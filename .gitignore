@@ -1,0 +1,16 @@
+comm/
+__pycache__/
+.idea/
+.vscode/
+certs/
+*.log
+*.crt
+*.key
+*.cmd
+*.zip
+*.p7s
+*.pdf
+Matrix.zip*
+AUTHORS_DECLARATION.txt
+*.bak
+revver_agent_install.json

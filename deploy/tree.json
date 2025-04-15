@@ -1,0 +1,7 @@
+{
+  "matrix": ["sentinel-alpha", "worker-alpha"],
+  "sentinel-alpha": ["logger-beta", "mailman-scout"],
+  "worker-alpha": [],
+  "logger-beta": [],
+  "mailman-scout": []
+}

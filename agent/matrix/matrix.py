@@ -1,0 +1,196 @@
+#Authored by Daniel F MacDonald and ChatGPT
+import sys
+import os
+import time
+import threading
+import json
+import hashlib
+import glob
+from string import Template
+
+if path_resolution['agent_path'] not in sys.path:
+    sys.path.append(path_resolution['agent_path'])
+if path_resolution['root_path'] not in sys.path:
+    sys.path.append(path_resolution['root_path'])
+
+from agent.core.boot_agent import BootAgent
+from agent.core.tree_parser import TreeParser
+from agent.core.mixin.delegation import DelegationMixin
+from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
+from agent.core.class_lib.file_system.util.ensure_trailing_slash import EnsureTrailingSlash
+from agent.core.tree_propagation import propagate_tree_slice
+from agent.core.swarm_manager import SwarmManager  # adjust path to match
+
+
+
+
+class MatrixAgent(DelegationMixin, BootAgent):
+
+    def __init__(self, path_resolution, command_line_args):
+
+        super().__init__(path_resolution, command_line_args)
+
+        self.path_resolution=path_resolution
+
+        self.command_line_args=command_line_args
+
+        self.orbits = {}
+
+        self.swarm = SwarmManager(path_resolution)
+
+
+
+        #from agent.core.tree_disseminator import TreeDisseminator
+
+        #tree_path = os.path.join(
+        #    self.path_resolution["comm_path"],
+        #    self.command_line_args["permanent_id"],  # dynamically resolves to 'matrix'
+        #    "agent_tree.json"
+        #)
+
+        #self.disseminator = TreeDisseminator(tree_path, self.path_resolution["comm_path"])
+
+        #start_https_server(self, port=65431)
+
+
+    def pre_boot(self):
+        print("[PRE-BOOT] Not implemented yet.")
+        #threading.Thread(target=self.start_payload_scanner, daemon=True).start()
+
+    def handle_https_command(self, data):
+        try:
+            comm_path = "/comm/matrix/payload"
+            os.makedirs(comm_path, exist_ok=True)
+
+            # Create unique filename with timestamp + hash
+            timestamp = int(time.time() * 1000)
+            payload_str = json.dumps(data, sort_keys=True)
+            payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()[:12]
+            filename = f"{timestamp}_{payload_hash}.json"
+            full_path = os.path.join(comm_path, filename)
+
+            # Write command to payload folder
+            with open(full_path, "w") as f:
+                f.write(payload_str)
+
+            print(f"[MATRIX:HTTPS] Command routed to payload: {filename}")
+        except Exception as e:
+            print(f"[MATRIX:HTTPS-ERROR] Failed to dispatch command: {e}")
+
+
+
+
+    def command_listener(self):
+
+        path = Template(self.path_resolution["incoming_path_template"])
+        incoming_path = path.substitute(permanent_id=self.command_line_args["matrix"])
+        incoming_path = EnsureTrailingSlash.ensure_trailing_slash(incoming_path)
+
+        payload_dir = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
+        os.makedirs(payload_dir, exist_ok=True)
+
+        print(f"[CMD-LISTENER] Listening for commands in {incoming_path}...")
+
+        while self.running:
+            try:
+                # TREE REFRESH COMMAND
+                for filename in glob.glob(incoming_path + '*:_tree_slice_request.cmd'):
+
+                    #No need for the command junk it
+                    os.remove(filename)
+
+                    # Extract the file name without the path or extension
+                    filename = os.path.basename(filename)  # Get the file name with extension, e.g., "example_tree_slice_request.cmd"
+                    filename = os.path.splitext(filename)[0]
+                    perm_id = filename.split(':')[0].strip() # Strip the command, e.g., "*:_tree_slice_request.cmd"
+
+                    # Raise an exception if perm_id is empty
+                    if not perm_id:
+                        raise ValueError(f"[MATRIX][ERROR] permanent_id is empty for the file: {filename}")
+
+                    target_incoming_path = os.path.join(self.path_resolution['comm_path'], perm_id, 'agent_tree.json')
+
+                    tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
+
+                    tp = TreeParser.load_tree(tree_path)
+                    if not tp:
+                        self.log("[PROPAGATE] Failed to load tree.")
+                        return
+
+                    subtree = tp.extract_subtree_by_id(perm_id)
+                    if not subtree:
+                        print(f"[PROPAGATION] No subtree found for {perm_id}")
+                        subtree = {}
+
+                    try:
+                        preview = json.dumps(slice, indent=2)[:300]
+                    except TypeError as e:
+                        preview = f"[NON-SERIALIZABLE SLICE] {e}"
+
+                    self.log(f"[TREE-DISPATCH] Sending to {perm_id}: {preview}")
+
+                    #copy from agent_tree_master.json
+                    JsonSafeWrite.safe_write(target_incoming_path, subtree)
+
+            except Exception as e:
+                self.log(f"[CMD-ERROR][TREE-REFRESH] {e}")
+
+            # PAYLOADS OFF THE WIRE
+            try:
+                for fname in sorted(os.listdir(payload_dir)):
+                    if not fname.endswith(".json"):
+                        continue
+
+                    fpath = os.path.join(payload_dir, fname)
+                    with open(fpath) as f:
+                        payload = json.load(f)
+
+                    ctype = payload.get("type")
+                    content = payload.get("content", {})
+
+                    if ctype == "inject":
+                        self.swarm.handle_injection(content)
+                    elif ctype == "inject_team":
+                        self.swarm.handle_team_injection(
+                            content.get("subtree"),
+                            content.get("target_perm_id")
+                        )
+                    elif ctype == "delete_subtree":
+                        self.swarm.kill_subtree(content.get("perm_id"))
+
+                    os.remove(fpath)
+                    self.log(f"[PAYLOAD] Processed: {fname}")
+
+                time.sleep(2)
+            except Exception as e:
+                self.log(f"[PAYLOAD] Error: {e}")
+                time.sleep(3)
+
+            time.sleep(4)
+
+
+    def propagate_all_delegates(self):
+        from agent.core.tree_parser import TreeParser
+        from agent.core.tree_propagation import propagate_tree_slice
+
+        tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree.json')
+        tp = TreeParser.load_tree(tree_path)
+        if not tp:
+            self.log("[PROPAGATE] Failed to load tree.")
+            return
+
+        all_nodes = tp.get_all_nodes_flat()
+        for perm_id in all_nodes:
+            propagate_tree_slice(tp, perm_id, self.path_resolution["comm_path"])
+
+if __name__ == "__main__":
+    # label = None
+    # if "--label" in sys.argv:
+    #   label = sys.argv[sys.argv.index("--label") + 1]
+
+    # current directory of the agent script or it wont be able to find itself
+    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
+
+    matrix = MatrixAgent(path_resolution, command_line_args)
+
+    matrix.boot()
