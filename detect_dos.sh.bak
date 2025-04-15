@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# Set file paths relative to script location
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+OUTPUT_FILE="$SCRIPT_DIR/dos_ips.txt"
+BAN_FILE="$SCRIPT_DIR/firewalld_rules.txt"
+
+# Clear previous content
+> "$OUTPUT_FILE"
+> "$BAN_FILE"
+
+# Extract unique IPs connecting to port 443 and count occurrences
+netstat -tn | awk '$4 ~ /:443$/ {print $5}' | cut -d: -f1 | sort | uniq -c | sort -nr > "$OUTPUT_FILE"
+
+declare -A country_ips
+declare -A country_counts
+declare -A country_firewall_rules
+declare -A city_country
+
+# Process each IP and classify by country and city
+while read -r count ip; do
+    if [[ -n "$ip" && "$ip" != "::1" ]]; then
+        location=$(geoiplookup "$ip")
+
+        # Extract Country and City from geoiplookup output
+        country=$(echo "$location" | grep "GeoIP Country Edition" | awk -F ', ' '{print $2}' | awk '{print $1}')
+        city=$(echo "$location" | grep "GeoIP City Edition" | awk -F ', ' '{print $4}')
+
+        # Default values if lookup fails
+        [[ -z "$country" ]] && country="Unknown"
+        [[ -z "$city" ]] && city="Unknown"
+
+        # Store count per country
+        ((country_counts["$country"] += count))
+
+        # Store city-country info
+        city_country["$ip"]="$city, $country"
+
+        # Append IP and its connection count to the country's list
+        country_ips["$country"]+="$ip ($count) - $city, "
+
+        # Store firewalld rule per country
+        country_firewall_rules["$country"]+="firewall-cmd --permanent --add-rich-rule='rule family=\"ipv4\" source address=\"$ip\" drop'\n"
+    fi
+done < "$OUTPUT_FILE"
+
+# Overwrite the output file with grouped data
+#> "$OUTPUT_FILE"
+> "$BAN_FILE"
+
+for country in "${!country_ips[@]}"; do
+    echo "$country: ${country_counts[$country]} total connections" >> "$OUTPUT_FILE"
+    echo "IPs: ${country_ips[$country]}" >> "$OUTPUT_FILE"
+    echo "-------------------------------------------------" >> "$OUTPUT_FILE"
+
+    # Write grouped firewall rules per country
+    echo "$country: ${country_counts[$country]} total connections" >> "$BAN_FILE"
+    echo -e "${country_firewall_rules[$country]}" >> "$BAN_FILE"
+    echo "-------------------------------------------------" >> "$BAN_FILE"
+done
+
+echo "Results saved to: $OUTPUT_FILE"
+echo "Firewalld rules saved to: $BAN_FILE"
+
+

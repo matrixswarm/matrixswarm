@@ -1,16 +1,35 @@
-comm/
+# Python system files
 __pycache__/
-.idea/
-.vscode/
-certs/
-*.log
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtualenv / interpreter folders
+env/
+venv/
+ENV/
+Lib/
+Scripts/
+Include/
+bin/
+*.exe
+
+# Certificates and private keys
 *.crt
 *.key
 *.cmd
+*.log
+
+# Archives
 *.zip
+*.tar.gz
+*.7z
 *.p7s
 *.pdf
-Matrix.zip*
-AUTHORS_DECLARATION.txt
-*.bak
-revver_agent_install.json
+
+# IDE/Editor
+.idea/
+.vscode/
+
+# Matrix runtime
+comm/
