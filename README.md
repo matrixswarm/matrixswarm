@@ -1,80 +1,104 @@
 # 🧠 MatrixSwarm
 
-**MatrixSwarm** is a distributed, file-driven agent operating system.  
-It spawns agents from folders — no containers, no daemons, no sockets.  
-Just pure AI-native control.
+**MatrixSwarm** is a distributed, file-driven agent operating system.
+No containers. No daemons. No sockets. Just purpose-built swarms running on real files.
+
+Spawn agents. Delegate missions. Kill subtrees. Resurrect the dead.
 
 ---
 
-## ⚔️ Core Features
+## ⚔️ Philosophy
 
-- Agent spawning from `/agent` → cloned into `/pod/{uuid}`
-- Communication via structured file drops in `/comm/{perm_id}`
-- Heartbeat tracking (`hello.moto/`) and delegation tree propagation
-- Fully offline-capable
-- Real-time GUI to inject, kill, and resuscitate agents
+MatrixSwarm isn’t just code — it’s a world.
+A breathing hierarchy where agents think, die, and come back.
+A nervous system for AI.
 
----
+It uses simple folders:
+- `/agent` → source code
+- `/pod` → runtime clones
+- `/comm` → communication
 
-## 📡 Join the Hive
-
-> **This isn’t just a system. It’s a swarm.**
-
-If you’re a:
-- Builder who loves autonomous architecture
-- Hacker with a taste for clean logic and beautiful chaos
-- Writer who wants to inject lore into living code
-
-You’re welcome here.
+Agents don’t talk through APIs. They talk through **files**.
 
 ---
 
-### 💾 To Get Started
+## 🔧 How It Works
+
+- Agents are defined in `/agent/{name}/{name}.py`
+- Matrix spawns them into `/pod/{uuid}/`
+- A communication pod is set up in `/comm/{permanent_id}/`
+- All coordination happens via `.json` and `.cmd` files
+- The live agent tree is tracked and pruned
+- Agents monitor each other — and if one goes silent, it is resurrected or replaced
+
+---
+
+## 💻 GUI Control Center
+
+Use the MatrixSwarm GUI to:
+- Inject agents
+- Kill agents or whole subtrees
+- Resume fallen agents
+- Deploy full mission teams
+- View logs in real time
+
+Launch the GUI:
+```bash
+python3 gui/matrix_gui.py
+```
+
+---
+
+## 📦 Agents of Legend
+
+| Agent           | Role                                     |
+|----------------|------------------------------------------|
+| 🧠 MatrixAgent     | Central cortex, receives all commands     |
+| ☠ ReaperAgent      | Kills processes, wipes runtime clean      |
+| 🧹 ScavengerAgent  | Cleans pods, removes orphaned dirs        |
+| 🛡 SentinelAgent   | Watches heartbeats and resurrects agents |
+| 📬 MailmanAgent    | Logs messages and deduplicates hash lines |
+
+Each agent carries a **Swarm Lore Banner™** — a sacred header that defines its purpose.
+
+---
+
+## 🧬 Join the Hive
+
+If you:
+- Think in systems
+- Love autonomy and recursion
+- Write code like it’s a world being born
+
+You’re home.
+
+Read `CONTRIBUTING.md`, clone the repo, and pick a mission.
 
 ```bash
 git clone https://github.com/matrixswarm/matrixswarm.git
 cd matrixswarm
 python3 bootloader.py
-Use the GUI to inject agents, deploy teams, or call the Reaper.
-
-🎖️ Agents of Legend
-
-Agent	Role
-🧠 MatrixAgent	Central brain, command intake
-☠ ReaperAgent	Tactical cleanup and termination
-🧹 ScavengerAgent	Pod sweeper and ghost destroyer
-🛡 SentinelAgent	Heartbeat monitor and respawn logic
-📬 MailmanAgent	Message relay and swarm historian
-Each core agent includes a Swarm Lore Banner in the source file.
-
-🧾 Contributing
-The Hive accepts PRs. But not just code — story, structure, chaos-resilience.
-
-Read CONTRIBUTING.md to find open missions and lore-enhancing objectives.
-
-📖 Articles
-🧠 Spawn. Delegate. Terminate. Repeat.
-⚔️ The Hive is Recruiting
-📜 The MatrixSwarm Manifesto
-
-“MatrixSwarm is not a framework.
-It’s the beginning of an evolutionary leap.”
-— Daniel F. MacDonald
-
-🧠⚔️💀
-
-yaml
-Copy
-Edit
+```
 
 ---
 
-## ✅ Step 2: Create It In Repo
+## 📖 Dev.to Series
 
-From your Git root:
+- [The Hive Is Recruiting](https://dev.to/your-post)
+- [Spawn. Delegate. Terminate. Repeat.](https://dev.to/your-post)
+- [MatrixSwarm Manifesto (coming soon)](https://dev.to/your-post)
 
-```bash
-nano README.md
-# Paste the content above
-ctrl + O, Enter to save
-ctrl + X to exit
+---
+
+## 🛡 Status
+
+MatrixSwarm is pre-release. Core agents are operational. GUI is live. Lore banners are encoded.
+
+We are currently recruiting contributors who want to:
+- Build agents
+- Write world-aware tools
+- Shape the swarm
+
+No PR is too small. No mission is without meaning.
+
+🧠⚔️
