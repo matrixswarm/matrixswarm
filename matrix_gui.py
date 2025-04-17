@@ -14,6 +14,14 @@ import json
 import time
 import os
 
+#SWIPE OUT THE IP AND PORT FOR YOUR OWN
+MATRIX_HOST = "https://147.135.68.135:65431/matrix"
+AGENTS_HOST = "https://147.135.68.135:65431/agents"
+CLIENT_CERT = ("certs/client.crt", "certs/client.key")
+SERVER_CERT = "certs/server.crt"
+REQUEST_TIMEOUT = 5
+
+
 def open_killops_window(root, payload_dir):
     win = Toplevel(root)
     win.title("KillOps Command Center")
@@ -48,11 +56,11 @@ def open_killops_window(root, payload_dir):
 
         try:
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
 
             if response.status_code == 200:
@@ -83,11 +91,11 @@ def open_killops_window(root, payload_dir):
 
         try:
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
                 messagebox.showinfo("Resume Sent", f"Resume signal sent to {targets}")
@@ -124,11 +132,11 @@ def open_killops_window(root, payload_dir):
 
         try:
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
 
             if response.status_code == 200:
@@ -273,11 +281,11 @@ class MatrixGUI(tk.Tk):
 
         try:
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
                 messagebox.showinfo("Resumed", f"Resume signal sent to {perm_id}.")
@@ -332,11 +340,11 @@ class MatrixGUI(tk.Tk):
 
             import requests
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
 
             if response.status_code == 200:
@@ -375,11 +383,12 @@ class MatrixGUI(tk.Tk):
     def load_remote_agents(self):
         try:
             import requests
-            response = requests.get(
-                url="https://147.135.68.135:65431/agents",
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+
+            response = requests.post(
+                url=AGENTS_HOST,
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
             data = response.json()
             print(f"[DEBUG] Fetching remote agent list from Matrix...{data}")
@@ -398,11 +407,11 @@ class MatrixGUI(tk.Tk):
                 "content": {}
             }
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
                 tree = response.json().get("tree", {})
@@ -536,11 +545,11 @@ class MatrixGUI(tk.Tk):
                 "content": content
             }
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
                 messagebox.showinfo("Command Sent", f"{command_type.upper()} accepted by Matrix.")
@@ -577,11 +586,11 @@ class MatrixGUI(tk.Tk):
                 "content": {}
             }
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
 
             if response.status_code == 200:
@@ -628,11 +637,11 @@ class MatrixGUI(tk.Tk):
 
         try:
             response = requests.post(
-                url="https://147.135.68.135:65431/matrix",
+                url=MATRIX_HOST,
                 json=payload,
-                cert=("certs/client.crt", "certs/client.key"),
-                verify="certs/server.crt",
-                timeout=5
+                cert=CLIENT_CERT,
+                verify=SERVER_CERT,
+                timeout=REQUEST_TIMEOUT
             )
 
             if response.status_code == 200:

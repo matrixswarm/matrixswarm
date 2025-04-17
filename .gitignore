@@ -34,3 +34,5 @@ bin/
 # Matrix runtime
 comm/certs/*.csr
 certs/*.srl
+*.zipx
+To OpenAI.txt
