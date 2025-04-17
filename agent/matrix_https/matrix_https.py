@@ -1,3 +1,4 @@
+#Authored by Daniel F MacDonald and ChatGPT
 from flask import Flask, request, jsonify
 import ssl
 import os
@@ -147,6 +148,51 @@ class MatrixHTTPS(BootAgent):
                     self.log(f"[INJECT_TEAM] Payload dropped to Matrix: {fpath}")
                     return jsonify({"status": "ok", "message": f"Team injected under {target_perm_id}"})
 
+                elif ctype == "stop":
+                    content = payload.get("content", {})
+                    targets = content.get("targets", [])
+                    if isinstance(targets, str):
+                        targets = [targets]
+
+                    # Build stop payload to drop into Matrix's payload queue
+                    payload = {
+                        "type": "stop",
+                        "timestamp": time.time(),
+                        "content": {
+                            "targets": targets
+                        }
+                    }
+
+                    inbox = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
+                    os.makedirs(inbox, exist_ok=True)
+
+                    fname = f"stop_{int(time.time())}.json"
+                    fpath = os.path.join(inbox, fname)
+
+                    with open(fpath, "w") as f:
+                        json.dump(payload, f, indent=2)
+
+                    self.log(f"[MATRIX-HTTPS][PAYLOAD-CMD][STOP-AGENT] Payload dropped to Matrix: {fpath}")
+                    return jsonify({"status": "ok", "message": f"Agent sent stop under {targets}"})
+
+                elif ctype == "resume":
+                    targets = content.get("targets", [])
+                    if isinstance(targets, str):
+                        targets = [targets]
+
+                    for perm_id in targets:
+                        die_path = os.path.join(self.path_resolution["comm_path"], perm_id, "incoming", "die")
+                        tombstone_path = os.path.join(self.path_resolution["comm_path"], perm_id, "incoming",
+                                                      "tombstone")
+
+                        if os.path.exists(die_path):
+                            os.remove(die_path)
+                            self.log(f"[MATRIX][RESUME] Removed die file for {perm_id}")
+
+                        if os.path.exists(tombstone_path):
+                            os.remove(tombstone_path)
+                            self.log(f"[MATRIX][RESUME] Removed tombstone for {perm_id}")
+
 
                 elif ctype == "delete_node":
                     self.log(f"[MATRIX-HTTPS][CMD][DELETE-NODE] {payload}")
@@ -182,10 +228,18 @@ class MatrixHTTPS(BootAgent):
                         return jsonify({"status": "ok", "tree": data})
                     else:
                         return jsonify({"status": "error", "message": "agent_tree_master.json not found"}), 404
+
+                elif ctype == "kill":
+                    payload_path = os.path.join(self.payload_dir, f"kill_{int(time.time())}.json")
+                    with open(payload_path, "w") as f:
+                        json.dump(payload, f, indent=2)
+                        return jsonify({"status": "ok", "message": f"Kill payload routed to Matrix"})
+
                 else:
                     return jsonify({"status": "error", "message": "Unknown command type."}), 400
 
                 return jsonify({"status": "ok", "message": f"Command {ctype} processed."})
+
 
 
             except Exception as e:

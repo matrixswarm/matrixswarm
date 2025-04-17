@@ -1,3 +1,4 @@
+#Authored by Daniel F MacDonald and ChatGPT
 import os
 import time
 import traceback

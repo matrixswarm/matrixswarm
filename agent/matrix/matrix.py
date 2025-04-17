@@ -1,4 +1,11 @@
 #Authored by Daniel F MacDonald and ChatGPT
+# ╔════════════════════════════════════════════════════════╗
+# ║                   🧠 MATRIX AGENT 🧠                   ║
+# ║   Central Cortex · Tree Dispatcher · Prime Director    ║
+# ║     Forged in the core of Hive Zero | v3.0 Directive   ║
+# ║  Accepts: inject / replace / resume / kill / propagate ║
+# ╚════════════════════════════════════════════════════════╝
+
 import sys
 import os
 import time
@@ -20,8 +27,6 @@ from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from agent.core.class_lib.file_system.util.ensure_trailing_slash import EnsureTrailingSlash
 from agent.core.tree_propagation import propagate_tree_slice
 from agent.core.swarm_manager import SwarmManager  # adjust path to match
-
-
 
 
 class MatrixAgent(DelegationMixin, BootAgent):
@@ -137,6 +142,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
             # PAYLOADS OFF THE WIRE
             try:
+
                 for fname in sorted(os.listdir(payload_dir)):
                     if not fname.endswith(".json"):
                         continue
@@ -147,6 +153,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
                     ctype = payload.get("type")
                     content = payload.get("content", {})
+                    annihilate = content.get("annihilate", True)
 
                     if ctype == "inject":
                         self.swarm.handle_injection(content)
@@ -155,6 +162,40 @@ class MatrixAgent(DelegationMixin, BootAgent):
                             content.get("subtree"),
                             content.get("target_perm_id")
                         )
+
+                    elif ctype == "stop":
+                        targets = content.get("targets", [])
+                        if isinstance(targets, str):
+                            targets = [targets]
+
+                        for t in targets:
+                            self.swarm.kill_agent(t, annihilate=False)
+                            self.log(f"[MATRIX] Stop command dispatched for {t}")
+
+                    elif ctype == "kill":
+
+                        target = content.get("target")
+
+                        mode = content.get("mode", "single")
+
+                        annihilate = content.get("annihilate", True)
+
+                        if mode == "lights_out":
+
+                            self.swarm.kill_all_agents(annihilate=annihilate)
+
+                        elif mode == "subtree":
+
+                            self.swarm.kill_subtree(target, annihilate=annihilate)
+
+                        elif isinstance(target, str):
+
+                            self.swarm.kill_agent(target, annihilate=annihilate)
+
+                        elif isinstance(content.get("targets"), list):
+
+                            for t in content["targets"]:
+                                self.swarm.kill_agent(t, annihilate=annihilate)
                     elif ctype == "delete_subtree":
                         self.swarm.kill_subtree(content.get("perm_id"))
 
@@ -182,6 +223,49 @@ class MatrixAgent(DelegationMixin, BootAgent):
         all_nodes = tp.get_all_nodes_flat()
         for perm_id in all_nodes:
             propagate_tree_slice(tp, perm_id, self.path_resolution["comm_path"])
+
+    def handle_replace_agent(self, content):
+        old_id = content.get("target_perm_id")
+        new_node = content.get("new_agent")
+        new_id = new_node.get("perm_id")
+
+        if not old_id or not new_node:
+            self.log("[REPLACE] Missing required fields.")
+            return
+
+        from agent.core.tree_parser import TreeParser
+
+        tree_path = self.tree_path  # or path_resolution["tree_file"]
+        tp = TreeParser.load_tree(tree_path)
+        if not tp or not tp.has_node(old_id):
+            self.log(f"[REPLACE] Agent '{old_id}' not found in tree.")
+            return
+
+        # Find parent
+        parent = tp.find_parent_of(old_id)
+        if not parent:
+            self.log(f"[REPLACE] Could not find parent of '{old_id}'.")
+            return
+
+        # Send die to old agent
+        die_file = os.path.join(self.path_resolution["comm_path"], old_id, "incoming", "die")
+        JsonSafeWrite.safe_write(die_file, "terminate")
+        self.log(f"[REPLACE] Issued die to {old_id}")
+
+        # Mark tombstone so parent doesn't respawn
+        tomb = os.path.join(self.path_resolution["comm_path"], old_id, "incoming", "tombstone")
+        JsonSafeWrite.safe_write(tomb, "true")
+
+        # Remove old node from tree
+        tp.remove_node(old_id)
+
+        # Inject new node under same parent
+        tp.insert_node(new_node, parent_permanent_id=parent)
+        tp.save_tree(tree_path)
+
+        # Spawn the new agent
+        self.spawn_agent(new_id)
+        self.log(f"[REPLACE] Spawned replacement: {new_id}")
 
 if __name__ == "__main__":
     # label = None

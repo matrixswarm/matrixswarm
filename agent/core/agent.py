@@ -1,3 +1,4 @@
+#Authored by Daniel F MacDonald and ChatGPT
 import os
 import threading
 import time
@@ -78,7 +79,7 @@ class Agent:
     def enforce_singleton(self):
 
         #LOOP FOR 20 SECS; IF AN INSTANCE MATCHES THE JOB TAG, KILL PROGRAM
-
+        #IF A DIE FILE IS FOUND IN THE INCOMING FOLDER, KILL PROGRAM
         while self.running:
 
             #is there any duplicate processes that have duplicate cli --job leave if this process is younger

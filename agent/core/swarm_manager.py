@@ -1,7 +1,6 @@
-# Swarm Deployment Core - Matrix Agent v1.0
-# Author: Daniel MacDonald & ChatGPT
-# Purpose: Full-cycle team injection, validation, and error reporting
-
+# Matrix: An AI OS System
+# Copyright (c) 2025 Daniel MacDonald
+# Licensed under the MIT License. See LICENSE file in project root for details.
 from agent.core.tree_parser import TreeParser
 from agent.core.class_lib.logging.logger import Logger
 from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
@@ -85,6 +84,19 @@ class SwarmManager:
             JsonSafeWrite.safe_write(request_path, "1")
             self.logger.log(f"[TEAM-INJECT] Slice request primed for root: {root_id}")
 
+    def execute_resume(self, perm_id):
+        comm_path = os.path.join(self.path_resolution['comm_path'], perm_id)
+        die_path = os.path.join(comm_path, "incoming", "die")
+
+        if os.path.exists(die_path):
+            os.remove(die_path)
+            self.log(f"[SCAVENGER] Resume signal: removed die file for {perm_id}")
+            self.send_confirmation(perm_id, "resumed")
+            return
+
+        self.log(f"[SCAVENGER] No die file present for {perm_id}. Nothing to resume.")
+        self.send_confirmation(perm_id, "no_action")
+
     def kill_subtree(self, perm_id):
         tp = TreeParser.load_tree(self.tree_path)
         if not tp or not tp.has_node(perm_id):
@@ -101,6 +113,53 @@ class SwarmManager:
         scav_cmd = os.path.join(self.path_resolution['comm_path'], "scavenger", "payload", f"scavenge_{perm_id}.cmd")
         JsonSafeWrite.safe_write(scav_cmd, "1")
         self.logger.log(f"[SwarmManager][KILL] Scavenger summoned for '{perm_id}' subtree cleanup.")
+
+    def kill_agent(self, perm_id, annihilate=True):
+        tp = TreeParser.load_tree(self.tree_path)
+        if not tp or not tp.has_node(perm_id):
+            self.logger.log(f"[SWARM][KILL] Target '{perm_id}' not found.")
+            return
+
+        flat = tp.get_all_nodes_flat()
+        delegated_by = None
+        scavenger_target = None
+
+        # Walk up to parent that delegated this node
+        for node_id, node in flat.items():
+            if "delegated" in node and perm_id in node["delegated"]:
+                delegated_by = node_id
+                break
+
+        # Scan delegated children for a scavenger agent
+        if delegated_by:
+            child_ids = flat.get(delegated_by, {}).get("delegated", [])
+            for cid in child_ids:
+                child = flat.get(cid, {})
+                if child.get("agent_name") in ["scavenger"]:
+                    scavenger_target = cid
+                    break
+
+        # Fallback if no scavenger found
+        if not scavenger_target:
+            self.logger.log(f"[SWARM][KILL] No scavenger found under '{delegated_by}', defaulting to 'scavenger-root'")
+            scavenger_target = "scavenger-root"
+
+        # Write the kill command
+        cmd_file = f"scavenge_{perm_id}.cmd" if annihilate else f"kill_{perm_id}.cmd"
+        path = os.path.join(self.path_resolution["comm_path"], scavenger_target, "payload", cmd_file)
+        JsonSafeWrite.safe_write(path, "1")
+
+    def kill_all_agents(self, annihilate=True):
+        self.logger.log(f"[SWARM][KILL-ALL] Initiating global wipe (annihilate={annihilate})")
+
+        from agent.core.tree_parser import TreeParser
+        tp = TreeParser.load_tree(self.tree_path)
+        if not tp:
+            self.logger.log("[SWARM][KILL-ALL] Tree unavailable.")
+            return
+
+        for perm_id in tp.get_all_nodes_flat().keys():
+            self.kill_agent(perm_id, annihilate=annihilate)
 
     def log(self, msg):
         print(time.strftime("[%Y-%m-%d %H:%M:%S]"), msg)

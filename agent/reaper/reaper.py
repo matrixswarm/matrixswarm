@@ -1,69 +1,105 @@
+#Authored by Daniel F MacDonald and ChatGPT
+# ╔═══════════════════════════════════════════════╗
+# ║              ☠ REAPER AGENT ☠                ║
+# ║   Tactical Cleanup · Wipe Authority · V2.5    ║
+# ║        Forged in the halls of Matrix          ║
+# ║  Accepts: .cmd / .json  |  Modes: soft/full   ║
+# ╚═══════════════════════════════════════════════╝
+
 import os
-import shutil
 import time
 import json
+import shutil
+import sys
 
 if path_resolution['agent_path'] not in sys.path:
     sys.path.append(path_resolution['agent_path'])
 if path_resolution['root_path'] not in sys.path:
     sys.path.append(path_resolution['root_path'])
 
-
-
 from agent.core.boot_agent import BootAgent
+from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 
 class ReaperAgent(BootAgent):
-    def __init__(self):
-        super().__init__(uuid="reaper-executioner")
-        self.watch_path = os.path.join(self.path_resolution['comm_path_resolved'], "payload")
+    def __init__(self, path_resolution, command_line_args):
 
-    def run(self):
-        self.report("ReaperAgent online. Scanning for termination orders...")
-        while self.running:
-            self.scan_for_orders()
-            self.sleep(3)
+        super().__init__(path_resolution, command_line_args)
+
+        self.watch_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["permanent_id"], "payload")
+
+        os.makedirs(self.watch_path, exist_ok=True)
+
 
     def command_listener(self):
-        if not os.path.exists(self.watch_path):
-            return
-
-        for fname in os.listdir(self.watch_path):
-            if not fname.endswith(".json"):
+        self.log("ReaperAgent online. Scanning for termination orders...")
+        while self.running:
+            if not os.path.exists(self.watch_path):
+                time.sleep(4)
                 continue
 
-            path = os.path.join(self.watch_path, fname)
-            with open(path, "r") as f:
-                try:
-                    order = json.load(f)
-                except:
-                    self.report(f"Failed to parse order: {fname}")
+            for fname in os.listdir(self.watch_path):
+
+                if fname.endswith(".cmd") or fname.endswith(".json"):
                     continue
 
-            target = order.get("perm_id")
-            if not target:
-                self.report(f"Missing perm_id in order: {fname}")
-                continue
+                path = os.path.join(self.watch_path, fname)
 
-            self.execute_kill(target)
-            os.remove(path)
+                if fname.endswith(".json"):
+                    with open(path, "r") as f:
+                        try:
+                            order = json.load(f)
+                            target = order.get("perm_id")
+                            annihilate = order.get("annihilate", True)
+                        except:
+                            self.log(f"Failed to parse JSON kill order: {fname}")
+                            continue
+                else:  # .cmd file
+                    target = fname.replace("scavenge_", "").replace(".cmd", "")
+                    annihilate = True  # default .cmd to full wipe
 
-    def execute_kill(self, perm_id):
+                if not target:
+                    self.log(f"Missing perm_id in order: {fname}")
+                    continue
+
+                self.execute_kill(target, annihilate=annihilate)
+                os.remove(path)
+
+            time.sleep(4)
+
+    def execute_kill(self, perm_id, annihilate=True):
         pod_path = f"{self.path_resolution['pod_path']}/{perm_id}"
         comm_path = f"{self.path_resolution['comm_path']}/{perm_id}"
-
-
         killed = False
 
-        if os.path.exists(pod_path):
-            shutil.rmtree(pod_path)
-            killed = True
+        if annihilate:
+            # Stage soft kill first
+            die_cmd = os.path.join(comm_path, "payload", "die.cmd")
+            JsonSafeWrite.safe_write(die_cmd, "terminate")
+            self.log(f"[REAPER] Annihilation requested — issued die.cmd to {perm_id}")
 
-        if os.path.exists(comm_path):
-            shutil.rmtree(comm_path)
-            killed = True
+            # Wait for hello.moto shutdown signal
+            hello_path = os.path.join(pod_path, "hello.moto")
+            for _ in range(6):  # wait up to 18 seconds
+                if not os.path.exists(hello_path):
+                    break
+                time.sleep(3)
 
+            # Begin purge
+            if os.path.exists(pod_path):
+                shutil.rmtree(pod_path)
+                killed = True
+            if os.path.exists(comm_path):
+                shutil.rmtree(comm_path)
+                killed = True
 
-        status = "terminated" if killed else "not_found"
+            status = "terminated" if killed else "not_found"
+        else:
+            # Soft kill = pod wipe only
+            if os.path.exists(pod_path):
+                shutil.rmtree(pod_path)
+                killed = True
+            status = "soft_killed" if killed else "not_found"
+
         self.send_confirmation(perm_id, status)
 
     def send_confirmation(self, perm_id, status):
@@ -80,9 +116,13 @@ class ReaperAgent(BootAgent):
         path = os.path.join(outbox, f"reaper_{perm_id}.json")
         with open(path, "w") as f:
             json.dump(payload, f, indent=2)
-        self.report(f"Reaper completed: {perm_id} → {status}")
+        self.log(f"[REAPER] Completed: {perm_id} → {status}")
+
+
+
 
 if __name__ == "__main__":
+
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
     agent = ReaperAgent(path_resolution, command_line_args)
     agent.boot()

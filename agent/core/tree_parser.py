@@ -1,8 +1,8 @@
+#Authored by Daniel F MacDonald and ChatGPT
 import json
 import os
 import time
 import tempfile
-
 
 class TreeParser:
     CHILDREN_KEY = "children"
@@ -55,8 +55,10 @@ class TreeParser:
         for key, value in self.nodes.items():
             print(f"")
 
-        # Recursively process the children
         for child in node.get(self.CHILDREN_KEY, []):
+            if not isinstance(child, dict) or not child.get("permanent_id"):
+                print(f"[TREE][WARNING] Skipping malformed child node: {child}")
+                continue
             self._parse_nodes(child)
 
     def _validate_and_store_node(self, node):
@@ -66,6 +68,13 @@ class TreeParser:
         permanent_id = node.get(self.PERMANENT_ID_KEY)
         if not permanent_id:
            return
+
+        valid_children = []
+        for child in node.get(self.CHILDREN_KEY, []):
+            if isinstance(child, dict) and child.get("permanent_id"):
+                valid_children.append(child)
+        node[self.CHILDREN_KEY] = valid_children
+
 
         # Add the node if it's not a duplicate
         if permanent_id not in self.nodes:

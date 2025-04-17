@@ -126,11 +126,40 @@ def boot():
                     }
                 },
             {
+                "permanent_id": "scavenger-root",
+                "name": "scavenger",
+                "delegated": [],
+                "filesystem": {
+                    "folders": [
+                        {
+
+                        },
+                    ],
+                    "files": {}
+                }
+            },
+            {
+                "permanent_id": "logger-1",
+                "name": "logger",
+                "delegated": [],
+                "filesystem": {
+                    "folders": [
+                        {
+
+                        },
+                    ],
+                    "files": {}
+                }
+            },
+            {
                 "permanent_id": "commander-1",
                 "name": "commander",
                 "children": []
-            }
+            },
+            {
 
+
+            }
                 ,]
     }
 
