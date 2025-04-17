@@ -32,4 +32,5 @@ bin/
 .vscode/
 
 # Matrix runtime
-comm/
+comm/certs/*.csr
+certs/*.srl

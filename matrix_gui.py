@@ -1,9 +1,158 @@
+#Authored by Daniel F MacDonald and ChatGPT
 import tkinter as tk
+from tkinter import Toplevel, Label, Entry, Button, StringVar, Checkbutton, BooleanVar, OptionMenu
+
 from tkinter import ttk, messagebox, filedialog
 import json
 import os
 import time
 from agent.core.live_tree import LiveTree
+import requests
+
+from tkinter import Toplevel, Label, Entry, Button, StringVar, Checkbutton, BooleanVar, OptionMenu
+import json
+import time
+import os
+
+def open_killops_window(root, payload_dir):
+    win = Toplevel(root)
+    win.title("KillOps Command Center")
+    win.geometry("400x200")  # Force a clean size
+
+    Label(win, text="Target perm_id(s):").grid(row=0, column=0, sticky="w")
+    perm_id_var = StringVar()
+    Entry(win, textvariable=perm_id_var, width=40).grid(row=0, column=1)
+
+    Label(win, text="Mode:").grid(row=1, column=0, sticky="w")
+    mode_var = StringVar(value="single")
+    OptionMenu(win, mode_var, "single", "subtree", "lights_out").grid(row=1, column=1, sticky="w")
+
+    annihilate_var = BooleanVar(value=True)
+    Checkbutton(win, text="Annihilate", variable=annihilate_var).grid(row=2, column=1, sticky="w")
+
+
+    def send_stop():
+        targets = [x.strip() for x in perm_id_var.get().split(",") if x.strip()]
+        if not targets:
+            messagebox.showerror("Invalid Input", "Please enter at least one perm_id to stop.")
+            return
+
+        payload = {
+            "type": "stop",
+            "timestamp": int(time.time()),
+            "content": {
+                "targets": targets
+            }
+        }
+
+
+        try:
+            response = requests.post(
+                url="https://147.135.68.135:65431/matrix",
+                json=payload,
+                cert=("certs/client.crt", "certs/client.key"),
+                verify="certs/server.crt",
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                messagebox.showinfo("Stop Sent", f"Matrix accepted stop for: {targets}")
+            else:
+                messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
+
+        except Exception as e:
+            print(f"[GUI][ERROR] Failed to send stop to Matrix: {e}")
+            messagebox.showerror("Send Failed", f"Could not reach Matrix:\n{e}")
+
+        Button(win, text="♻️ Resume Agent", command=send_resume).grid(row=3, column=0, columnspan=2, pady=5)
+
+    def send_resume():
+
+        targets = [x.strip() for x in perm_id_var.get().split(",") if x.strip()]
+        if not targets:
+            messagebox.showerror("Invalid Input", "Enter at least one perm_id.")
+            return
+
+        payload = {
+            "type": "resume",
+            "timestamp": int(time.time()),
+            "content": {
+                "targets": targets
+            }
+        }
+
+        try:
+            response = requests.post(
+                url="https://147.135.68.135:65431/matrix",
+                json=payload,
+                cert=("certs/client.crt", "certs/client.key"),
+                verify="certs/server.crt",
+                timeout=5
+            )
+            if response.status_code == 200:
+                messagebox.showinfo("Resume Sent", f"Resume signal sent to {targets}")
+            else:
+                messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
+        except Exception as e:
+            messagebox.showerror("Send Failed", f"Could not reach Matrix:\n{e}")
+
+
+
+    def send_kill():
+        targets = [x.strip() for x in perm_id_var.get().split(",") if x.strip()]
+        mode = mode_var.get()
+        annihilate = annihilate_var.get()
+        timestamp = int(time.time())
+
+        payload = {
+            "type": "kill",
+            "timestamp": timestamp,
+            "content": {
+                "mode": mode,
+                "annihilate": annihilate
+            }
+        }
+
+        if mode == "single" and len(targets) == 1:
+            payload["content"]["target"] = targets[0]
+        elif mode == "subtree" and targets:
+            payload["content"]["target"] = targets[0]
+        elif mode == "lights_out":
+            payload["content"]["target"] = "matrix-root"
+        else:
+            payload["content"]["targets"] = targets
+
+        try:
+            response = requests.post(
+                url="https://147.135.68.135:65431/matrix",
+                json=payload,
+                cert=("certs/client.crt", "certs/client.key"),
+                verify="certs/server.crt",
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                messagebox.showinfo("Kill Dispatched", f"Matrix accepted the payload.\nTarget: {targets}")
+            else:
+                messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
+
+        except Exception as e:
+            print(f"[GUI][ERROR] Failed to send payload to Matrix: {e}")
+            messagebox.showerror("Send Failed", f"Could not reach Matrix:\n{e}")
+
+        #win.destroy()
+
+
+
+    win.update_idletasks()  # Force layout update
+    Button(win, text="\ud83d\udc80 Execute Kill", command=send_kill).grid(row=3, column=0, columnspan=2, pady=10)
+    Button(win, text="🛑 Send Stop", command=send_stop).grid(row=4, column=0, columnspan=2, pady=5)
+
+
+# NOTE: This function should be called from inside your GUI class using:
+# open_killops_window(root=self, payload_dir="/comm/matrix/payload")
+
+
 
 class MatrixGUI(tk.Tk):
     def __init__(self):
@@ -16,6 +165,11 @@ class MatrixGUI(tk.Tk):
 
         self.create_widgets()
         self.start_tree_autorefresh(interval=10)
+
+        # Entry point to hook into your GUI
+        open_killops_window(root=self, payload_dir="/comm/matrix/payload")
+
+
 
     def create_widgets(self):
         left = tk.Frame(self, bg="#252526", bd=2)
@@ -42,6 +196,8 @@ class MatrixGUI(tk.Tk):
         self.delegated.insert(0, "comma,separated,delegated")
         self.delegated.pack(pady=5)
 
+        tk.Button(left, text="RESUME AGENT", command=self.resume_agent).pack(pady=5)
+
         tk.Label(left, text="Select Agent", fg="white", bg="#252526").pack(pady=5)
         agents = self.load_remote_agents()
         print("[DEBUG] Loaded remote agents:", agents)
@@ -51,6 +207,7 @@ class MatrixGUI(tk.Tk):
         self.agent_select.pack(pady=5)
 
         tk.Label(left, text="Select Team", fg="white", bg="#252526").pack(pady=5)
+        self.agent_select.bind("<<ComboboxSelected>>", self.on_agent_select)
 
         # Load teams
         teams = self.load_team_list()
@@ -86,11 +243,6 @@ class MatrixGUI(tk.Tk):
         self.tree_display.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         tk.Button(center, text="Reload Tree", command=self.load_tree).pack(pady=3)
 
-        self.agent_select = ttk.Combobox(
-            left,
-            values=["---"] + self.load_remote_agents(),  # ✅ Should be this
-            state="readonly"
-        )
 
         right = tk.Frame(self, bg="#252526")
         right.pack(side=tk.RIGHT, fill=tk.BOTH)
@@ -104,6 +256,39 @@ class MatrixGUI(tk.Tk):
 
         self.log_box = tk.Text(right, bg="#000", fg="#f0f0f0", height=35)
         self.log_box.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+    def resume_agent(self):
+        perm_id = self.perm_id.get().strip()
+        if not perm_id:
+            messagebox.showwarning("No perm_id", "Enter a perm_id to resume.")
+            return
+
+        payload = {
+            "type": "resume",
+            "timestamp": time.time(),
+            "content": {
+                "targets": [perm_id]
+            }
+        }
+
+        try:
+            response = requests.post(
+                url="https://147.135.68.135:65431/matrix",
+                json=payload,
+                cert=("certs/client.crt", "certs/client.key"),
+                verify="certs/server.crt",
+                timeout=5
+            )
+            if response.status_code == 200:
+                messagebox.showinfo("Resumed", f"Resume signal sent to {perm_id}.")
+            else:
+                messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
+        except Exception as e:
+            messagebox.showerror("Connection Failed", str(e))
+
+    def on_agent_select(self, event):
+        value = self.agent_select.get()
+        print(f"[DEBUG] Agent selected: {value}")
 
     def deploy_selected_team(self):
 
@@ -126,11 +311,21 @@ class MatrixGUI(tk.Tk):
             with open(team_file, "r") as f:
                 team_data = json.load(f)
 
+            target_perm_id = self.agent_select.get().strip()
+            print(f"[DEBUG] Dropdown returned: {repr(target_perm_id)}")
+
+            if not target_perm_id or target_perm_id == "---":
+                messagebox.showwarning(
+                    "No Target Selected",
+                    f"Dropdown returned: {repr(target_perm_id)}\nPlease select a valid agent to deploy under."
+                )
+                return
+
             payload = {
                 "type": "inject_team",
                 "timestamp": time.time(),
                 "content": {
-                    "target_perm_id": "matrix",  # or let user specify in the GUI later
+                    "target_perm_id": target_perm_id,
                     "subtree": team_data
                 }
             }
@@ -215,8 +410,21 @@ class MatrixGUI(tk.Tk):
                 # Usage in request_tree_from_matrix response
                 output = self.render_tree(tree.get("matrix", {}))
                 self.tree_display.delete("1.0", tk.END)
-                self.tree_display.insert(tk.END, f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]")
-                self.tree_display.insert(tk.END, "\n".join(output))
+                self.tree_display.insert(tk.END, f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]\n")
+
+                for idx, (line, perm_id) in enumerate(output):
+                    tag = f"perm_{idx}"
+                    self.tree_display.insert(tk.END, line + "\n", tag)
+
+                    if "✓" in line:
+                        self.tree_display.tag_config(tag, foreground="#00ff66")  # Green confirmed
+
+                    elif "⚠️" in line:
+                        self.tree_display.tag_config(tag, foreground="#ff5555")  # Red downed
+
+                    if perm_id != "none":
+                        self.tree_display.tag_bind(tag, "<Button-1>", self.make_click_callback(perm_id))
+
             else:
                 messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
         except Exception as e:
@@ -228,24 +436,31 @@ class MatrixGUI(tk.Tk):
             output.append((f"{indent}- [INVALID NODE STRUCTURE: {node}]", "none"))
             return output
 
-        name = node.get("permanent_id") or node.get("name") or "unknown"
-        label = name
+        perm_id = node.get("permanent_id") or node.get("name") or "unknown"
+        label = perm_id
+
+        # ⚠️ Check for DIE file
+        die_path = f"/comm/{perm_id}/incoming/die"
+        if os.path.exists(die_path):
+            label += " ⚠️ [DOWN]"
+
         if node.get("confirmed"):
             label += " ✓"
+
         children = node.get("children", [])
         if isinstance(children, list):
-            child_count = len(children)
-            if child_count:
-                label += f" ({child_count})"
+            if children:
+                label += f" ({len(children)})"
         else:
             label += " [INVALID CHILD FORMAT]"
             children = []
 
         line = f"{indent}- {label}"
-        output.append((line, name))  # capture both line and perm_id
+        output.append((line, perm_id))
         for child in children:
             output.extend(self.render_tree(child, indent + "  "))
         return output
+
 
     def start_tree_autorefresh(self, interval=10):
         def refresh():
