@@ -31,7 +31,6 @@ Agents don’t talk through APIs. They talk through **files**.
 - The live agent tree is tracked and pruned
 - Agents monitor each other — and if one goes silent, it is resurrected or replaced
 
-![image](https://github.com/user-attachments/assets/50154f01-2a77-44a7-b075-472024039893)
 
 ---
 
