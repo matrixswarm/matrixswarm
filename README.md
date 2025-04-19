@@ -103,3 +103,9 @@ We are currently recruiting contributors who want to:
 No PR is too small. No mission is without meaning.
 
 🧠⚔️
+
+### 🧬 Codex Exit Clause
+
+**MatrixSwarm is open.**  
+**Fork it.**  
+**Or Fork U.**
