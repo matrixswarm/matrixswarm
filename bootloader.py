@@ -5,6 +5,7 @@ import uuid
 from agent.core.path_manager import PathManager
 from agent.core.core_spawner import CoreSpawner
 #from agent.matrix.matrix import MatrixAgent
+from agent.core.tree_parser import TreeParser
 
 cp = CoreSpawner()
 
@@ -48,6 +49,11 @@ def boot():
                             ],
                     "files": {}
                     }
+                },
+                {
+                    "permanent_id": "commander-2",
+                    "name": "commander",
+                    "children": []
                 },
                 {
                     "permanent_id": "worker-backup-2",
@@ -167,12 +173,14 @@ def boot():
     if hard_reset:
         cp.reset_hard()
 
+        tp=TreeParser({})
+
         comm_file_spec=[
             {
                 'name': 'agent_tree_master.json',
                 'type': 'f',
                 'atomic': True,
-                'content': matrix_directive
+                'content': tp.load_dict(matrix_directive)
             },
             {
                 'name': 'hello.moto',

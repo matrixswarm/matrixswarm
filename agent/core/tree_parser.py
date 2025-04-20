@@ -53,7 +53,7 @@ class TreeParser:
         # Debugging the state of self.nodes after adding
         print("Current state of self.nodes:")
         for key, value in self.nodes.items():
-            print(f"")
+            print(f"{key} → {value.get('name', '[NO NAME]')}")
 
         for child in node.get(self.CHILDREN_KEY, []):
             if not isinstance(child, dict) or not child.get("permanent_id"):
@@ -69,12 +69,16 @@ class TreeParser:
         if not permanent_id:
            return
 
+        # Clean up malformed children
         valid_children = []
         for child in node.get(self.CHILDREN_KEY, []):
-            if isinstance(child, dict) and child.get("permanent_id"):
-                valid_children.append(child)
-        node[self.CHILDREN_KEY] = valid_children
+           if isinstance(child, dict) and child.get("permanent_id"):
+               valid_children.append(child)
+           else:
+               print(f"[TREE] ⚠️ Malformed child skipped: {child}")
 
+        node[self.CHILDREN_KEY] = valid_children
+        node.setdefault(self.CHILDREN_KEY, [])
 
         # Add the node if it's not a duplicate
         if permanent_id not in self.nodes:
@@ -343,3 +347,51 @@ class TreeParser:
 
         recurse(self.root)
         return flat
+
+    def load_dict(self, data):
+        """
+        Load a tree from a raw Python dictionary and return the cleansed version.
+        """
+        self.root = self._initialize_data(data)
+        self.cleanse()
+        return self.root
+
+    def cleanse(self):
+        """
+        Fully cleanse the entire root tree including children.
+        """
+
+        def recursive_purge(node):
+            if not isinstance(node, dict) or not node.get(self.PERMANENT_ID_KEY):
+                return None
+
+            clean_children = []
+            for child in node.get(self.CHILDREN_KEY, []):
+                clean = recursive_purge(child)
+                if clean:
+                    clean_children.append(clean)
+                else:
+                    print(f"[TREE] ⚠️ Removed malformed node during cleanse: {child}")
+
+            node[self.CHILDREN_KEY] = clean_children
+            return node
+
+        self.root = recursive_purge(self.root)
+        return self.root
+
+    def get_subtree_nodes(self, perm_id):
+        """
+        Get all nodes under and including the given perm_id.
+        """
+        if perm_id not in self.nodes:
+            return []
+
+        result = []
+
+        def collect(node):
+            result.append(node[self.PERMANENT_ID_KEY])
+            for child in node.get(self.CHILDREN_KEY, []):
+                collect(child)
+
+        collect(self.nodes[perm_id])
+        return result

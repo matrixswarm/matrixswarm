@@ -1,37 +1,69 @@
-import tkinter as tk
-from tkinter import ttk
-from codex.swarm_codex import get_codex
+# 📜 Swarm Codex — Agent Registration Log
+# Auto-generated ledger of all agents that serve the Hive.
+# This file can be programmatically updated by spawn routines or manually extended.
 
-class CodexPanel(tk.Frame):
-    def __init__(self, master):
-        super().__init__(master, bg="#1e1e1e")
-        self.pack(fill=tk.BOTH, expand=True)
+SWARM_CODEX = [
+    {
+        "perm_id": "matrix",
+        "agent_name": "MatrixAgent",
+        "role": "Central Cortex",
+        "banner": "🧠 MATRIX AGENT",
+        "spawned": "Hive Zero",
+        "version": "v3.0",
+        "status": "Immortal"
+    },
+    {
+        "perm_id": "reaper-root",
+        "agent_name": "ReaperAgent",
+        "role": "Tactical Cleanup",
+        "banner": "☠ REAPER AGENT",
+        "spawned": "Halls of Matrix",
+        "version": "v2.5",
+        "status": "Active"
+    },
+    {
+        "perm_id": "scavenger-root",
+        "agent_name": "ScavengerAgent",
+        "role": "Runtime Sweeper",
+        "banner": "🧹 SCAVENGER AGENT",
+        "spawned": "Blackout Protocol",
+        "version": "Rev 1.8",
+        "status": "Active"
+    },
+    {
+        "perm_id": "sentinel-alpha",
+        "agent_name": "SentinelAgent",
+        "role": "Heartbeat Monitor",
+        "banner": "🛡 SENTINEL AGENT",
+        "spawned": "Zone Watch",
+        "version": "v1.2",
+        "status": "Active"
+    },
+    {
+        "perm_id": "mailman-1",
+        "agent_name": "MailmanAgent",
+        "role": "Message Relay",
+        "banner": "📬 MAILMAN AGENT",
+        "spawned": "Seal 7",
+        "version": "v1.0",
+        "status": "Standby"
+    }
+    # Future agents will be registered here
+]
 
-        title = tk.Label(self, text="Codex", font=("Courier", 16), bg="#1e1e1e", fg="white")
-        title.pack(pady=10)
+def register_agent(entry):
+    SWARM_CODEX.append(entry)
 
-        columns = ("perm_id", "role", "banner", "spawned", "version", "status")
-        tree = ttk.Treeview(self, columns=columns, show="headings")
-        tree.pack(fill=tk.BOTH, expand=True)
+def get_codex():
+    return SWARM_CODEX
 
-        for col in columns:
-            tree.heading(col, text=col.capitalize())
-            tree.column(col, anchor="center", width=100)
+def print_codex():
+    print("\n🧠 SWARM CODEX — ACTIVE LEDGER")
+    print("══════════════════════════════════════════════════")
+    for agent in SWARM_CODEX:
+        print(f"{agent['banner']} :: {agent['perm_id']} [{agent['role']}] — {agent['status']}")
+    print("══════════════════════════════════════════════════\n")
 
-        for agent in get_codex():
-            status_color = "🟢" if agent["status"].lower() == "active" else "🔴"
-            tree.insert("", tk.END, values=(
-                agent["perm_id"],
-                agent["role"],
-                agent["banner"],
-                agent["spawned"],
-                agent["version"],
-                f"{status_color} {agent['status']}"
-            ))
-
+# If run standalone, print the codex
 if __name__ == "__main__":
-    root = tk.Tk()
-    root.title("Swarm Codex")
-    root.geometry("900x600")
-    CodexPanel(root)
-    root.mainloop()
+    print_codex()

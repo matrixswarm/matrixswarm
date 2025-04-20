@@ -36,3 +36,9 @@ comm/certs/*.csr
 certs/*.srl
 *.zipx
 To OpenAI.txt
+*.zip
+*.zipx
+*.tar.gz
+*.sj
+*.sh
+*.bak

@@ -1,0 +1,22 @@
+{
+  "permanent_id": "logger-3",
+  "name": "logger",
+  "children": [
+    {
+      "permanent_id": "logger-4",
+      "name": "logger",
+      "children": [
+        {
+          "permanent_id": "commander-1",
+          "name": "commander",
+          "children": []
+        },
+        {
+          "permanent_id": "worker-backup-3",
+          "name": "worker",
+          "children": []
+        }
+      ]
+    }
+  ]
+}
