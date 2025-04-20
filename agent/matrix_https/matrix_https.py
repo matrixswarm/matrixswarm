@@ -47,7 +47,7 @@ class MatrixHTTPS(BootAgent):
         def get_agent_list():
             try:
                 self.log("[CMD] Getting Live Agent List")
-                comm_path = os.path.join(os.getcwd(), "comm")
+                comm_path = self.path_resolution['comm_path']
                 agents = []
 
                 if os.path.exists(comm_path):

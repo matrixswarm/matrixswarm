@@ -59,8 +59,7 @@ def open_killops_window(root, payload_dir):
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
-                
-cert = ("certs/client.crt", "certs/client.key"),
+                cert = ("certs/client.crt", "certs/client.key"),
                 verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT,
             )
@@ -361,7 +360,8 @@ class MatrixGUI(tk.Tk):
             import requests
             response = requests.post(
                 url=MATRIX_HOST,
-                json=payload, cert = ("certs/client.crt", "certs/client.key"),
+                json=payload,
+                cert = ("certs/client.crt", "certs/client.key"),
                 verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
@@ -381,32 +381,17 @@ class MatrixGUI(tk.Tk):
         return [f.replace(".json", "") for f in os.listdir(team_dir) if f.endswith(".json")]
 
     def refresh_agents(self):
-        agents = self.load_active_agents()
+        agents = self.load_remote_agents()
         self.agent_select["values"] = ["---"] + agents
         self.agent_select.set("---")
-
-    def load_active_agents(self):
-        comm_path = "/sites/orbit/python/comm"
-        agents = []
-
-        if not os.path.exists(comm_path):
-            return agents
-
-        for name in os.listdir(comm_path):
-            path = os.path.join(comm_path, name)
-            if os.path.isdir(path):
-                agents.append(name)
-
-        return sorted(agents)
 
     def load_remote_agents(self):
         try:
             import requests
 
-            response = requests.post(
+            response = requests.get(
                 url=AGENTS_HOST,
-                
-cert = ("certs/client.crt", "certs/client.key"),
+                cert = ("certs/client.crt", "certs/client.key"),
                 verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
