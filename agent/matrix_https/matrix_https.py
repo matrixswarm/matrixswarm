@@ -193,6 +193,63 @@ class MatrixHTTPS(BootAgent):
                             os.remove(tombstone_path)
                             self.log(f"[MATRIX][RESUME] Removed tombstone for {perm_id}")
 
+                elif ctype == "shutdown_subtree":
+                    target_id = content.get("perm_id")
+                    if not target_id:
+                        return jsonify({"status": "error", "message": "Missing perm_id"}), 400
+                    try:
+
+                        from agent.core.tree_parser import TreeParser
+                        tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
+                        tp = TreeParser.load_tree(tree_path)
+                        subtree_ids = tp.get_subtree_nodes(target_id)
+
+                        for agent_id in subtree_ids:
+                            die_path = os.path.join(self.path_resolution["comm_path"], agent_id, "incoming", "die")
+                            os.makedirs(os.path.dirname(die_path), exist_ok=True)
+                            with open(die_path, "w") as f:
+                                f.write("☠️")
+
+                        self.log(f"[MATRIX-HTTPS][SHUTDOWN] Issued die to subtree under: {target_id}")
+                        return jsonify(
+                            {"status": "ok", "message": f"Shutdown signal sent to {len(subtree_ids)} agents"})
+
+                    except Exception as e:
+                        self.log(f"[ERROR][SHUTDOWN_SUBTREE] {str(e)}")
+                        return jsonify({"status": "error", "message": str(e)}), 500
+
+                elif ctype == "restart_subtree":
+                    target_id = content.get("perm_id")
+                    if not target_id:
+                        return jsonify({"status": "error", "message": "Missing perm_id"}), 400
+
+                    try:
+                        from agent.core.tree_parser import TreeParser
+                        tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
+                        tp = TreeParser.load_tree(tree_path)
+                        subtree_ids = tp.get_subtree_nodes(target_id)
+
+                        for agent_id in subtree_ids:
+                            die_path = os.path.join(self.path_resolution["comm_path"], agent_id, "incoming", "die")
+                            tombstone_path = os.path.join(self.path_resolution["comm_path"], agent_id, "incoming",
+                                                          "tombstone")
+
+                            if os.path.exists(die_path):
+                                os.remove(die_path)
+                                self.log(f"[MATRIX-HTTPS][RESUME] Removed die signal for {agent_id}")
+
+                            if os.path.exists(tombstone_path):
+                                os.remove(tombstone_path)
+                                self.log(f"[MATRIX-HTTPS][RESUME] Removed tombstone for {agent_id}")
+
+                        self.log(f"[MATRIX-HTTPS][RESTART_SUBTREE] Resumed {len(subtree_ids)} agents under {target_id}")
+                        return jsonify(
+                            {"status": "ok", "message": f"Resumed {len(subtree_ids)} agents under {target_id}."})
+
+                    except Exception as e:
+                        self.log(f"[MATRIX-HTTPS][ERROR] Restart Subtree: {str(e)}")
+                        return jsonify({"status": "error", "message": str(e)}), 500
+
 
                 elif ctype == "delete_node":
                     self.log(f"[MATRIX-HTTPS][CMD][DELETE-NODE] {payload}")
@@ -254,10 +311,10 @@ class MatrixHTTPS(BootAgent):
 
     def run_server(self):
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        context.load_cert_chain(certfile=self.cert_path, keyfile=self.key_path)
-        context.load_verify_locations(self.client_ca)
-        context.verify_mode = ssl.CERT_REQUIRED
 
+        context.load_verify_locations(cafile="certs/rootCA.pem")
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.load_cert_chain(certfile="certs/server.fullchain.crt", keyfile="certs/server.key")
         self.log(f"[HTTPS] Listening on port {self.port}")
         self.app.run(host="0.0.0.0", port=self.port, ssl_context=context)
 

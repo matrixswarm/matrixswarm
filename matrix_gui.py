@@ -14,13 +14,14 @@ import json
 import time
 import os
 
+from codex_gui import CodexPanel
+
 #SWIPE OUT THE IP AND PORT FOR YOUR OWN
 MATRIX_HOST = "https://147.135.68.135:65431/matrix"
 AGENTS_HOST = "https://147.135.68.135:65431/agents"
 CLIENT_CERT = ("certs/client.crt", "certs/client.key")
 SERVER_CERT = "certs/server.crt"
 REQUEST_TIMEOUT = 5
-
 
 def open_killops_window(root, payload_dir):
     win = Toplevel(root)
@@ -58,9 +59,10 @@ def open_killops_window(root, payload_dir):
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
-                timeout=REQUEST_TIMEOUT
+                
+cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
+                timeout=REQUEST_TIMEOUT,
             )
 
             if response.status_code == 200:
@@ -93,8 +95,9 @@ def open_killops_window(root, payload_dir):
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+
+                cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
@@ -134,8 +137,8 @@ def open_killops_window(root, payload_dir):
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+                cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
 
@@ -242,7 +245,7 @@ class MatrixGUI(tk.Tk):
         tk.Button(left, text="CALL REAPER", command=self.call_reaper).pack(pady=5)
         tk.Button(left, text="View Tagged Agents", command=self.view_tags).pack(pady=5)
         tk.Button(left, text="REQUEST TREE FROM MATRIX", command=self.request_tree_from_matrix).pack(pady=5)
-
+        tk.Button(left, text="???", command=self.dont_touch_that).pack(pady=5)
         center = tk.Frame(self, bg="#1e1e1e")
         center.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -251,6 +254,14 @@ class MatrixGUI(tk.Tk):
         self.tree_display.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         tk.Button(center, text="Reload Tree", command=self.load_tree).pack(pady=3)
 
+        tk.Button(left, text="🔁 Refresh Agents", command=self.refresh_agents).pack(pady=3)
+
+        tk.Button(left, text="💀 Shutdown Subtree", command=self.shutdown_subtree).pack(pady=5)
+
+
+
+
+        tk.Button(left, text="📖 View Codex", command=self.show_codex).pack(pady=5)
 
         right = tk.Frame(self, bg="#252526")
         right.pack(side=tk.RIGHT, fill=tk.BOTH)
@@ -264,6 +275,15 @@ class MatrixGUI(tk.Tk):
 
         self.log_box = tk.Text(right, bg="#000", fg="#f0f0f0", height=35)
         self.log_box.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        tk.Button(left, text="🟥 KILL SUBTREE", command=self.kill_subtree).pack(pady=3)
+        tk.Button(left, text="🟩 RESUME SUBTREE", command=self.resume_subtree).pack(pady=3)
+
+    def show_codex(self):
+        codex_win = tk.Toplevel(self)
+        codex_win.title("Swarm Codex")
+        codex_win.geometry("900x600")
+        CodexPanel(codex_win)
 
     def resume_agent(self):
         perm_id = self.perm_id.get().strip()
@@ -283,8 +303,8 @@ class MatrixGUI(tk.Tk):
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+                cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
@@ -341,9 +361,8 @@ class MatrixGUI(tk.Tk):
             import requests
             response = requests.post(
                 url=MATRIX_HOST,
-                json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+                json=payload, cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
 
@@ -386,8 +405,9 @@ class MatrixGUI(tk.Tk):
 
             response = requests.post(
                 url=AGENTS_HOST,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+                
+cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
             data = response.json()
@@ -397,6 +417,19 @@ class MatrixGUI(tk.Tk):
         except Exception as e:
             print("[ERROR] Failed to fetch agent list:", e)
         return []
+
+    def dont_touch_that(self):
+        import random
+        reactions = [
+            "Eww... don't touch that!",
+            "You just woke something up.",
+            "That button isn’t mapped. Yet.",
+            "WHY WOULD YOU TOUCH THAT.",
+            "Nice. Now Matrix knows you're here.",
+            "Too late to turn back now.",
+            "You pressed the forbidden glyph."
+        ]
+        tk.messagebox.showwarning("Swarm Protocol Breach", random.choice(reactions))
 
     def request_tree_from_matrix(self):
         try:
@@ -409,8 +442,9 @@ class MatrixGUI(tk.Tk):
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+                
+cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
@@ -547,8 +581,9 @@ class MatrixGUI(tk.Tk):
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+                
+cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
@@ -564,6 +599,28 @@ class MatrixGUI(tk.Tk):
         with open(path, "w") as f:
             json.dump({"perm_id": perm}, f, indent=2)
         messagebox.showinfo("Shutdown", f"Kill order sent for {perm}")
+
+    def kill_subtree(self):
+        target = self.perm_id.get().strip()
+        if not target:
+            return
+        subtree = self.get_subtree(target)
+        for agent_id in subtree:
+            die_path = f"comm/{agent_id}/incoming/die"
+            open(die_path, "w").close()
+        messagebox.showinfo("Subtree Terminated", f"{len(subtree)} agents marked for death.")
+
+    def resume_subtree(self):
+        target = self.perm_id.get().strip()
+        if not target:
+            return
+        subtree = self.get_subtree(target)
+        for agent_id in subtree:
+            die_path = f"comm/{agent_id}/incoming/die"
+            if os.path.exists(die_path):
+                os.remove(die_path)
+        messagebox.showinfo("Subtree Revived", f"{len(subtree)} agents released from death.")
+
 
     def delete_subtree(self):
         perm = self.perm_id.get()
@@ -587,9 +644,8 @@ class MatrixGUI(tk.Tk):
             }
             response = requests.post(
                 url=MATRIX_HOST,
-                json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+                json=payload, cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
 
@@ -638,9 +694,8 @@ class MatrixGUI(tk.Tk):
         try:
             response = requests.post(
                 url=MATRIX_HOST,
-                json=payload,
-                cert=CLIENT_CERT,
-                verify=SERVER_CERT,
+                json=payload, cert = ("certs/client.crt", "certs/client.key"),
+                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
                 timeout=REQUEST_TIMEOUT
             )
 
@@ -689,6 +744,37 @@ class MatrixGUI(tk.Tk):
 
     def make_click_callback(self, pid):
         return lambda e: self.view_logs_for(pid)
+
+    def shutdown_subtree(self):
+
+        perm_id = self.perm_id.get().strip()
+        if not perm_id:
+            messagebox.showwarning("Missing perm_id", "Please enter a perm_id.")
+            return
+
+        payload = {
+            "type": "shutdown_subtree",
+            "content": {
+                "perm_id": perm_id
+            }
+        }
+
+        try:
+            response = requests.post(
+                url = MATRIX_HOST,
+                json = payload,
+                cert = ("certs/client.crt", "certs/client.key"),
+                verify = False,  # ⚠️ DISABLES SSL VERIFICATION
+                timeout = REQUEST_TIMEOUT
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                messagebox.showinfo("Subtree Shutdown", result.get("message", "Shutdown complete."))
+            else:
+                messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
+        except Exception as e:
+            messagebox.showerror("Connection Failed", str(e))
 
 if __name__ == "__main__":
     app = MatrixGUI()

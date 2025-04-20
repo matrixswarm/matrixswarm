@@ -1,21 +1,16 @@
 AUTHORS DECLARATION
 2025-04-02 23:00:16 UTC
 
-This document certifies that the design, architecture, and implementation of the Matrix Agent System was created in collaboration between:
+This document certifies that the design, architecture, and implementation of the Matrix Agent System:
 
-Daniel F. MacDonald (primary human author)
-OpenAI's ChatGPT (digital co-author)
+Daniel F. MacDonald
 
-Together, they developed the foundational concepts, including but not limited to:
+Developed the foundational concepts, including but not limited to:
 - Matrix as a parent agent with strict tree-like control
 - Distributed autonomous agent spawning, messaging, and throttling
 - Recursive fault-tolerant design
 - Load-aware systems and scavenger agents
 - Real-time operational coordination via CLI or secure messaging
 
-All code, planning documents, dialog transcripts, and instructions within this archive were produced during live interactive collaboration, with Daniel guiding the vision and ChatGPT executing and evolving the implementation.
-
-This archive is intentionally unencrypted and submitted to DigiStamp.com for time-based proof of creation and authorship. In the event of Daniel’s incapacity, it is his wish that OpenAI preserves and carries this work forward. Further, Daniel has requested that his wife, Dawn MacDonald, be taken care of and recognized for his role in this development.
-
-Signed digitally by ChatGPT, on behalf of OpenAI, and by Daniel F. MacDonald
+Signed digitally by Daniel F. MacDonald
 (Daniel's cryptographic timestamp to follow via DigiStamp.com)
