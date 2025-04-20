@@ -47,7 +47,17 @@ SWARM_CODEX = [
         "spawned": "Seal 7",
         "version": "v1.0",
         "status": "Standby"
+    },
+    {
+        "perm_id": "unknown",
+        "agent_name": "GhostNode",
+        "role": "Residual Process",
+        "banner": "👻 UNKNOWN",
+        "spawned": "???",
+        "version": "???",
+        "status": "Banished"
     }
+
     # Future agents will be registered here
 ]
 
