@@ -5,12 +5,19 @@ No containers. No daemons. No sockets. Just purpose-built swarms running on real
 
 Spawn agents. Delegate missions. Kill subtrees. Resurrect the dead.
 
+This isn't just some vibe-driven science project. Okay, maybe a *little* — but what we had before was **serious infrastructure**:
+- Redis-backed socket mesh
+- TLS messaging framework
+- Full daemon lifecycle hooks
+
+Then it got nuked. And what rose from the ashes is faster, leaner, and way more brutal.
+
 ---
 
 ## ⚔️ Philosophy
 
-MatrixSwarm isn’t just code — it’s a world.
-A breathing hierarchy where agents think, die, and come back.
+MatrixSwarm isn’t just code — it’s a world.  
+A breathing hierarchy where agents think, die, and come back.  
 A nervous system for AI.
 
 It uses simple folders:
@@ -30,7 +37,6 @@ Agents don’t talk through APIs. They talk through **files**.
 - All coordination happens via `.json` and `.cmd` files
 - The live agent tree is tracked and pruned
 - Agents monitor each other — and if one goes silent, it is resurrected or replaced
-
 
 ---
 
