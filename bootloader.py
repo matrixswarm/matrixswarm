@@ -132,42 +132,42 @@ def boot():
                     "files": {}
                     }
                 },
-            {
-                "permanent_id": "scavenger-root",
-                "name": "scavenger",
-                "delegated": [],
-                "filesystem": {
-                    "folders": [
-                        {
+                {
+                    "permanent_id": "scavenger-root",
+                    "name": "scavenger",
+                    "delegated": [],
+                    "filesystem": {
+                        "folders": [
+                            {
 
-                        },
-                    ],
-                    "files": {}
-                }
-            },
-            {
-                "permanent_id": "logger-1",
-                "name": "logger",
-                "delegated": [],
-                "filesystem": {
-                    "folders": [
-                        {
+                            },
+                        ],
+                        "files": {}
+                    }
+                },
 
-                        },
-                    ],
-                    "files": {}
-                }
-            },
-            {
-                "permanent_id": "commander-1",
-                "name": "commander",
-                "children": []
-            },
-            {
-
-
-            }
-                ,]
+                {
+                    "permanent_id": "commander-1",
+                    "name": "commander",
+                    "children": []
+                },
+                {
+                    "permanent_id": "watchdog-1",
+                    "name": "watchdog",
+                    "delegated": [],
+                    "config": {
+                        "ping_url": "https://matrixswarm.com",
+                        "check_interval_sec": 120,
+                        "timeout_sec": 5,
+                        "max_failures": 3,
+                        "alert_action": "notify_matrix",
+                    },
+                    "filesystem": {
+                        "folders": [],
+                        "files": {}
+                    }
+                },
+        ]
     }
 
     ###### kill all running processes under pod/ then smoke the directories
