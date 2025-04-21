@@ -163,6 +163,21 @@ def boot():
                     "children": []
                 },
                 {
+                    "permanent_id": "sweeper_commander-1",
+                    "name": "sweeper_commander",
+                    "filesystem": {
+                        "folders": [
+                            {
+                                "name": "payload",
+                                "type": "d",
+                                "content": None
+                            }
+                        ],
+                        "files": {}
+                    },
+                    "children": []
+                },
+                {
                     "permanent_id": "watchdog-1",
                     "name": "watchdog",
                     "delegated": [],
