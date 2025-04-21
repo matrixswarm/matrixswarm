@@ -117,7 +117,16 @@ python3 bootloader.py
 - [OracleAgent — From Spawn to Prophecy (coming soon)](https://dev.to/your-post)
 
 ---
+## ⚠️ Use at Your Own Risk
 
+This system has not been fully tested in all environments.
+MatrixSwarm is still evolving.
+
+We make no guarantees that your agents won’t terminate your system.We do not sandbox.We do not take responsibility.We Spawn the Swarm.
+
+You run it. You control it. You deal with it.
+
+---
 ## 🛡 Status
 
 MatrixSwarm is pre-release. Core agents are operational. GUI is live. Lore banners are encoded.
