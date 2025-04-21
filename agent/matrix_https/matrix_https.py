@@ -5,7 +5,6 @@ import os
 import json
 import threading
 import time
-import uuid
 import sys
 
 if path_resolution['agent_path'] not in sys.path:

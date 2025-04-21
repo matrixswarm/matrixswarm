@@ -3,15 +3,13 @@
 # ║                   🧠 WATCHDOG AGENT 🧠                ║
 # ║   Central Cortex · Tree Dispatcher · Prime Director    ║
 # ║     Forged in the core of Hive Zero | v3.0 Directive   ║
-# ║  Accepts: inject / replace / resume / kill / propagate ║
+# ║   ║
 # ╚════════════════════════════════════════════════════════╝
-
 import sys
 import os
 import time
 import requests
 import json
-
 
 if path_resolution['agent_path'] not in sys.path:
     sys.path.append(path_resolution['agent_path'])
@@ -25,24 +23,26 @@ class WatchdogAgent(BootAgent):
 
         super().__init__(path_resolution, command_line_args)
 
+
     def load_config(self):
-        if self.config_path.exists():
-            with open(self.config_path, "r") as f:
-                config = json.load(f)
-            self.ping_url = config.get("ping_url", "https://matrixswarm.com")
-            self.check_interval = config.get("check_interval_sec", 60)
-            self.timeout = config.get("timeout_sec", 5)
-            self.max_failures = config.get("max_failures", 3)
-            self.alert_action = config.get("alert_action", "notify_matrix")
-        else:
-            # Default values
-            self.ping_url = "https://matrixswarm.com"
-            self.check_interval = 300
-            self.timeout = 5
-            self.max_failures = 3
-            self.alert_action = "notify_matrix"
+
+        #injected through top of script during spawning
+        config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
+
+        self.ping_url = config.get("ping_url", "https://matrixswarm.com")
+        self.check_interval = config.get("check_interval_sec", 60)
+        self.timeout = config.get("timeout_sec", 5)
+        self.max_failures = config.get("max_failures", 3)
+        self.alert_action = config.get("alert_action", "notify_matrix")
+
+        self.log(
+            f"[WATCHDOG][CONFIG] Loaded: ping={self.ping_url}, interval={self.check_interval}s, timeout={self.timeout}s, max_failures={self.max_failures}, action={self.alert_action}")
 
     def worker(self):
+
+
+        self.load_config()
+        self.log("[WATCHDOG] Config loaded in post_boot.")
 
         self.log("[WATCHDOG] WatchdogAgent is now running.")
         while self.running:
@@ -91,6 +91,6 @@ if __name__ == "__main__":
     # current directory of the agent script or it wont be able to find itself
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
 
-    matrix = WatchdogAgent(path_resolution, command_line_args)
+    agent = WatchdogAgent(path_resolution, command_line_args)
 
-    matrix.boot()
+    agent.boot()

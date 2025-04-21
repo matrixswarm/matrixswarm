@@ -1,6 +1,8 @@
 # 🧠 MatrixSwarm
 
-**MatrixSwarm** is a distributed, file-driven agent operating system.
+**MatrixSwarm** is a distributed, file-driven agent operating system.  
+**Spawn the Swarm.**
+
 No containers. No daemons. No sockets. Just purpose-built swarms running on real files.
 
 Spawn agents. Delegate missions. Kill subtrees. Resurrect the dead.

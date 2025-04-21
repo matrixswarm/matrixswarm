@@ -175,6 +175,7 @@ class BootAgent(Agent):
                         node.get("name"),
                         node.get("permanent_id"),
                         self.command_line_args["permanent_id"],
+                        tree_node=node,  # ← inject tree node directly
                     )
 
                     orbits[node.get("permanent_id")] = {

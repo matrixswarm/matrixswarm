@@ -155,7 +155,7 @@ class CoreSpawner:
 
         return good, content
 
-    def spawn_agent(self, universe_id, spawn_uuid, agent_name, permanent_id, spawner):
+    def spawn_agent(self, universe_id, spawn_uuid, agent_name, permanent_id, spawner, tree_node=None):
 
         try:
 
@@ -192,8 +192,16 @@ class CoreSpawner:
             path_resolution = 'path_resolution={\n'+ root_path + pod_path + comm_path + agent_path + incoming_path_template + comm_path_resolved + '}\n'
             command_line_args = 'command_line_args={\n' + install_name + matrix_name + universe_name + spawner_name + permanent_id_name + agent_name_name + '}\n'
 
+            tree_node_blob = ""
+            if tree_node:
+                try:
+                    tree_node_blob = f"tree_node = {repr(tree_node)}\n"
+                except Exception as e:
+                    print(f"[SPAWN-ERROR] Could not encode tree_node for {permanent_id}: {e}")
+
+
             with open(run_path, "w") as f:
-                f.write(path_resolution + command_line_args + file_content)
+                f.write(path_resolution + command_line_args + tree_node_blob + file_content)
 
             #payload = json.dumps(live_data).encode("utf-8")
             #encrypted = core.encrypt(payload)

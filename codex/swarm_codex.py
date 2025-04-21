@@ -73,6 +73,17 @@ SWARM_CODEX = [
             "propagate"
         ],
         "description": "Central Cortex · Tree Dispatcher · Prime Director"
+    },
+    {
+        "perm_id": "reaper",
+        "agent_name": "ReaperAgent",
+        "role": "High-Authority Cleanup Unit",
+        "banner": "☠ REAPER AGENT ☠",
+        "spawned": "Manual Command Only",
+        "version": "v1.0",
+        "status": "unregistered",
+        "capabilities": ["reap", "terminate", "force_kill", "subtree_cleanup"],
+        "description": "Handles escalated kill orders. Graceful first, lethal if ignored."
     }
 
     # Future agents will be registered here
