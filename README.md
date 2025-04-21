@@ -27,6 +27,7 @@ It uses simple folders:
 - `/pod` → runtime clones
 - `/comm` → communication; enhance performance mount as tmpfs mem-disk
 
+
 Agents don’t talk through APIs. They talk through **files**.
 
 ---
@@ -67,6 +68,7 @@ python3 gui/matrix_gui.py
 | 🧹 ScavengerAgent  | Cleans pods, removes orphaned dirs        |
 | 🛡 SentinelAgent   | Watches heartbeats and resurrects agents |
 | 📬 MailmanAgent    | Logs messages and deduplicates hash lines |
+| 🔮 OracleAgent     | AI responder that interprets `.prompt` files using GPT-4 |
 
 Each agent carries a **Swarm Lore Banner™** — a sacred header that defines its purpose.
 
@@ -96,6 +98,7 @@ python3 bootloader.py
 - [The Hive Is Recruiting](https://dev.to/your-post)
 - [Spawn. Delegate. Terminate. Repeat.](https://dev.to/your-post)
 - [MatrixSwarm Manifesto (coming soon)](https://dev.to/your-post)
+- [OracleAgent — From Spawn to Prophecy (coming soon)](https://dev.to/your-post)
 
 ---
 

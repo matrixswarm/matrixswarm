@@ -3,9 +3,9 @@
 # Returns OpenAI-generated responses into `outbox/`
 
 import os
+import sys
 import time
-import json
-import openai
+from openai import OpenAI
 
 if path_resolution['agent_path'] not in sys.path:
     sys.path.append(path_resolution['agent_path'])
@@ -18,13 +18,16 @@ class OracleAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
         super().__init__(path_resolution, command_line_args)
         self.api_key = os.getenv("OPENAI_API_KEY")
-        openai.api_key = self.api_key
+        self.client = OpenAI(api_key=self.api_key)
         self.prompt_path = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
         self.outbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "outbox")
         os.makedirs(self.outbox_path, exist_ok=True)
 
     def post_boot(self):
-        self.log("[ORACLE] OracleAgent online. Watching for prompts.")
+        if not self.api_key:
+            self.log("[ORACLE][ERROR] No API key detected. Is your .env loaded?")
+        else:
+            self.log("[ORACLE] API key loaded. Ready to receive prompts.")
 
     def worker(self):
         while self.running:
@@ -52,7 +55,7 @@ class OracleAgent(BootAgent):
 
     def query_openai(self, prompt):
         try:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
