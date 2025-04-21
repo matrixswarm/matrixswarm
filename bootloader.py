@@ -1,12 +1,8 @@
-import sys
-import os
-import json
-import uuid
+from dotenv import load_dotenv
+load_dotenv()
 from agent.core.path_manager import PathManager
 from agent.core.core_spawner import CoreSpawner
-#from agent.matrix.matrix import MatrixAgent
 from agent.core.tree_parser import TreeParser
-from agent.core.class_lib.json.permanent_id_extract import PermanentIdExtract
 from agent.core.class_lib.processes.reaper import Reaper
 cp = CoreSpawner()
 
@@ -149,6 +145,21 @@ def boot():
                 {
                     "permanent_id": "commander-1",
                     "name": "commander",
+                    "children": []
+                },
+                {
+                    "permanent_id": "oracle-1",
+                    "name": "oracle",
+                    "filesystem": {
+                        "folders": [
+                            {
+                                "name": "payload",
+                                "type": "d",
+                                "content": None
+                            }
+                        ],
+                        "files": {}
+                    },
                     "children": []
                 },
                 {

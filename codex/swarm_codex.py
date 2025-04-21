@@ -84,6 +84,17 @@ SWARM_CODEX = [
         "status": "unregistered",
         "capabilities": ["reap", "terminate", "force_kill", "subtree_cleanup"],
         "description": "Handles escalated kill orders. Graceful first, lethal if ignored."
+    },
+    {
+      "perm_id": "oracle-1",
+      "agent_name": "OracleAgent",
+      "role": "Swarm Interpreter",
+      "banner": "🔮 ORACLE AGENT",
+      "spawned": "Matrix's Third Eye",
+      "version": "v1.0",
+      "status": "Operational",
+      "capabilities": ["analyze", "respond", "summarize", "translate"],
+      "description": "Reads prompts from the swarm. Speaks back wisdom."
     }
 
     # Future agents will be registered here
