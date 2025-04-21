@@ -106,7 +106,8 @@ SWARM_CODEX = [
       "status": "Operational",
       "capabilities": ["prompt_oracle", "parse_cmd", "purge_folder"],
       "description": "Queries Oracle, obeys her response. Executes safe file-level actions."
-    }
+    },
+
 
     # Future agents will be registered here
 ]
