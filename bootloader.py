@@ -6,7 +6,8 @@ from agent.core.path_manager import PathManager
 from agent.core.core_spawner import CoreSpawner
 #from agent.matrix.matrix import MatrixAgent
 from agent.core.tree_parser import TreeParser
-
+from agent.core.class_lib.json.permanent_id_extract import PermanentIdExtract
+from agent.core.class_lib.processes.reaper import Reaper
 cp = CoreSpawner()
 
 MATRIX_UUID = "matrix"
@@ -171,6 +172,12 @@ def boot():
 
     ###### kill all running processes under pod/ then smoke the directories
     if hard_reset:
+
+        #this makes sure if any agents are running they close before we nuke the pod directory
+        reaper = Reaper('pod', 'comm')
+
+        reaper.reap_all(UNIVERSE_ID)
+
         cp.reset_hard()
 
         tp=TreeParser({})
@@ -197,6 +204,11 @@ def boot():
             {"name": "payload", "type": "d", "content": None}
 
         ]
+
+        #v=PermanentIdExtract.get_dict_by_permanent_id(matrix_directive, MATRIX_UUID)
+        #print(v)
+        #exit(0)
+
         cp.ensure_comm_channel(MATRIX_UUID, comm_file_spec, matrix_directive)
         new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)
         cp.spawn_agent(UNIVERSE_ID, new_uuid, MATRIX_UUID, MATRIX_UUID, BOOTLOADER_UUID)
