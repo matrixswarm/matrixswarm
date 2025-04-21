@@ -25,7 +25,7 @@ A nervous system for AI.
 It uses simple folders:
 - `/agent` → source code
 - `/pod` → runtime clones
-- `/comm` → communication
+- `/comm` → communication; enhance performance mount as tmpfs mem-disk
 
 Agents don’t talk through APIs. They talk through **files**.
 
