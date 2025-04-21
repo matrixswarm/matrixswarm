@@ -193,6 +193,20 @@ def boot():
                         "files": {}
                     }
                 },
+                {
+                    "permanent_id": "update-sentinel-1",
+                    "name": "sentinel",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "incoming", "type": "d", "content": None}
+                        ],
+                        "files": {}
+                    },
+                    "config": {
+                        "scan_path": "/opt/tasks",
+                        "age_threshold_days": 90
+                    }
+                },
         ]
     }
 
