@@ -123,12 +123,7 @@ class CoreSpawner:
         pod_path = os.path.join(self.pod_path, new_uuid)
         os.makedirs(pod_path, exist_ok=True)
 
-        install = {
-            "permanent_id": permanent_id,
-            "boot_time": time.time()
-        }
-        with open(os.path.join(pod_path, "boot.json"), "w") as f:
-            json.dump(install, f, indent=2)
+
 
         return new_uuid, pod_path
 
@@ -223,6 +218,15 @@ class CoreSpawner:
                 #preexec_fn=os.setsid
 
             )
+
+            install = {
+                "permanent_id": permanent_id,
+                "boot_time": time.time(),
+                "pid": process.pid,
+            }
+            with open(os.path.join(self.pod_path, spawn_uuid, "boot.json"), "w") as f:
+                json.dump(install, f, indent=2)
+
 
         except Exception as e:
             print(f"[SPAWN-ERROR] Failed to spawn {agent_name}: {e}\n{traceback.format_exc()}")

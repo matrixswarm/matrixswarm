@@ -56,6 +56,23 @@ SWARM_CODEX = [
         "spawned": "???",
         "version": "???",
         "status": "Banished"
+    },
+    {
+        "perm_id": "watchdog",
+        "agent_name": "WatchdogAgent",
+        "role": "Site Monitor & Uptime Enforcer",
+        "banner": "🧠 WATCHDOG AGENT 🧠",
+        "spawned": "Forged in the core of Hive Zero",
+        "version": "v3.0",
+        "status": "Operational",
+        "capabilities": [
+            "inject",
+            "replace",
+            "resume",
+            "kill",
+            "propagate"
+        ],
+        "description": "Central Cortex · Tree Dispatcher · Prime Director"
     }
 
     # Future agents will be registered here
