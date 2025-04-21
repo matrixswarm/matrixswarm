@@ -25,8 +25,8 @@ A nervous system for AI.
 It uses simple folders:
 - `/agent` → source code
 - `/pod` → runtime clones
-- `/comm` → communication; enhance performance mount as tmpfs mem-disk
-
+- `/comm` → communication (dropzone for payload, status, logs)  
+  ↪ *Pro tip: mount this as a `tmpfs` mem-disk for swarm speed and zero I/O overhead.*
 
 Agents don’t talk through APIs. They talk through **files**.
 
@@ -40,6 +40,22 @@ Agents don’t talk through APIs. They talk through **files**.
 - All coordination happens via `.json` and `.cmd` files
 - The live agent tree is tracked and pruned
 - Agents monitor each other — and if one goes silent, it is resurrected or replaced
+
+---
+
+## 🚀 How to Boot the Swarm (Initial Boot)
+
+```bash
+git clone https://github.com/matrixswarm/matrixswarm.git
+cd matrixswarm
+python3 bootloader.py
+```
+
+On first boot:
+- MatrixAgent initializes
+- Sentinel, Commander, and all core agents are spawned
+- The live swarm tree appears
+- Logs start flowing into `/comm/`
 
 ---
 
