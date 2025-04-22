@@ -27,9 +27,9 @@ class BootAgent(Agent):
         self.worker_thread = threading.Thread(target=self._throttled_worker_wrapper, name="worker", daemon=False)
         self.worker_thread.start()
 
+        threading.Thread(target=self.enforce_singleton, name="enforce_singleton", daemon=True).start()
         threading.Thread(target=self.heartbeat, name="heartbeat", daemon=True).start()
         threading.Thread(target=self.spawn_manager, name="spawn_manager", daemon=True).start()
-        threading.Thread(target=self.enforce_singleton, name="enforce_singleton", daemon=True).start()
         threading.Thread(target=self.command_listener, name="cmd_listener", daemon=True).start()
         self.start_dynamic_throttle()
         self.post_boot()

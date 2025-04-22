@@ -203,12 +203,40 @@ class CoreSpawner:
             with open(run_path, "w") as f:
                 f.write(path_resolution + command_line_args + tree_node_blob + file_content)
 
+
             #payload = json.dumps(live_data).encode("utf-8")
             #encrypted = core.encrypt(payload)
             #with open(os.path.join(spawn_path, "live.json.enc"), "wb") as f:
              #   f.write(encrypted)
 
             logger = Logger(comm_path_resolved)
+
+            # WRITE SPAWN LOG
+            # Log the spawn to /comm/{perm_id}/spawn/
+            try:
+                spawn_record = {
+                    "uuid": spawn_uuid,
+                    "permanent_id": permanent_id,
+                    "agent_name": agent_name,
+                    "parent": spawner,
+                    "timestamp": time.time()
+                }
+
+                spawn_dir = os.path.join(self.comm_path, permanent_id, "spawn")
+                os.makedirs(spawn_dir, exist_ok=True)
+
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{timestamp}_{spawn_uuid}.spawn"
+                filepath = os.path.join(spawn_dir, filename)
+
+                with open(filepath, "w") as f:
+                    json.dump(spawn_record, f, indent=2)
+
+                logger.log(f"[SPAWN-LOG] Spawn recorded at {filepath}")
+            except Exception as e:
+                logger.log(f"[SPAWN-LOG-ERROR] Failed to log spawn for {permanent_id}: {e}")
+
+            #GO TIME
             logger.log(f"[SPAWN-MGR] About to spawn: {permanent_id}")
 
             cmd = [

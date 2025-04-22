@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 import os
+import sys
 load_dotenv()
 from agent.core.path_manager import PathManager
 from agent.core.core_spawner import CoreSpawner
@@ -158,6 +159,18 @@ def boot():
 
                 },
                 {
+                    "permanent_id": "mailman-1",
+                    "name": "mailman",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "payload", "type": "d", "content": None},
+                            {"name": "mail", "type": "d", "content": None},
+                            {"name": "tally", "type": "d", "content": None},
+                            {"name": "incoming", "type": "d", "content": None}
+                        ]
+                    }
+                },
+                {
                     "permanent_id": "commander-1",
                     "name": "commander",
                     "children": []
@@ -209,6 +222,19 @@ def boot():
                     }
                 },
                 {
+                    "permanent_id": "filewatch-1",
+                    "name": "filewatch",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "payload", "type": "d", "content": None}
+                        ]
+                    },
+                    "config": {
+                        "watch_path": "/etc/",
+                        "send_to": "mailman-1"
+                    }
+                },
+                {
                     "permanent_id": "update-sentinel-1",
                     "name": "sentinel",
                     "filesystem": {
@@ -225,8 +251,15 @@ def boot():
         ]
     }
 
+    if "--kill" in sys.argv:
+
+        reaper = Reaper('pod', 'comm')
+        reaper.reap_all("bb")
+        print("[BOOTLOADER] Kill switch triggered. Swarm shutdown complete.")
+        sys.exit(0)
+
     ###### kill all running processes under pod/ then smoke the directories
-    if hard_reset:
+    elif hard_reset:
 
         #this makes sure if any agents are running they close before we nuke the pod directory
         reaper = Reaper('pod', 'comm')
