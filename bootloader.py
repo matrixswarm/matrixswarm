@@ -218,6 +218,20 @@ def boot():
                         "alert_to": "mailman-1"
                     }
                 },
+                {
+                    "permanent_id": "metric-1",
+                    "name": "metric",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "payload", "type": "d", "content": None}
+                        ]
+                    },
+                    "config": {
+                        "interval_sec": 10,
+                        "report_to": "mailman-1",
+                        "oracle": "oracle-1"
+                    }
+                }
         ]
     }
 
