@@ -98,7 +98,7 @@ spawner metric-1 permanent_id of agent
 spawned logger-1 permanent_id of agent
 name    logger actual source-code name of agent
 
-permanent_id is universal in the matrix, it's what allows communication between agents    
+permanent_id is universal in the matrix, it's what allows communication between agents. It's also the name of your comm folder, the two channel for all communication with the outside world.    
     
 ```
 
