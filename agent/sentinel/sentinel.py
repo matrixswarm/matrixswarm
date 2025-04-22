@@ -17,7 +17,7 @@ if path_resolution['agent_path'] not in sys.path:
     sys.path.append(path_resolution['agent_path'])
 if path_resolution['root_path'] not in sys.path:
     sys.path.append(path_resolution['root_path'])
-
+from agent.core.utils.swarm_sleep import interruptible_sleep
 from agent.core.boot_agent import BootAgent
 
 class SentinelAgent(BootAgent):
@@ -52,79 +52,79 @@ class SentinelAgent(BootAgent):
                 if age_days > self.age_threshold_days:
                     self.send_prompt_to_oracle(full_path, age_days)
             self.listen_for_cmds()
-            time.sleep(300)  # check every 5 minutes
+            interruptible_sleep(self, 300)
 
 
-def get_file_age_days(self, path):
-    last_mod = os.path.getmtime(path)
-    return (time.time() - last_mod) / 86400
+    def get_file_age_days(self, path):
+        last_mod = os.path.getmtime(path)
+        return (time.time() - last_mod) / 86400
 
 
-def send_prompt_to_oracle(self, filepath, age_days):
-    prompt = {
-        "file": filepath,
-        "last_modified_days": round(age_days, 2),
-        "reply_to": self.command_line_args["permanent_id"]
-    }
-    filename = f"stale_{uuid.uuid4().hex}.prompt"
-    with open(os.path.join(self.oracle_payload, filename), "w") as f:
-        f.write(json.dumps(prompt, indent=2))
-    self.log(f"[SENTINEL] Prompt sent to Oracle for file: {filepath}")
+    def send_prompt_to_oracle(self, filepath, age_days):
+        prompt = {
+            "file": filepath,
+            "last_modified_days": round(age_days, 2),
+            "reply_to": self.command_line_args["permanent_id"]
+        }
+        filename = f"stale_{uuid.uuid4().hex}.prompt"
+        with open(os.path.join(self.oracle_payload, filename), "w") as f:
+            f.write(json.dumps(prompt, indent=2))
+        self.log(f"[SENTINEL] Prompt sent to Oracle for file: {filepath}")
 
 
-def listen_for_cmds(self):
-    for f in os.listdir(self.incoming_path):
-        if f.endswith(".cmd"):
-            with open(os.path.join(self.incoming_path, f), "r") as cmd_file:
-                try:
-                    cmd = json.load(cmd_file)
-                    self.execute_cmd(cmd)
-                except Exception as e:
-                    self.log(f"[SENTINEL][ERROR] Failed to parse command: {e}")
-            os.remove(os.path.join(self.incoming_path, f))
+    def listen_for_cmds(self):
+        for f in os.listdir(self.incoming_path):
+            if f.endswith(".cmd"):
+                with open(os.path.join(self.incoming_path, f), "r") as cmd_file:
+                    try:
+                        cmd = json.load(cmd_file)
+                        self.execute_cmd(cmd)
+                    except Exception as e:
+                        self.log(f"[SENTINEL][ERROR] Failed to parse command: {e}")
+                os.remove(os.path.join(self.incoming_path, f))
 
 
-def forward_to_mailman(self, entry):
-    try:
-        file = f"sentinel_log_{uuid.uuid4().hex}.msg"
-        path = os.path.join(self.path_resolution["comm_path"], "mailman-1", "incoming", file)
-        with open(path, "w") as f:
-            f.write(json.dumps(entry, indent=2))
-    except Exception as e:
-        self.log(f"[SENTINEL][ERROR] Failed to send to Mailman: {e}")
-
-
-def execute_cmd(self, cmd):
-    mailman_path = os.path.join(self.path_resolution["comm_path"], "mailman-1", "incoming")
-    os.makedirs(mailman_path, exist_ok=True)
-    log_entry = {
-        "source": self.command_line_args.get("permanent_id", "update-sentinel"),
-        "type": "action",
-        "event": cmd.get("action"),
-        "target": cmd.get("target"),
-        "timestamp": datetime.utcnow().isoformat() + "Z"
-    }
-    if cmd.get("source") != "oracle":
-        self.log(f"[SENTINEL] Rejected command from unknown source: {cmd.get('source')}")
-        return
-
-    action = cmd.get("action")
-    target = cmd.get("target")
-
-    if action == "archive" and target:
-        archive_path = f"/archive/{os.path.basename(target)}"
+    def forward_to_mailman(self, entry):
         try:
-            os.rename(target, archive_path)
-            self.log(f"[SENTINEL] Archived: {target} → {archive_path}")
-            self.forward_to_mailman(log_entry)
+            file = f"sentinel_log_{uuid.uuid4().hex}.msg"
+            path = os.path.join(self.path_resolution["comm_path"], "mailman-1", "incoming", file)
+            with open(path, "w") as f:
+                f.write(json.dumps(entry, indent=2))
         except Exception as e:
-            self.log(f"[SENTINEL][ERROR] Archive failed: {e}")
-    elif action == "log_only" and target:
-        self.log(f"[SENTINEL] Oracle advised review of: {target}")
-        self.forward_to_mailman(log_entry)
+            self.log(f"[SENTINEL][ERROR] Failed to send to Mailman: {e}")
 
-    else:
-        self.log(f"[SENTINEL] Unknown action or malformed command: {action}")
+
+    def execute_cmd(self, cmd):
+        mailman_path = os.path.join(self.path_resolution["comm_path"], "mailman-1", "incoming")
+        os.makedirs(mailman_path, exist_ok=True)
+        log_entry = {
+            "source": self.command_line_args.get("permanent_id", "update-sentinel"),
+            "type": "action",
+            "event": cmd.get("action"),
+            "target": cmd.get("target"),
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+        if cmd.get("source") != "oracle":
+            self.log(f"[SENTINEL] Rejected command from unknown source: {cmd.get('source')}")
+            return
+
+        action = cmd.get("action")
+        target = cmd.get("target")
+
+        if action == "archive" and target:
+            archive_path = f"/archive/{os.path.basename(target)}"
+            try:
+                os.rename(target, archive_path)
+                self.log(f"[SENTINEL] Archived: {target} → {archive_path}")
+                self.forward_to_mailman(log_entry)
+            except Exception as e:
+                self.log(f"[SENTINEL][ERROR] Archive failed: {e}")
+        elif action == "log_only" and target:
+            self.log(f"[SENTINEL] Oracle advised review of: {target}")
+            self.forward_to_mailman(log_entry)
+
+        else:
+            self.log(f"[SENTINEL] Unknown action or malformed command: {action}")
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
