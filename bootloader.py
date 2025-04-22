@@ -130,24 +130,7 @@ def boot():
                     "files": {}
                     }
                 },
-                {
-                    "permanent_id": "scavenger-root",
-                    "name": "scavenger",
-                    "config": {
-                        "bot_token": "your_telegram_bot_token",
-                        "chat_id": "your_target_chat_id",
-                        "watch_comm": "mailman-1"
-                    },
-                    "delegated": [],
-                    "filesystem": {
-                        "folders": [
-                            {
 
-                            },
-                        ],
-                        "files": {}
-                    }
-                },
                 {
                     "permanent_id": "telegram-relay-1",
                     "name": "telegram_relay",
@@ -198,19 +181,6 @@ def boot():
                 },
 
                 {
-                    "permanent_id": "filewatch-1",
-                    "name": "filewatch",
-                    "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d", "content": None}
-                        ]
-                    },
-                    "config": {
-                        "watch_path": "/etc/",
-                        "send_to": "mailman-1"
-                    }
-                },
-                {
                     "permanent_id": "pinger-1",
                     "name": "uptime_pinger",
                     "filesystem": {
@@ -236,6 +206,18 @@ def boot():
                         "interval_sec": 10,
                         "report_to": "mailman-1",
                         "oracle": "oracle-1"
+                    }
+                },
+                {
+                    "permanent_id": "scraper-1",
+                    "name": "scraper",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "payload", "type": "d", "content": None}
+                        ]
+                    },
+                    "config": {
+                        "report_to": "mailman-1"
                     }
                 }
         ]
