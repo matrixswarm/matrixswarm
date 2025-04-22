@@ -86,7 +86,7 @@ cd matrixswarm
 python3 bootloader.py
 ```
 
-## Let the Spawns Swarm
+## Let Spawn the Swarm!
 ```bash
 ps aux | grep pod
 
