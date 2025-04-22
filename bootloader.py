@@ -190,37 +190,7 @@ def boot():
                     },
                     "children": []
                 },
-                {
-                    "permanent_id": "sweeper_commander-1",
-                    "name": "sweeper_commander",
-                    "filesystem": {
-                        "folders": [
-                            {
-                                "name": "payload",
-                                "type": "d",
-                                "content": None
-                            }
-                        ],
-                        "files": {}
-                    },
-                    "children": []
-                },
-                {
-                    "permanent_id": "watchdog-1",
-                    "name": "watchdog",
-                    "delegated": [],
-                    "config": {
-                        "ping_url": "https://matrixswarm.com",
-                        "check_interval_sec": 120,
-                        "timeout_sec": 5,
-                        "max_failures": 3,
-                        "alert_action": "notify_matrix",
-                    },
-                    "filesystem": {
-                        "folders": [],
-                        "files": {}
-                    }
-                },
+
                 {
                     "permanent_id": "filewatch-1",
                     "name": "filewatch",
@@ -235,17 +205,17 @@ def boot():
                     }
                 },
                 {
-                    "permanent_id": "update-sentinel-1",
-                    "name": "sentinel",
+                    "permanent_id": "pinger-1",
+                    "name": "uptime_pinger",
                     "filesystem": {
                         "folders": [
-                            {"name": "incoming", "type": "d", "content": None}
-                        ],
-                        "files": {}
+                            {"name": "payload", "type": "d", "content": None}
+                        ]
                     },
                     "config": {
-                        "scan_path": "/opt/tasks",
-                        "age_threshold_days": 90
+                        "targets": ["https://dragoart.com", "https://matrixswarm.com"],
+                        "interval_sec": 15,
+                        "alert_to": "mailman-1"
                     }
                 },
         ]
