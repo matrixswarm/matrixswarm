@@ -86,6 +86,20 @@ cd matrixswarm
 python3 bootloader.py
 ```
 
+## Let the Spawns Swarm
+```bash
+ps aux | grep pod
+![img.png](img.png)
+#fields
+universe-id (bb): allows multiple matrix to co-exist on the system
+spawner metric-1 permanent_id of agent
+spawned logger-1 permanent_id of agent
+name    logger actual source-code name of agent
+
+permanent_id is universal in the matrix, it's what allows communication between agents    
+    
+```
+
 On first boot:
 - MatrixAgent initializes
 - Sentinel, Commander, and all core agents are spawned
