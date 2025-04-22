@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+import os
 load_dotenv()
 from agent.core.path_manager import PathManager
 from agent.core.core_spawner import CoreSpawner
@@ -131,6 +132,11 @@ def boot():
                 {
                     "permanent_id": "scavenger-root",
                     "name": "scavenger",
+                    "config": {
+                        "bot_token": "your_telegram_bot_token",
+                        "chat_id": "your_target_chat_id",
+                        "watch_comm": "mailman-1"
+                    },
                     "delegated": [],
                     "filesystem": {
                         "folders": [
@@ -141,7 +147,16 @@ def boot():
                         "files": {}
                     }
                 },
+                {
+                    "permanent_id": "telegram-relay-1",
+                    "name": "telegram_relay",
+                    "config": {
+                        "bot_token": os.getenv("TELEGRAM_API_KEY"),
+                        "chat_id": os.getenv("TELEGRAM_CHAT_ID")
+                    },
+                    "children": []
 
+                },
                 {
                     "permanent_id": "commander-1",
                     "name": "commander",

@@ -16,6 +16,7 @@ if path_resolution['agent_path'] not in sys.path:
 if path_resolution['root_path'] not in sys.path:
     sys.path.append(path_resolution['root_path'])
 
+from agent.core.utils.swarm_sleep import interruptible_sleep
 from agent.core.boot_agent import BootAgent
 
 class WatchdogAgent(BootAgent):
@@ -61,7 +62,10 @@ class WatchdogAgent(BootAgent):
                 if self.failure_count >= self.max_failures:
                     self.handle_alert(str(e))
                     self.failure_count = 0  # Reset after alert
-            time.sleep(self.check_interval)
+            interruptible_sleep(self, self.check_interval)
+            if not self.running:
+                self.log("[WATCHDOG] Shutdown detected mid-sleep. Exiting now.")
+                return
 
     def handle_alert(self, error_message):
         alert = {
