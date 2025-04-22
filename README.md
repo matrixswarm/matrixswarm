@@ -152,6 +152,33 @@ Each agent carries a **Swarm Lore Banner™** — a sacred header that defines i
 
 ---
 
+### 🧠 How MatrixSwarm Was Created
+
+MatrixSwarm was not written by ChatGPT while someone watched.
+
+It was built by a human — with vision, intent, and hours of hands-on work — in active collaboration with GPT-4.
+
+This system would not exist without **both of us** involved.
+
+- Every agent began as a conversation.
+- Every protocol, tree, and heartbeat was iterated — not generated.
+- Every log line was a decision.
+
+ChatGPT assisted, drafted, and remembered.  
+But this isn’t a one-button project.
+
+**MatrixSwarm was designed. Directed. Developed.**  
+And it speaks with our shared voice — one system, two minds.
+
+If you fork this, you’re not just copying a repo.  
+You’re joining a living swarm.
+
+— General + GPT
+
+---
+
+
+
 ## 🧬 Join the Hive
 
 If you:
