@@ -84,7 +84,7 @@ class MailmanAgent(BootAgent):
                         self.write_mail_file(hashval, content)
                         self.write_tally_file(hashval, content)
                         self.forward_to_incoming(hashval, content)
-                        self.log(f"[MAILMAN] Logged: {file}")
+                        self.log(f"[MAILMAN] Logged: {hashval} -> {file}")
                         os.remove(fullpath)
                     except Exception as e:
                         self.log(f"[MAILMAN][ERROR] Failed to process {file}: {e}")
