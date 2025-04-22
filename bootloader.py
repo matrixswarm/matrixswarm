@@ -173,7 +173,13 @@ def boot():
                 {
                     "permanent_id": "commander-1",
                     "name": "commander",
-                    "children": []
+                    "children": [
+                        {
+                            "permanent_id": "commander-2",
+                            "name": "commander",
+                            "children": []
+                        },
+                    ]
                 },
                 {
                     "permanent_id": "oracle-1",
