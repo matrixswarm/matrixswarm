@@ -187,6 +187,7 @@ class BootAgent(Agent):
                         "last_check": datetime.now().strftime("%Y%m%d%H%M%S%")
                     }
 
+
                 #for perm_id in delta["removed"]:
                 #    self.log(f"[DELEGATION] Agent removed: {perm_id}")
                     # Optional: issue die, or mark for scavenger
