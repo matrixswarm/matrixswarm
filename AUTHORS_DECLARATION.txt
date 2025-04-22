@@ -1,0 +1,16 @@
+AUTHORS DECLARATION
+2025-04-02 23:00:16 UTC
+
+This document certifies that the design, architecture, and implementation of the Matrix Agent System:
+
+Daniel F. MacDonald
+
+Developed the foundational concepts, including but not limited to:
+- Matrix as a parent agent with strict tree-like control
+- Distributed autonomous agent spawning, messaging, and throttling
+- Recursive fault-tolerant design
+- Load-aware systems and scavenger agents
+- Real-time operational coordination via CLI or secure messaging
+
+Signed digitally by Daniel F. MacDonald
+(Daniel's cryptographic timestamp to follow via DigiStamp.com)
