@@ -89,8 +89,10 @@ python3 bootloader.py
 ## Let the Spawns Swarm
 ```bash
 ps aux | grep pod
-![img.png](img.png)
-#fields
+
+#EXAMPLE
+     --job bb:metric-1:logger-1:logger 
+#FIELDS
 universe-id (bb): allows multiple matrix to co-exist on the system
 spawner metric-1 permanent_id of agent
 spawned logger-1 permanent_id of agent
