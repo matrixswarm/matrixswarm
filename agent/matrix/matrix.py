@@ -65,7 +65,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
         #start_https_server(self, port=65431)
 
     def pre_boot(self):
-        message = "Knock...Knock...Knock...The Matrix has you..."
+        message = "Knock... Knock... Knock... The Matrix has you..."
         print(message)
         self.broadcast(message)
 
@@ -173,7 +173,6 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
             # PAYLOADS OFF THE WIRE
             try:
-
                 for fname in sorted(os.listdir(payload_dir)):
                     if not fname.endswith(".json"):
                         continue
@@ -184,9 +183,16 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
                     ctype = payload.get("type")
                     content = payload.get("content", {})
-                    annihilate = content.get("annihilate", True)
+                    #annihilate = content.get("annihilate", True)
 
-                    if ctype == "inject":
+                    if ctype == "spawn_agent":
+                        self.log(f"[SPAWN] Injecting NOW agent from payload: {content.get('perm_id')}")
+                        self.swarm.handle_injection(content)
+                        self.log(f"[SPAWN] Injected agent from payload: {content.get('perm_id')}")
+                        os.remove(fpath)
+                        continue
+
+                    elif ctype == "inject":
                         self.swarm.handle_injection(content)
                     elif ctype == "inject_team":
                         self.swarm.handle_team_injection(
@@ -230,12 +236,14 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     elif ctype == "delete_subtree":
                         self.swarm.kill_subtree(content.get("perm_id"))
 
+
                     os.remove(fpath)
                     self.log(f"[PAYLOAD] Processed: {fname}")
 
                 time.sleep(2)
             except Exception as e:
-                self.log(f"[PAYLOAD] Error: {e}")
+
+                self.log(f"[PAYLOAD] Error: {e} : {payload}")
                 time.sleep(3)
 
             time.sleep(4)

