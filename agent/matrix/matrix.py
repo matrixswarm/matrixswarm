@@ -64,10 +64,15 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
         #start_https_server(self, port=65431)
 
-
     def pre_boot(self):
-        print("[PRE-BOOT] Not implemented yet.")
-        #threading.Thread(target=self.start_payload_scanner, daemon=True).start()
+        message = "Knock...Knock...Knock...The Matrix has you..."
+        print(message)
+        self.broadcast(message)
+
+    def post_boot(self):
+        message = "I'm watching..."
+        print(message)
+        self.broadcast(message)
 
     def handle_https_command(self, data):
         try:

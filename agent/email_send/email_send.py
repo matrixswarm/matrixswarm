@@ -1,0 +1,80 @@
+import os
+import sys
+import time
+import json
+import smtplib
+
+if path_resolution['agent_path'] not in sys.path:
+    sys.path.append(path_resolution['agent_path'])
+if path_resolution['root_path'] not in sys.path:
+    sys.path.append(path_resolution['root_path'])
+
+from email.message import EmailMessage
+from dotenv import load_dotenv
+from agent.core.boot_agent import BootAgent
+
+load_dotenv()
+
+class EmailSendAgent(BootAgent):
+    def __init__(self, path_resolution, command_line_args):
+        super().__init__(path_resolution, command_line_args)
+        self.watch_path = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
+        os.makedirs(self.watch_path, exist_ok=True)
+
+        config = tree_node.get("config", {})
+        self.smtp_host = config.get("smtp_host") or os.getenv("EMAILSENDAGENT_SMTP_HOST")
+        self.smtp_port = config.get("smtp_port") or os.getenv("EMAILSENDAGENT_SMTP_PORT")
+        self.email_addr = config.get("email") or os.getenv("EMAILSENDAGENT_SMTP_EMAIL")
+        self.email_pass = config.get("password") or os.getenv("EMAILSENDAGENT_PASSWORD")
+
+    def worker(self):
+        while self.running:
+            for fname in os.listdir(self.watch_path):
+                if not fname.endswith(".json"):
+                    continue
+
+                try:
+                    fpath = os.path.join(self.watch_path, fname)
+                    with open(fpath, "r") as f:
+                        msg_data = json.load(f)
+
+                    self.send_email(msg_data)
+                    self.log(f"[EMAIL] Sent: {msg_data.get('subject')}")
+                    os.remove(fpath)
+
+                except Exception as e:
+                    self.log(f"[EMAIL][ERROR] Failed to send {fname}: {e}")
+            time.sleep(4)
+
+    def send_email(self, data):
+        from email.message import EmailMessage
+        import smtplib
+
+        msg = EmailMessage()
+        msg["From"] = self.email_addr
+        msg["To"] = data["to"]
+        msg["Subject"] = data["subject"]
+        msg.set_content(data["body"])
+
+        try:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(self.email_addr, self.email_pass)
+                try:
+                    server.send_message(msg)
+                    self.log(f"[EMAIL] Sent: {data['subject']}")
+                except smtplib.SMTPResponseException as e:
+                    self.log(f"[EMAIL][SMTP-FAIL] Code: {e.smtp_code}, Msg: {e.smtp_error}")
+                except Exception as e:
+                    self.log(f"[EMAIL][ERROR] Failed to send: {e}")
+
+        except Exception as e:
+            self.log(f"[EMAIL][ERROR] Failed to send: {e}")
+
+
+if __name__ == "__main__":
+    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
+    agent = EmailSendAgent(path_resolution, command_line_args)
+    agent.boot()

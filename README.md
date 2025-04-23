@@ -66,7 +66,7 @@ text
 Copy
 Edit
 1. Upload new agent version
-2. Drop `die.json` into payload of the live agent
+2. Drop `die` into payload of the live agent
 3. Remove the die file
 Boom:
 
@@ -110,7 +110,7 @@ spawned logger-1 permanent_id of agent
 name    logger actual source-code name of agent
 
 permanent_id is universal in the matrix, it's what allows communication between agents. It's also the name of the agent's comm folder, a two channel for all agent-to-agent communications as well as the location where state data is contained.    
-    
+run file  is a spawned clone of an agent    
 ```
 
 On first boot:
@@ -200,18 +200,18 @@ python3 bootloader.py
 
 ## 📖 Dev.to Series
 
-- [The Hive Is Recruiting](https://dev.to/your-post)
-- [Spawn. Delegate. Terminate. Repeat.](https://dev.to/your-post)
-- [MatrixSwarm Manifesto (coming soon)](https://dev.to/your-post)
-- [OracleAgent — From Spawn to Prophecy (coming soon)](https://dev.to/your-post)
-
+- [The Hive Is Recruiting]
+- [Spawn. Delegate. Terminate. Repeat.]
+- [MatrixSwarm Manifesto] 
+- [OracleAgent — From Spawn to Prophecy]
+- 
 ---
 ## ⚠️ Use at Your Own Risk
 
 This system has not been fully tested in all environments.
 MatrixSwarm is still evolving.
 
-We make no guarantees that your agents won’t terminate your system.We do not sandbox.We do not take responsibility.We Spawn the Swarm.
+We make no guarantees that your agents won’t terminate your system. We do not sandbox. We do not take responsibility. We Spawn the Swarm.
 
 You run it. You control it. You deal with it.
 

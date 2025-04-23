@@ -59,7 +59,6 @@ class SentinelAgent(BootAgent):
         last_mod = os.path.getmtime(path)
         return (time.time() - last_mod) / 86400
 
-
     def send_prompt_to_oracle(self, filepath, age_days):
         prompt = {
             "file": filepath,
