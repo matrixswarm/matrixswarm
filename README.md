@@ -84,6 +84,11 @@ Logs, payloads, and structure persist
 git clone https://github.com/matrixswarm/matrixswarm.git
 cd matrixswarm
 python3 bootloader.py
+
+tear down:
+python3 bootloader.py --kill
+
+
 ```
 
 ## Let's Spawn the Swarm!
