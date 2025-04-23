@@ -69,7 +69,56 @@ class OracleAgent(BootAgent):
 
             time.sleep(10)
 
+    def handle_spawn_suggestion(self, query):
+        payload = query.get("spawn", {})
+        reason = query.get("reason", "No reason provided.")
+        target = query.get("response_to", "matrix")
 
+        # Validate spawn block
+        perm_id = payload.get("perm_id")
+        agent_name = payload.get("agent_name")
+        directives = payload.get("directives", {})
+
+        if not perm_id or not agent_name:
+            self.log("[ORACLE][SPAWN][ERROR] Missing perm_id or agent_name.")
+            return
+
+        # Build spawn agent command
+        spawn_cmd = {
+            "command": "spawn_agent",
+            "payload": {
+                "perm_id": perm_id,
+                "agent_name": agent_name,
+                "directives": directives
+            }
+        }
+
+        # Drop into Matrix payload
+        spawn_dir = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
+        os.makedirs(spawn_dir, exist_ok=True)
+        fname = f"oracle_spawn_{int(time.time())}.json"
+        path = os.path.join(spawn_dir, fname)
+
+        with open(path, "w") as f:
+            json.dump(spawn_cmd, f, indent=2)
+
+        # Log it
+        self.log(f"[ORACLE] Dispatched spawn request for {agent_name} to Matrix. Reason: {reason}")
+
+        # Optional: notify Mailman
+        try:
+            mailman = os.path.join(self.path_resolution["comm_path"], "mailman-1", "payload")
+            os.makedirs(mailman, exist_ok=True)
+            notice = {
+                "uuid": "oracle-1",
+                "timestamp": time.time(),
+                "severity": "info",
+                "msg": f"Spawn order issued to Matrix for {agent_name} ({perm_id}) :: {reason}"
+            }
+            with open(os.path.join(mailman, f"oracle_notice_{int(time.time())}.json"), "w") as f:
+                json.dump(notice, f, indent=2)
+        except Exception as e:
+            self.log(f"[ORACLE][MAILMAN][ERROR] {e}")
 
     def handle_email_analysis(self, query):
         payload = query.get("payload", {})
