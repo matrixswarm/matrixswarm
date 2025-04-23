@@ -145,18 +145,24 @@ python3 gui/matrix_gui.py
 
 ---
 
-## 📦 Agents of Legend
+## 🧠 Agents of Legend
 
-| Agent           | Role                                     |
-|----------------|------------------------------------------|
-| 🧠 MatrixAgent     | Central cortex, receives all commands     |
-| ☠ ReaperAgent      | Kills processes, wipes runtime clean      |
-| 🧹 ScavengerAgent  | Cleans pods, removes orphaned dirs        |
-| 🛡 SentinelAgent   | Watches heartbeats and resurrects agents |
-| 📬 MailmanAgent    | Logs messages and deduplicates hash lines |
-| 🔮 OracleAgent     | AI responder that interprets `.prompt` files using GPT-4 |
+| 🧬 **Agent**              | ⚙️ **Role**                                                                 |
+|---------------------------|------------------------------------------------------------------------------|
+| 🧠 **MatrixAgent**         | Central cortex — receives all commands, initiates all spawns, signs the tree. |
+| 💀 **ReaperAgent**         | Executes kill orders with finality. Escalates. Terminates. Wipes runtimes clean. |
+| 🧹 **ScavengerAgent**      | Cleans abandoned pods, removes orphaned directories. Order out of chaos.       |
+| 🛡️ **SentinelAgent**       | Monitors heartbeats, confirms agent vitality, resurrects the fallen.          |
+| 📬 **MailmanAgent**        | Canonical log keeper. Deduplicates messages by hash. Streams the pulse of the Swarm. |
+| 🔮 **OracleAgent**         | AI responder that reads `.prompt` files. Thinks with GPT-4, speaks with insight. |
+| ⚡ **ReactorAgent**        | Autonomic reflex of the Swarm. Makes judgment calls. Triggers spawn chains. *(in progress)* |
+| 🧾 **CodexViewer**         | Displays live Swarm Codex. Immortalizes agent banners and histories. *(coming soon)* |
+| 🔍 **ProcessIntelAgent**   | Monitors running processes. Tracks rogue threads and hidden anomalies. *(in dev)* |
+| 🪞 **FilesystemMirrorAgent** | Reflects and shadows file trees. Useful for surveillance, auditing, and rollback. *(coming online)* |
+| 📣 **TelegramRelayAgent**  | Sends messages from Mailman to Telegram. External voice of the Swarm. *(active)* |
+| 🕵️ **UpdateSentinel**      | Watches for updates to directives, patches live agents, ensures continuity. *(deployed)* |
 
-Each agent carries a **Swarm Lore Banner™** — a sacred header that defines its purpose.
+> Every agent carries a **Swarm Lore Banner™** — a sacred header that defines its essence and role in the Hive.
 
 ---
 
