@@ -82,12 +82,15 @@ Logs, payloads, and structure persist
 
 ```bash
 git clone https://github.com/matrixswarm/matrixswarm.git
+
+boot:
 cd matrixswarm
 python3 bootloader.py
+#you're in!
 
 tear down:
 python3 bootloader.py --kill
-
+#use from another terminal
 
 ```
 
