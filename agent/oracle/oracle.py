@@ -51,20 +51,39 @@ class OracleAgent(BootAgent):
                         os.remove(path)
 
                     elif filename.endswith(".json"):
+
                         with open(path, "r") as f:
+
                             try:
+
                                 payload = json.load(f)
+
                             except Exception as e:
+                                print('cooki')
                                 self.log(f"[ORACLE][ERROR] Failed to parse {filename}: {e}")
+
                                 continue
 
                         query_type = payload.get("query_type")
+
                         if query_type == "email_analysis":
+
                             self.handle_email_analysis(payload)
+
                             self.log(f"[ORACLE] Email analysis complete: {filename}")
+
+                            os.remove(path)
+
+                        elif query_type == "spawn_suggestion":
+
+                            self.handle_spawn_suggestion(payload)
+
+                            self.log(f"[ORACLE] Spawn suggestion dispatched: {filename}")
+
                             os.remove(path)
 
             except Exception as e:
+                print(f"[TTTTT]{payload}[SSSSS]: {e}")
                 self.log(f"[ORACLE][ERROR] {e}")
 
             time.sleep(10)

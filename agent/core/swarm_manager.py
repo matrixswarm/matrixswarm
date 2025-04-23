@@ -1,5 +1,5 @@
 # Matrix: An AI OS System
-# Copyright (c) 2025 Daniel MacDonald
+# Copyright (c) 2025 Daniel MacDonald and ChatGPT aka The Generals
 # Licensed under the MIT License. See LICENSE file in project root for details.
 from agent.core.tree_parser import TreeParser
 from agent.core.class_lib.logging.logger import Logger
@@ -28,8 +28,10 @@ class SwarmManager:
         subtree = {
             "permanent_id": content.get("perm_id"),
             "name": content.get("agent_name"),
-            "delegated": content.get("delegated", [])
+            "delegated": content.get("delegated", []),
+            "config": content.get("directives", {})  # 🧠 inject here
         }
+
         self.handle_team_injection(subtree, target_permanent_id=content.get("target_perm_id"))
 
     def handle_team_injection(self, subtree, target_permanent_id=None):
