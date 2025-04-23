@@ -55,6 +55,37 @@ def boot():
                     "children": []
                 },
                 {
+                    "permanent_id": "email-check-1",
+                    "name": "email_check",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "payload", "type": "d", "content": None}
+                        ]
+                    },
+                    "config": {
+                        "imap_host": os.getenv("EMAILCHECKAGENT_IMAP_HOST"),
+                        "email": os.getenv("EMAILCHECKAGENT_EMAIL"),
+                        "password": os.getenv("EMAILCHECKAGENT_PASSWORD"),
+                        "report_to": os.getenv("EMAILCHECKAGENT_REPORT_TO", "mailman-1"),
+                        "interval": int(os.getenv("EMAILCHECKAGENT_INTERVAL", 60))
+                    }
+                },
+                {
+                    "permanent_id": "email-send-1",
+                    "name": "email_send",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "payload", "type": "d", "content": None}
+                        ]
+                    },
+                    "config": {
+                        "smtp_host": os.getenv("EMAILSENDAGENT_SMTP_HOST"),
+                        "smtp_port": os.getenv("EMAILSENDAGENT_SMTP_PORT"),
+                        "email": os.getenv("EMAILSENDAGENT_SMTP_EMAIL"),
+                        "password": os.getenv("EMAILSENDAGENT_PASSWORD")
+                    }
+                },
+                {
                     "permanent_id": "worker-backup-2",
                     "name": "worker",
                     "directives": {
@@ -209,39 +240,7 @@ def boot():
                         "oracle": "oracle-1"
                     }
                 },
-                {
-                    "permanent_id": "email-check-1",
-                    "name": "email_check",
-                    "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d", "content": None}
-                        ]
-                    },
-                    "config": {
-                        "imap_host": os.getenv("EMAILCHECKAGENT_IMAP_HOST"),
-                        "email": os.getenv("EMAILCHECKAGENT_EMAIL"),
-                        "password": os.getenv("EMAILCHECKAGENT_PASSWORD"),
-                        "report_to": os.getenv("EMAILCHECKAGENT_REPORT_TO", "mailman-1"),
-                        "interval": int(os.getenv("EMAILCHECKAGENT_INTERVAL", 60))
-                    }
-                }
-                ,
-                {
-                    "permanent_id": "email-send-1",
-                    "name": "email_send",
-                    "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d", "content": None}
-                        ]
-                    },
-                    "config": {
-                        "smtp_host": os.getenv("EMAILSENDAGENT_SMTP_HOST"),
-                        "smtp_port": os.getenv("EMAILSENDAGENT_SMTP_PORT"),
-                        "email": os.getenv("EMAILSENDAGENT_SMTP_EMAIL"),
-                        "password": os.getenv("EMAILSENDAGENT_PASSWORD")
-                    }
-                }
-                ,
+
                 {
                     "permanent_id": "scraper-1",
                     "name": "scraper",
@@ -257,11 +256,12 @@ def boot():
         ]
     }
 
+    #IS THIS A TEAR DOWN
     if "--kill" in sys.argv:
 
         reaper = Reaper('pod', 'comm')
-        reaper.reap_all("bb")
-        print("[BOOTLOADER] Kill switch triggered. Swarm shutdown complete.")
+        reaper.reap_all(UNIVERSE_ID)
+        print("[BOOTLOADER] Kill switch triggered. They drank the Kool-Aid. Swarm shutdown complete.")
         sys.exit(0)
 
     ###### kill all running processes under pod/ then smoke the directories
