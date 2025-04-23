@@ -74,6 +74,25 @@ class MatrixAgent(DelegationMixin, BootAgent):
         print(message)
         self.broadcast(message)
 
+    def broadcast(self, message, severity="info"):
+        try:
+            mailman_dir = os.path.join(self.path_resolution["comm_path"], "mailman-1", "payload")
+            os.makedirs(mailman_dir, exist_ok=True)
+
+            payload = {
+                "uuid": self.command_line_args.get("permanent_id", "matrix"),
+                "timestamp": time.time(),
+                "severity": severity,
+                "msg": message
+            }
+
+            fname = f"matrix_broadcast_{int(time.time())}.json"
+            with open(os.path.join(mailman_dir, fname), "w") as f:
+                json.dump(payload, f, indent=2)
+
+        except Exception as e:
+            self.log(f"[MATRIX][BROADCAST-ERROR] {e}")
+
     def handle_https_command(self, data):
         try:
             comm_path = "/comm/matrix/payload"
