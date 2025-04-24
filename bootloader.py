@@ -355,7 +355,7 @@ def boot():
             },
             {
                 "permanent_id": "calendar-agent-1",
-                "name": "calendar_agent",
+                "name": "google_calendar",
                 "config": {
                     "calendar_id": "primary",
                     "interval": 300,
