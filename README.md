@@ -255,3 +255,5 @@ No PR is too small. No mission is without meaning.
 **MatrixSwarm is open.**  
 **Fork it.**  
 **Or Fork U.**
+
+[![Powered by MatrixSwarm](https://img.shields.io/badge/Swarm-Matrix-green)](https://github.com/matrixswarm/matrixswarm)
