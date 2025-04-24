@@ -205,7 +205,7 @@ The Swarm is no longer silent.
 
 Our Discord relay agent is online and responding.  
 Come test the agents, submit lore, log a Codex entry, and witness the first autonomous system that talks back.
-
+🔗 [Join the Swarm](https://discord.com/invite/yPJyTYyq5F)
 
 
 Read `CONTRIBUTING.md`, clone the repo, and pick a mission.
