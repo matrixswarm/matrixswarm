@@ -1,0 +1,6 @@
+operation: kill_node
+target_uuid: 7139a2e9-23ff-4974-95a1-c99e9a909f56
+include_subtree: true
+reason: "Deprecated branch. Replacing with upgraded Reactor subclass."
+confirmed_by: Matrix
+status: pending
