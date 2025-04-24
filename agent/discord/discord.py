@@ -84,23 +84,30 @@ class DiscordAgent(BootAgent):
     def payload_watcher(self):
         try:
             path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
-            self.log(f"[DISCORD] Watching: {path}")
+            self.log(f"[DISCORD] Watching for .msg in: {path}")
             while self.running:
                 for file in os.listdir(path):
                     if file.endswith(".msg"):
                         full_path = os.path.join(path, file)
-                        with open(full_path, "r") as f:
-                            msg = json.load(f)
-                            channel = self.discord_client.get_channel(self.channel_id)
+                        self.log(f"[DISCORD] Detected message file: {file}")
+                        try:
+                            with open(full_path, "r") as f:
+                                msg = json.load(f)
+                            channel = self.bot.get_channel(self.channel_id)
                             if channel:
+                                self.log(f"[DISCORD] Sending: {msg.get('msg')}")
                                 asyncio.run_coroutine_threadsafe(
-                                    channel.send(f"📣 {msg.get('msg')}"), self.discord_client.loop
+                                    channel.send(f"📣 {msg.get('msg')}"), self.bot.loop
                                 )
-                        os.remove(full_path)
+                            else:
+                                self.log("[DISCORD] Channel not found.")
+                            os.remove(full_path)
+                            self.log(f"[DISCORD] Message dispatched + file removed.")
+                        except Exception as e:
+                            self.log(f"[DISCORD][ERROR] Failed to send .msg: {e}")
                 interruptible_sleep(self, 5)
         except Exception as e:
-            self.log(f"[DISCORD][ERROR][PAYLOAD] {e}")
-            print(f"❌ Payload watcher failed: {e}")
+            self.log(f"[DISCORD][FATAL] Payload watcher crashed: {e}")
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))

@@ -281,10 +281,11 @@ def boot():
                         "bot_token": os.getenv("DISCORD_TOKEN"),
                         "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
                     }
-                }
+                },
         ]
     }
 
+    #Short Circuit matrix_directive above
     matrix_directive = {
         "permanent_id": 'matrix',
         "name": "matrix",
@@ -340,7 +341,32 @@ def boot():
                     "bot_token": os.getenv("DISCORD_TOKEN"),
                     "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
                 }
+            },
+            {
+                "permanent_id": "commander-1",
+                "name": "commander",
+                "children": [
+                    {
+                        "permanent_id": "commander-2",
+                        "name": "commander",
+                        "children": []
+                    },
+                ]
+            },
+            {
+                "permanent_id": "calendar-agent-1",
+                "name": "calendar_agent",
+                "config": {
+                    "calendar_id": "primary",
+                    "interval": 300,
+                    "watch_ahead_minutes": 15,
+                    "broadcast_to": ["mailman-1", "discord-relay-1"]
+                },
+                "filesystem": {
+                    "folders": [{"name": "incoming", "type": "d"}]
+                }
             }
+
         ]
     }
 
