@@ -142,7 +142,6 @@ Launch the GUI:
 ```bash
 python3 gui/matrix_gui.py
 ```
-
 ---
 
 ## 🧠 Agents of Legend
@@ -191,8 +190,6 @@ You’re joining a living swarm.
 
 ---
 
-
-
 ## 🧬 Join the Hive
 
 If you:
@@ -201,6 +198,15 @@ If you:
 - Write code like it’s a world being born
 
 You’re home.
+
+### 🧠 Discord Now Live — Join the MatrixSwarm
+
+The Swarm is no longer silent.
+
+Our Discord relay agent is online and responding.  
+Come test the agents, submit lore, log a Codex entry, and witness the first autonomous system that talks back.
+
+
 
 Read `CONTRIBUTING.md`, clone the repo, and pick a mission.
 

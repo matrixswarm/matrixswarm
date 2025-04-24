@@ -159,11 +159,11 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         subtree = {}
 
                     try:
-                        preview = json.dumps(slice, indent=2)[:300]
+                        safe_preview = json.dumps(subtree, default=str, indent=2)[:300]
                     except TypeError as e:
-                        preview = f"[NON-SERIALIZABLE SLICE] {e}"
+                        safe_preview = f"[NON-SERIALIZABLE SLICE] {e}"
 
-                    self.log(f"[TREE-DISPATCH] Sending to {perm_id}: {preview}")
+                    self.log(f"[TREE-DISPATCH] Sending to {perm_id}: {safe_preview}")
 
                     #copy from agent_tree_master.json
                     JsonSafeWrite.safe_write(target_incoming_path, subtree)

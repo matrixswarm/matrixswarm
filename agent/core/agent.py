@@ -87,6 +87,9 @@ class Agent:
 
             if DuplicateProcessCheck.check_all_duplicate_risks(job_label=job_label, check_path=False):
                 self.running = False
+                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["permanent_id"]} : shutting down found job having a later timestamp --job= \"{job_label}\"")
+            else:
+                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["permanent_id"]} : safe to proceed no duplicate processes with label --job= \"{job_label}\"")
 
             #incoming:   die
             # example: change {root}/comm/{permanent_id}/incoming = {root}/comm/worker-1/incoming
@@ -97,6 +100,7 @@ class Agent:
             count, file_list = FileFinderGlob.find_files_with_glob(path,pattern="die")
             if count>0:
                 self.running=False
+                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["permanent_id"]} die cookie accepted, going down easy...")
 
             #within 20secs if another instance detected, and this is the younger of the die
 
