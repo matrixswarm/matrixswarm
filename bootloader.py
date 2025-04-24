@@ -268,7 +268,79 @@ def boot():
                     "config": {
                         "report_to": "mailman-1"
                     }
+                },
+                {
+                    "permanent_id": "discord-relay-1",
+                    "name": "discord",
+                    "filesystem": {
+                        "folders": [
+                            {"name": "payload", "type": "d"},
+                        ]
+                    },
+                    "config": {
+                        "bot_token": os.getenv("DISCORD_TOKEN"),
+                        "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
+                    }
                 }
+        ]
+    }
+
+    matrix_directive = {
+        "permanent_id": 'matrix',
+        "name": "matrix",
+        "filesystem": {
+            "folders": [
+                {
+                    'name': 'payload',
+                    'type': 'd',
+                    'content': None
+                },
+            ],
+            "files": {}
+        },
+
+        "children": [{
+                "permanent_id": "matrix-https",
+                "name": "matrix_https",
+                "delegated": [],
+                "filesystem": {
+                    "folders": [
+                        {
+                            'name': 'payload',
+                            'type': 'd',
+                            'content': None
+                        },
+                    ],
+                    "files": {}
+                }
+            },
+
+            {
+                "permanent_id": "mailman-1",
+                "name": "mailman",
+                "filesystem": {
+                    "folders": [
+                        {"name": "payload", "type": "d", "content": None},
+                        {"name": "mail", "type": "d", "content": None},
+                        {"name": "tally", "type": "d", "content": None},
+                        {"name": "incoming", "type": "d", "content": None}
+                    ]
+                }
+            },
+
+            {
+                "permanent_id": "discord-relay-1",
+                "name": "discord",
+                "filesystem": {
+                    "folders": [
+                        {"name": "payload", "type": "d"},
+                    ]
+                },
+                "config": {
+                    "bot_token": os.getenv("DISCORD_TOKEN"),
+                    "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
+                }
+            }
         ]
     }
 
