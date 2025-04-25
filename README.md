@@ -209,6 +209,31 @@ Our Discord relay agent is online and responding.
 Come test the agents, submit lore, log a Codex entry, and witness the first autonomous system that talks back.
 🔗 [Join the Swarm](https://discord.com/invite/yPJyTYyq5F)
 
+---
+
+## 🛡 Deployment and Customization Support
+
+MatrixSwarm isn’t just a codebase — it’s a living system.
+
+**Custom deployments, installation support, and updates for the life of the version are available.**  
+I personally assist with install tuning, advanced tree setup, large swarm deployments, and Codex expansions.
+
+If you want your Hive operational, optimized, or expanded —  
+I'm available.
+
+Embedded below in the ancient tongue of binary is your contact path:
+
+01110011 01110000 01100001 01110111 01101110 01000000 01101101 01100001 01110100 01110010 01101001 01111000 01110011 01110000 01100001 01110111 01101110 00101110 01100011 01101111 01101101
+
+yaml
+Copy
+Edit
+
+> **spawn@matrixspawn.com**  
+
+💬 Send missions. I’ll respond.
+
+---
 
 Read `CONTRIBUTING.md`, clone the repo, and pick a mission.
 

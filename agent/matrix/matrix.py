@@ -288,6 +288,21 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     elif ctype == "delete_subtree":
                         self.swarm.kill_subtree(content.get("perm_id"))
 
+                    elif ctype == "kill":
+                        target_id = content.get("target")
+                        subtree = self.tree_parser.get_subtree_nodes(target_id)
+                        kill_list = subtree if subtree else [target_id]
+
+                        self.spawn_agent(
+                            f"reaper-mission-{uuid4()}",
+                            type="DisposableReaperAgent",
+                            args={
+                                "targets": kill_list,
+                                "kill_id": f"kill-{target_id}-{int(time.time())}"
+                            }
+                        )
+                        self.log(f"[MATRIX][KILL] Dispatched kill op for {kill_list}")
+
 
                     os.remove(fpath)
                     self.log(f"[PAYLOAD] Processed: {fname}")
