@@ -92,7 +92,7 @@ class BootAgent(Agent):
         #last_snapshot = {}
         orbits = {}
         spawner = CoreSpawner()
-        self.request_tree_slice_from_matrix()
+        #self.request_tree_slice_from_matrix()
 
         tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["permanent_id"], 'agent_tree.json')
 
@@ -103,7 +103,8 @@ class BootAgent(Agent):
             try:
 
                 #   If we never checked for a slice or the time we last check if greater than 2 mins--recheck
-                if tree_refresh_time == 0 or TimePassed.get_time_passed(tree_refresh_time) > 120:
+                # 1==3 shut off for now
+                if 1==3 and (tree_refresh_time == 0 or TimePassed.get_time_passed(tree_refresh_time) > 120):
                     #TELL MATRIX WE WANT OUR SLICE OF THE PIE
                     self.request_tree_slice_from_matrix()
                     tree_refresh_time = datetime.now().strftime("%Y%m%d%H%M%S%")

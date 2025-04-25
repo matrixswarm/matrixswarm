@@ -20,6 +20,9 @@ import time
 import json
 import hashlib
 import glob
+import inotify
+import inotify.adapters
+import threading
 from string import Template
 
 from agent.core.boot_agent import BootAgent
@@ -66,6 +69,13 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
     def post_boot(self):
         message = "I'm watching..."
+        # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
+        perm_id = self.command_line_args.get("permanent_id", "matrix")
+        self.delegate_tree_to_agent(self.command_line_args.get("permanent_id", perm_id))
+        self.broadcast(f"Delivered agent_tree slice to self ({perm_id})", severity="info")
+
+
+        threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
         self.broadcast(message)
 
@@ -87,6 +97,45 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
         except Exception as e:
             self.log(f"[MATRIX][BROADCAST-ERROR] {e}")
+
+    # watches comm for any added permanent_ids, and adds the agent_tree instantly
+    def comm_directory_watcher(self):
+        print("[COMM-WATCHER] Watching /comm/ for new agents...")
+        i = inotify.adapters.Inotify()
+        i.add_watch(self.path_resolution["comm_path"])
+
+        for event in i.event_gen(yield_nones=False):
+            (_, type_names, path, filename) = event
+
+            if "IN_CREATE" in type_names or "IN_MOVED_TO" in type_names:
+                try:
+                    # Only act on new directories (perm_ids)
+                    full_path = os.path.join(path, filename)
+                    if os.path.isdir(full_path):
+                        print(f"[COMM-WATCHER] New comm directory detected: {filename}")
+                        self.delegate_tree_to_agent(filename)
+                except Exception as e:
+                    self.log(f"[COMM-WATCHER-ERROR] {e}")
+
+
+    def delegate_tree_to_agent(self, perm_id):
+        try:
+            tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree_master.json')
+            tp = TreeParser.load_tree(tree_path)
+            if not tp:
+                self.log(f"[DELEGATE] Failed to load master tree for {perm_id}")
+                return
+
+            subtree = tp.extract_subtree_by_id(perm_id)
+            if not subtree:
+                self.log(f"[DELEGATE] No subtree found for {perm_id}, sending empty tree.")
+                subtree = {}
+
+            out_path = os.path.join(self.path_resolution["comm_path"], perm_id, "agent_tree.json")
+            JsonSafeWrite.safe_write(out_path, subtree)
+            self.log(f"[DELEGATE] Tree delivered to {perm_id}")
+        except Exception as e:
+            self.log(f"[DELEGATE-ERROR] {e}")
 
     def handle_https_command(self, data):
         try:
