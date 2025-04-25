@@ -94,6 +94,9 @@ class BootAgent(Agent):
         spawner = CoreSpawner()
         #self.request_tree_slice_from_matrix()
 
+        last_tree_mtime = 0
+        tree = None  # Initial tree holder
+
         tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["permanent_id"], 'agent_tree.json')
 
         tree_refresh_time = 0
@@ -115,7 +118,12 @@ class BootAgent(Agent):
                     time.sleep(5)
                     continue
 
-                tree = TreeParser.load_tree(tree_path)
+                mtime = os.path.getmtime(tree_path)
+                if mtime != last_tree_mtime:
+                    tree = TreeParser.load_tree(tree_path)
+                    last_tree_mtime = mtime
+                    self.log(f"[SPAWN] Tree updated from disk.")
+
                 if not tree:
                     print(f"[SPAWN][ERROR] Could not load tree for {self.command_line_args['permanent_id']}")
                     time.sleep(5)

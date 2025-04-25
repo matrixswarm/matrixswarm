@@ -6,113 +6,92 @@
 # ║  Accepts: .cmd / .json  |  Modes: soft/full   ║
 # ╚═══════════════════════════════════════════════╝
 
+# DisposableReaperAgent.py
+
 import os
-import time
 import json
+import time
 import shutil
+import signal
+import psutil
 
 from agent.core.boot_agent import BootAgent
+from agent.core.class_lib.processes.reaper import Reaper  # Import Big Reaper
 from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 
-class ReaperAgent(BootAgent):
+
+class DisposableReaperAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
-
         super().__init__(path_resolution, command_line_args)
+        self.targets = self.command_line_args.get("targets", [])
+        self.kill_id = self.command_line_args.get("kill_id", f"reap-{int(time.time())}")
+        self.outbox_path = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox")
+        os.makedirs(self.outbox_path, exist_ok=True)
 
-        self.watch_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["permanent_id"], "payload")
+    def post_boot(self):
+        self.log(f"[DISPOSABLE-REAPER] Mission {self.kill_id} received with targets: {self.targets}")
+        threading.Thread(target=self.mission, daemon=True).start()
 
-        os.makedirs(self.watch_path, exist_ok=True)
+    def mission(self):
+        results = {}
+        for perm_id in self.targets:
+            success = self.attempt_kill(perm_id)
+            results[perm_id] = "terminated" if success else "escalated"
 
+        self.send_mission_report(results)
+        self.running = False  # Self-destruct after mission
 
-    def command_listener(self):
-        self.log("ReaperAgent online. Scanning for termination orders...")
-        while self.running:
-            if not os.path.exists(self.watch_path):
-                time.sleep(4)
-                continue
+    def attempt_kill(self, perm_id):
+        pod_path = os.path.join(self.path_resolution['pod_path'], perm_id)
+        comm_path = os.path.join(self.path_resolution['comm_path'], perm_id)
 
-            for fname in os.listdir(self.watch_path):
+        # Drop die + tombstone
+        incoming = os.path.join(comm_path, "incoming")
+        os.makedirs(incoming, exist_ok=True)
+        with open(os.path.join(incoming, "die"), "w") as f:
+            json.dump({"cmd": "die", "force": False}, f)
+        with open(os.path.join(incoming, "tombstone"), "w") as f:
+            f.write("true")
 
-                if fname.endswith(".cmd") or fname.endswith(".json"):
-                    continue
+        self.log(f"[DISPOSABLE-REAPER] Die and tombstone delivered to {perm_id}")
 
-                path = os.path.join(self.watch_path, fname)
+        # Wait for graceful death
+        hello_path = os.path.join(pod_path, "hello.moto")
+        max_wait = 18
+        elapsed = 0
+        while elapsed < max_wait:
+            if not os.path.exists(hello_path):
+                self.log(f"[DISPOSABLE-REAPER] {perm_id} down gracefully.")
+                return True
+            time.sleep(3)
+            elapsed += 3
 
-                if fname.endswith(".json"):
-                    with open(path, "r") as f:
-                        try:
-                            order = json.load(f)
-                            target = order.get("perm_id")
-                            annihilate = order.get("annihilate", True)
-                        except:
-                            self.log(f"Failed to parse JSON kill order: {fname}")
-                            continue
-                else:  # .cmd file
-                    target = fname.replace("scavenge_", "").replace(".cmd", "")
-                    annihilate = True  # default .cmd to full wipe
+        self.log(f"[DISPOSABLE-REAPER] {perm_id} resisted — invoking Big Reaper escalation.")
+        self.escalate_with_big_reaper(perm_id)
+        return False
 
-                if not target:
-                    self.log(f"Missing perm_id in order: {fname}")
-                    continue
+    def escalate_with_big_reaper(self, perm_id):
+        try:
+            big_reaper = Reaper(self.path_resolution['pod_path'], self.path_resolution['comm_path'], timeout_sec=30)
+            big_reaper.reap_targets([perm_id])
+            self.log(f"[DISPOSABLE-REAPER] Escalation complete for {perm_id}")
+        except Exception as e:
+            self.log(f"[DISPOSABLE-REAPER] Big Reaper escalation FAILED for {perm_id}: {e}")
 
-                self.execute_kill(target, annihilate=annihilate)
-                os.remove(path)
-
-            time.sleep(4)
-
-    def execute_kill(self, perm_id, annihilate=True):
-        pod_path = f"{self.path_resolution['pod_path']}/{perm_id}"
-        comm_path = f"{self.path_resolution['comm_path']}/{perm_id}"
-        killed = False
-
-        if annihilate:
-            # Stage soft kill first
-            die_cmd = os.path.join(comm_path, "payload", "die.cmd")
-            JsonSafeWrite.safe_write(die_cmd, "terminate")
-            self.log(f"[REAPER] Annihilation requested — issued die.cmd to {perm_id}")
-
-            # Wait for hello.moto shutdown signal
-            hello_path = os.path.join(pod_path, "hello.moto")
-            for _ in range(6):  # wait up to 18 seconds
-                if not os.path.exists(hello_path):
-                    break
-                time.sleep(3)
-
-            # Begin purge
-            if os.path.exists(pod_path):
-                shutil.rmtree(pod_path)
-                killed = True
-            if os.path.exists(comm_path):
-                shutil.rmtree(comm_path)
-                killed = True
-
-            status = "terminated" if killed else "not_found"
-        else:
-            # Soft kill = pod wipe only
-            if os.path.exists(pod_path):
-                shutil.rmtree(pod_path)
-                killed = True
-            status = "soft_killed" if killed else "not_found"
-
-        self.send_confirmation(perm_id, status)
-
-    def send_confirmation(self, perm_id, status):
-        outbox = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox")
-        os.makedirs(outbox, exist_ok=True)
-
+    def send_mission_report(self, results):
         payload = {
-            "status": status,
-            "perm_id": perm_id,
+            "kill_id": self.kill_id,
+            "targets": self.targets,
+            "results": results,
             "timestamp": time.time(),
-            "message": f"{perm_id} {status} by Reaper."
+            "message": f"Kill operation {self.kill_id} complete."
         }
 
-        path = os.path.join(outbox, f"reaper_{perm_id}.json")
-        with open(path, "w") as f:
+        report_path = os.path.join(self.outbox_path, f"reaper_mission_{self.kill_id}.json")
+        with open(report_path, "w") as f:
             json.dump(payload, f, indent=2)
-        self.log(f"[REAPER] Completed: {perm_id} → {status}")
 
-
+        self.log(f"[DISPOSABLE-REAPER] Mission report written: {report_path}")
 
 
 if __name__ == "__main__":
