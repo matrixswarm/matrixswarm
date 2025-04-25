@@ -17,12 +17,12 @@
 #I don’t know, something was up with that guy.
 import os
 import time
-import json
-import hashlib
 import glob
 import inotify
 import inotify.adapters
 import threading
+import hashlib
+import json
 from string import Template
 
 from agent.core.boot_agent import BootAgent
@@ -97,6 +97,13 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
         except Exception as e:
             self.log(f"[MATRIX][BROADCAST-ERROR] {e}")
+
+    def file_hash(path):
+        with open(path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    def json_hash(obj):
+        return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
 
     # watches comm for any added permanent_ids, and adds the agent_tree instantly
     def comm_directory_watcher(self):
@@ -216,6 +223,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 self.log(f"[CMD-ERROR][TREE-REFRESH] {e}")
 
             # PAYLOADS OFF THE WIRE
+
             try:
                 for fname in sorted(os.listdir(payload_dir)):
                     if not fname.endswith(".json"):
@@ -290,7 +298,57 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 self.log(f"[PAYLOAD] Error: {e} : {payload}")
                 time.sleep(3)
 
+
+            #SANITY CHECK: make sure all nodes are up to date with agent_tree.json
+            self.perform_tree_master_validation()
+
             time.sleep(4)
+
+    def perform_tree_master_validation(self):
+        try:
+            if not hasattr(self, "_last_tree_verify"):
+                self._last_tree_verify = 0
+
+            if time.time() - self._last_tree_verify > 300:  # 5-minute window
+                self._last_tree_verify = time.time()
+
+                static_tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree_master.json')
+                tp = TreeParser.load_tree(static_tree_path)
+                if not tp:
+                    self.log("[VERIFY-TREE] Could not load master tree.")
+                    return
+
+                canonical_hash = hashlib.sha256(json.dumps(tp.tree, sort_keys=True).encode()).hexdigest()
+
+                for perm_id in os.listdir(self.path_resolution["comm_path"]):
+                    target_dir = os.path.join(self.path_resolution["comm_path"], perm_id)
+                    if not os.path.isdir(target_dir):
+                        continue
+
+                    tree_path = os.path.join(target_dir, "agent_tree.json")
+                    needs_update = False
+
+                    if not os.path.exists(tree_path):
+                        needs_update = True
+                    else:
+                        try:
+                            with open(tree_path, "r") as f:
+                                current_tree = json.load(f)
+                                current_hash = hashlib.sha256(
+                                    json.dumps(current_tree, sort_keys=True).encode()).hexdigest()
+                                if current_hash != canonical_hash:
+                                    needs_update = True
+                        except Exception as e:
+                            self.log(f"[VERIFY-TREE] {perm_id} tree parse fail: {e}")
+                            needs_update = True
+
+                    if needs_update:
+                        self.delegate_tree_to_agent(perm_id)
+                        self.broadcast(f"Refreshed agent_tree for {perm_id}", severity="info")
+
+        except Exception as e:
+            self.log(f"[VERIFY-TREE] Error: {e}")
+
 
 
     def propagate_all_delegates(self):
