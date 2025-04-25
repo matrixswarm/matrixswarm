@@ -1,21 +1,18 @@
 # 📜 Codex Entry #011 — The Walken Protocol
 
-_"I always say 1984..."_ — True Romance
+_"I haven't killed anybody... since 1984."_  
+— Vincenzo Coccotti, True Romance
 
-In the swarm, there came a moment when an event had no name, no summary, no metadata of value.
+There are moments in swarm history when a protocol doesn’t wait for permission.
 
-But Matrix saw it.  
-CalendarAgent felt it.  
-And the General remembered what Walken taught us:
+It’s missing a summary.  
+There’s no title.  
+But the agent knows...  
+> **“It’s time.”**
 
-> If it walks like a jabroni, but doesn’t identify itself,  
-> it still triggers protocol.
-
-Thus was born The Walken Protocol:
-
-- When `summary` is missing from an event...
-- The agent assigns `(Untitled Event)`
-- Logs: `[WALKEN PROTOCOL] Jabroni-level title missing. Broadcasting anyway.`
+So the swarm logs the event.  
+Walken Protocol is triggered.  
+And even untitled calendar entries get remembered by the Codex.
 
 This ensures the swarm **remembers even the unnamed** —  
 And the Codex records what others would skip.
