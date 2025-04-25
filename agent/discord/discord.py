@@ -2,9 +2,7 @@
 # ║                  📡 DISCORD AGENT V3 📡                  ║
 # ║     Matrix-Compatible · Swarm Speaker · Relay-Class     ║
 # ╚══════════════════════════════════════════════════════════╝
-
 import os
-
 import threading
 import json
 import discord as discord_real

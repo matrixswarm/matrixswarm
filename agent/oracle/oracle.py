@@ -1,9 +1,7 @@
 # 🧠 OracleAgent — MatrixSwarm Prototype
 # Purpose: Responds to `.prompt` files dropped into its payload folder
 # Returns OpenAI-generated responses into `outbox/`
-
 import os
-import sys
 import json
 import time
 from openai import OpenAI
@@ -78,7 +76,7 @@ class OracleAgent(BootAgent):
                             os.remove(path)
 
             except Exception as e:
-                print(f"[TTTTT]{payload}[SSSSS]: {e}")
+                print(f"{payload}: {e}")
                 self.log(f"[ORACLE][ERROR] {e}")
 
             time.sleep(10)
