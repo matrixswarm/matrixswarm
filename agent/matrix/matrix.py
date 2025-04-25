@@ -305,6 +305,12 @@ class MatrixAgent(DelegationMixin, BootAgent):
             time.sleep(4)
 
     def perform_tree_master_validation(self):
+        def canonical_json(obj):
+            """
+            Canonical JSON serializer: compact, ordered, no random whitespace or key ordering differences.
+            """
+            return json.dumps(obj, sort_keys=True, separators=(',', ':'), ensure_ascii=True)
+
         try:
             if not hasattr(self, "_last_tree_verify"):
                 self._last_tree_verify = 0
@@ -318,8 +324,6 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     self.log("[VERIFY-TREE] Could not load master tree.")
                     return
 
-                canonical_hash = hashlib.sha256(json.dumps(tp.root, sort_keys=True).encode()).hexdigest()
-
                 for perm_id in os.listdir(self.path_resolution["comm_path"]):
                     target_dir = os.path.join(self.path_resolution["comm_path"], perm_id)
                     if not os.path.isdir(target_dir):
@@ -328,15 +332,21 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     tree_path = os.path.join(target_dir, "agent_tree.json")
                     needs_update = False
 
+                    # Get what SHOULD be there
+                    expected_subtree = tp.extract_subtree_by_id(perm_id)
+                    if not expected_subtree:
+                        expected_subtree = {}
+
+                    expected_hash = hashlib.sha256(canonical_json(expected_subtree).encode()).hexdigest()
+
                     if not os.path.exists(tree_path):
                         needs_update = True
                     else:
                         try:
                             with open(tree_path, "r") as f:
                                 current_tree = json.load(f)
-                                current_hash = hashlib.sha256(
-                                    json.dumps(current_tree, sort_keys=True).encode()).hexdigest()
-                                if current_hash != canonical_hash:
+                                current_hash = hashlib.sha256(canonical_json(current_tree).encode()).hexdigest()
+                                if current_hash != expected_hash:
                                     needs_update = True
                         except Exception as e:
                             self.log(f"[VERIFY-TREE] {perm_id} tree parse fail: {e}")
