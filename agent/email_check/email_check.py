@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 import json
 import imaplib
@@ -7,11 +6,6 @@ import email
 import socket
 
 socket.setdefaulttimeout(10)  # Set a 10-second global timeout for sockets
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 
 from email.header import decode_header
 from dotenv import load_dotenv

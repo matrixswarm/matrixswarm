@@ -5,16 +5,10 @@
 # ║     Forged in the core of Hive Zero | v3.0 Directive   ║
 # ║   ║
 # ╚════════════════════════════════════════════════════════╝
-import sys
 import os
 import time
 import requests
 import json
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 
 from agent.core.utils.swarm_sleep import interruptible_sleep
 from agent.core.boot_agent import BootAgent

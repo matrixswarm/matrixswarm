@@ -100,7 +100,7 @@ class Agent:
             count, file_list = FileFinderGlob.find_files_with_glob(path,pattern="die")
             if count>0:
                 self.running=False
-                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["permanent_id"]} die cookie accepted, going down easy...")
+                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["permanent_id"]} die cookie ingested, going down easy...")
 
             #within 20secs if another instance detected, and this is the younger of the die
 

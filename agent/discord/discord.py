@@ -4,18 +4,12 @@
 # ╚══════════════════════════════════════════════════════════╝
 
 import os
-import sys
+
 import threading
 import json
 import discord as discord_real
 from discord.ext import commands
 import asyncio
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
-
 
 from agent.core.boot_agent import BootAgent
 from agent.core.utils.swarm_sleep import interruptible_sleep

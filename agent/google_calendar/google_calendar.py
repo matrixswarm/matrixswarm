@@ -2,9 +2,7 @@
 # ║            📅 GOOGLE CALENDAR AGENT (v1) — SCOUT           ║
 # ║   Scans calendar events and relays to swarm in real time  ║
 # ╚════════════════════════════════════════════════════════════╝
-
 import os
-import sys
 import json
 import time
 import datetime
@@ -13,10 +11,6 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta, timezone
 
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 
 from agent.core.boot_agent import BootAgent
 from agent.core.utils.swarm_sleep import interruptible_sleep
