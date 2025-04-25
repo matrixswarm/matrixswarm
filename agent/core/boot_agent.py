@@ -136,7 +136,7 @@ class BootAgent(Agent):
                         self.log(f"[SPAWN] Could not find node for {child_id}")
                         continue
 
-                    print(f"[SPAWN] Agent added: {self.command_line_args['permanent_id']} Node: {node}\n")
+                    #print(f"[SPAWN] Agent added: {self.command_line_args['permanent_id']} Node: {node}\n")
 
                     #IS THERE A DIE TOKEN IN THE TARGET'S INCOMING FOLDER
                     die_file = os.path.join(self.path_resolution['comm_path'], node.get("permanent_id"), 'incoming', 'die')
