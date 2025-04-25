@@ -318,7 +318,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     self.log("[VERIFY-TREE] Could not load master tree.")
                     return
 
-                canonical_hash = hashlib.sha256(json.dumps(tp.tree, sort_keys=True).encode()).hexdigest()
+                canonical_hash = hashlib.sha256(json.dumps(tp.root, sort_keys=True).encode()).hexdigest()
 
                 for perm_id in os.listdir(self.path_resolution["comm_path"]):
                     target_dir = os.path.join(self.path_resolution["comm_path"], perm_id)
