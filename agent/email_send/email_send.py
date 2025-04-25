@@ -1,13 +1,7 @@
 import os
-import sys
 import time
 import json
 import smtplib
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 
 from email.message import EmailMessage
 from dotenv import load_dotenv

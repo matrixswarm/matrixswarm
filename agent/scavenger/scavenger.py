@@ -5,18 +5,10 @@
 # ║   Brought online under blackout protocol | Rev 1.8      ║
 # ║   Monitors: /pod/* | Deletes: expired / orphaned nodes ║
 # ╚════════════════════════════════════════════════════════╝
-
 import os
-import sys
 import time
 import json
 import shutil
-
-# Ensure dynamic paths are loaded from injected path_resolution
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 
 from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from agent.core.boot_agent import BootAgent

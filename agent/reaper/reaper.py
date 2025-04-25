@@ -10,12 +10,6 @@ import os
 import time
 import json
 import shutil
-import sys
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 
 from agent.core.boot_agent import BootAgent
 from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite

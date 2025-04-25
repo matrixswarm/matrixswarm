@@ -1,12 +1,6 @@
 import time
 import json
-import sys
 import os
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 
 from agent.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from agent.core.mixin.delegation import DelegationMixin

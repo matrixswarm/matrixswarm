@@ -1,16 +1,9 @@
 # Matrix: An AI OS System
 # Copyright (c) 2025 Daniel MacDonald
 # Licensed under the MIT License. See LICENSE file in project root for details.
-import sys
 import os
 import time
 import json
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
-
 
 from agent.core.boot_agent import BootAgent
 

@@ -13,10 +13,6 @@ import json
 import uuid
 from datetime import datetime
 
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 from agent.core.utils.swarm_sleep import interruptible_sleep
 from agent.core.boot_agent import BootAgent
 

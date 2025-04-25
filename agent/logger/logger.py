@@ -1,18 +1,7 @@
-import sys
 import os
 import json
 import time
-import psutil
-
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
-
 from agent.core.boot_agent import BootAgent
-from agent.core.tree_parser import TreeParser
-from agent.core.core_spawner import CoreSpawner
 
 class LoggerAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):

@@ -2,25 +2,9 @@ import os
 import json
 import time
 import hashlib
-import threading
 import requests
-from datetime import datetime
-import sys
-
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
 
 from agent.core.boot_agent import BootAgent
-
-
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
-
 
 class UptimePingerAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):

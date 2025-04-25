@@ -8,6 +8,8 @@ from agent.core.tree_parser import TreeParser
 from agent.core.class_lib.processes.reaper import Reaper
 cp = CoreSpawner()
 
+import json
+
 MATRIX_UUID = "matrix"
 BOOTLOADER_UUID = "bootloader"
 UNIVERSE_ID = "bb" #big bang
@@ -148,6 +150,7 @@ def boot():
         ]
     }
 
+    # Short Circuit matrix_directive above
     matrix_directive = {
         "permanent_id": 'matrix',
         "name": "matrix",
@@ -416,6 +419,8 @@ def boot():
         #v=PermanentIdExtract.get_dict_by_permanent_id(matrix_directive, MATRIX_UUID)
         #print(v)
         #exit(0)
+
+        json_string = json.dumps(matrix_directive, indent=4)
 
         cp.ensure_comm_channel(MATRIX_UUID, comm_file_spec, matrix_directive)
         new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)

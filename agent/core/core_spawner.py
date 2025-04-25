@@ -1,7 +1,7 @@
 # At the top of your script
 import sys
 import os
-
+import textwrap
 from unicodedata import unidata_version
 
 # Add the directory containing this script to the PYTHONPATH
@@ -172,6 +172,14 @@ class CoreSpawner:
             with open(full_path, "r") as f:
                 file_content = f.read()  # Read the entire file content
 
+            path_resolver = textwrap.dedent("""
+            import sys
+            if path_resolution['agent_path'] not in sys.path:
+                sys.path.append(path_resolution['agent_path'])
+            if path_resolution['root_path'] not in sys.path:
+                sys.path.append(path_resolution['root_path'])
+            """)
+
             #when the process is spawned it has no way to find the root and the lib path
             #so prepend it with these facts
             root_path = '"root_path": "' + self.root_path + '",' + "\n"
@@ -189,7 +197,7 @@ class CoreSpawner:
             install_name = '"install_name": "' + spawn_uuid + '",' + "\n"
 
             #written to the top of the script, runtime src
-            path_resolution = 'path_resolution={\n'+ root_path + pod_path + comm_path + agent_path + incoming_path_template + comm_path_resolved + '}\n'
+            path_resolution = 'path_resolution={\n'+ root_path + pod_path + comm_path + agent_path + incoming_path_template + comm_path_resolved + '}\n' + path_resolver
             command_line_args = 'command_line_args={\n' + install_name + matrix_name + universe_name + spawner_name + permanent_id_name + agent_name_name + '}\n'
 
             tree_node_blob = ""

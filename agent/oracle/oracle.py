@@ -8,11 +8,6 @@ import json
 import time
 from openai import OpenAI
 
-if path_resolution['agent_path'] not in sys.path:
-    sys.path.append(path_resolution['agent_path'])
-if path_resolution['root_path'] not in sys.path:
-    sys.path.append(path_resolution['root_path'])
-
 from agent.core.boot_agent import BootAgent
 
 class OracleAgent(BootAgent):
