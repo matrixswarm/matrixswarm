@@ -1,12 +1,19 @@
-🧠 MatrixSwarm: First AI Operating System
-MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
-Agents don’t run under you — they live beside you.
+# 🧠💥  
+# **MATRIXSWARM**  
+# **THE FIRST AI OPERATING SYSTEM**
 
-✅ No containers.
-✅ No servers.
-✅ No sockets.
+## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.  
+## Agents don’t run under you — they live beside you.
 
-Only raw, decentralized Hive command — operating purely on the filesystem.
+✅ No containers.  
+✅ No servers.  
+✅ No sockets.  
+
+> **Spawn fleets.  
+Issue orders.  
+Strike targets.  
+Bury the dead.  
+MatrixSwarm governs a living organism — not a machine.**
 ---
 
 ## ⚔️ Philosophy
