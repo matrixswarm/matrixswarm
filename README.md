@@ -15,6 +15,15 @@ Strike targets.
 Bury the dead.  
 MatrixSwarm governs a living organism — not a machine.**
 ---
+## 💀 I'm not running a charity. I'm running a swarm.
+
+[☠ Support the Hive ☠](https://ko-fi.com/matrixswarm)
+
+> **Donate if you understand.  
+> Get out of the way if you don't.**
+
+---
+
 
 ## ⚔️ Philosophy
 
