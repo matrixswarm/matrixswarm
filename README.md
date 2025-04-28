@@ -99,6 +99,14 @@ python3 bootloader.py
 
 tear down:
 python3 bootloader.py --kill
+
+#kill agent and all descendants example: kill agent with a permanent_id of logger-4 and all children
+python3 bootloader.py --kill-perm_id logger-4
+
+#watch what agents are active
+python3 {root of files}/live_hive_watch.py
+
+
 #use from another terminal
 
 ```
