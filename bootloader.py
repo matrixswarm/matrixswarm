@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import os
 import sys
+import time
 load_dotenv()
 from agent.core.path_manager import PathManager
 from agent.core.core_spawner import CoreSpawner
@@ -425,6 +426,36 @@ def boot():
         ]
     }
 
+    # TARGETED KILL REQUEST
+    if "--kill-perm_id" in sys.argv:
+        idx = sys.argv.index("--kill-perm_id")
+        if idx + 1 >= len(sys.argv):
+            print("[BOOTLOADER][ERROR] Missing permanent_id after --kill-perm_id")
+            sys.exit(1)
+
+        target_perm_id = sys.argv[idx + 1]
+
+        print(f"[BOOTLOADER] Sending kill request for {target_perm_id} to Matrix...")
+
+        payload_dir = os.path.join("comm", "matrix", "payload")
+        os.makedirs(payload_dir, exist_ok=True)
+
+        kill_payload = {
+            "type": "kill",
+            "content": {
+                "target": target_perm_id
+            }
+        }
+
+        timestamp = int(time.time())
+        payload_file = os.path.join(payload_dir, f"kill_{target_perm_id}_{timestamp}.json")
+
+        with open(payload_file, "w") as f:
+            json.dump(kill_payload, f, indent=2)
+
+        print(f"[BOOTLOADER] Kill payload written: {payload_file}")
+        print(f"[BOOTLOADER] Matrix will handle kill. Operation may take several minutes.")
+        sys.exit(0)
 
 
     #IS THIS A TEAR DOWN

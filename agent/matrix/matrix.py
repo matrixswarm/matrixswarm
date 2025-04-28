@@ -400,11 +400,11 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
     def delegation_refresh(self):
         """
-        TREE BULWARK DEFENDER III — MARK ONLY:
-        Refresh agent_tree_master.json, mark fallen nodes but do NOT delete.
+        TREE BULWARK DEFENDER III — Deletion Mode:
+        Purge tombstoned agents entirely from agent_tree_master.json.
         """
         try:
-            self.log("[BULWARK] Starting Tree Delegation Refresh (Mark Only Mode)...")
+            self.log("[BULWARK] Starting Full Delegation Refresh (Deletion Mode)...")
 
             tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree_master.json')
             tp = TreeParser.load_tree(tree_path)
@@ -452,39 +452,14 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 return
 
             for dead_id in dead_perm_ids:
-                node = tp.nodes.get(dead_id)
-                if not node:
-                    continue
-
-                children = node.get("children", [])
-
-                if not children:
-                    # No children, simple case
-                    node["killed"] = True
-                    self.log(f"[BULWARK] Marked {dead_id} as killed.")
-                else:
-                    # Children detected
-                    all_children_dead = True
-                    for child_node in children:
-                        child_id = child_node.get("permanent_id")
-                        if child_id not in dead_perm_ids:
-                            all_children_dead = False
-                            break
-
-                    if all_children_dead:
-                        node["killed"] = True
-                        self.log(f"[BULWARK] Marked {dead_id} as killed with all children dead.")
-                    else:
-                        node["killed"] = True
-                        self.log(f"[BULWARK] Marked {dead_id} as killed with surviving children.")
-                        for child_node in children:
-                            child_id = child_node.get("permanent_id")
-                            if child_id and child_id not in dead_perm_ids:
-                                child_node["pending_orphan"] = True
-                                self.log(f"[BULWARK] Marked {child_id} as pending_orphan under {dead_id}.")
+                try:
+                    tp.remove_node(dead_id)
+                    self.log(f"[BULWARK] Purged fallen agent: {dead_id}")
+                except Exception as e:
+                    self.log(f"[BULWARK][ERROR] Failed to purge {dead_id}: {e}")
 
             tp.save_tree(tree_path)
-            self.log("[BULWARK] Delegation Refresh Completed (Mark Only Mode). Tree memory secured.")
+            self.log("[BULWARK] Delegation Refresh Completed. Battlefield memory locked.")
 
         except Exception as e:
             self.log(f"[BULWARK][CRASH] {e}")
