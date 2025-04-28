@@ -352,7 +352,59 @@ def boot():
                     {
                         "permanent_id": "commander-2",
                         "name": "commander",
-                        "children": []
+                        "children": [
+                              {
+                                "permanent_id": "logger-1",
+                                "name": "logger",
+                                "children": [
+                                  {
+                                    "permanent_id": "logger-2",
+                                    "name": "logger",
+                                    "children": [
+                                      {
+                                        "permanent_id": "logger-3",
+                                        "name": "logger",
+                                        "children": [
+                                          {
+                                            "permanent_id": "logger-4",
+                                            "name": "logger",
+                                            "children": [
+                                                {
+                                                    "permanent_id": "commander-1",
+                                                    "name": "commander",
+                                                    "children": []
+                                                },
+                                                {
+                                                    "permanent_id": "worker-backup-3",
+                                                    "name": "worker",
+                                                    "children": []
+                                                },
+                                                {
+                                                    "permanent_id": "email-check-1",
+                                                    "name": "email_check",
+                                                    "filesystem": {
+                                                        "folders": [
+                                                            {"name": "payload", "type": "d", "content": None}
+                                                        ]
+                                                    },
+                                                    "config": {
+                                                        "imap_host": os.getenv("EMAILCHECKAGENT_IMAP_HOST"),
+                                                        "email": os.getenv("EMAILCHECKAGENT_EMAIL"),
+                                                        "password": os.getenv("EMAILCHECKAGENT_PASSWORD"),
+                                                        "report_to": os.getenv("EMAILCHECKAGENT_REPORT_TO",
+                                                                               "mailman-1"),
+                                                        "interval": int(os.getenv("EMAILCHECKAGENT_INTERVAL", 60))
+                                                    }
+                                                },
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
                     },
                 ]
             },
@@ -373,11 +425,13 @@ def boot():
         ]
     }
 
+
+
     #IS THIS A TEAR DOWN
     if "--kill" in sys.argv:
 
-        reaper = Reaper('pod', 'comm')
-        reaper.reap_all(UNIVERSE_ID)
+        reaper = Reaper('pod', 'comm', 60)
+        reaper.reap_all()
         print("[BOOTLOADER] Kill switch triggered. Swarm shutdown complete.")
         sys.exit(0)
 
@@ -387,7 +441,7 @@ def boot():
         #this makes sure if any agents are running they close before we nuke the pod directory
         reaper = Reaper('pod', 'comm')
 
-        reaper.reap_all(UNIVERSE_ID)
+        reaper.reap_all()
 
         cp.reset_hard()
 
@@ -425,7 +479,7 @@ def boot():
         cp.ensure_comm_channel(MATRIX_UUID, comm_file_spec, matrix_directive)
         new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)
         cp.spawn_agent(UNIVERSE_ID, new_uuid, MATRIX_UUID, MATRIX_UUID, BOOTLOADER_UUID)
-        print('go time!')
+
     else:
         cp.verify_soft()
 

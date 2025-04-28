@@ -20,7 +20,10 @@ class BootAgent(Agent):
         cp = CoreSpawner()
         fail_success, self.boot_log = cp.get_boot_log(self.path_resolution["pod_path_resolved"])
         if not (fail_success and self.boot_log.get("permanent_id")):
+
             return
+
+
 
         self.running = True
 
@@ -84,34 +87,13 @@ class BootAgent(Agent):
 
         from agent.core.tree_parser import TreeParser
 
-        comm_file_spec = [
-            {"name": "hello.moto", "type": "d", "content": None},
-            {"name": "incoming", "type": "d", "content": None}
-        ]
-
-        #last_snapshot = {}
-        orbits = {}
-        spawner = CoreSpawner()
-        #self.request_tree_slice_from_matrix()
-
         last_tree_mtime = 0
         tree = None  # Initial tree holder
 
         tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["permanent_id"], 'agent_tree.json')
 
-        tree_refresh_time = 0
-
         while self.running:
-
             try:
-
-                #   If we never checked for a slice or the time we last check if greater than 2 mins--recheck
-                # 1==3 shut off for now
-                if 1==3 and (tree_refresh_time == 0 or TimePassed.get_time_passed(tree_refresh_time) > 120):
-                    #TELL MATRIX WE WANT OUR SLICE OF THE PIE
-                    self.request_tree_slice_from_matrix()
-                    tree_refresh_time = datetime.now().strftime("%Y%m%d%H%M%S%")
-
                 print(f"[SPAWN] Checking for delegated children of {self.command_line_args['permanent_id']}")
 
                 if not os.path.exists(tree_path):
@@ -128,89 +110,71 @@ class BootAgent(Agent):
                     print(f"[SPAWN][ERROR] Could not load tree for {self.command_line_args['permanent_id']}")
                     time.sleep(5)
                     continue
-                else:
-                    print(f"[SPAWN] Tree loaded, looking for children of {self.command_line_args['permanent_id']}")
-                if not tree:
-                    time.sleep(5)
-                    continue
 
-                #delta = self.check_delegation_changes(tree, last_snapshot)
-
-                #for perm_id, node in delta["added"].items():
                 for child_id in tree.get_first_level_child_ids(self.command_line_args["permanent_id"]):
 
                     node = tree.nodes.get(child_id)
-
                     if not node:
                         self.log(f"[SPAWN] Could not find node for {child_id}")
                         continue
 
-                    #print(f"[SPAWN] Agent added: {self.command_line_args['permanent_id']} Node: {node}\n")
-
-                    #IS THERE A DIE TOKEN IN THE TARGET'S INCOMING FOLDER
+                    # Skip if die token exists
                     die_file = os.path.join(self.path_resolution['comm_path'], node.get("permanent_id"), 'incoming', 'die')
                     if os.path.exists(die_file):
-                        self.log(f"[SPAWN-BLOCKED] {node.get("permanent_id")} has die file.")
+                        self.log(f"[SPAWN-BLOCKED] {node.get('permanent_id')} has die file.")
                         continue
 
-                    #IS THERE A DUPLICATE JOB
-                    #job_label = f"{self.command_line_args['universe_id']}:{self.command_line_args['permanent_id']}:{node.get("permanent_id")}:{node.get("permanent_id")}"
-                    #if DuplicateProcessCheck.check_all_duplicate_risks(job_label=job_label):
-                    #    self.log(f"[SPAWN-BLOCKED] Duplicate process for {job_label}")
-                    #    continue
-
-                    #DID WE ALREADY PROCESS THIS FILE
-                    processed = node.get("permanent_id") in orbits
-                    last_processed = 0
-                    if processed:
-                        last_processed  = TimePassed.get_time_passed(orbits[node.get("permanent_id")]["last_check"])
-                    # HAS THE LAST HEARTBEAT TIMESTAMP BEEN WITHIN ACCEPTABLE TIMEFRAME
-                    #   We already processed file
-                    #       No Hello.Moto Timestamp Found and not None
-                    #       OR the Hello.Moto Timestamp doesn't show activity within acceptable timeframe
-                    #       AND the Orbit last-time processed is within acceptable range
-                    #           Continue Loop
-                    #   ELSE Spawn the node
-
+                    # Skip if recent heartbeat is alive
                     time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], node.get("permanent_id"))
                     if time_delta is not None and time_delta < time_delta_timeout:
                         continue
 
-                    spawner.ensure_comm_channel(node.get("permanent_id"), comm_file_spec, node.get("filesystem", {}))  # ✅ Extract only the filesystem block)
-                    new_uuid, pod_path = spawner.create_runtime(node.get("permanent_id"))
-                    pid, cmd = spawner.spawn_agent(
-                        self.command_line_args["universe_id"],
-                        new_uuid,
-                        node.get("name"),
-                        node.get("permanent_id"),
-                        self.command_line_args["permanent_id"],
-                        tree_node=node,  # ← inject tree node directly
+                    # Call new tactical spawn function
+                    self.spawn_agent_direct(
+                        perm_id=node.get("permanent_id"),
+                        agent_name=node.get("name"),
+                        tree_node=node
                     )
 
-                    orbits[node.get("permanent_id")] = {
-                        "permanent_id": node.get("permanent_id"),
-                        "name": node.get("name"),
-                        "pid": pid,
-                        "cmd": cmd,
-                        "uuid": new_uuid,
-                        "last_check": datetime.now().strftime("%Y%m%d%H%M%S%")
-                    }
-
-
-                #for perm_id in delta["removed"]:
-                #    self.log(f"[DELEGATION] Agent removed: {perm_id}")
-                    # Optional: issue die, or mark for scavenger
-
-                #last_snapshot = tree.query_children_by_id(self.command_line_args["permanent_id"])
-
             except Exception as e:
-                # Get the full traceback information
                 tb = traceback.format_exc()
-                # Log or print the detailed error message and line number
                 print(f"[SPAWN] Exception occurred: {e}")
                 print(f"[SPAWN] Full traceback:\n{tb}")
 
             time.sleep(10)
+
+    def spawn_agent_direct(self, perm_id, agent_name, tree_node):
+
+        from agent.core.core_spawner import CoreSpawner
+
+        spawner = CoreSpawner()
+
+        comm_file_spec = [
+            {"name": "hello.moto", "type": "d", "content": None},
+            {"name": "incoming", "type": "d", "content": None}
+        ]
+
+        # Ensure comm channel (basic folders)
+        spawner.ensure_comm_channel(perm_id, comm_file_spec, tree_node.get("filesystem", {}))
+
+        # Create pod runtime
+        new_uuid, pod_path = spawner.create_runtime(perm_id)
+
+        # Spawn the agent
+        result= spawner.spawn_agent(
+            universe_id=self.command_line_args["universe_id"],
+            spawn_uuid=new_uuid,
+            agent_name=agent_name,
+            permanent_id=perm_id,
+            spawner=self.command_line_args["permanent_id"],
+            tree_node=tree_node
+        )
+
+        if result is None:
+            self.log(f"[MATRIX][KILL] ERROR: Failed to spawn agent {perm_id}.")
+            return
+
+        return result
 
     #request_tree_slice_from_matrix part of the tree that this agent is delegated to maintain
     def request_tree_slice_from_matrix(self):

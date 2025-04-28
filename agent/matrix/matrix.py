@@ -1,3 +1,4 @@
+
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
 # ╔════════════════════════════════════════════════════════╗
 # ║                   🧠 MATRIX AGENT 🧠                   ║
@@ -31,9 +32,10 @@ from agent.core.tree_parser import TreeParser
 from agent.core.mixin.delegation import DelegationMixin
 from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from agent.core.class_lib.file_system.util.ensure_trailing_slash import EnsureTrailingSlash
-from agent.core.tree_propagation import propagate_tree_slice
 from agent.core.swarm_manager import SwarmManager  # adjust path to match
-
+from agent.reaper.reaper_factory import make_reaper_node
+from agent.scavenger.scavenger_factory import make_scavenger_node
+from agent.core.class_lib.hive.kill_chain_lock_manager import KillChainLockManager
 
 class MatrixAgent(DelegationMixin, BootAgent):
 
@@ -66,6 +68,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
         message = "Knock... Knock... Knock... The Matrix has you..."
         print(message)
         self.broadcast(message)
+        self.launch_service_fleet()
 
     def post_boot(self):
         message = "I'm watching..."
@@ -73,14 +76,14 @@ class MatrixAgent(DelegationMixin, BootAgent):
         perm_id = self.command_line_args.get("permanent_id", "matrix")
         self.delegate_tree_to_agent(self.command_line_args.get("permanent_id", perm_id))
         self.broadcast(f"Delivered agent_tree slice to self ({perm_id})", severity="info")
-
-
+        #
         threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
         self.broadcast(message)
 
     def broadcast(self, message, severity="info"):
         try:
+
             mailman_dir = os.path.join(self.path_resolution["comm_path"], "mailman-1", "payload")
             os.makedirs(mailman_dir, exist_ok=True)
 
@@ -124,6 +127,33 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 except Exception as e:
                     self.log(f"[COMM-WATCHER-ERROR] {e}")
 
+    #default services to load on boot
+    def launch_service_fleet(self):
+        scavenger_node = make_scavenger_node()
+        self.log("[MATRIX][FLEET] Launching service fleet...")
+
+        # INSERT into agent_tree_master.json
+        try:
+            tree_path = os.path.join(self.path_resolution['comm_path'], "matrix", "agent_tree_master.json")
+            tp = TreeParser.load_tree(tree_path)
+            if tp:
+                tp.insert_node(scavenger_node, parent_permanent_id="matrix")
+                tp.save_tree(tree_path)
+                self.log(f"[MATRIX][FLEET] Scavenger inserted into agent tree under matrix.")
+            else:
+                self.log("[MATRIX][FLEET][ERROR] Could not load tree to insert scavenger.")
+        except Exception as e:
+            self.log(f"[MATRIX][FLEET][ERROR] Failed to insert scavenger: {e}")
+
+        # THEN spawn it
+        self.spawn_agent_direct(
+            scavenger_node["permanent_id"],
+            scavenger_node["name"],
+            scavenger_node
+        )
+
+        self.log("[MATRIX][FLEET] Scavenger patrol launched.")
+
 
     def delegate_tree_to_agent(self, perm_id):
         try:
@@ -144,6 +174,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
         except Exception as e:
             self.log(f"[DELEGATE-ERROR] {e}")
 
+    #commands coming off the wire
     def handle_https_command(self, data):
         try:
             comm_path = "/comm/matrix/payload"
@@ -164,11 +195,8 @@ class MatrixAgent(DelegationMixin, BootAgent):
         except Exception as e:
             print(f"[MATRIX:HTTPS-ERROR] Failed to dispatch command: {e}")
 
-
-
-
+    #executing commands
     def command_listener(self):
-
         path = Template(self.path_resolution["incoming_path_template"])
         incoming_path = path.substitute(permanent_id=self.command_line_args["matrix"])
         incoming_path = EnsureTrailingSlash.ensure_trailing_slash(incoming_path)
@@ -176,150 +204,146 @@ class MatrixAgent(DelegationMixin, BootAgent):
         payload_dir = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
         os.makedirs(payload_dir, exist_ok=True)
 
-        print(f"[CMD-LISTENER] Listening for commands in {incoming_path}...")
+        print(f"[CMD-LISTENER] Listening for commands in {incoming_path} and payloads...")
 
         while self.running:
             try:
-                # TREE REFRESH COMMAND
+                # Handle tree refresh requests
                 for filename in glob.glob(incoming_path + '*:_tree_slice_request.cmd'):
-
-                    #No need for the command junk it
-                    os.remove(filename)
-
-                    # Extract the file name without the path or extension
-                    filename = os.path.basename(filename)  # Get the file name with extension, e.g., "example_tree_slice_request.cmd"
-                    filename = os.path.splitext(filename)[0]
-                    perm_id = filename.split(':')[0].strip() # Strip the command, e.g., "*:_tree_slice_request.cmd"
-
-                    # Raise an exception if perm_id is empty
-                    if not perm_id:
-                        raise ValueError(f"[MATRIX][ERROR] permanent_id is empty for the file: {filename}")
-
-                    target_incoming_path = os.path.join(self.path_resolution['comm_path'], perm_id, 'agent_tree.json')
-
-                    tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
-
-                    tp = TreeParser.load_tree(tree_path)
-                    if not tp:
-                        self.log("[PROPAGATE] Failed to load tree.")
-                        return
-
-                    subtree = tp.extract_subtree_by_id(perm_id)
-                    if not subtree:
-                        print(f"[PROPAGATION] No subtree found for {perm_id}")
-                        subtree = {}
-
                     try:
-                        safe_preview = json.dumps(subtree, default=str, indent=2)[:300]
-                    except TypeError as e:
-                        safe_preview = f"[NON-SERIALIZABLE SLICE] {e}"
+                        os.remove(filename)
+                        perm_id = os.path.basename(filename).split(':')[0].strip()
+                        if not perm_id:
+                            raise ValueError(f"[TREE-REFRESH][ERROR] No perm_id in filename {filename}")
 
-                    self.log(f"[TREE-DISPATCH] Sending to {perm_id}: {safe_preview}")
+                        target_incoming_path = os.path.join(self.path_resolution['comm_path'], perm_id,
+                                                            'agent_tree.json')
+                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"],
+                                                 'agent_tree_master.json')
 
-                    #copy from agent_tree_master.json
-                    JsonSafeWrite.safe_write(target_incoming_path, subtree)
+                        tp = TreeParser.load_tree(tree_path)
+                        if not tp:
+                            self.log("[TREE-REFRESH][ERROR] Failed to load tree.")
+                            continue
 
-            except Exception as e:
-                self.log(f"[CMD-ERROR][TREE-REFRESH] {e}")
+                        subtree = tp.extract_subtree_by_id(perm_id) or {}
+                        JsonSafeWrite.safe_write(target_incoming_path, subtree)
+                        self.log(f"[TREE-REFRESH] Tree slice sent to {perm_id}.")
 
-            # PAYLOADS OFF THE WIRE
+                    except Exception as e:
+                        self.log(f"[TREE-REFRESH][ERROR] {e}")
 
-            try:
+                # Handle payload commands
                 for fname in sorted(os.listdir(payload_dir)):
+                    fpath = os.path.join(payload_dir, fname)
                     if not fname.endswith(".json"):
                         continue
-
-                    fpath = os.path.join(payload_dir, fname)
-                    with open(fpath) as f:
-                        payload = json.load(f)
-
-                    ctype = payload.get("type")
-                    content = payload.get("content", {})
-                    #annihilate = content.get("annihilate", True)
-
-                    if ctype == "spawn_agent":
-                        self.log(f"[SPAWN] Injecting NOW agent from payload: {content.get('perm_id')}")
-                        self.swarm.handle_injection(content)
-                        self.log(f"[SPAWN] Injected agent from payload: {content.get('perm_id')}")
+                    try:
+                        with open(fpath) as f:
+                            payload = json.load(f)
+                    except Exception as e:
+                        self.log(f"[PAYLOAD][ERROR] Failed to parse {fname}: {e}")
                         os.remove(fpath)
                         continue
 
-                    elif ctype == "inject":
+                    ctype = payload.get("type")
+                    content = payload.get("content", {})
+
+                    if ctype == "spawn_agent":
+                        self.log(f"[SPAWN] Now injecting agent: {content.get('perm_id')}")
                         self.swarm.handle_injection(content)
+
+                    elif ctype == "inject":
+                        self.log(f"[INJECT] Injecting agent from payload.")
+                        self.swarm.handle_injection(content)
+
                     elif ctype == "inject_team":
-                        self.swarm.handle_team_injection(
-                            content.get("subtree"),
-                            content.get("target_perm_id")
-                        )
+                        self.log(f"[INJECT-TEAM] Injecting agent team.")
+                        self.swarm.handle_team_injection(content.get("subtree"), content.get("target_perm_id"))
 
                     elif ctype == "stop":
                         targets = content.get("targets", [])
                         if isinstance(targets, str):
                             targets = [targets]
-
                         for t in targets:
                             self.swarm.kill_agent(t, annihilate=False)
-                            self.log(f"[MATRIX] Stop command dispatched for {t}")
+                            self.log(f"[STOP] Sent stop signal to {t}")
 
                     elif ctype == "kill":
+                        target_perm_id = content.get("target")
+                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"],
+                                                 'agent_tree_master.json')
+                        tp = TreeParser.load_tree(tree_path)
+                        if tp is None:
+                            self.log("[KILL][ERROR] Tree load failed, aborting kill.")
+                            continue
 
-                        target = content.get("target")
+                        kill_list = self.collect_kill_list(tp, target_perm_id)
+                        self.log(f"[KILL] Kill List: {kill_list}")
 
-                        mode = content.get("mode", "single")
+                        kcm = KillChainLockManager(tp)
+                        kcm.lock_targets(kill_list)
+                        tp.save_tree(tree_path)
 
-                        annihilate = content.get("annihilate", True)
+                        # Inject reaper mission
+                        reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
+                        tp.insert_node(reaper_node, parent_permanent_id="matrix")
+                        tp.save_tree(tree_path)
 
-                        if mode == "lights_out":
+                        self.spawn_agent_direct(reaper_node["permanent_id"], reaper_node["name"], reaper_node)
 
-                            self.swarm.kill_all_agents(annihilate=annihilate)
+                        self.delegation_refresh()
 
-                        elif mode == "subtree":
+                        self.log(f"[KILL] Reaper dispatched for {kill_list}")
 
-                            self.swarm.kill_subtree(target, annihilate=annihilate)
+                    else:
+                        self.log(f"[PAYLOAD][UNKNOWN] Unrecognized payload type: {ctype}")
 
-                        elif isinstance(target, str):
-
-                            self.swarm.kill_agent(target, annihilate=annihilate)
-
-                        elif isinstance(content.get("targets"), list):
-
-                            for t in content["targets"]:
-                                self.swarm.kill_agent(t, annihilate=annihilate)
-                    elif ctype == "delete_subtree":
-                        self.swarm.kill_subtree(content.get("perm_id"))
-
-                    elif ctype == "kill":
-                        target_id = content.get("target")
-                        subtree = self.tree_parser.get_subtree_nodes(target_id)
-                        kill_list = subtree if subtree else [target_id]
-
-                        self.spawn_agent(
-                            f"reaper-mission-{uuid4()}",
-                            type="DisposableReaperAgent",
-                            args={
-                                "targets": kill_list,
-                                "kill_id": f"kill-{target_id}-{int(time.time())}"
-                            }
-                        )
-                        self.log(f"[MATRIX][KILL] Dispatched kill op for {kill_list}")
-
-
+                    # Always clean up payload file
                     os.remove(fpath)
                     self.log(f"[PAYLOAD] Processed: {fname}")
 
-                time.sleep(2)
-            except Exception as e:
+                # Sanity: Make sure agents have updated trees
+                self.perform_tree_master_validation()
 
-                self.log(f"[PAYLOAD] Error: {e} : {payload}")
+                # Breath control
+                time.sleep(2)
+
+            except Exception as e:
+                self.log(f"[COMMAND-LISTENER][CRASH] {e}")
                 time.sleep(3)
 
+    @staticmethod
+    def collect_kill_list(tp, root_id):
+        visited = set()
+        result = []
 
-            #SANITY CHECK: make sure all nodes are up to date with agent_tree.json
-            self.perform_tree_master_validation()
+        def recurse(node):
+            if not node or not isinstance(node, dict):
+                return
+            perm_id = node.get("permanent_id")
+            if not perm_id or perm_id in visited:
+                return
+            visited.add(perm_id)
 
-            time.sleep(4)
+            # Don't recurse into commander-1 even if we see it
+            if perm_id == "commander-1" and root_id != "commander-1":
+                return
 
+            result.append(perm_id)
+            for child in node.get("children", []):
+                recurse(child)
+
+        start_node = tp._find_node(tp.root, root_id)
+        if start_node:
+            recurse(start_node)
+
+        return result
+
+    #send a copy of agent_tree to each node
     def perform_tree_master_validation(self):
+
+
         def canonical_json(obj):
             """
             Canonical JSON serializer: compact, ordered, no random whitespace or key ordering differences.
@@ -373,6 +397,98 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
         except Exception as e:
             self.log(f"[VERIFY-TREE] Error: {e}")
+
+    def delegation_refresh(self):
+        """
+        TREE BULWARK DEFENDER III — MARK ONLY:
+        Refresh agent_tree_master.json, mark fallen nodes but do NOT delete.
+        """
+        try:
+            self.log("[BULWARK] Starting Tree Delegation Refresh (Mark Only Mode)...")
+
+            tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree_master.json')
+            tp = TreeParser.load_tree(tree_path)
+            if not tp:
+                self.log("[BULWARK] Could not load tree. Abort delegation refresh.")
+                return
+
+            pod_root = self.path_resolution['pod_path']
+            comm_root = self.path_resolution['comm_path']
+
+            dead_perm_ids = set()
+
+            for perm_id in list(tp.get_all_nodes_flat()):
+                if perm_id == "matrix":
+                    continue  # Never remove matrix herself
+
+                pod_uuid = None
+                for pod_dir in os.listdir(pod_root):
+                    try:
+                        boot_path = os.path.join(pod_root, pod_dir, "boot.json")
+                        if not os.path.exists(boot_path):
+                            continue
+                        with open(boot_path, "r") as f:
+                            boot_data = json.load(f)
+                        if boot_data.get("permanent_id") == perm_id:
+                            pod_uuid = pod_dir
+                            break
+                    except Exception:
+                        continue
+
+                comm_tombstone = os.path.join(comm_root, perm_id, "incoming", "tombstone")
+                pod_tombstone = os.path.join(pod_root, pod_uuid, "tombstone") if pod_uuid else None
+
+                tombstone_found = False
+                if os.path.exists(comm_tombstone):
+                    tombstone_found = True
+                elif pod_tombstone and os.path.exists(pod_tombstone):
+                    tombstone_found = True
+
+                if tombstone_found:
+                    dead_perm_ids.add(perm_id)
+
+            if not dead_perm_ids:
+                self.log("[BULWARK] No tombstoned agents found. Hive remains at full strength.")
+                return
+
+            for dead_id in dead_perm_ids:
+                node = tp.nodes.get(dead_id)
+                if not node:
+                    continue
+
+                children = node.get("children", [])
+
+                if not children:
+                    # No children, simple case
+                    node["killed"] = True
+                    self.log(f"[BULWARK] Marked {dead_id} as killed.")
+                else:
+                    # Children detected
+                    all_children_dead = True
+                    for child_node in children:
+                        child_id = child_node.get("permanent_id")
+                        if child_id not in dead_perm_ids:
+                            all_children_dead = False
+                            break
+
+                    if all_children_dead:
+                        node["killed"] = True
+                        self.log(f"[BULWARK] Marked {dead_id} as killed with all children dead.")
+                    else:
+                        node["killed"] = True
+                        self.log(f"[BULWARK] Marked {dead_id} as killed with surviving children.")
+                        for child_node in children:
+                            child_id = child_node.get("permanent_id")
+                            if child_id and child_id not in dead_perm_ids:
+                                child_node["pending_orphan"] = True
+                                self.log(f"[BULWARK] Marked {child_id} as pending_orphan under {dead_id}.")
+
+            tp.save_tree(tree_path)
+            self.log("[BULWARK] Delegation Refresh Completed (Mark Only Mode). Tree memory secured.")
+
+        except Exception as e:
+            self.log(f"[BULWARK][CRASH] {e}")
+
 
 
 

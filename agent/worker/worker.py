@@ -36,7 +36,7 @@ class WorkerAgent(BootAgent, DelegationMixin):
 
         while self.running:
 
-            print("Doing my thing...")
+
             time.sleep(10)
 
             if self.command_line_args["permanent_id"] == "worker-backup-2":
@@ -69,10 +69,6 @@ class WorkerAgent(BootAgent, DelegationMixin):
                 top_stats = snapshot.statistics("lineno")
                 for stat in top_stats[:10]:
                     print(stat)
-
-            print("watching...")
-            #COMMAND CENTER
-
 
     def process_command(self, command):
         if command.get("action") == "update_delegates":
