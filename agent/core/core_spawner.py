@@ -267,9 +267,10 @@ class CoreSpawner:
                 "permanent_id": permanent_id,
                 "boot_time": time.time(),
                 "pid": process.pid,
+                "cmd": cmd
             }
             with open(os.path.join(self.pod_path, spawn_uuid, "boot.json"), "w") as f:
-                json.dump(install, f, indent=2)
+                json.dump(install, f, indent=4)
 
 
         except Exception as e:

@@ -379,6 +379,41 @@ class TreeParser:
         self.root = recursive_purge(self.root)
         return self.root
 
+    def find_parent_of(self, child_perm_id):
+        """
+        Recursively find the parent node that has a child with the given permanent_id.
+        """
+
+        def recurse(node):
+            if not node or not isinstance(node, dict):
+                print(f"[RECURSE] Skipping bad node: {node}")
+                return None
+
+            children = node.get(self.CHILDREN_KEY, [])
+            if not isinstance(children, list):
+                print(f"[RECURSE] Children field is not a list for node: {node}")
+                return None
+
+            for child in children:
+                if not isinstance(child, dict):
+                    print(f"[RECURSE] Skipping bad child: {child}")
+                    continue  # skip non-dict children
+
+                child_perm = child.get(self.PERMANENT_ID_KEY, None)
+                if child_perm == child_perm_id:
+                    print(f"[RECURSE] FOUND parent of {child_perm_id} under node {node.get(self.PERMANENT_ID_KEY)}")
+                    return node
+
+                result = recurse(child)
+                if result:
+                    return result
+
+            return None
+
+        print(f"[FIND_PARENT] Starting parent search for {child_perm_id}")
+        return recurse(self.root)
+
+
     def get_subtree_nodes(self, perm_id):
         """
         Get all nodes under and including the given perm_id.
