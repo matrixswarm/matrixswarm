@@ -216,10 +216,8 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         if not perm_id:
                             raise ValueError(f"[TREE-REFRESH][ERROR] No perm_id in filename {filename}")
 
-                        target_incoming_path = os.path.join(self.path_resolution['comm_path'], perm_id,
-                                                            'agent_tree.json')
-                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"],
-                                                 'agent_tree_master.json')
+                        target_incoming_path = os.path.join(self.path_resolution['comm_path'], perm_id, 'agent_tree.json')
+                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
 
                         tp = TreeParser.load_tree(tree_path)
                         if not tp:
