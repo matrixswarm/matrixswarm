@@ -100,10 +100,12 @@ python3 bootloader.py
 tear down:
 python3 bootloader.py --kill
 
-remove agent: payload sent to Matrix which removes target and descendants; example: kill agent with a permanent_id of logger-4 and all children
+remove agent: 
+payload sent to Matrix which removes target and descendants; example: kill agent with a permanent_id of logger-4 and all children
 python3 bootloader.py --kill-perm_id logger-4
 
-inject agent: payload sent to Matrix which injects an agent into the domain of existent agent
+inject agent: 
+payload sent to Matrix which injects an agent into the domain of existent agent
 python3 bootloader.py --spawn-agent -n logger -pid logger-5 -targ logger-3
 -n logger      = source file name, under /agent
 -pid logger-5  = permanent_id to be assigned the new agent, has to be unique in universe
