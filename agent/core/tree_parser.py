@@ -430,3 +430,9 @@ class TreeParser:
 
         collect(self.nodes[perm_id])
         return result
+
+    def get_node(self, perm_id):
+        """
+        Retrieve a node directly by its permanent_id.
+        """
+        return self.nodes.get(perm_id, None)

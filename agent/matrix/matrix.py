@@ -68,7 +68,6 @@ class MatrixAgent(DelegationMixin, BootAgent):
         message = "Knock... Knock... Knock... The Matrix has you..."
         print(message)
         self.broadcast(message)
-        self.launch_service_fleet()
 
     def post_boot(self):
         message = "I'm watching..."
@@ -126,33 +125,6 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         self.delegate_tree_to_agent(filename)
                 except Exception as e:
                     self.log(f"[COMM-WATCHER-ERROR] {e}")
-
-    #default services to load on boot
-    def launch_service_fleet(self):
-        scavenger_node = make_scavenger_node()
-        self.log("[MATRIX][FLEET] Launching service fleet...")
-
-        # INSERT into agent_tree_master.json
-        try:
-            tree_path = os.path.join(self.path_resolution['comm_path'], "matrix", "agent_tree_master.json")
-            tp = TreeParser.load_tree(tree_path)
-            if tp:
-                tp.insert_node(scavenger_node, parent_permanent_id="matrix")
-                tp.save_tree(tree_path)
-                self.log(f"[MATRIX][FLEET] Scavenger inserted into agent tree under matrix.")
-            else:
-                self.log("[MATRIX][FLEET][ERROR] Could not load tree to insert scavenger.")
-        except Exception as e:
-            self.log(f"[MATRIX][FLEET][ERROR] Failed to insert scavenger: {e}")
-
-        # THEN spawn it
-        self.spawn_agent_direct(
-            scavenger_node["permanent_id"],
-            scavenger_node["name"],
-            scavenger_node
-        )
-
-        self.log("[MATRIX][FLEET] Scavenger patrol launched.")
 
 
     def delegate_tree_to_agent(self, perm_id):
@@ -255,6 +227,31 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         self.log(f"[INJECT] Injecting agent from payload.")
                         self.swarm.handle_injection(content)
 
+                    elif ctype == "node_query":
+                        requestor = content.get("requestor")
+                        target_perm_id = content.get("perm_id")
+
+                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
+                        tp = TreeParser.load_tree(tree_path)
+
+                        node = tp.get_node(target_perm_id)
+
+                        reply = {
+                            "type": "node_response",
+                            "content": {
+                                "perm_id": target_perm_id,
+                                "node": node
+                            }
+                        }
+
+                        outbox = os.path.join(self.path_resolution['comm_path'], requestor, "incoming")
+                        os.makedirs(outbox, exist_ok=True)
+                        response_file = os.path.join(outbox, f"node_response_{target_perm_id}.json")
+
+                        with open(response_file, "w") as f:
+                            json.dump(reply, f, indent=2)
+
+                        self.log(f"[MATRIX] Sent node response for {target_perm_id} to {requestor}.")
                     elif ctype == "inject_team":
                         self.log(f"[INJECT-TEAM] Injecting agent team.")
                         self.swarm.handle_team_injection(content.get("subtree"), content.get("target_perm_id"))
