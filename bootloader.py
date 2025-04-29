@@ -426,6 +426,49 @@ def boot():
         ]
     }
 
+    # INSERT AGENT COMMAND
+    if "--spawn-agent" in sys.argv:
+        try:
+            name_idx = sys.argv.index("-n")
+            pid_idx = sys.argv.index("-pid")
+            targ_idx = sys.argv.index("-targ")
+
+            agent_name = sys.argv[name_idx + 1]
+            new_perm_id = sys.argv[pid_idx + 1]
+            target_perm_id = sys.argv[targ_idx + 1]
+
+        except Exception as e:
+            print(f"[BOOTLOADER][ERROR] Invalid agent insert syntax: {e}")
+            sys.exit(1)
+
+        print(f"[BOOTLOADER] Sending insert request for agent {new_perm_id} ({agent_name}) under {target_perm_id}")
+
+        payload_dir = os.path.join("comm", "matrix", "payload")
+        os.makedirs(payload_dir, exist_ok=True)
+
+        inject_payload = {
+            "type": "inject",
+            "content": {
+                "perm_id": new_perm_id,
+                "agent_name": agent_name,
+                "target_perm_id": target_perm_id,
+                "filesystem": {
+                    "folders": [{"name": "payload", "type": "d", "content": None}]
+                },
+                "children": []
+            }
+        }
+
+        timestamp = int(time.time())
+        payload_file = os.path.join(payload_dir, f"inject_{new_perm_id}_{timestamp}.json")
+
+        with open(payload_file, "w") as f:
+            json.dump(inject_payload, f, indent=2)
+
+        print(f"[BOOTLOADER] Inject payload written: {payload_file}")
+        print(f"[BOOTLOADER] Matrix will handle spawn and memory update.")
+        sys.exit(0)
+
     # TARGETED KILL REQUEST
     if "--kill-perm_id" in sys.argv:
         idx = sys.argv.index("--kill-perm_id")
@@ -513,7 +556,6 @@ def boot():
 
     else:
         cp.verify_soft()
-
 
 
 
