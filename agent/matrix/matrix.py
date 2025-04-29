@@ -284,8 +284,8 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
                         # Inject reaper mission
                         reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
-                        tp.insert_node(reaper_node, parent_permanent_id="matrix")
-                        tp.save_tree(tree_path)
+                        #tp.insert_node(reaper_node, parent_permanent_id="matrix")
+                        #tp.save_tree(tree_path)
 
                         self.spawn_agent_direct(reaper_node["permanent_id"], reaper_node["name"], reaper_node)
 
