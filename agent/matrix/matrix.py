@@ -269,8 +269,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
                     elif ctype == "kill":
                         target_perm_id = content.get("target")
-                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"],
-                                                 'agent_tree_master.json')
+                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
                         tp = TreeParser.load_tree(tree_path)
                         if tp is None:
                             self.log("[KILL][ERROR] Tree load failed, aborting kill.")
