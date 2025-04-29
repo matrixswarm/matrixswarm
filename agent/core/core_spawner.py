@@ -230,6 +230,7 @@ class CoreSpawner:
                     "timestamp": time.time()
                 }
 
+
                 spawn_dir = os.path.join(self.comm_path, permanent_id, "spawn")
                 os.makedirs(spawn_dir, exist_ok=True)
 

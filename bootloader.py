@@ -181,7 +181,14 @@ def boot():
                     "files": {}
                     }
                 },
-
+                {
+                    "permanent_id": "scavenger-strike",
+                    "name": "scavenger",
+                    "filesystem": {
+                        "folders": []
+                    },
+                    "config": {}
+                },
                 {
                     "permanent_id": "telegram-relay-1",
                     "name": "telegram_relay",
@@ -305,19 +312,52 @@ def boot():
         },
 
         "children": [{
-                "permanent_id": "matrix-https",
-                "name": "matrix_https",
-                "delegated": [],
-                "filesystem": {
-                    "folders": [
-                        {
-                            'name': 'payload',
-                            'type': 'd',
-                            'content': None
-                        },
-                    ],
+            "permanent_id": "matrix-https",
+            "name": "matrix_https",
+            "delegated": [],
+            "filesystem": {
+                "folders": [
+                    {
+                        'name': 'payload',
+                        'type': 'd',
+                        'content': None
+                    },
+                ],
                     "files": {}
                 }
+            },
+            {
+                "permanent_id": "guardian-1",
+                "name": "sentinel",
+                "filesystem": {},
+                "config": {},
+                "children": [
+                    {
+                        "permanent_id": "guardian-2",
+                        "name": "sentinel",
+                        "filesystem": {},
+                        "children": [
+                            {
+                                "permanent_id": "guardian-3",
+                                "name": "sentinel",
+                                "filesystem": {},
+                                "config": {},
+                                "children": [
+                                    {
+                                        "permanent_id": "guardian-4",
+                                        "name": "sentinel",
+                                        "filesystem": {},
+                                        "config": {
+                                            "watching": "the Queen",
+                                            "permanent_id": "matrix"
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        "config": {}
+                    }
+                ]
             },
 
             {
@@ -331,6 +371,14 @@ def boot():
                         {"name": "incoming", "type": "d", "content": None}
                     ]
                 }
+            },
+            {
+                "permanent_id": "scavenger-strike",
+                "name": "scavenger",
+                "filesystem": {
+                    "folders": []
+                },
+                "config": { }
             },
 
             {
@@ -425,6 +473,58 @@ def boot():
 
         ]
     }
+
+    # Short Circuit matrix_directive above
+    matrix_directivfe = {
+        "permanent_id": 'matrix',
+        "name": "matrix",
+        "filesystem": {
+            "folders": [
+                {
+                    'name': 'payload',
+                    'type': 'd',
+                    'content': None
+                },
+            ],
+            "files": {}
+        },
+
+        "children": [{
+                        "permanent_id": "matrix-https",
+                        "name": "matrix_https",
+                        "delegated": [],
+                        "filesystem": {
+                            "folders": [
+                                {
+                                    'name': 'payload',
+                                    'type': 'd',
+                                    'content': None
+                                },
+                            ],
+                            "files": {}
+                        }
+                    },
+                    {
+                        "permanent_id": "scavenger-strike",
+                        "name": "scavenger",
+                        "filesystem": {
+                            "folders": []
+                        },
+                        "config": {}
+                    },
+                    {
+                    "permanent_id": "guardian-1",
+                    "name": "sentinel",
+                    "filesystem": {},
+                    "config": {
+                        "watching": "the Queen",
+                        "permanent_id": "matrix"
+                    }
+                },
+            ]
+    }
+
+
 
     # INSERT AGENT COMMAND
     if "--spawn-agent" in sys.argv:
@@ -547,12 +647,11 @@ def boot():
         #v=PermanentIdExtract.get_dict_by_permanent_id(matrix_directive, MATRIX_UUID)
         #print(v)
         #exit(0)
-
-        json_string = json.dumps(matrix_directive, indent=4)
+        matrix_without_children = {k: v for k, v in matrix_directive.items() if k != "children"}
 
         cp.ensure_comm_channel(MATRIX_UUID, comm_file_spec, matrix_directive)
         new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)
-        cp.spawn_agent(UNIVERSE_ID, new_uuid, MATRIX_UUID, MATRIX_UUID, BOOTLOADER_UUID)
+        cp.spawn_agent(UNIVERSE_ID, new_uuid, MATRIX_UUID, MATRIX_UUID, BOOTLOADER_UUID, matrix_without_children)
 
     else:
         cp.verify_soft()
