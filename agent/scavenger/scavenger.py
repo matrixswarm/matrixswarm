@@ -89,6 +89,7 @@ class ScavengerAgent(BootAgent):
                     interruptible_sleep(self, 120)
                     continue
 
+                #Loop through the pod looking for boot.json to extract --job [identity train]
                 for uuid in os.listdir(pod_root):
                     try:
                         pod_path = os.path.join(pod_root, uuid)

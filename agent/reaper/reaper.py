@@ -76,13 +76,20 @@ class ReaperAgent(BootAgent):
             incoming_dir = os.path.join(self.path_resolution["comm_path"], self.command_line_args["permanent_id"], "incoming")
             os.makedirs(incoming_dir, exist_ok=True)
 
-            # Write tombstone
+            pod_dir = os.path.join(self.path_resolution["pod_path"], self.command_line_args["install_name"])
+
+            # Write tombstone to comm
             die_path = os.path.join(incoming_dir, "die")
             with open(die_path, "w") as f:
                 f.write("true")
 
-            # Write tombstone
+            # Write tombstone to comm
             tombstone_path = os.path.join(incoming_dir, "tombstone")
+            with open(tombstone_path, "w") as f:
+                f.write("true")
+
+            # Write tombstone to pod
+            tombstone_path = os.path.join(pod_dir, "tombstone")
             with open(tombstone_path, "w") as f:
                 f.write("true")
 
