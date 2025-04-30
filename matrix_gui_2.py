@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QMessageBox
 
 from PyQt5.QtWidgets import QListWidget, QListWidgetItem
 
@@ -44,6 +45,7 @@ class MatrixCommandBridge(QWidget):
         splitter.addWidget(self.right_panel)
         splitter.setSizes([300, 800, 300])
 
+        self.center_panel = self.create_tree_panel()
         self.tree_display = QListWidget()
         self.tree_display.itemClicked.connect(self.handle_tree_click)
 
@@ -97,13 +99,15 @@ class MatrixCommandBridge(QWidget):
         box = QGroupBox("🧠 Hive Tree View")
         layout = QVBoxLayout()
 
+        box = QGroupBox("🧠 Hive Tree View")
+        layout = QVBoxLayout()
+
         self.tree = QTreeWidget()
         self.tree.setHeaderLabel("Hive Agents")
 
         reload_btn = QPushButton("Reload Tree")
         layout.addWidget(self.tree)
         layout.addWidget(reload_btn)
-        box.setLayout(layout)
 
         self.download_stats = QLabel("⏳ Waiting for data...")
         self.download_stats.setStyleSheet("color: gray; background-color: #252526; font-family: Courier; padding: 5px;")
@@ -187,7 +191,14 @@ class MatrixCommandBridge(QWidget):
             )
 
             if response.status_code == 200:
+
+
                 tree = response.json().get("tree", {})
+
+
+                if not tree:
+                    QMessageBox.critical(self, "Tree Load Error", "Matrix returned no tree data.")
+
                 print("[DEBUG] Raw tree payload:\n", json.dumps(tree, indent=2))
 
                 output = self.render_tree(tree.get("matrix", {}))

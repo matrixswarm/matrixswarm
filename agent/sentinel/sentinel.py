@@ -92,7 +92,6 @@ class SentinelAgent(BootAgent):
         if not os.path.exists(incoming_path):
             return None
 
-
         # 🔥 If no Matrix response, check local tree file
         agent_tree_file = os.path.join(self.path_resolution['comm_path'], perm_id, "agent_tree.json")
         if os.path.exists(agent_tree_file):
