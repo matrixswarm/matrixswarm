@@ -56,6 +56,9 @@ class MatrixHTTPS(BootAgent):
             except Exception as e:
                 return jsonify({"status": "error", "message": str(e)}), 500
 
+        @self.app.route("/matrix/ping", methods=["GET"])
+        def ping():
+            return jsonify({"status": "ok"}), 200
 
         @self.app.route("/matrix", methods=["POST"])
         def receive_command():
