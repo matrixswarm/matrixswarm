@@ -174,6 +174,8 @@ class MatrixGUI(tk.Tk):
         self.tree_data = {}
 
         self.create_widgets()
+
+
         self.start_tree_autorefresh(interval=10)
 
         # Entry point to hook into your GUI
@@ -228,7 +230,8 @@ class MatrixGUI(tk.Tk):
         self.team_select.pack(pady=5)
         self.team_select.set("---")
 
-        # 🔻 Drop this directly after
+
+
         def on_team_change(event):
             print("[DEBUG] Dropdown changed:", repr(self.team_select.get()))
 
@@ -236,7 +239,6 @@ class MatrixGUI(tk.Tk):
 
 
         tk.Button(left, text="DEPLOY SELECTED TEAM", command=self.deploy_selected_team).pack(pady=5)
-
         tk.Button(left, text="SEND SPAWN TO MATRIX", command=self.send_spawn).pack(pady=5)
         tk.Button(left, text="INJECT TO TREE", command=self.send_injection).pack(pady=5)
         tk.Button(left, text="SHUTDOWN AGENT", command=self.shutdown_agent).pack(pady=5)
@@ -245,6 +247,8 @@ class MatrixGUI(tk.Tk):
         tk.Button(left, text="View Tagged Agents", command=self.view_tags).pack(pady=5)
         tk.Button(left, text="REQUEST TREE FROM MATRIX", command=self.request_tree_from_matrix).pack(pady=5)
         tk.Button(left, text="???", command=self.dont_touch_that).pack(pady=5)
+
+        #center frame
         center = tk.Frame(self, bg="#1e1e1e")
         center.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 

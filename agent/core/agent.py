@@ -49,7 +49,6 @@ class Agent:
                 if not os.path.exists(hello_moto_path):
                     os.makedirs(hello_moto_path, exist_ok=True)
 
-
                 #prune the hello.motto folder, keep the 3 newest, do this every 60 secs
                 cnt += 1
                 if cnt > 3:

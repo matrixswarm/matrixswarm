@@ -21,11 +21,14 @@ from agent.core.boot_agent import BootAgent
 class SentinelAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
         super().__init__(path_resolution, command_line_args)
+        self.path_resolution=path_resolution
+        self.command_line_args=command_line_args
         config = tree_node.get("config", {})
         self.watching = config.get("watching", "the Matrix")
         self.permanent_id = config.get("permanent_id", None)
         self.target_node = None
         self.time_delta_timeout = config.get("timeout", 30)  # Default 5 min if not set
+
 
     def post_boot(self):
         self.log(f"[SENTINEL] Sentinel booted. Monitoring: {self.watching}")
@@ -36,49 +39,53 @@ class SentinelAgent(BootAgent):
     def watch_cycle(self):
         self.log("[SENTINEL] Watch cycle started.")
         while self.running:
-            try:
-                if self.target_node is None:
-                    response = self.receive_node_response(self.permanent_id)
-                    if response is not None:
-                        self.target_node = {k: v for k, v in response.items()}
-                        self.log(self.target_node)
-                    interruptible_sleep(self, 5)
-                    continue
 
-                perm_id = self.target_node.get("permanent_id")
+            if self.permanent_id:
 
-                if not perm_id:
-                    self.log("[SENTINEL][WATCH] Target node missing perm_id. Breathing idle.")
-                    interruptible_sleep(self, 5)
-                    continue
+                try:
+                    if self.target_node is None:
+                        response = self.receive_node_response(self.permanent_id)
+                        if response is not None:
+                            self.target_node = {k: v for k, v in response.items()}
+                            self.log(self.target_node)
+                        interruptible_sleep(self, 5)
+                        continue
 
-                die_file = os.path.join(self.path_resolution['comm_path'], perm_id, 'incoming', 'die')
+                    perm_id = self.target_node.get("permanent_id")
 
-                if os.path.exists(die_file):
-                    self.log(f"[SENTINEL][BLOCKED] {perm_id} has die file.")
-                    interruptible_sleep(self, 10)
-                    continue
+                    if not perm_id:
+                        self.log("[SENTINEL][WATCH] Target node missing perm_id. Breathing idle.")
+                        interruptible_sleep(self, 5)
+                        continue
 
-                time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], perm_id)
-                if time_delta is not None and time_delta < self.time_delta_timeout:
-                    interruptible_sleep(self, 10)
-                    continue
+                    die_file = os.path.join(self.path_resolution['comm_path'], perm_id, 'incoming', 'die')
 
-                self.spawn_agent_direct(
-                    perm_id=perm_id,
-                    agent_name=self.target_node.get("name"),
-                    tree_node=self.target_node
-                )
-                self.log(f"[SENTINEL][SPAWNED] {perm_id} respawned successfully.")
+                    if os.path.exists(die_file):
+                        self.log(f"[SENTINEL][BLOCKED] {perm_id} has die file.")
+                        interruptible_sleep(self, 10)
+                        continue
 
-                interruptible_sleep(self, 10)
+                    time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], perm_id)
+                    if time_delta is not None and time_delta < self.time_delta_timeout:
+                        interruptible_sleep(self, 10)
+                        continue
 
-            except Exception as e:
-                tb = traceback.format_exc()
-                self.log(f"[SENTINEL][WATCH-ERROR] {e}")
-                self.log(f"[SENTINEL][TRACEBACK]\n{tb}")
-                interruptible_sleep(self, 30)
+                    self.spawn_agent_direct(
+                        perm_id=perm_id,
+                        agent_name=self.target_node.get("name"),
+                        tree_node=self.target_node
+                    )
+                    self.log(f"[SENTINEL][SPAWNED] {perm_id} respawned successfully.")
 
+
+
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    self.log(f"[SENTINEL][WATCH-ERROR] {e}")
+                    self.log(f"[SENTINEL][TRACEBACK]\n{tb}")
+                    interruptible_sleep(self, 30)
+
+            interruptible_sleep(self, 10)
 
     def receive_node_response(self, perm_id):
         incoming_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args.get("permanent_id", "sentinel"), "incoming")
