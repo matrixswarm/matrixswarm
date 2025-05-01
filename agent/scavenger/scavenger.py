@@ -38,6 +38,12 @@ class ScavengerAgent(BootAgent):
         except Exception as e:
             self.log(f"[SCAVENGER][POST-BOOT ERROR] {e}")
 
+    def worker_pre(self):
+        self.log("[SCAVENGER] Agent activated. Monitoring for cleanup ops.")
+
+    def worker_post(self):
+        self.log("[SCAVENGER] Shutdown confirmed. Sweep logs complete.")
+
     def safe_command_listener(self):
         try:
             self.command_listener()
