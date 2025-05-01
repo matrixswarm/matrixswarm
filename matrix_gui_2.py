@@ -143,6 +143,7 @@ class MatrixCommandBridge(QWidget):
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
+                self.status_label.setText("🟢 Connected")
                 tree = response.json().get("tree", {})
                 self.render_tree_to_gui(tree)
             else:
