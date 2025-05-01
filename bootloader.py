@@ -534,19 +534,6 @@ def boot():
     }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
     # INSERT AGENT COMMAND
     if "--spawn-agent" in sys.argv:
         try:
