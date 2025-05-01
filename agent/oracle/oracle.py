@@ -151,6 +151,24 @@ class OracleAgent(BootAgent):
         except Exception as e:
             return f"[ORACLE][ERROR] Failed to query OpenAI: {e}"
 
+    def send_oracle_reply(self, query, response):
+            recipient = query.get("response_to")
+            if not recipient:
+                self.log("[ORACLE][REPLY][ERROR] No response_to field in query.")
+                return
+
+            try:
+                inbox = os.path.join(self.path_resolution["comm_path"], recipient, "incoming")
+                os.makedirs(inbox, exist_ok=True)
+                fname = f"oracle_response_{int(time.time())}.json"
+                with open(os.path.join(inbox, fname), "w") as f:
+                    json.dump(response, f, indent=2)
+                self.log(f"[ORACLE] Reply sent to {recipient}: {fname}")
+            except Exception as e:
+                self.log(f"[ORACLE][REPLY-FAIL] Failed to deliver reply: {e}")
+
+
+
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
     oracle = OracleAgent(path_resolution, command_line_args)
