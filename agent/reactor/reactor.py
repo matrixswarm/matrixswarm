@@ -1,8 +1,8 @@
 import os
 import json
 import time
-
 from agent.core.boot_agent import BootAgent
+from agent.core.utils.swarm_sleep import interruptible_sleep
 
 class ReactorAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
@@ -12,53 +12,36 @@ class ReactorAgent(BootAgent):
         self.spawn_target = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
         os.makedirs(self.spawn_target, exist_ok=True)
 
-    def pre_boot(self):
-        message = "ReactorAgent online. Listening for Oracle directives."
-        print(message)
-        self.broadcast(message)
-
-    def post_boot(self):
-        message = "Reactor standing by for dynamic agent deployment."
-        print(message)
-        self.broadcast(message)
-
-    def broadcast(self, message):
-        try:
-            mailman_dir = os.path.join(self.path_resolution["comm_path"], "mailman-1", "payload")
-            os.makedirs(mailman_dir, exist_ok=True)
-            payload = {
-                "uuid": self.command_line_args.get("permanent_id", "reactor-1"),
-                "timestamp": time.time(),
-                "severity": "info",
-                "msg": message
-            }
-            fname = f"reactor_boot_{int(time.time())}.json"
-            with open(os.path.join(mailman_dir, fname), "w") as f:
-                json.dump(payload, f, indent=2)
-        except Exception as e:
-            self.log(f"[REACTOR][ERROR] {e}")
+    def worker_pre(self):
+        msg = "[REACTOR] Initializing reflex protocol. Listening for Oracle decisions."
+        print(msg)
+        self.broadcast(msg)
 
     def worker(self):
-        self.log("[REACTOR] Agent online. Monitoring for Oracle decisions...")
-        while self.running:
-            try:
-                for fname in os.listdir(self.payload_dir):
-                    if not fname.endswith(".json"):
-                        continue
-                    fpath = os.path.join(self.payload_dir, fname)
-                    with open(fpath, "r") as f:
-                        msg = json.load(f)
+        self.check_oracle_triggers_once()
+        interruptible_sleep(self, 2)
 
-                    action = msg.get("action_taken")
-                    classification = msg.get("classification")
+    def worker_post(self):
+        self.log("[REACTOR] Shutting down. Reflexes deactivated.")
 
-                    if classification == "threat" and action == "interrupted":
-                        self.deploy_defense_agent("mirror-2", "filesystem_mirror")
+    def check_oracle_triggers_once(self):
+        try:
+            for fname in os.listdir(self.payload_dir):
+                if not fname.endswith(".json"):
+                    continue
+                fpath = os.path.join(self.payload_dir, fname)
+                with open(fpath, "r") as f:
+                    msg = json.load(f)
 
-                    os.remove(fpath)
-            except Exception as e:
-                self.log(f"[REACTOR][ERROR] {e}")
-            time.sleep(2)
+                action = msg.get("action_taken")
+                classification = msg.get("classification")
+
+                if classification == "threat" and action == "interrupted":
+                    self.deploy_defense_agent("mirror-2", "filesystem_mirror")
+
+                os.remove(fpath)
+        except Exception as e:
+            self.log(f"[REACTOR][ERROR] {e}")
 
     def deploy_defense_agent(self, perm_id, agent_name):
         spawn_payload = {
@@ -77,6 +60,25 @@ class ReactorAgent(BootAgent):
         with open(path, "w") as f:
             json.dump(spawn_payload, f, indent=2)
         self.log(f"[REACTOR] Dispatched spawn request for {agent_name} as {perm_id}.")
+
+    def broadcast(self, message):
+        try:
+            mailman_dir = os.path.join(self.path_resolution["comm_path"], "mailman-1", "payload")
+            os.makedirs(mailman_dir, exist_ok=True)
+            payload = {
+                "uuid": self.command_line_args.get("permanent_id", "reactor-1"),
+                "timestamp": time.time(),
+                "severity": "info",
+                "msg": message
+            }
+            fname = f"reactor_boot_{int(time.time())}.json"
+            with open(os.path.join(mailman_dir, fname), "w") as f:
+                json.dump(payload, f, indent=2)
+        except Exception as e:
+            self.log(f"[REACTOR][ERROR] {e}")
+
+
+
 
 if __name__ == "__main__":
     # label = None
