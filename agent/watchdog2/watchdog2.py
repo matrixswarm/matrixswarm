@@ -5,6 +5,7 @@ import os
 from agent.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from agent.core.mixin.delegation import DelegationMixin
 from agent.core.boot_agent import BootAgent
+from agent.core.utils.swarm_sleep import interruptible_sleep
 
 class Watchdog2Agent(BootAgent, DelegationMixin):
 
@@ -14,18 +15,19 @@ class Watchdog2Agent(BootAgent, DelegationMixin):
         self.pending_resurrections = {}
         self.label = self.command_line_args.get("permanent_id", "UNKNOWN").upper()
 
-    def pre_boot(self):
-        self.log("[WATCHDOG-2] Pre-boot check passed.")
-
-    def post_boot(self):
-        self.log("[WATCHDOG-2] Boot complete. Resurrection monitor engaged.")
+    def worker_pre(self):
+        self.log("[WATCHDOG-2] Agent initialized. Resurrection monitoring engaged.")
 
     def worker(self):
-        self.log("[WATCHDOG-2] Resurrection scan underway...")
-        while self.running:
-            self.check_heartbeats()
-            self.retry_failed_agents()
-            time.sleep(5)
+        self.scan_once()
+        interruptible_sleep(self, 5)
+
+    def worker_post(self):
+        self.log("[WATCHDOG-2] Agent shutdown. Resurrection attempts halted.")
+
+    def scan_once(self):
+        self.check_heartbeats()
+        self.retry_failed_agents()
 
     def check_heartbeats(self):
         comm_path = self.path_resolution["comm_path"]
@@ -41,7 +43,7 @@ class Watchdog2Agent(BootAgent, DelegationMixin):
                 continue
 
             if delta > timeout:
-                self.log(f"[{self.label}] {agent_id} missed heartbeat. Starting recovery attempts.")
+                self.log(f"[{self.label}] {agent_id} missed heartbeat. Starting recovery.")
                 self.pending_resurrections[agent_id] = {"attempts": 1, "last_seen": now}
                 self.recover_agent(agent_id)
             else:
@@ -51,16 +53,16 @@ class Watchdog2Agent(BootAgent, DelegationMixin):
         now = time.time()
         for agent_id, info in list(self.pending_resurrections.items()):
             if self.confirm_resurrection(agent_id):
-                self.log(f"[WATCHDOG-2] Resurrection confirmed for {agent_id}.")
+                self.log(f"[WATCHDOG-2] Resurrection confirmed: {agent_id}")
                 del self.pending_resurrections[agent_id]
             else:
                 if info["attempts"] >= 3:
-                    self.log(f"[WATCHDOG-2] {agent_id} failed to resurrect after 3 tries. Marked as fallen.")
+                    self.log(f"[WATCHDOG-2] {agent_id} failed to resurrect. Marked as fallen.")
                     del self.pending_resurrections[agent_id]
                 elif now - info["last_seen"] > 20:
                     info["attempts"] += 1
                     info["last_seen"] = now
-                    self.log(f"[WATCHDOG-2] Retrying resurrection for {agent_id} (attempt {info['attempts']}).")
+                    self.log(f"[WATCHDOG-2] Retrying resurrection: {agent_id} (attempt {info['attempts']})")
                     self.recover_agent(agent_id)
 
     def confirm_resurrection(self, agent_id):
@@ -76,30 +78,26 @@ class Watchdog2Agent(BootAgent, DelegationMixin):
     def recover_agent(self, perm_id):
         matrix_comm = os.path.join(self.path_resolution["comm_path"], "matrix", "incoming")
         os.makedirs(matrix_comm, exist_ok=True)
-
         request = {
             "action": "request_delegation",
             "requester": perm_id
         }
-
         filename = f"request_delegation_{int(time.time())}.cmd"
         full_path = os.path.join(matrix_comm, filename)
-
         with open(full_path, "w") as f:
             json.dump(request, f, indent=2)
-
-        self.log(f"[WATCHDOG-2] Recovery request dispatched to Matrix for {perm_id} → {filename}")
+        self.log(f"[WATCHDOG-2] Recovery request dispatched for {perm_id} → {filename}")
 
     def process_command(self, command):
         try:
             action = command.get("action")
             if action == "die":
-                self.log("[COMMAND] Watchdog-2 received die command.")
+                self.log("[CMD] Watchdog-2 received die command.")
                 self.running = False
             elif action == "update_delegates":
-                self.process_update_delegates(command)  # From DelegationMixin
+                self.process_update_delegates(command)
             else:
-                self.log(f"[COMMAND] Ignoring unknown action: {action}")
+                self.log(f"[CMD] Unknown action: {action}")
         except Exception as e:
             self.log(f"[CMD-ERROR] {e}")
 

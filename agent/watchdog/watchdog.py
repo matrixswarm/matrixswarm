@@ -15,51 +15,40 @@ from agent.core.boot_agent import BootAgent
 
 class WatchdogAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
-
         super().__init__(path_resolution, command_line_args)
+        self.failure_count = 0
 
-
-    def load_config(self):
-
-        #injected through top of script during spawning
+    def worker_pre(self):
         config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
-
         self.ping_url = config.get("ping_url", "https://matrixswarm.com")
         self.check_interval = config.get("check_interval_sec", 60)
         self.timeout = config.get("timeout_sec", 5)
         self.max_failures = config.get("max_failures", 3)
         self.alert_action = config.get("alert_action", "notify_matrix")
 
-        self.log(
-            f"[WATCHDOG][CONFIG] Loaded: ping={self.ping_url}, interval={self.check_interval}s, timeout={self.timeout}s, max_failures={self.max_failures}, action={self.alert_action}")
+        self.log(f"[WATCHDOG][CONFIG] Loaded: ping={self.ping_url}, interval={self.check_interval}s, timeout={self.timeout}s, max_failures={self.max_failures}, action={self.alert_action}")
+        self.log("[WATCHDOG] WatchdogAgent initialized and watching.")
 
     def worker(self):
+        self.check_ping_once()
+        interruptible_sleep(self, self.check_interval)
 
+    def worker_post(self):
+        self.log("[WATCHDOG] WatchdogAgent is shutting down. Signal loop terminated.")
 
-        self.load_config()
-        self.log("[WATCHDOG] Config loaded in post_boot.")
-
-        self.log("[WATCHDOG] WatchdogAgent is now running.")
-        while self.running:
-            try:
-                response = requests.get(self.ping_url, timeout=self.timeout)
-                if response.status_code != 200:
-                    raise Exception(f"Bad status code: {response.status_code}")
-                # Success, reset failure count
+    def check_ping_once(self):
+        try:
+            response = requests.get(self.ping_url, timeout=self.timeout)
+            if response.status_code != 200:
+                raise Exception(f"Bad status code: {response.status_code}")
+            self.failure_count = 0
+            self.log(f"[WATCHDOG][OK] {self.ping_url} is UP [200]")
+        except Exception as e:
+            self.failure_count += 1
+            self.log(f"[WATCHDOG][FAIL] ({self.failure_count}/{self.max_failures}): {e}")
+            if self.failure_count >= self.max_failures:
+                self.handle_alert(str(e))
                 self.failure_count = 0
-                r = f"[WATCHDOG][INFO]Ping success: {self.ping_url} [200 OK]"
-                self.log(r)
-            except Exception as e:
-                self.failure_count += 1
-                r = f"[WATCHDOG][INFO]Ping failure: ({self.failure_count}/{self.max_failures}): {e}"
-                self.log(r)
-                if self.failure_count >= self.max_failures:
-                    self.handle_alert(str(e))
-                    self.failure_count = 0  # Reset after alert
-            interruptible_sleep(self, self.check_interval)
-            if not self.running:
-                self.log("[WATCHDOG] Shutdown detected mid-sleep. Exiting now.")
-                return
 
     def handle_alert(self, error_message):
         alert = {
@@ -77,9 +66,8 @@ class WatchdogAgent(BootAgent):
         if self.alert_action == "notify_matrix":
             print(alert)
         elif self.alert_action == "log_only":
-            r=f"[WATCHDOG][ALERT] (log_only): {json.dumps(alert)}"
-            self.log(r)
-        # Optional: add logic for direct replace/inject here
+            self.log(f"[WATCHDOG][ALERT] (log_only): {json.dumps(alert)}")
+
 
 if __name__ == "__main__":
     # label = None
