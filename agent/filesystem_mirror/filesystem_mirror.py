@@ -3,6 +3,7 @@ import time
 import json
 
 from agent.core.boot_agent import BootAgent
+from agent.core.utils.swarm_sleep import interruptible_sleep
 
 class FilesystemMirrorAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
@@ -16,20 +17,28 @@ class FilesystemMirrorAgent(BootAgent):
         self.report_to = config.get("report_to", "mailman-1")
         self.out_dir = os.path.join(self.path_resolution["comm_path"], self.report_to, "payload")
         os.makedirs(self.out_dir, exist_ok=True)
+        self.cycle_index = 0
+
+    def worker_pre(self):
+        self.log(f"[MIRROR] Mission start. Watching {self.watch_path} [mode: {self.mode}]")
 
     def worker(self):
-        self.log(f"[MIRROR] Scanning: {self.watch_path} [mode: {self.mode}]")
-
-        self.scan_and_log()
-
-        if self.self_destruct:
-            self.log("[MIRROR] Mission complete. Self-destruct initiated.")
-            self.running = False
+        if self.mode != "cycle" and self.cycle_index > 0:
+            interruptible_sleep(self, 10)
             return
 
-        while self.running and self.mode == "cycle":
-            time.sleep(10)
-            self.scan_and_log()
+        self.cycle_index += 1
+        self.scan_and_log()
+
+        if self.self_destruct and self.mode == "once":
+            self.log("[MIRROR] Mission complete. Self-destruct initiated.")
+            self.running = False
+
+        if self.mode == "cycle":
+            interruptible_sleep(self, 10)
+
+    def worker_post(self):
+        self.log(f"[MIRROR] Final cycle complete. Agent shutting down after {self.cycle_index} scan(s).")
 
     def scan_and_log(self):
         snapshot = []
@@ -56,7 +65,7 @@ class FilesystemMirrorAgent(BootAgent):
             "timestamp": time.time(),
             "watch_path": self.watch_path,
             "file_count": len(snapshot),
-            "files": snapshot[:50]  # Limit for brevity
+            "files": snapshot[:50]
         }
 
         fname = f"mirror_{int(time.time())}.json"

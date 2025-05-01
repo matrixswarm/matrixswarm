@@ -6,6 +6,8 @@ import time
 import json
 
 from agent.core.boot_agent import BootAgent
+from agent.core.utils.swarm_sleep import interruptible_sleep
+
 
 class CommanderAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
@@ -19,9 +21,8 @@ class CommanderAgent(BootAgent):
         self.log("[COMMANDER] Active swarm dashboard engaged.")
 
     def worker(self):
-        while self.running:
-            self.track_agents()
-            time.sleep(10)
+        self.track_agents()
+        interruptible_sleep(self, 10)
 
     def track_agents(self):
         comm_root = self.path_resolution["comm_path"]

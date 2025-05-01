@@ -469,8 +469,17 @@ def boot():
                 "filesystem": {
                     "folders": [{"name": "incoming", "type": "d"}]
                 }
-            }
+            },
+            {
+                "permanent_id": "worker-1",
+                "name": "worker",
+                "config": {
 
+                },
+                "filesystem": {
+                    "folders": [{"name": "incoming", "type": "d"}]
+                }
+            }
         ]
     }
 
@@ -523,6 +532,18 @@ def boot():
                 },
             ]
     }
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

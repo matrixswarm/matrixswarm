@@ -28,45 +28,60 @@ class EmailCheckAgent(BootAgent):
         self.payload_dir = os.path.join(self.path_resolution["comm_path"], self.report_to, "payload")
         os.makedirs(self.payload_dir, exist_ok=True)
 
-    def worker(self):
+    def worker_pre(self):
+        import socket
+        import imaplib
+
+        self.log("[EMAIL] Preparing IMAP connection...")
         socket.setdefaulttimeout(10)
-        while self.running:
+        try:
+            self.mail = imaplib.IMAP4_SSL(self.mail_host)
+            self.mail.login(self.mail_user, self.mail_pass)
+            self.mail.select("inbox")
+            self.log("[EMAIL] Connected to inbox.")
+        except Exception as e:
+            self.log(f"[EMAIL][ERROR][LOGIN] {e}")
+            self.mail = None
+
+    def worker(self):
+        import email
+        from email.header import decode_header
+
+        if not self.mail:
+            return  # Connection failed during pre
+
+        try:
+            result, data = self.mail.search(None, 'UNSEEN')
+            if result != 'OK' or not data or not data[0]:
+                return
+
+            ids = data[0].split()
+            for num in ids:
+                if not self.running:
+                    break
+
+                result, msg_data = self.mail.fetch(num, "(RFC822)")
+                if result != 'OK':
+                    continue
+
+                raw = msg_data[0][1]
+                msg = email.message_from_bytes(raw)
+                subject, encoding = decode_header(msg["Subject"])[0]
+                subject = subject.decode(encoding or "utf-8") if isinstance(subject, bytes) else subject
+
+                self.log(f"[EMAIL] New mail: {subject}")
+
+        except Exception as e:
+            self.log(f"[EMAIL][ERROR][WORKER] {e}")
+
+    def worker_post(self):
+        if hasattr(self, 'mail') and self.mail:
             try:
-                with imaplib.IMAP4_SSL(self.mail_host) as mail:
-                    mail.login(self.mail_user, self.mail_pass)
-                    mail.select("inbox")
-
-                    result, data = mail.search(None, 'UNSEEN')
-                    ids = data[0].split()
-                    for num in ids:
-                        if not self.running:
-                            break
-
-                        result, msg_data = mail.fetch(num, "(RFC822)")
-                        raw = msg_data[0][1]
-                        msg = email.message_from_bytes(raw)
-
-                        subject, encoding = decode_header(msg["Subject"])[0]
-                        subject = subject.decode(encoding or "utf-8") if isinstance(subject, bytes) else subject
-
-                        from_email = msg.get("From")
-                        payload = {
-                            "uuid": self.command_line_args["permanent_id"],
-                            "timestamp": time.time(),
-                            "from": from_email,
-                            "subject": subject,
-                            "body": self.extract_body(msg)
-                        }
-
-                        fname = f"email_{int(time.time())}.json"
-                        with open(os.path.join(self.payload_dir, fname), "w") as f:
-                            json.dump(payload, f, indent=2)
-
-                        self.log(f"[EMAIL] Logged message from {from_email}: {subject}")
-
+                self.mail.logout()
+                self.log("[EMAIL] Logged out cleanly.")
             except Exception as e:
-                self.log(f"[EMAIL][ERROR] {e}")
-            interruptible_sleep(self, self.interval)
+                self.log(f"[EMAIL][ERROR][LOGOUT] {e}")
+
 
     def extract_body(self, msg):
         if msg.is_multipart():

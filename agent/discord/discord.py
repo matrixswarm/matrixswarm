@@ -22,10 +22,12 @@ class DiscordAgent(BootAgent):
         self.channel_id = int(config.get("channel_id", 0))
         self.name = "DiscordAgentV3e"
 
-    def worker(self):
+    def worker_pre(self):
         self.log("[DISCORD] Worker alive, idling.")
-        while self.running:
-            interruptible_sleep(self, 5)
+
+    def worker(self):
+
+        interruptible_sleep(self, 20)
 
     def post_boot(self):
         self.log("[DISCORD] Payload watcher thread starting...")

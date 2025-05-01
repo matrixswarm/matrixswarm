@@ -6,6 +6,8 @@ import smtplib
 from email.message import EmailMessage
 from dotenv import load_dotenv
 from agent.core.boot_agent import BootAgent
+from agent.core.utils.swarm_sleep import interruptible_sleep
+
 
 load_dotenv()
 
@@ -22,23 +24,23 @@ class EmailSendAgent(BootAgent):
         self.email_pass = config.get("password") or os.getenv("EMAILSENDAGENT_PASSWORD")
 
     def worker(self):
-        while self.running:
-            for fname in os.listdir(self.watch_path):
-                if not fname.endswith(".json"):
-                    continue
 
-                try:
-                    fpath = os.path.join(self.watch_path, fname)
-                    with open(fpath, "r") as f:
-                        msg_data = json.load(f)
+        for fname in os.listdir(self.watch_path):
+            if not fname.endswith(".json"):
+                continue
 
-                    self.send_email(msg_data)
-                    self.log(f"[EMAIL] Sent: {msg_data.get('subject')}")
-                    os.remove(fpath)
+            try:
+                fpath = os.path.join(self.watch_path, fname)
+                with open(fpath, "r") as f:
+                    msg_data = json.load(f)
 
-                except Exception as e:
-                    self.log(f"[EMAIL][ERROR] Failed to send {fname}: {e}")
-            time.sleep(4)
+                self.send_email(msg_data)
+                self.log(f"[EMAIL] Sent: {msg_data.get('subject')}")
+                os.remove(fpath)
+
+            except Exception as e:
+                self.log(f"[EMAIL][ERROR] Failed to send {fname}: {e}")
+        interruptible_sleep(self, 4)
 
     def send_email(self, data):
         from email.message import EmailMessage

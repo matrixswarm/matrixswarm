@@ -1,28 +1,19 @@
-# MatrixSwarm GUI Template: Command Bridge Layout (PyQt5)
-
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QTreeWidget, QTreeWidgetItem,
-    QTextEdit, QComboBox, QLineEdit, QGroupBox, QSplitter, QFileDialog
+    QPushButton, QLabel, QListWidget, QListWidgetItem,
+    QLineEdit, QGroupBox, QSplitter, QFileDialog,
+    QTextEdit, QStatusBar, QSizePolicy, QStackedLayout
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QMessageBox
-
-from PyQt5.QtWidgets import QListWidget, QListWidgetItem
-
-
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QColor, QFont, QPalette
 import sys
-from agent.core.live_tree import LiveTree
+import requests
 import os
-import time
 import json
+import time
 
-#SWIPE OUT THE IP AND PORT FOR YOUR OWN
 MATRIX_HOST = "https://147.135.68.135:65431/matrix"
-AGENTS_HOST = "https://147.135.68.135:65431/agents"
 CLIENT_CERT = ("certs/client.crt", "certs/client.key")
-SERVER_CERT = "certs/server.crt"
 REQUEST_TIMEOUT = 5
 
 class MatrixCommandBridge(QWidget):
@@ -30,14 +21,53 @@ class MatrixCommandBridge(QWidget):
         super().__init__()
         self.setWindowTitle("MatrixSwarm V2: Command Bridge")
         self.setMinimumSize(1400, 800)
+        self.setup_ui()
+        self.setup_status_bar()
+        self.setup_timers()
+        self.check_matrix_connection()
 
-        layout = QHBoxLayout()
-        self.setLayout(layout)
+    def setup_ui(self):
+        self.main_layout = QVBoxLayout()
+        self.setLayout(self.main_layout)
 
-        # Panels
-        self.left_panel = self.create_mission_panel()
-        self.center_panel = self.create_tree_panel()
-        self.right_panel = self.create_log_panel()
+        self.stack = QStackedLayout()
+        self.command_view = self.build_command_view()
+        self.code_view = self.build_code_view()
+
+        self.stack.addWidget(self.command_view)
+        self.stack.addWidget(self.code_view)
+
+        self.main_layout.addLayout(self.stack)
+
+    def setup_status_bar(self):
+        self.status_bar = QStatusBar()
+        self.status_bar.setStyleSheet("color: #33ff33; background-color: #111; font-family: Courier;")
+        self.status_bar.setFixedHeight(30)
+        self.status_label = QLabel("🔴 Disconnected")
+        self.status_bar.addPermanentWidget(self.status_label)
+        self.main_layout.addWidget(self.status_bar)
+
+    def setup_timers(self):
+        self.pulse_state = True
+        self.pulse_timer = QTimer()
+        self.pulse_timer.timeout.connect(self.toggle_status_dot)
+        self.pulse_timer.start(1000)
+
+        self.start_tree_autorefresh(interval=5)
+
+    def toggle_status_dot(self):
+        if self.status_label.text().endswith("Connected"):
+            dot = "🟢" if self.pulse_state else "⚫"
+            self.status_label.setText(f"{dot} Connected")
+            self.pulse_state = not self.pulse_state
+
+    def build_command_view(self):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+
+        self.left_panel = self.build_command_panel()
+        self.center_panel = self.build_tree_panel()
+        self.right_panel = self.build_log_panel()
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.left_panel)
@@ -45,143 +75,37 @@ class MatrixCommandBridge(QWidget):
         splitter.addWidget(self.right_panel)
         splitter.setSizes([300, 800, 300])
 
-        self.center_panel = self.create_tree_panel()
-        self.tree_display = QListWidget()
-        self.tree_display.itemClicked.connect(self.handle_tree_click)
-
-        self.conn_status = QLabel("🔴 Disconnected")
-        self.conn_status.setStyleSheet("color: red; background-color: #252526; font-family: Courier;")
-
-        layout.addWidget(self.conn_status)
-
         layout.addWidget(splitter)
+        return container
 
-        self.start_connection_monitor()
+    def build_code_view(self):
+        container = QWidget()
+        layout = QVBoxLayout()
+        label = QLabel("[CODE VIEW] Future codex, code preview, or live injection shell will go here.")
+        label.setStyleSheet("color: #33ff33; font-family: Courier; padding: 20px;")
+        layout.addWidget(label)
 
+        back_btn = QPushButton("⬅️ Return to Command View")
+        back_btn.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+        back_btn.setStyleSheet("background-color: #111; color: #33ff33; border: 1px solid #00ff66;")
+        layout.addWidget(back_btn)
+
+        container.setLayout(layout)
+        return container
 
     def handle_tree_click(self, item):
         perm_id = item.data(Qt.UserRole)
-        self.agent_log_entry.setText(perm_id)
-        print(f"[CLICK] Clicked agent {perm_id}")
+        self.log_input.setText(perm_id)
+        self.view_logs()
 
-    def create_mission_panel(self):
-        box = QGroupBox("🧩 Mission Console")
-        layout = QVBoxLayout()
-
-        self.agent_name = QLineEdit()
-        self.agent_name.setPlaceholderText("agent_name")
-        self.perm_id = QLineEdit()
-        self.perm_id.setPlaceholderText("permanent_id")
-        self.target_id = QLineEdit()
-        self.target_id.setPlaceholderText("target_permanent_id")
-        self.delegate = QLineEdit()
-        self.delegate.setPlaceholderText("comma,separated,delegated")
-
-        layout.addWidget(self.agent_name)
-        layout.addWidget(self.perm_id)
-        layout.addWidget(self.target_id)
-        layout.addWidget(self.delegate)
-
-        layout.addWidget(QPushButton("RESUME AGENT"))
-        layout.addWidget(QPushButton("SHUTDOWN AGENT"))
-        layout.addWidget(QPushButton("INJECT TO TREE"))
-        layout.addWidget(QPushButton("CALL REAPER"))
-        layout.addWidget(QPushButton("DELETE SUBTREE"))
-
-        self.upload_btn = QPushButton("Upload Agent Code")
-        self.upload_btn.clicked.connect(self.upload_agent_code)
-        layout.addWidget(self.upload_btn)
-
-        box.setLayout(layout)
-        return box
-
-    def create_tree_panel(self):
-        box = QGroupBox("🧠 Hive Tree View")
-        layout = QVBoxLayout()
-
-        box = QGroupBox("🧠 Hive Tree View")
-        layout = QVBoxLayout()
-
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabel("Hive Agents")
-
-        reload_btn = QPushButton("Reload Tree")
-        layout.addWidget(self.tree)
-        layout.addWidget(reload_btn)
-
-        self.download_stats = QLabel("⏳ Waiting for data...")
-        self.download_stats.setStyleSheet("color: gray; background-color: #252526; font-family: Courier; padding: 5px;")
-        self.download_stats.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.download_stats)
-
-        return box
-
-    def create_log_panel(self):
-        box = QGroupBox("📡 Agent Intel & Logs")
-        layout = QVBoxLayout()
-
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_input = QLineEdit()
-        self.log_input.setPlaceholderText("Enter agent perm_id to view logs")
-
-        layout.addWidget(self.log_input)
-        layout.addWidget(QPushButton("View Logs"))
-        layout.addWidget(self.log_text)
-
-        box.setLayout(layout)
-        return box
-
-    def upload_agent_code(self):
-        options = QFileDialog.Options()
-        file_name, _ = QFileDialog.getOpenFileName(self, "Select Agent Python File", "", "Python Files (*.py)", options=options)
-        if file_name:
-            # Placeholder: Copy to a staging folder or trigger upload logic
-            print(f"[UPLOAD] Selected agent source: {file_name}")
-            # TODO: Notify Matrix if she requests agent and code is available
-
-    def start_connection_monitor(self):
-        self.conn_timer = QTimer(self)
-        self.conn_timer.timeout.connect(self.check_matrix_connection)
-        self.conn_timer.start(5000)  # every 5000 ms = 5 seconds
-
-    def check_matrix_connection(self):
-        import requests
-        response = None  # ⚠️ Needed for safe handling outside try
-
+    def view_logs(self):
+        perm_id = self.log_input.text().strip()
+        payload = {
+            "type": "get_log",
+            "timestamp": time.time(),
+            "content": {"perm_id": perm_id}
+        }
         try:
-            response = requests.get(
-                url=MATRIX_HOST + "/ping",  # must be supported by Matrix
-                cert=CLIENT_CERT,
-                verify=False,
-                timeout=REQUEST_TIMEOUT
-            )
-            if response.status_code == 200:
-                self.conn_status.setText("🟢 Connected")
-                self.conn_status.setStyleSheet("color: #00ff66;")
-                return True
-
-        except Exception as e:
-            print(f"[ERROR][CONNECTION CHECK] {e}")
-
-        self.conn_status.setText("🔴 Disconnected")
-        self.conn_status.setStyleSheet("color: red;")
-
-        # ✅ Only check response if it exists
-        if response and response.status_code == 200:
-            self.request_tree_from_matrix()
-
-        return False
-
-    def request_tree_from_matrix(self):
-        import requests
-        try:
-            payload = {
-                "type": "list_tree",
-                "timestamp": time.time(),
-                "content": {}
-            }
-
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
@@ -189,45 +113,54 @@ class MatrixCommandBridge(QWidget):
                 verify=False,
                 timeout=REQUEST_TIMEOUT
             )
-
             if response.status_code == 200:
-
-
-                tree = response.json().get("tree", {})
-
-
-                if not tree:
-                    QMessageBox.critical(self, "Tree Load Error", "Matrix returned no tree data.")
-
-                print("[DEBUG] Raw tree payload:\n", json.dumps(tree, indent=2))
-
-                output = self.render_tree(tree.get("matrix", {}))
-
-                self.tree_display.clear()
-                header = QListWidgetItem(f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]")
-                header.setForeground(Qt.gray)
-                self.tree_display.addItem(header)
-
-                for idx, (line, perm_id, color) in enumerate(output):
-                    item = QListWidgetItem(line)
-                    item.setData(Qt.UserRole, perm_id)
-
-                    if color == "green":
-                        item.setForeground(Qt.green)
-                    elif color == "red":
-                        item.setForeground(Qt.red)
-                    else:
-                        item.setForeground(Qt.white)
-
-                    self.tree_display.addItem(item)
-
+                data = response.json()
+                logs = data.get("log", "[NO LOG DATA RECEIVED]")
+                self.log_text.setPlainText(logs)
+                self.log_text.moveCursor(self.log_text.textCursor().End)
             else:
-                QMessageBox.critical(self, "Matrix Error", f"{response.status_code}: {response.text}")
-
+                try:
+                    message = response.json().get("message", response.text)
+                except Exception:
+                    message = response.text
+                self.log_text.setPlainText(f"[MATRIX ERROR] Could not retrieve logs for {perm_id}:{message}")
         except Exception as e:
-            QMessageBox.critical(self, "Request Failed", str(e))
+            self.log_text.setPlainText(f"[ERROR] Failed to connect to Matrix:\n{str(e)}")
 
+    def start_tree_autorefresh(self, interval=10):
+        self.tree_timer = QTimer(self)
+        self.tree_timer.timeout.connect(self.request_tree_from_matrix)
+        self.tree_timer.start(interval * 1000)
 
+    def request_tree_from_matrix(self):
+        try:
+            payload = {"type": "list_tree", "timestamp": time.time(), "content": {}}
+            response = requests.post(
+                url=MATRIX_HOST,
+                json=payload,
+                cert=CLIENT_CERT,
+                verify=False,
+                timeout=REQUEST_TIMEOUT
+            )
+            if response.status_code == 200:
+                tree = response.json().get("tree", {})
+                self.render_tree_to_gui(tree)
+            else:
+                self.status_label.setText("🔴 Disconnected")
+        except Exception:
+            self.status_label.setText("🔴 Disconnected")
+
+    def render_tree_to_gui(self, tree):
+        output = self.render_tree(tree)
+        self.tree_display.clear()
+        header = QListWidgetItem(f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]")
+        header.setForeground(QColor("#888"))
+        self.tree_display.addItem(header)
+        for line, perm_id, color in output:
+            item = QListWidgetItem(line)
+            item.setData(Qt.UserRole, perm_id)
+            item.setForeground(QColor("#33ff33") if color == "green" else QColor("#ff5555") if color == "red" else QColor("#33ff33"))
+            self.tree_display.addItem(item)
 
     def render_tree(self, node, indent=""):
         output = []
@@ -249,96 +182,135 @@ class MatrixCommandBridge(QWidget):
             color = "green"
 
         children = node.get("children", [])
-        if isinstance(children, list):
-            if children:
-                label += f" ({len(children)})"
-        else:
-            label += " [INVALID CHILD FORMAT]"
-            children = []
+        if isinstance(children, list) and children:
+            label += f" ({len(children)})"
 
         line = f"{indent}- {label}"
         output.append((line, perm_id, color))
-
         for child in children:
             output.extend(self.render_tree(child, indent + "  "))
-
         return output
 
-    def start_tree_autorefresh(self, interval=10):
-        def refresh():
-            self.load_tree_from_matrix()
-            self.after(interval * 1000, refresh)
 
-        refresh()
+    def upload_agent_code(self):
+        options = QFileDialog.Options()
+        file_name, _ = QFileDialog.getOpenFileName(self, "Select Agent Python File", "", "Python Files (*.py)", options=options)
+        if file_name:
+            print(f"[UPLOAD] Selected agent source: {file_name}")
 
-    def load_tree(self):
-        tree = LiveTree()
-        output = []
+    def build_command_panel(self):
+        box = QGroupBox("🧩 Mission Console")
+        layout = QVBoxLayout()
+        layout.setSpacing(6)
 
-        def recurse(node, indent=""):
-            line = f"{indent}- {node}"
-            if node.get("confirmed"):
-                line += " ✓"
-            output.append(line)
-            for child in tree.get_delegates(node):
-                recurse(child, indent + "  ")
+        self.agent_name = QLineEdit("agent_name")
+        self.perm_id = QLineEdit("permanent_id")
+        self.target_id = QLineEdit("target_permanent_id")
+        self.delegate = QLineEdit("comma,separated,delegated")
 
-        root_node = tree.nodes.get("matrix")  # ← Replace "matrix" with actual root perm_id if dynamic
-        if root_node:
-            recurse(root_node)
-        else:
-            output.append(("[ERROR] Root node 'matrix' not found.", "none"))
+        for widget in [self.agent_name, self.perm_id, self.target_id, self.delegate]:
+            widget.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
+            layout.addWidget(widget)
 
-        self.tree_display.delete("1.0", tk.END)
-        self.tree_display.insert(tk.END, f"[TREE SYNC @ {time.strftime('%H:%M:%S')}]\n\n")
-        self.tree_display.insert(tk.END, "\n".join(output))
+        for label in ["RESUME AGENT", "SHUTDOWN AGENT", "INJECT TO TREE", "CALL REAPER", "DELETE SUBTREE"]:
+            btn = QPushButton(label)
+            btn.setStyleSheet("background-color: #1e1e1e; color: #33ff33; border: 1px solid #00ff66;")
+            layout.addWidget(btn)
 
-    # Usage in request_tree_from_matrix response
-    def load_tree_from_matrix(self):
+        self.upload_btn = QPushButton("Upload Agent Code")
+        self.upload_btn.clicked.connect(self.upload_agent_code)
+        self.upload_btn.setStyleSheet("background-color: #1e1e1e; color: #33ff33; border: 1px solid #00ff66;")
+        layout.addWidget(self.upload_btn)
+
+        toggle_btn = QPushButton("🧠 Switch to Code View")
+        toggle_btn.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        toggle_btn.setStyleSheet("background-color: #000; color: #00ff66; font-weight: bold;")
+        layout.addWidget(toggle_btn)
+
+        box.setLayout(layout)
+        return box
+
+    def check_matrix_connection(self):
         try:
-            import requests
-            payload = {
-                "type": "list_tree",
-                "timestamp": time.time(),
-                "content": {}
-            }
-            response = requests.post(
-                url=MATRIX_HOST,
-                json=payload, cert = ("certs/client.crt", "certs/client.key"),
-                verify=False,  # ⚠️ DISABLES SSL VERIFICATION
+            response = requests.get(
+                url=MATRIX_HOST + "/ping",
+                cert=CLIENT_CERT,
+                verify=False,
                 timeout=REQUEST_TIMEOUT
             )
-
             if response.status_code == 200:
-                tree = response.json().get("tree", {})
-                lines = []
-
-                # The root node is the entire tree object
-                root_node = tree if isinstance(tree, dict) and "permanent_id" in tree else None
-                if root_node:
-                    lines = self.render_tree(root_node)
-                else:
-                    lines = [("[ERROR] Invalid or empty tree structure returned.", "none")]
-
-                self.tree_display.delete("1.0", tk.END)
-                self.tree_display.insert(tk.END, f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]\n\n")
-
-                for idx, (line, perm_id) in enumerate(lines):
-                    tag = f"perm_{idx}"
-                    self.tree_display.insert(tk.END, line + "\n", tag)
-                    if perm_id != "none":
-                        # Inject it into the log input as well
-                        self.agent_log_entry.delete(0, tk.END)
-                        self.agent_log_entry.insert(0, perm_id)
-
-                        self.tree_display.tag_bind(tag, "<Button-1>", self.make_click_callback(perm_id))
-
-                        print(f"[CLICK-BIND] Clicked tag bound to perm_id: {perm_id}")
+                self.status_label.setText("🟢 Connected")
             else:
-                messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
+                self.status_label.setText("🔴 Disconnected")
+        except Exception:
+            self.status_label.setText("🔴 Disconnected")
 
-        except Exception as e:
-            messagebox.showerror("Request Failed", str(e))
+
+    def build_tree_panel(self):
+        box = QGroupBox("🧠 Hive Tree View")
+        layout = QVBoxLayout()
+
+        self.tree_display = QListWidget()
+        self.tree_display.itemClicked.connect(self.handle_tree_click)
+        self.tree_display.setStyleSheet("""
+            QListWidget {
+                background-color: #000000;
+                color: #33ff33;
+                font-family: Courier;
+                font-size: 14px;
+                padding: 5px;
+                border: 1px solid #00ff66;
+            }
+            QListWidget::item {
+                padding: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: #00ff66;
+                color: #000000;
+            }
+        """)
+
+        reload_btn = QPushButton("Reload Tree")
+        reload_btn.clicked.connect(self.request_tree_from_matrix)
+        reload_btn.setStyleSheet("background-color: #111; color: #33ff33; border: 1px solid #00ff66;")
+
+        layout.addWidget(self.tree_display)
+        layout.addWidget(reload_btn)
+        box.setLayout(layout)
+        return box
+
+
+    def build_log_panel(self):
+        box = QGroupBox("📡 Agent Intel Logs")
+        layout = QVBoxLayout()
+
+        self.log_input = QLineEdit()
+        self.log_input.setPlaceholderText("Enter agent perm_id to view logs")
+        self.log_input.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
+
+        view_btn = QPushButton("View Logs")
+        view_btn.clicked.connect(self.view_logs)
+        view_btn.setStyleSheet("background-color: #111; color: #33ff33; border: 1px solid #00ff66;")
+
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setMinimumHeight(300)
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #000;
+                color: #33ff33;
+                font-family: Courier;
+                font-size: 13px;
+                padding: 10px;
+                border: 1px solid #00ff66;
+            }
+        """)
+
+        layout.addWidget(self.log_input)
+        layout.addWidget(view_btn)
+        layout.addWidget(self.log_text)
+        box.setLayout(layout)
+        return box
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
