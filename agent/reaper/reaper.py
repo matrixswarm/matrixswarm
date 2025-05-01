@@ -7,7 +7,6 @@
 # ╚═══════════════════════════════════════════════╝
 
 # DisposableReaperAgent.py
-
 import os
 import json
 import time
@@ -41,6 +40,12 @@ class ReaperAgent(BootAgent):
         """
         self.log(f"[DISPOSABLE-REAPER] Mission {self.kill_id} received with targets: {self.targets}")
         threading.Thread(target=self.mission, daemon=True).start()
+
+    def worker_pre(self):
+        self.log("[REAPER] Agent entering execution mode. Targets loaded. Blades sharp.")
+
+    def worker_post(self):
+        self.log("[REAPER] Mission completed. Reaper dissolving into silence.")
 
     def mission(self):
         """
