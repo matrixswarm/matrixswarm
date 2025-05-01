@@ -12,8 +12,8 @@ import os
 import json
 import time
 
-MATRIX_HOST = "https://147.135.68.135:65431/matrix"
-CLIENT_CERT = ("certs/client.crt", "certs/client.key")
+MATRIX_HOST = "https://147.135.68.135:65431/matrix" #put your own ip here, not mine
+CLIENT_CERT = ("certs/client.crt", "certs/client.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
 REQUEST_TIMEOUT = 5
 
 class MatrixCommandBridge(QWidget):
