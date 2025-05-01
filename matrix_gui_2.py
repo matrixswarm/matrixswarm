@@ -315,6 +315,45 @@ class MatrixCommandBridge(QWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+
+    dark_palette = app.palette()
+    dark_palette.setColor(app.palette().Window, QColor("#121212"))
+    dark_palette.setColor(app.palette().Base, QColor("#000000"))
+    dark_palette.setColor(app.palette().AlternateBase, QColor("#1e1e1e"))
+    dark_palette.setColor(app.palette().Button, QColor("#1a1a1a"))
+    dark_palette.setColor(app.palette().ButtonText, QColor("#33ff33"))
+    dark_palette.setColor(app.palette().Text, QColor("#33ff33"))
+    dark_palette.setColor(app.palette().BrightText, QColor("#33ff33"))
+    dark_palette.setColor(app.palette().WindowText, QColor("#33ff33"))
+    app.setPalette(dark_palette)
+    app.setStyleSheet("""
+                QWidget {
+                    background-color: #121212;
+                    color: #33ff33;
+                    font-family: Courier;
+                }
+                QLineEdit, QTextEdit, QListWidget, QPushButton {
+                    background-color: #000;
+                    color: #33ff33;
+                    border: 1px solid #00ff66;
+                }
+                QGroupBox {
+                    color: #33ff33;
+                    border: 1px solid #00ff66;
+                    margin-top: 1ex;
+                    font-weight: bold;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    subcontrol-position: top center;
+                    padding: 0 3px;
+                    color: #33ff33;
+                }
+                QPushButton:hover {
+                    background-color: #1e1e1e;
+                }
+            """)
+
     window = MatrixCommandBridge()
     window.show()
     sys.exit(app.exec_())
