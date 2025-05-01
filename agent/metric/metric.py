@@ -61,21 +61,21 @@ class MetricsAgent(BootAgent):
         self.log("[METRICS] Oracle query dispatched.")
 
     def worker(self):
-        while self.running:
-            data = self.get_metrics()
-            self.log_metrics(data)
-            self.history.append(data)
 
-            if len(self.history) >= 5:
-                summary = {
-                    "cpu_avg": round(sum(d["cpu"] for d in self.history[-5:]) / 5, 2),
-                    "ram_avg": round(sum(d["ram_used_percent"] for d in self.history[-5:]) / 5, 2),
-                    "disk_min": round(min(d["disk_free_gb"] for d in self.history[-5:]), 2),
-                    "uptime": self.history[-1]["uptime_sec"]
-                }
-                self.query_oracle(summary)
+        data = self.get_metrics()
+        self.log_metrics(data)
+        self.history.append(data)
 
-            time.sleep(self.interval)
+        if len(self.history) >= 5:
+            summary = {
+                "cpu_avg": round(sum(d["cpu"] for d in self.history[-5:]) / 5, 2),
+                "ram_avg": round(sum(d["ram_used_percent"] for d in self.history[-5:]) / 5, 2),
+                "disk_min": round(min(d["disk_free_gb"] for d in self.history[-5:]), 2),
+                "uptime": self.history[-1]["uptime_sec"]
+            }
+            self.query_oracle(summary)
+
+        time.sleep(self.interval)
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))

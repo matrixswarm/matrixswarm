@@ -55,12 +55,27 @@ class BootAgent(Agent):
 
     def _throttled_worker_wrapper(self):
         self.log("[BOOT] Throttled worker wrapper engaged.")
+
+        # 🔹 Optional pre-hook (called ONCE before loop)
+        if hasattr(self, "worker_pre"):
+            try:
+                self.worker_pre()
+            except Exception as e:
+                self.log(f"[WORKER_PRE][ERROR] {e}")
+
         while self.running:
             if getattr(self, "can_proceed", True):
                 self.can_proceed = False
                 self.worker()
             else:
                 time.sleep(0.05)
+
+        # 🔹 Optional post-hook (called ONCE after loop exits)
+        if hasattr(self, "worker_post"):
+            try:
+                self.worker_post()
+            except Exception as e:
+                self.log(f"[WORKER_POST][ERROR] {e}")
 
     def start_dynamic_throttle(self, min_delay=2, max_delay=10, max_load=2.0):
         def dynamic_throttle_loop():

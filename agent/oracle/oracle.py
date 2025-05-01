@@ -24,62 +24,62 @@ class OracleAgent(BootAgent):
             self.log("[ORACLE] API key loaded. Ready to receive prompts.")
 
     def worker(self):
-        while self.running:
-            try:
-                for filename in os.listdir(self.prompt_path):
-                    path = os.path.join(self.prompt_path, filename)
 
-                    if filename.endswith(".prompt"):
-                        with open(path, "r") as f:
-                            prompt = f.read().strip()
+        try:
+            for filename in os.listdir(self.prompt_path):
+                path = os.path.join(self.prompt_path, filename)
 
-                        response = self.query_openai(prompt)
-                        out_filename = filename.replace(".prompt", ".response")
-                        out_path = os.path.join(self.outbox_path, out_filename)
+                if filename.endswith(".prompt"):
+                    with open(path, "r") as f:
+                        prompt = f.read().strip()
 
-                        with open(out_path, "w") as f:
-                            f.write(response)
+                    response = self.query_openai(prompt)
+                    out_filename = filename.replace(".prompt", ".response")
+                    out_path = os.path.join(self.outbox_path, out_filename)
 
-                        self.log(f"[ORACLE] Responded to {filename}")
+                    with open(out_path, "w") as f:
+                        f.write(response)
+
+                    self.log(f"[ORACLE] Responded to {filename}")
+                    os.remove(path)
+
+                elif filename.endswith(".json"):
+
+                    with open(path, "r") as f:
+
+                        try:
+
+                            payload = json.load(f)
+
+                        except Exception as e:
+                            print('cooki')
+                            self.log(f"[ORACLE][ERROR] Failed to parse {filename}: {e}")
+
+                            continue
+
+                    query_type = payload.get("query_type")
+
+                    if query_type == "email_analysis":
+
+                        self.handle_email_analysis(payload)
+
+                        self.log(f"[ORACLE] Email analysis complete: {filename}")
+
                         os.remove(path)
 
-                    elif filename.endswith(".json"):
+                    elif query_type == "spawn_suggestion":
 
-                        with open(path, "r") as f:
+                        self.handle_spawn_suggestion(payload)
 
-                            try:
+                        self.log(f"[ORACLE] Spawn suggestion dispatched: {filename}")
 
-                                payload = json.load(f)
+                        os.remove(path)
 
-                            except Exception as e:
-                                print('cooki')
-                                self.log(f"[ORACLE][ERROR] Failed to parse {filename}: {e}")
+        except Exception as e:
+            print(f"{payload}: {e}")
+            self.log(f"[ORACLE][ERROR] {e}")
 
-                                continue
-
-                        query_type = payload.get("query_type")
-
-                        if query_type == "email_analysis":
-
-                            self.handle_email_analysis(payload)
-
-                            self.log(f"[ORACLE] Email analysis complete: {filename}")
-
-                            os.remove(path)
-
-                        elif query_type == "spawn_suggestion":
-
-                            self.handle_spawn_suggestion(payload)
-
-                            self.log(f"[ORACLE] Spawn suggestion dispatched: {filename}")
-
-                            os.remove(path)
-
-            except Exception as e:
-                print(f"{payload}: {e}")
-                self.log(f"[ORACLE][ERROR] {e}")
-
-            time.sleep(10)
+        time.sleep(10)
 
     def handle_spawn_suggestion(self, query):
         payload = query.get("spawn", {})

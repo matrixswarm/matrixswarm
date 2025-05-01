@@ -27,29 +27,38 @@ class SentinelAgent(BootAgent):
         os.makedirs(self.oracle_payload, exist_ok=True)
         os.makedirs(self.incoming_path, exist_ok=True)
 
-    def post_boot(self):
-        self.log(f"[SENTINEL] UpdateSentinel booted. Monitoring {self.scan_path} for stale files.")
+    def worker_pre(self):
+        self.log(f"[SENTINEL] UpdateSentinel initialized. Monitoring {self.scan_path}.")
 
     def worker(self):
-        self.log("[SENTINEL] Starting scan cycle.")
-        while self.running:
-            existing_uuids = set()
+        self.scan_files_once()
+        self.check_oracle_cmds_once()
+        interruptible_sleep(self, 300)
+
+    def worker_post(self):
+        self.log("[SENTINEL] Sentinel agent is shutting down.")
+
+    def scan_files_once(self):
         try:
-            with open("/proc/self/cmdline", "r") as f:
-                self_pid = os.getpid()
-                existing_uuids.add(self.command_line_args.get("install_name", ""))
-        except Exception:
-            pass
+            for root, _, files in os.walk(self.scan_path):
+                for fname in files:
+                    full_path = os.path.join(root, fname)
+                    age_days = self.get_file_age_days(full_path)
+                    if age_days > self.age_threshold_days:
+                        self.send_prompt_to_oracle(full_path, age_days)
+        except Exception as e:
+            self.log(f"[SENTINEL][SCAN ERROR] {e}")
 
-        for root, _, files in os.walk(self.scan_path):
-            for fname in files:
-                full_path = os.path.join(root, fname)
-                age_days = self.get_file_age_days(full_path)
-                if age_days > self.age_threshold_days:
-                    self.send_prompt_to_oracle(full_path, age_days)
-            self.listen_for_cmds()
-            interruptible_sleep(self, 300)
-
+    def check_oracle_cmds_once(self):
+        for f in os.listdir(self.incoming_path):
+            if f.endswith(".cmd"):
+                try:
+                    with open(os.path.join(self.incoming_path, f), "r") as cmd_file:
+                        cmd = json.load(cmd_file)
+                        self.execute_cmd(cmd)
+                except Exception as e:
+                    self.log(f"[SENTINEL][CMD ERROR] {e}")
+                os.remove(os.path.join(self.incoming_path, f))
 
     def get_file_age_days(self, path):
         last_mod = os.path.getmtime(path)
@@ -64,20 +73,7 @@ class SentinelAgent(BootAgent):
         filename = f"stale_{uuid.uuid4().hex}.prompt"
         with open(os.path.join(self.oracle_payload, filename), "w") as f:
             f.write(json.dumps(prompt, indent=2))
-        self.log(f"[SENTINEL] Prompt sent to Oracle for file: {filepath}")
-
-
-    def listen_for_cmds(self):
-        for f in os.listdir(self.incoming_path):
-            if f.endswith(".cmd"):
-                with open(os.path.join(self.incoming_path, f), "r") as cmd_file:
-                    try:
-                        cmd = json.load(cmd_file)
-                        self.execute_cmd(cmd)
-                    except Exception as e:
-                        self.log(f"[SENTINEL][ERROR] Failed to parse command: {e}")
-                os.remove(os.path.join(self.incoming_path, f))
-
+        self.log(f"[SENTINEL] Prompt sent to Oracle for: {filepath}")
 
     def forward_to_mailman(self, entry):
         try:
@@ -86,12 +82,9 @@ class SentinelAgent(BootAgent):
             with open(path, "w") as f:
                 f.write(json.dumps(entry, indent=2))
         except Exception as e:
-            self.log(f"[SENTINEL][ERROR] Failed to send to Mailman: {e}")
-
+            self.log(f"[SENTINEL][MAILMAN ERROR] {e}")
 
     def execute_cmd(self, cmd):
-        mailman_path = os.path.join(self.path_resolution["comm_path"], "mailman-1", "incoming")
-        os.makedirs(mailman_path, exist_ok=True)
         log_entry = {
             "source": self.command_line_args.get("permanent_id", "update-sentinel"),
             "type": "action",
@@ -113,13 +106,13 @@ class SentinelAgent(BootAgent):
                 self.log(f"[SENTINEL] Archived: {target} → {archive_path}")
                 self.forward_to_mailman(log_entry)
             except Exception as e:
-                self.log(f"[SENTINEL][ERROR] Archive failed: {e}")
+                self.log(f"[SENTINEL][ARCHIVE ERROR] {e}")
         elif action == "log_only" and target:
-            self.log(f"[SENTINEL] Oracle advised review of: {target}")
+            self.log(f"[SENTINEL] Oracle flagged for review: {target}")
             self.forward_to_mailman(log_entry)
-
         else:
-            self.log(f"[SENTINEL] Unknown action or malformed command: {action}")
+            self.log(f"[SENTINEL] Unknown or malformed action: {action}")
+
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
