@@ -1,74 +1,49 @@
 # Matrix: An AI OS System
 # Copyright (c) 2025 Daniel MacDonald
 # Licensed under the MIT License. See LICENSE file in project root for details.
-import sys
 import os
-import json
 import time
+import json
 import psutil
-
-# Now you can import your module
 from agent.core.boot_agent import BootAgent
 from agent.core.mixin.delegation import DelegationMixin
+from agent.core.utils.swarm_sleep import interruptible_sleep
 
 class WorkerAgent(BootAgent, DelegationMixin):
-
     def __init__(self, path_resolution, command_line_args):
-
         super().__init__(path_resolution, command_line_args)
-
         self.path_resolution = path_resolution
-
         self.command_line_args = command_line_args
-
         self.orbits = {}
 
-    def pre_boot(self):
-        print("")
-
-    def post_boot(self):
-        self.log("[WORKER] Post-boot complete. Agent standing by.")
-
+    def worker_pre(self):
+        self.log("[WORKER] Booted. WorkerAgent is awake and ready.")
 
     def worker(self):
+        self.do_task_once()
+        interruptible_sleep(self, 10)
 
-        print("[RUN] WorkerAgent main loop running...")
+    def worker_post(self):
+        self.log("[WORKER] WorkerAgent shutting down. Task queue suspended.")
 
-        while self.running:
+    def do_task_once(self):
+        perm_id = self.command_line_args.get("permanent_id")
 
+        if perm_id == "worker-backup-2":
+            load_averages = os.getloadavg()
+            self.log(f"Load averages — 1min: {load_averages[0]}, 5min: {load_averages[1]}, 15min: {load_averages[2]}")
 
-            time.sleep(10)
+        elif perm_id == "worker-backup-1":
+            net_stats = psutil.net_io_counters()
+            self.log(f"Network — Bytes Sent: {net_stats.bytes_sent}, Received: {net_stats.bytes_recv}")
 
-            if self.command_line_args["permanent_id"] == "worker-backup-2":
-
-                load_averages = os.getloadavg()  # Returns a tuple: (1_min, 5_min, 15_min)
-
-                # Print the load averages
-                print(f"Load averages:")
-                print(f"1-minute: {load_averages[0]}")
-                print(f"5-minute: {load_averages[1]}")
-                print(f"15-minute: {load_averages[2]}")
-
-            elif self.command_line_args["permanent_id"] == "worker-backup-1":
-
-                net_stats = psutil.net_io_counters()
-
-                print(f"Bytes Sent: {net_stats.bytes_sent}")
-                print(f"Bytes Received: {net_stats.bytes_recv}")
-                print(f"Packets Sent: {net_stats.packets_sent}")
-                print(f"Packets Received: {net_stats.packets_recv}")
-                print(f"Errors In: {net_stats.errin}")
-                print(f"Errors Out: {net_stats.errout}")
-                print(f"Dropped Packets In: {net_stats.dropin}")
-                print(f"Dropped Packets Out: {net_stats.dropout}")
-
-            elif self.command_line_args["permanent_id"] == "worker-backup-3":
-                import tracemalloc
-                tracemalloc.start()
-                snapshot = tracemalloc.take_snapshot()
-                top_stats = snapshot.statistics("lineno")
-                for stat in top_stats[:10]:
-                    print(stat)
+        elif perm_id == "worker-backup-3":
+            import tracemalloc
+            tracemalloc.start()
+            snapshot = tracemalloc.take_snapshot()
+            top_stats = snapshot.statistics("lineno")
+            for stat in top_stats[:10]:
+                self.log(f"[TRACE] {stat}")
 
     def process_command(self, command):
         if command.get("action") == "update_delegates":
