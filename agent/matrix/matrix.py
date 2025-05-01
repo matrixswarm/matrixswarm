@@ -34,8 +34,9 @@ from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from agent.core.class_lib.file_system.util.ensure_trailing_slash import EnsureTrailingSlash
 from agent.core.swarm_manager import SwarmManager  # adjust path to match
 from agent.reaper.reaper_factory import make_reaper_node
-from agent.scavenger.scavenger_factory import make_scavenger_node
 from agent.core.class_lib.hive.kill_chain_lock_manager import KillChainLockManager
+from agent.core.utils.swarm_sleep import interruptible_sleep
+
 
 class MatrixAgent(DelegationMixin, BootAgent):
 
@@ -79,6 +80,12 @@ class MatrixAgent(DelegationMixin, BootAgent):
         threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
         self.broadcast(message)
+
+    def worker_pre(self):
+        self.log("[MATRIX] Pre-boot checks complete. Swarm ready.")
+
+    def worker_post(self):
+        self.log("[MATRIX] Matrix shutting down. Closing directives.")
 
     def broadcast(self, message, severity="info"):
         try:
@@ -301,11 +308,11 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 self.perform_tree_master_validation()
 
                 # Breath control
-                time.sleep(2)
+                interruptible_sleep(self, 2)
 
             except Exception as e:
                 self.log(f"[COMMAND-LISTENER][CRASH] {e}")
-                time.sleep(3)
+                interruptible_sleep(self, 3)
 
     @staticmethod
     def collect_kill_list(tp, root_id):
