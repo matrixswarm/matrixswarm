@@ -6,14 +6,17 @@ import psutil
 import shutil
 
 from agent.core.boot_agent import BootAgent
+from agent.core.utils.swarm_sleep import interruptible_sleep
 
 class MetricsAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
         super().__init__(path_resolution, command_line_args)
 
-        self.report_to = tree_node.get("config", {}).get("report_to", "mailman-1")
-        self.ask_oracle = tree_node.get("config", {}).get("oracle", "oracle-1")
-        self.interval = tree_node.get("config", {}).get("interval_sec", 10)
+        config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
+
+        self.report_to = config.get("report_to", "mailman-1")
+        self.ask_oracle = config.get("oracle", "oracle-1")
+        self.interval = config.get("interval_sec", 10)
 
         self.outbox = os.path.join(self.path_resolution["comm_path"], self.report_to, "payload")
         self.oracle_payload = os.path.join(self.path_resolution["comm_path"], self.ask_oracle, "payload")
@@ -22,6 +25,30 @@ class MetricsAgent(BootAgent):
         os.makedirs(self.oracle_payload, exist_ok=True)
 
         self.history = []
+
+    def worker_pre(self):
+        self.log("[METRICS] Agent initialized. Beginning observation.")
+
+    def worker(self):
+        self.collect_and_report()
+        interruptible_sleep(self, self.interval)
+
+    def worker_post(self):
+        self.log("[METRICS] Agent shutting down. Final metrics recorded.")
+
+    def collect_and_report(self):
+        data = self.get_metrics()
+        self.log_metrics(data)
+        self.history.append(data)
+
+        if len(self.history) >= 5:
+            summary = {
+                "cpu_avg": round(sum(d["cpu"] for d in self.history[-5:]) / 5, 2),
+                "ram_avg": round(sum(d["ram_used_percent"] for d in self.history[-5:]) / 5, 2),
+                "disk_min": round(min(d["disk_free_gb"] for d in self.history[-5:]), 2),
+                "uptime": self.history[-1]["uptime_sec"]
+            }
+            self.query_oracle(summary)
 
     def get_metrics(self):
         cpu = os.getloadavg()[0]
@@ -59,23 +86,6 @@ class MetricsAgent(BootAgent):
         with open(os.path.join(self.oracle_payload, fname), "w") as f:
             json.dump(query, f)
         self.log("[METRICS] Oracle query dispatched.")
-
-    def worker(self):
-
-        data = self.get_metrics()
-        self.log_metrics(data)
-        self.history.append(data)
-
-        if len(self.history) >= 5:
-            summary = {
-                "cpu_avg": round(sum(d["cpu"] for d in self.history[-5:]) / 5, 2),
-                "ram_avg": round(sum(d["ram_used_percent"] for d in self.history[-5:]) / 5, 2),
-                "disk_min": round(min(d["disk_free_gb"] for d in self.history[-5:]), 2),
-                "uptime": self.history[-1]["uptime_sec"]
-            }
-            self.query_oracle(summary)
-
-        time.sleep(self.interval)
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))

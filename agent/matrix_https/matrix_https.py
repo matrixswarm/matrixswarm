@@ -32,6 +32,12 @@ class MatrixHTTPS(BootAgent):
     def cert_exists(self):
         return os.path.exists(self.cert_path) and os.path.exists(self.key_path)
 
+    def worker_pre(self):
+        self.log("[MATRIX_HTTPS] Boot initialized. Port online, certs verified.")
+
+    def worker_post(self):
+        self.log("[MATRIX_HTTPS] HTTPS interface shutting down. The swarm will feel it.")
+
     def configure_routes(self):
 
         # matrix_https.py (inside MatrixHTTPS class)
