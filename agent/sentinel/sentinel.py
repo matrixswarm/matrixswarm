@@ -36,6 +36,12 @@ class SentinelAgent(BootAgent):
         # Start watch thread
         threading.Thread(target=self.watch_cycle, daemon=True).start()
 
+    def worker_pre(self):
+        self.log("[SENTINEL] Sentinel activated. Awaiting signal loss...")
+
+    def worker_post(self):
+        self.log("[SENTINEL] Sentinel down. Final watch cycle complete.")
+
     def watch_cycle(self):
         self.log("[SENTINEL] Watch cycle started.")
         while self.running:
