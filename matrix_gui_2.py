@@ -53,7 +53,7 @@ class MatrixCommandBridge(QWidget):
         self.pulse_timer.timeout.connect(self.toggle_status_dot)
         self.pulse_timer.start(1000)
 
-        self.start_tree_autorefresh(interval=5)
+        self.start_tree_autorefresh(interval=25)
 
     def toggle_status_dot(self):
         if self.status_label.text().endswith("Connected"):
@@ -99,7 +99,8 @@ class MatrixCommandBridge(QWidget):
         self.view_logs()
 
     def view_logs(self):
-        perm_id = self.log_input.text().strip()
+        perm_id = self.log_input.text().strip().split(" ")[0]
+
         payload = {
             "type": "get_log",
             "timestamp": time.time(),
@@ -163,35 +164,50 @@ class MatrixCommandBridge(QWidget):
             item.setForeground(QColor("#33ff33") if color == "green" else QColor("#ff5555") if color == "red" else QColor("#33ff33"))
             self.tree_display.addItem(item)
 
-    def render_tree(self, node, indent=""):
+    def render_tree(self, node, indent="", is_last=True):
         output = []
         if not isinstance(node, dict):
-            output.append((f"{indent}- [INVALID NODE STRUCTURE: {node}]", "none", "red"))
+            output.append((f"{indent}└─ [INVALID NODE STRUCTURE: {node}]", "none", "red"))
             return output
 
         perm_id = node.get("permanent_id") or node.get("name") or "unknown"
-        label = perm_id
+        agent_type = (node.get("name") or node.get("permanent_id", "")).split("-")[0].lower()
+        icon_map = {
+            "matrix": "🧠", "reaper": "💀", "scavenger": "🧹", "sentinel": "🛡️",
+            "oracle": "🔮", "mailman": "📬", "logger": "❓", "worker": "🧍",
+            "metrics": "📊", "calendar": "📅", "uptime_pinger": "📡",
+            "filewatch": "📁", "codex_tracker": "📜", "reactor": "⚡",
+            "sweeper": "🧭", "discord": "📣", "telegram": "🛰️", "mirror": "❓",
+            "commander": "🧱"
+        }
+        icon = icon_map.get(agent_type, "📄")
         color = "white"
+
+        if agent_type not in icon_map:
+            icon = "❓"
 
         die_path = os.path.join("comm", perm_id, "incoming", "die")
         if os.path.exists(die_path):
-            label += " ⚠️ [DOWN]"
+            perm_id += " ⚠️ [DOWN]"
             color = "red"
 
         if node.get("confirmed"):
-            label += " ✓"
             color = "green"
 
         children = node.get("children", [])
         if isinstance(children, list) and children:
-            label += f" ({len(children)})"
+            perm_id += f" ({len(children)})"
 
-        line = f"{indent}- {label}"
+        prefix = "└─ " if is_last else "├─ "
+        line = f"{indent}{prefix}{icon} {perm_id}"
         output.append((line, perm_id, color))
-        for child in children:
-            output.extend(self.render_tree(child, indent + "  "))
-        return output
 
+        for i, child in enumerate(children):
+            last = (i == len(children) - 1)
+            child_indent = indent + ("   " if is_last else "│  ")
+            output.extend(self.render_tree(child, child_indent, is_last=last))
+
+        return output
 
     def upload_agent_code(self):
         options = QFileDialog.Options()
