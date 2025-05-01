@@ -7,6 +7,8 @@ import json
 import uuid
 
 from agent.core.boot_agent import BootAgent
+from agent.core.utils.swarm_sleep import interruptible_sleep
+
 class SweepCommanderAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
         super().__init__(path_resolution, command_line_args)
@@ -15,24 +17,19 @@ class SweepCommanderAgent(BootAgent):
         os.makedirs(self.oracle_payload, exist_ok=True)
         os.makedirs(self.incoming_path, exist_ok=True)
 
-    def post_boot(self):
-        self.log("[SWEEP] SweepCommander ready. Sending prompt to Oracle.")
-        self.send_prompt_to_oracle()
+    def worker_pre(self):
+        self.log("[SWEEP] Agent activated. Awaiting cleanup directives.")
 
     def worker(self):
-        self.log("[SWEEP] SweepCommander is watching for Oracle commands.")
-        while self.running:
-            for f in os.listdir(self.incoming_path):
-                if f.endswith(".cmd"):
-                    cmd_path = os.path.join(self.incoming_path, f)
-                    with open(cmd_path, "r") as f:
-                        try:
-                            cmd = json.load(f)
-                            self.handle_command(cmd)
-                        except Exception as e:
-                            self.log(f"[SWEEP][ERROR] Failed to parse command: {e}")
-                    os.remove(cmd_path)
-            time.sleep(3)
+        self.check_incoming_once()
+        interruptible_sleep(self, 3)
+
+    def worker_post(self):
+        self.log("[SWEEP] Shutting down. No further directives expected.")
+
+    def post_boot(self):
+        self.log("[SWEEP] Boot complete. Dispatching prompt to Oracle.")
+        self.send_prompt_to_oracle()
 
     def send_prompt_to_oracle(self):
         prompt_data = {
@@ -51,6 +48,18 @@ class SweepCommanderAgent(BootAgent):
         pod_root = self.path_resolution.get("pod_path", "/pod")
         return len([d for d in os.listdir(pod_root) if d.startswith("dead")])
 
+    def check_incoming_once(self):
+        for f in os.listdir(self.incoming_path):
+            if not f.endswith(".cmd"):
+                continue
+            try:
+                with open(os.path.join(self.incoming_path, f), "r") as cmd_file:
+                    cmd = json.load(cmd_file)
+                    self.handle_command(cmd)
+                os.remove(os.path.join(self.incoming_path, f))
+            except Exception as e:
+                self.log(f"[SWEEP][ERROR] Failed to parse {f}: {e}")
+
     def handle_command(self, cmd):
         source = cmd.get("source")
         if source != "oracle":
@@ -65,7 +74,8 @@ class SweepCommanderAgent(BootAgent):
                 if os.path.exists(target):
                     for file in os.listdir(target):
                         fpath = os.path.join(target, file)
-                        os.remove(fpath) if os.path.isfile(fpath) else None
+                        if os.path.isfile(fpath):
+                            os.remove(fpath)
                     self.log(f"[SWEEP] Purged folder: {target}")
             except Exception as e:
                 self.log(f"[SWEEP][ERROR] Failed to purge folder {target}: {e}")
