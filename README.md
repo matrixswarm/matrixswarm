@@ -170,7 +170,6 @@ python3 gui/matrix_gui.py
 ---
 
 ## 🧠 Agents of Legend
-
 | **Agent**                | **Role**                                                                                     |
 |--------------------------|----------------------------------------------------------------------------------------------|
 | 🧠 **MatrixAgent**        | Central cortex — receives all commands, initiates all spawns, signs the tree.               |
@@ -179,14 +178,20 @@ python3 gui/matrix_gui.py
 | 🛡️ **SentinelAgent**      | Monitors heartbeats, confirms agent vitality, resurrects the fallen.                        |
 | 📬 **MailmanAgent**       | Canonical log keeper. Deduplicates messages by hash. Streams the pulse of the Swarm.        |
 | 🔮 **OracleAgent**        | AI responder that reads `.prompt` files. Thinks with GPT-4, speaks with insight.            |
-| ⚡ **ReactorAgent**       | Autonomic reflex of the Swarm. Makes judgment calls. Triggers spawn chains. *(in progress)* |
+| ⚡ **ReactorAgent**       | Autonomic reflex of the Swarm. Makes judgment calls. Triggers spawn chains. *(active)*      |
 | 📜 **CodexViewer**        | Displays live Swarm Codex. Immortalizes agent banners and histories. *(coming soon)*        |
 | 🔍 **ProcessIntelAgent**  | Monitors running processes. Tracks rogue threads and hidden anomalies. *(in dev)*           |
-| 🪞 **FilesystemMirrorAgent** | Reflects and shadows file trees. Useful for surveillance, auditing, and rollback. *(coming online)* |
+| 🪞 **FilesystemMirrorAgent** | Reflects and shadows file trees. Useful for surveillance, auditing, and rollback. *(online)* |
 | 📣 **DiscordAgent**       | Listens to commands via Discord. Responds to `!status`, `!guest`, and relays `.msg`. *(active)* |
 | 🛰️ **TelegramRelayAgent** | Sends messages from Mailman to Telegram. External voice of the Swarm. *(active)*            |
 | 🧭 **UpdateSentinel**     | Watches for updates to directives, patches live agents, ensures continuity. *(deployed)*    |
-
+| 🧹 **SweepCommander**     | Sends signals to Oracle, receives `.cmd`, executes cleanup ops. *(deployed)*                |
+| 📊 **MetricsAgent**       | Tracks CPU, RAM, uptime, disk. Forwards trend data to Oracle. *(online)*                    |
+| 📡 **UptimePingerAgent**  | Periodically pings sites. Broadcasts up/down status to Mailman. *(online)*                 |
+| 🌐 **ScraperAgent**       | Pulls down site summaries. Parses, cleans, logs. *(online)*                                 |
+| 🧬 **CodexTrackerAgent**  | Logs file downloads, external watchers, and ZIP pings. *(active)*                           |
+| 📅 **CalendarAgent**      | Monitors upcoming Google Calendar events. Broadcasts timeline. *(live)*                    |
+| 📁 **FileWatchAgent**     | Inotify monitor for file changes. Forwards swarm `.msg`. *(fielded)*                        |
 
 > Every agent carries a **Swarm Lore Banner™** — a sacred header that defines its essence and role in the Hive.
 
