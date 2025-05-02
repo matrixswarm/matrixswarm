@@ -296,7 +296,7 @@ def boot():
         ]
     }
 
-    #Short Circuit matrix_directive above
+    #MATRIX CORE DEPLOYMENT
     matrix_directive = {
         "permanent_id": 'matrix',
         "name": "matrix",
@@ -311,41 +311,33 @@ def boot():
             "files": {}
         },
 
-        "children": [{
-            "permanent_id": "matrix-https",
-            "name": "matrix_https",
-            "delegated": [],
-            "filesystem": {
-                "folders": [
-                    {
-                        'name': 'payload',
-                        'type': 'd',
-                        'content': None
-                    },
-                ],
-                    "files": {}
-                }
-            },
+        "children": [
+
+            #MATRIX PROTECTION LAYER 4 SENTINELS
             {
                 "permanent_id": "guardian-1",
                 "name": "sentinel",
+                "app": "matrix-core",
                 "filesystem": {},
                 "config": {},
                 "children": [
                     {
                         "permanent_id": "guardian-2",
                         "name": "sentinel",
+                        "app": "matrix-core",
                         "filesystem": {},
                         "children": [
                             {
                                 "permanent_id": "guardian-3",
                                 "name": "sentinel",
+                                "app": "matrix-core",
                                 "filesystem": {},
                                 "config": {},
                                 "children": [
                                     {
                                         "permanent_id": "guardian-4",
                                         "name": "sentinel",
+                                        "app": "matrix-core",
                                         "filesystem": {},
                                         "config": {
                                             "watching": "the Queen",
@@ -359,22 +351,40 @@ def boot():
                     }
                 ]
             },
-
             {
-                "permanent_id": "mailman-1",
-                "name": "mailman",
-                "filesystem": {
-                    "folders": [
-                        {"name": "payload", "type": "d", "content": None},
-                        {"name": "mail", "type": "d", "content": None},
-                        {"name": "tally", "type": "d", "content": None},
-                        {"name": "incoming", "type": "d", "content": None}
-                    ]
+                "permanent_id": "context-agent-1",
+                "name": "app_context",
+                "app": "matrix-core",
+                "children": []
+            },
+            {
+                "permanent_id": "resolver-1",
+                "name": "resolver",
+                "app": "matrix-core",
+                "children": []
+            },
+            {
+            "permanent_id": "matrix-https",
+            "name": "matrix_https",
+            "delegated": [],
+            "app": "matrix-core",
+            "filesystem": {
+                "folders": [
+                    {
+                        'name': 'payload',
+                        'type': 'd',
+                        'content': None
+                    },
+                ],
+                    "files": {}
                 }
             },
+
+
             {
                 "permanent_id": "scavenger-strike",
                 "name": "scavenger",
+                "app": "matrix-core",
                 "filesystem": {
                     "folders": []
                 },
@@ -382,156 +392,16 @@ def boot():
             },
 
             {
-                "permanent_id": "discord-relay-1",
-                "name": "discord",
-                "filesystem": {
-                    "folders": [
-                        {"name": "payload", "type": "d"},
-                    ]
-                },
-                "config": {
-                    "bot_token": os.getenv("DISCORD_TOKEN"),
-                    "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
-                }
-            },
-            {
                 "permanent_id": "commander-1",
                 "name": "commander",
-                "children": [
-                    {
-                        "permanent_id": "commander-2",
-                        "name": "commander",
-                        "children": [
-                              {
-                                "permanent_id": "logger-1",
-                                "name": "logger",
-                                "children": [
-                                  {
-                                    "permanent_id": "logger-2",
-                                    "name": "logger",
-                                    "children": [
-                                      {
-                                        "permanent_id": "logger-3",
-                                        "name": "logger",
-                                        "children": [
-                                          {
-                                            "permanent_id": "logger-4",
-                                            "name": "logger",
-                                            "children": [
-                                                {
-                                                    "permanent_id": "commander-1",
-                                                    "name": "commander",
-                                                    "children": []
-                                                },
-                                                {
-                                                    "permanent_id": "worker-backup-3",
-                                                    "name": "worker",
-                                                    "children": []
-                                                },
-                                                {
-                                                    "permanent_id": "email-check-1",
-                                                    "name": "email_check",
-                                                    "filesystem": {
-                                                        "folders": [
-                                                            {"name": "payload", "type": "d", "content": None}
-                                                        ]
-                                                    },
-                                                    "config": {
-                                                        "imap_host": os.getenv("EMAILCHECKAGENT_IMAP_HOST"),
-                                                        "email": os.getenv("EMAILCHECKAGENT_EMAIL"),
-                                                        "password": os.getenv("EMAILCHECKAGENT_PASSWORD"),
-                                                        "report_to": os.getenv("EMAILCHECKAGENT_REPORT_TO",
-                                                                               "mailman-1"),
-                                                        "interval": int(os.getenv("EMAILCHECKAGENT_INTERVAL", 60))
-                                                    }
-                                                },
-                                            ]
-                                          }
-                                        ]
-                                      }
-                                    ]
-                                  }
-                                ]
-                              }
-                            ]
-                    },
-                ]
-            },
-            {
-                "permanent_id": "calendar-agent-1",
-                "name": "google_calendar",
-                "config": {
-                    "calendar_id": "primary",
-                    "interval": 300,
-                    "watch_ahead_minutes": 15,
-                    "broadcast_to": ["mailman-1", "discord-relay-1"]
-                },
-                "filesystem": {
-                    "folders": [{"name": "incoming", "type": "d"}]
-                }
-            },
-            {
-                "permanent_id": "worker-1",
-                "name": "worker",
-                "config": {
+                "app": "matrix-core",
+                "children": []
 
-                },
-                "filesystem": {
-                    "folders": [{"name": "incoming", "type": "d"}]
-                }
-            }
+            },
+
         ]
     }
 
-    # Short Circuit matrix_directive above
-    matrix_directivfe = {
-        "permanent_id": 'matrix',
-        "name": "matrix",
-        "filesystem": {
-            "folders": [
-                {
-                    'name': 'payload',
-                    'type': 'd',
-                    'content': None
-                },
-            ],
-            "files": {}
-        },
-
-        "children": [{
-                        "permanent_id": "matrix-https",
-                        "name": "matrix_https",
-                        "delegated": [],
-                        "filesystem": {
-                            "folders": [
-                                {
-                                    'name': 'payload',
-                                    'type': 'd',
-                                    'content': None
-                                },
-                            ],
-                            "files": {}
-                        }
-                    },
-                    {
-                        "permanent_id": "scavenger-strike",
-                        "name": "scavenger",
-                        "filesystem": {
-                            "folders": []
-                        },
-                        "config": {}
-                    },
-                    {
-                    "permanent_id": "guardian-1",
-                    "name": "sentinel",
-                    "filesystem": {},
-                    "config": {
-                        "watching": "the Queen",
-                        "permanent_id": "matrix"
-                    }
-                },
-            ]
-    }
 
 
     # INSERT AGENT COMMAND
