@@ -37,11 +37,11 @@ class AppContextAgent(BootAgent):
         for i, comp in enumerate(app_data.get("components", []), start=1):
             for j in range(comp["count"]):
                 agent_type = comp["role"]
-                perm_id = f"{agent_type}-{app_name}-{i}-{j}"
+                universal_id = f"{agent_type}-{app_name}-{i}-{j}"
                 spawn_cmd = {
                     "command": "spawn_agent",
                     "payload": {
-                        "perm_id": perm_id,
+                        "universal_id": universal_id,
                         "agent_name": agent_type,
                         "directives": {
                             "app": app_name
@@ -49,10 +49,10 @@ class AppContextAgent(BootAgent):
                     }
                 }
                 path = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
-                fname = f"spawn_{perm_id}_{int(time.time())}.json"
+                fname = f"spawn_{universal_id}_{int(time.time())}.json"
                 with open(os.path.join(path, fname), "w") as f:
                     json.dump(spawn_cmd, f, indent=2)
-                self.log(f"[CONTEXT] Spawned: {perm_id}")
+                self.log(f"[CONTEXT] Spawned: {universal_id}")
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))

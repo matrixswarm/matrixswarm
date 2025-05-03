@@ -11,19 +11,20 @@ from agent.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_del
 from agent.core.core_spawner import CoreSpawner
 from agent.core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
 from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
+from agent.core.path_manager import PathManager
+
 
 class BootAgent(Agent):
 
     def boot(self):
         self.pre_boot()
 
-        cp = CoreSpawner()
+        pm = PathManager(use_session_root=True)
+        cp = CoreSpawner(path_manager=pm)
         fail_success, self.boot_log = cp.get_boot_log(self.path_resolution["pod_path_resolved"])
-        if not (fail_success and self.boot_log.get("permanent_id")):
+        if not (fail_success and self.boot_log.get("universal_id")):
 
             return
-
-
 
         self.running = True
 
@@ -105,11 +106,11 @@ class BootAgent(Agent):
         last_tree_mtime = 0
         tree = None  # Initial tree holder
 
-        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["permanent_id"], 'agent_tree.json')
+        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["universal_id"], 'agent_tree.json')
 
         while self.running:
             try:
-                print(f"[SPAWN] Checking for delegated children of {self.command_line_args['permanent_id']}")
+                print(f"[SPAWN] Checking for delegated children of {self.command_line_args['universal_id']}")
 
                 if not os.path.exists(tree_path):
                     time.sleep(5)
@@ -122,11 +123,11 @@ class BootAgent(Agent):
                     self.log(f"[SPAWN] Tree updated from disk.")
 
                 if not tree:
-                    print(f"[SPAWN][ERROR] Could not load tree for {self.command_line_args['permanent_id']}")
+                    print(f"[SPAWN][ERROR] Could not load tree for {self.command_line_args['universal_id']}")
                     time.sleep(5)
                     continue
 
-                for child_id in tree.get_first_level_child_ids(self.command_line_args["permanent_id"]):
+                for child_id in tree.get_first_level_child_ids(self.command_line_args["universal_id"]):
 
                     node = tree.nodes.get(child_id)
                     if not node:
@@ -134,19 +135,19 @@ class BootAgent(Agent):
                         continue
 
                     # Skip if die token exists
-                    die_file = os.path.join(self.path_resolution['comm_path'], node.get("permanent_id"), 'incoming', 'die')
+                    die_file = os.path.join(self.path_resolution['comm_path'], node.get("universal_id"), 'incoming', 'die')
                     if os.path.exists(die_file):
-                        self.log(f"[SPAWN-BLOCKED] {node.get('permanent_id')} has die file.")
+                        self.log(f"[SPAWN-BLOCKED] {node.get('universal_id')} has die file.")
                         continue
 
                     # Skip if recent heartbeat is alive
-                    time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], node.get("permanent_id"))
+                    time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], node.get("universal_id"))
                     if time_delta is not None and time_delta < time_delta_timeout:
                         continue
 
                     # Call new tactical spawn function
                     self.spawn_agent_direct(
-                        perm_id=node.get("permanent_id"),
+                        universal_id=node.get("universal_id"),
                         agent_name=node.get("name"),
                         tree_node=node
                     )
@@ -158,7 +159,7 @@ class BootAgent(Agent):
 
             time.sleep(10)
 
-    def spawn_agent_direct(self, perm_id, agent_name, tree_node):
+    def spawn_agent_direct(self, universal_id, agent_name, tree_node):
 
         from agent.core.core_spawner import CoreSpawner
 
@@ -170,23 +171,22 @@ class BootAgent(Agent):
         ]
 
         # Ensure comm channel (basic folders)
-        spawner.ensure_comm_channel(perm_id, comm_file_spec, tree_node.get("filesystem", {}))
+        spawner.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))
 
         # Create pod runtime
-        new_uuid, pod_path = spawner.create_runtime(perm_id)
+        new_uuid, pod_path = spawner.create_runtime(universal_id)
 
         # Spawn the agent
-        result= spawner.spawn_agent(
-            universe_id=self.command_line_args["universe_id"],
+        result = spawner.spawn_agent(
             spawn_uuid=new_uuid,
             agent_name=agent_name,
-            permanent_id=perm_id,
-            spawner=self.command_line_args["permanent_id"],
+            universal_id=universal_id,
+            spawner=self.command_line_args["universal_id"],
             tree_node=tree_node
         )
 
         if result is None:
-            self.log(f"[MATRIX][KILL] ERROR: Failed to spawn agent {perm_id}.")
+            self.log(f"[MATRIX][KILL] ERROR: Failed to spawn agent {universal_id}.")
             return
 
         return result
@@ -197,13 +197,13 @@ class BootAgent(Agent):
         #       CREATE COMMAND
         #       WRITE THE COMMAND TO MATRIX COMM PATH USING ATOMIC WRITE
         path = Template(self.path_resolution["incoming_path_template"])
-        matrix_incoming_path = path.substitute(permanent_id=self.command_line_args["matrix"])
+        matrix_incoming_path = path.substitute(universal_id=self.command_line_args["matrix"])
 
-        request = self.command_line_args["permanent_id"] + ":_tree_slice_request.cmd"
+        request = self.command_line_args["universal_id"] + ":_tree_slice_request.cmd"
 
         JsonSafeWrite.safe_write(os.path.join(matrix_incoming_path, request),  '1')
 
-        self.log(f"[TREE_SLICE_REQUEST] Sent request to matrix from {self.command_line_args["permanent_id"]}.")
+        self.log(f"[TREE_SLICE_REQUEST] Sent request to matrix from {self.command_line_args["universal_id"]}.")
 
     def command_listener(self):
         print("Override command_listener() in subclass.")

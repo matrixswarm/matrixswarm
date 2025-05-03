@@ -29,8 +29,13 @@ class CommanderAgent(BootAgent):
         flat = []
         for agent_id in os.listdir(comm_root):
             hello_path = os.path.join(comm_root, agent_id, "hello.moto")
+
+            # Skip phantom routing-only directories (not backed by pod boot.json)
+            if not self.is_real_agent(agent_id):
+                continue
+
             if not os.path.isdir(hello_path):
-                if agent_id == self.command_line_args.get("permanent_id"):
+                if agent_id == self.command_line_args.get("universal_id"):
                     continue
 
             try:
@@ -71,6 +76,18 @@ class CommanderAgent(BootAgent):
             json.dump(payload, f, indent=2)
         self.log(f"[COMMANDER] Resurrection request for {agent_id} dispatched to Matrix → {filename}")
 
+    def is_real_agent(self, universal_id):
+        pod_root = self.path_resolution["pod_path"]
+        for pod_dir in os.listdir(pod_root):
+            boot_path = os.path.join(pod_root, pod_dir, "boot.json")
+            try:
+                with open(boot_path) as f:
+                    data = json.load(f)
+                    if data.get("universal_id") == universal_id:
+                        return True
+            except:
+                continue
+        return False
 
 if __name__ == "__main__":
     # label = None

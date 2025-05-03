@@ -45,7 +45,7 @@ Agents don’t talk through APIs. They talk through **files**.
 
 - Agents are defined in `/agent/{name}/{name}.py`
 - Matrix spawns them into `/pod/{uuid}/`
-- A communication pod is set up in `/comm/{permanent_id}/`
+- A communication pod is set up in `/comm/{universal_id}/`
 - All coordination happens via `.json` and `.cmd` files
 - The live agent tree is tracked and pruned
 - Agents monitor each other — and if one goes silent, it is resurrected or replaced
@@ -85,64 +85,136 @@ Comm directories remain intact
 
 Logs, payloads, and structure persist
 
-🧠 That’s hot-swap mutation with memory — something Docker never dreams of.
+That’s hot-swap mutation with memory — something Docker never dreams of.
 
-## 🚀 How to Boot the Swarm (Initial Boot)
+---
+
+## 🧠 CLI CONTROL: MATRIX DEPLOYMENT PROTOCOL
+
+MatrixSwarm now comes with a **three-part terminal toolkit**:
+
+---
+
+### 🚀 Deploy the Swarm
 
 ```bash
-git clone https://github.com/matrixswarm/matrixswarm.git
+python3 site_ops/site_boot.py --universe ai --directive test-01
+```
 
-boot:
-cd matrixswarm
-python3 bootloader.py
-#you're in!
+- `--universe` specifies which Matrix you’re launching (can run many)
+- `--directive` points to a Python file inside `boot_directives/`
+- Swarm boots from `matrix_directive` defined in that file
 
-tear down:
-python3 bootloader.py --kill
+---
 
-remove agent: 
-payload sent to Matrix which removes target and descendants; example: kill agent with a permanent_id of logger-4 and all children
-python3 bootloader.py --kill-perm_id logger-4
+### 💀 Terminate a Universe
 
-inject agent: 
-payload sent to Matrix which injects an agent into the domain of existent agent
-python3 bootloader.py --spawn-agent -n logger -pid logger-5 -targ logger-3
--n logger      = source file name, under /agent
--pid logger-5  = permanent_id to be assigned the new agent, has to be unique in universe
--targ logger-3 = parent that will have dominion over new agent 
+```bash
+python3 site_ops/site_kill.py --universe ai
+```
+
+- Sends `die` cookies to all agents
+- Waits for graceful shutdown
+- Nukes `/pod/` and `/comm/` directories
+- Leaves other universes untouched
+
+---
+
+### 🛰 List Swarm Activity
+
+```bash
+python3 site_ops/site_list.py
+```
+
+- Lists all `/matrix/{universe}` trees
+- Shows `latest → boot_uuid` symlinks
+- Scans active PIDs and marks them:
+  - 🔥 **hot (in memory)**
+  - ❄️ **cold (inactive)**
+
+---
+
+### 🧬 Example Workflow
+
+```bash
+# Boot the ai universe using test directive
+python3 site_ops/site_boot.py --universe ai --directive test-01
+
+# Kill it instantly
+python3 site_ops/site_kill.py --universe ai
+
+# View which universes are active
+python3 site_ops/site_list.py
+```
+
+You now have **docker-grade control** with zero containers.
+
+---
+
+### ⚡ Directives Made Easy
+
+Every directive is a plain `.py` file:
+
+```python
+matrix_directive = {
+    "universal_id": "matrix",
+    "children": [
+        {"universal_id": "commander-1", "name": "commander"},
+        {"universal_id": "mailman-1", "name": "mailman"},
+        ...
+    ]
+}
+```
+
+Place them in `boot_directives/`. Call them with:
+```bash
+--directive test-01
+```
+
+---
+
+### 📁 SiteOps Directory
+
+Everything lives under `site_ops/`:
+
+- `site_boot.py` — Deploy a Matrix
+- `site_kill.py` — Kill a Matrix
+- `site_list.py` — View all universes and activity
+
 
 #watch what agents are active
 python3 {root of files}/live_hive_watch.py
 
+---
 
-#use from another terminal
-
-```
 
 ## Let's Spawn the Swarm!
 ```bash
 ps aux | grep pod
 
-root     1357568  0.4  0.0 467440 21356 pts/1    Sl   17:37   0:10 python3 /sites/orbit/python/pod/66470f7c-0af7-4b1f-aad3-0c4b28f13d0c/run --job bb:bootloader:matrix:matrix --ts 20250422173738406425
-root     1357629  0.4  0.0 556012 37956 pts/1    Sl   17:37   0:11 python3 /sites/orbit/python/pod/a6af6172-20a2-4c08-bb94-d2953ba23890/run --job bb:matrix:matrix-https:matrix_https --ts 20250422173748488529
-root     1357630  0.3  0.0 477208 31240 pts/1    Sl   17:37   0:09 python3 /sites/orbit/python/pod/2beedbf1-5de3-4cee-b558-fd47a39c9610/run --job bb:matrix:telegram-relay-1:telegram_relay --ts 20250422173748490099
-root     1357631  0.4  0.0 467260 19016 pts/1    Sl   17:37   0:09 python3 /sites/orbit/python/pod/48a6e1df-ade7-44d3-825a-baaff7245b99/run --job bb:matrix:mailman-1:mailman --ts 20250422173748492118
-root     1357632  0.4  0.0 388800 15616 pts/1    Sl   17:37   0:09 python3 /sites/orbit/python/pod/bbe8275b-b3cc-44c4-a29a-71576bbcd56e/run --job bb:matrix:commander-1:commander --ts 20250422173748493826
-root     1357633  0.4  0.0 432972 58644 pts/1    Sl   17:37   0:10 python3 /sites/orbit/python/pod/6262f13e-bd2b-41b0-836b-f5faf7c82819/run --job bb:matrix:oracle-1:oracle --ts 20250422173748495813
-root     1357634  0.4  0.0 477276 30628 pts/1    Sl   17:37   0:11 python3 /sites/orbit/python/pod/7c00abf6-e885-4bde-90b6-129c697b1804/run --job bb:matrix:pinger-1:uptime_pinger --ts 20250422173748497743
-root     1357635  0.4  0.0 467224 19200 pts/1    Sl   17:37   0:09 python3 /sites/orbit/python/pod/2ed16768-d5e4-4320-a2f0-2d93731f3fc2/run --job bb:matrix:metric-1:metric --ts 20250422173748499962
-root     1357691  0.4  0.0 462548 15360 pts/1    Sl   17:37   0:09 python3 /sites/orbit/python/pod/de962a6f-598c-48d7-9293-a362ce1326e2/run --job bb:commander-1:commander-2:commander --ts 20250422173753573630
-root     1361823  0.4  0.0 486904 35840 pts/1    Sl   17:53   0:06 python3 /sites/orbit/python/pod/9998d0a6-39b0-4baf-922b-dadea37cfd78/run --job bb:matrix:scraper-1:scraper --ts 20250422175318688733
+root     1127295  0.4  0.0 542124 22612 pts/1    Sl   11:14   0:04 python3 /matrix/ai/latest/pod/ec4d5a03-df5f-4562-9ebb-ead8f6fa90f8/run --job bb:site_boot:matrix:matrix --ts 20250503111458777844
+root     1127322  0.4  0.0 556032 34560 pts/1    Sl   11:15   0:05 python3 /matrix/ai/20250503_111458/pod/0ef6264a-2d9f-432e-9e91-2274eef6a9ba/run --job ai:matrix:matrix-https:matrix_https --ts 20250503111503868202
+root     1127323  0.4  0.0 610240 15360 pts/1    Sl   11:15   0:05 python3 /matrix/ai/20250503_111458/pod/b644220a-31f3-4469-ae88-5623f4de5aef/run --job ai:matrix:scavenger-strike:scavenger --ts 20250503111503870712
+root     1127324  0.3  0.0 481436 33368 pts/1    Sl   11:15   0:04 python3 /matrix/ai/20250503_111458/pod/9bb83977-372b-4b35-bccc-7aab5a5f880d/run --job ai:matrix:telegram-relay-1:telegram_relay --ts 20250503111503873044
+root     1127325  0.3  0.0 393584 19188 pts/1    Sl   11:15   0:04 python3 /matrix/ai/20250503_111458/pod/8f81b4c0-cb23-4625-93aa-2a924d199f54/run --job ai:matrix:mailman-1:mailman --ts 20250503111503875212
+root     1127326  0.4  0.0 388864 15104 pts/1    Sl   11:15   0:05 python3 /matrix/ai/20250503_111458/pod/9a9a4f20-8a30-4a56-ba5f-a628b9ea532b/run --job ai:matrix:commander-1:commander --ts 20250503111503876979
+root     1127327  0.4  0.0 516164 64236 pts/1    Sl   11:15   0:05 python3 /matrix/ai/20250503_111458/pod/5d9f62e1-8f01-4dc0-8352-63e67883fe18/run --job ai:matrix:oracle-1:oracle --ts 20250503111503879503
+root     1127328  0.4  0.0 482464 34192 pts/1    Sl   11:15   0:05 python3 /matrix/ai/20250503_111458/pod/247023ee-59af-471e-814e-1d69f5f5d0c1/run --job ai:matrix:pinger-1:uptime_pinger --ts 20250503111503881933
+root     1127329  0.3  0.0 393540 18688 pts/1    Sl   11:15   0:04 python3 /matrix/ai/20250503_111458/pod/efae5a1f-e4cf-40a9-9c8f-f531a2840a30/run --job ai:matrix:metric-1:metric --ts 20250503111503885520
+root     1127330  0.4  0.0 484400 35936 pts/1    Sl   11:15   0:04 python3 /matrix/ai/20250503_111458/pod/511bfc84-57c3-4b3d-b37e-fd980683afae/run --job ai:matrix:scraper-1:scraper --ts 20250503111503888711
+root     1127331  0.4  0.0 717644 47848 pts/1    Sl   11:15   0:04 python3 /matrix/ai/20250503_111458/pod/6009754c-cc50-403b-9ebe-c4fd2962d522/run --job ai:matrix:discord-relay-1:discord --ts 20250503111503892186
+root     1127349  0.4  0.0 462596 17024 pts/1    Sl   11:15   0:05 python3 /matrix/ai/20250503_111458/pod/14d4e101-7b35-483b-a411-8f667c8185ef/run --job ai:commander-1:commander-2:commander --ts 20250503111503949452
+
 
 #EXAMPLE JOB
      --job bb:metric-1:logger-1:logger 
 #FIELDS
 universe-id (bb): allows multiple matrix to co-exist on the system
-spawner metric-1 permanent_id of agent
-spawned logger-1 permanent_id of agent
+spawner metric-1 universal_id of agent
+spawned logger-1 universal_id of agent
 name    logger actual source-code name of agent
 
-permanent_id is universal in the matrix, it's what allows communication between agents. It's also the name of the agent's comm folder, a two channel for all agent-to-agent communications as well as the location where state data is contained.    
+universal_id is universal in the matrix, it's what allows communication between agents. It's also the name of the agent's comm folder, a two channel for all agent-to-agent communications as well as the location where state data is contained.    
 run file  is a spawned clone of an agent    
 ```
 

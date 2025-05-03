@@ -17,7 +17,7 @@ class CodexPanel(tk.Frame):
 
         tk.Button(self, text="TEST CONNECTION", command=self.test_connection, bg="#252526", fg="white").pack(pady=5)
 
-        columns = ("perm_id", "role", "banner", "spawned", "version", "status")
+        columns = ("universal_id", "role", "banner", "spawned", "version", "status")
         tree = ttk.Treeview(self, columns=columns, show="headings")
         tree.pack(fill=tk.BOTH, expand=True)
 
@@ -28,7 +28,7 @@ class CodexPanel(tk.Frame):
         for agent in get_codex():
             status_color = "🟢" if agent["status"].lower() == "active" else "🔴"
             tree.insert("", tk.END, values=(
-                agent["perm_id"],
+                agent["universal_id"],
                 agent["role"],
                 agent["banner"],
                 agent["spawned"],

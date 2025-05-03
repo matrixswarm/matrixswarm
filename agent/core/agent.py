@@ -34,7 +34,7 @@ class Agent:
     def send_message(self, message):
         self.log(f"[SEND] {json.dumps(message)}")
 
-    #sends a heartbeat to comm/{permanent_id}/hello.moto of self
+    #sends a heartbeat to comm/{universal_id}/hello.moto of self
     def heartbeat(self):
 
         hello_moto_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto")
@@ -86,22 +86,29 @@ class Agent:
 
             if DuplicateProcessCheck.check_all_duplicate_risks(job_label=job_label, check_path=False):
                 self.running = False
-                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["permanent_id"]} : shutting down found job having a later timestamp --job= \"{job_label}\"")
+                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["universal_id"]} : shutting down found job having a later timestamp --job= \"{job_label}\"")
             else:
-                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["permanent_id"]} : safe to proceed no duplicate processes with label --job= \"{job_label}\"")
+                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["universal_id"]} : safe to proceed no duplicate processes with label --job= \"{job_label}\"")
 
             #incoming:   die
-            # example: change {root}/comm/{permanent_id}/incoming = {root}/comm/worker-1/incoming
+            # example: change {root}/comm/{universal_id}/incoming = {root}/comm/worker-1/incoming
             #     look for die file in incoming only be 1 at anytime, and matrix command_thread will add/remove, spawn thread will
             #     check
-            path = Template(self.path_resolution["incoming_path_template"])
-            path = path.substitute(permanent_id=self.command_line_args["permanent_id"])
+            try:
+                path = Template(self.path_resolution["incoming_path_template"])
+            except KeyError:
+                self.log("[ENFORCE] Missing incoming_path_template. Using fallback.")
+                path = Template(os.path.join("comm", "$universal_id", "incoming"))
+
+            path = path.substitute(universal_id=self.command_line_args["universal_id"])
+
             count, file_list = FileFinderGlob.find_files_with_glob(path,pattern="die")
             if count>0:
                 self.running=False
-                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["permanent_id"]} die cookie ingested, going down easy...")
+                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["universal_id"]} die cookie ingested, going down easy...")
 
             #within 20secs if another instance detected, and this is the younger of the die
+
 
             time.sleep(7)
 

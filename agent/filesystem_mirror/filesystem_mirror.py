@@ -61,7 +61,7 @@ class FilesystemMirrorAgent(BootAgent):
             return
 
         payload = {
-            "uuid": self.command_line_args["permanent_id"],
+            "uuid": self.command_line_args["universal_id"],
             "timestamp": time.time(),
             "watch_path": self.watch_path,
             "file_count": len(snapshot),

@@ -18,18 +18,18 @@ class AgentSupervisorThread(threading.Thread):
         self.agent.log(f"[SUPERVISOR] Monitoring delegated agents: {delegated}")
 
         while self.running:
-            for perm_id in delegated:
+            for universal_id in delegated:
                 try:
-                    token_path = os.path.join(self.comm_root, perm_id, ".hello.token")
+                    token_path = os.path.join(self.comm_root, universal_id, ".hello.token")
                     if not os.path.isdir(token_path):
-                        self.agent.log(f"[SUPERVISOR] Missing .hello.token for {perm_id}")
-                        self.handle_failure(perm_id)
+                        self.agent.log(f"[SUPERVISOR] Missing .hello.token for {universal_id}")
+                        self.handle_failure(universal_id)
                         continue
 
                     latest_pulse = self.find_latest_pulse(token_path)
                     if not latest_pulse or time.time() - latest_pulse.stat().st_mtime > self.timeout:
-                        self.agent.log(f"[SUPERVISOR] Stale or missing heartbeat for {perm_id}")
-                        self.handle_failure(perm_id)
+                        self.agent.log(f"[SUPERVISOR] Stale or missing heartbeat for {universal_id}")
+                        self.handle_failure(universal_id)
 
                 except Exception as e:
                     self.agent.log(f"[SUPERVISOR-ERROR] {e}")
@@ -40,16 +40,16 @@ class AgentSupervisorThread(threading.Thread):
         pulses = list(Path(token_path).glob("hello_*.pulse"))
         return max(pulses, key=lambda p: p.stat().st_mtime, default=None)
 
-    def handle_failure(self, perm_id):
-        spawn_dir = os.path.join(self.comm_root, perm_id, "spawns")
+    def handle_failure(self, universal_id):
+        spawn_dir = os.path.join(self.comm_root, universal_id, "spawns")
         if not os.path.isdir(spawn_dir):
-            self.agent.log(f"[SUPERVISOR] No spawns directory for {perm_id}")
+            self.agent.log(f"[SUPERVISOR] No spawns directory for {universal_id}")
             return
 
         # Find latest spawn record
         spawn_files = sorted(Path(spawn_dir).glob("*.spawn"), reverse=True)
         if not spawn_files:
-            self.agent.log(f"[SUPERVISOR] No spawn entries found for {perm_id}")
+            self.agent.log(f"[SUPERVISOR] No spawn entries found for {universal_id}")
             return
 
         latest = spawn_files[0]
@@ -65,7 +65,7 @@ class AgentSupervisorThread(threading.Thread):
                 # Flag for scavenger agent, e.g., write to /scavenger/queue
 
         except Exception as e:
-            self.agent.log(f"[SUPERVISOR-FAILURE] Failed to process spawn for {perm_id}: {e}")
+            self.agent.log(f"[SUPERVISOR-FAILURE] Failed to process spawn for {universal_id}: {e}")
 
     def stop(self):
         self.running = False

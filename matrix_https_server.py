@@ -10,7 +10,7 @@ path_resolution = {
 }
 
 command_line_args = {
-    "permanent_id": "matrix"
+    "universal_id": "matrix"
 }
 
 # Boot MatrixAgent

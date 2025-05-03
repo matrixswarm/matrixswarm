@@ -18,7 +18,7 @@ An agent drops a file:
 {
   "type": "spawn_request",
   "requested_by": "oracle-agent",
-  "permanent_id": "reaper-2",
+  "universal_id": "reaper-2",
   "agent_name": "reaper",
   "source_required": true,
   "purpose": "handle delegated die cookies"

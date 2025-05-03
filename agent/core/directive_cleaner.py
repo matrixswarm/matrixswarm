@@ -18,17 +18,17 @@ class DirectiveCleaner:
             return False
 
     def deduplicate(self):
-        # Ensure one entry per permanent_id
+        # Ensure one entry per universal_id
         seen = {}
         unique_entries = []
 
         for entry in self.tree.get("agents", []):
-            perm_id = entry.get("permanent_id")
-            if perm_id and perm_id not in seen:
-                seen[perm_id] = entry
+            universal_id = entry.get("universal_id")
+            if universal_id and universal_id not in seen:
+                seen[universal_id] = entry
                 unique_entries.append(entry)
             else:
-                print(f"[CLEANER] Removing duplicate for perm_id: {perm_id}")
+                print(f"[CLEANER] Removing duplicate for universal_id: {universal_id}")
 
         self.cleaned_tree = {"agents": unique_entries}
 

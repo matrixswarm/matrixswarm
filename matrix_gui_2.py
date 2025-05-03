@@ -2,8 +2,10 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QListWidget, QListWidgetItem,
     QLineEdit, QGroupBox, QSplitter, QFileDialog,
-    QTextEdit, QStatusBar, QSizePolicy, QStackedLayout
+    QTextEdit, QStatusBar, QSizePolicy, QStackedLayout, QCheckBox
 )
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QFont, QPalette
 import sys
@@ -25,6 +27,7 @@ class MatrixCommandBridge(QWidget):
         self.setup_status_bar()
         self.setup_timers()
         self.check_matrix_connection()
+
 
     def setup_ui(self):
         self.main_layout = QVBoxLayout()
@@ -90,21 +93,108 @@ class MatrixCommandBridge(QWidget):
         back_btn.setStyleSheet("background-color: #111; color: #33ff33; border: 1px solid #00ff66;")
         layout.addWidget(back_btn)
 
+        self.loading_frames = ["⏳", "🔁", "⌛"]
+        self.loading_index = 0
+
+        self.loading_timer = QTimer()
+        self.loading_timer.timeout.connect(self.animate_loader)
+        self.loading_timer.start(300)
+
         container.setLayout(layout)
         return container
 
+    def animate_loader(self):
+        if hasattr(self, "tree_loading_label") and self.tree_stack.currentIndex() == 0:
+            icon = self.loading_frames[self.loading_index % len(self.loading_frames)]
+            self.tree_loading_label.setText(f"{icon} Loading agent tree from Matrix...")
+            self.loading_index += 1
+
     def handle_tree_click(self, item):
-        perm_id = item.data(Qt.UserRole)
-        self.log_input.setText(perm_id)
-        self.view_logs()
+        try:
+            print("[CLICK] Triggered")
+
+            universal_id = item.data(Qt.UserRole)
+            if not universal_id:
+                print("[CLICK] No universal_id from UserRole")
+                return
+
+            node = self.agent_tree_flat.get(universal_id)
+            if not node:
+                print(f"[TREE-CLICK] No node found for universal_id: {universal_id}")
+                return
+
+            self.input_agent_name.setText(node.get("name", ""))
+            self.input_universal_id.setText(universal_id)
+            self.input_target_universal_id.setText("")
+            self.input_delegated.setText(",".join(node.get("delegated", [])))
+
+            info_lines = [
+                f"🧠 Name: {node.get('name', '')}",
+                f"🆔 Perm ID: {universal_id}",
+                f"👥 Delegates: {', '.join(node.get('delegated', [])) or 'None'}",
+                f"📁 Filesystem: {json.dumps(node.get('filesystem', {}), indent=2)}",
+                f"⚙️ Config: {json.dumps(node.get('config', {}), indent=2)}"
+            ]
+
+            if node.get("confirmed"):
+                info_lines.append("✅ Status: ALIVE")
+            else:
+                info_lines.append("⚠️ Status: UNCONFIRMED / DOWN")
+
+            self.agent_info_panel.setText("\n".join(info_lines))
+            print("[CLICK] Update complete")
+
+            self.log_input.setText(universal_id)
+            self.view_logs()
+
+
+
+        except Exception as e:
+            print(f"[TREE-CLICK][CRASH] {e}")
+            self.agent_info_panel.setText("⚠️ Failed to load agent info.")
+
+
+    def send_payload_to_matrix(self):
+        payload_text = self.payload_editor.toPlainText().strip()
+        if not payload_text:
+            self.status_label.setText("⚠️ No payload to send.")
+            return
+
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError as e:
+            self.status_label.setText(f"⚠️ Invalid JSON: {e}")
+            return
+
+        # Inject selected universal_id as target if not already set
+        target = self.input_universal_id.text().strip()
+        if target:
+            payload.setdefault("target", target)
+            payload.setdefault("content", {})
+            payload["content"].setdefault("universal_id", target)
+
+        try:
+            response = requests.post(
+                url=MATRIX_HOST,
+                json=payload,
+                cert=CLIENT_CERT,
+                verify=False,
+                timeout=REQUEST_TIMEOUT
+            )
+            if response.status_code == 200:
+                self.status_label.setText(f"✅ Payload delivered to {target}.")
+            else:
+                self.status_label.setText(f"❌ Matrix responded: {response.status_code}")
+        except Exception as e:
+            self.status_label.setText(f"❌ Failed to send payload: {e}")
 
     def view_logs(self):
-        perm_id = self.log_input.text().strip().split(" ")[0]
+        universal_id = self.log_input.text().strip().split(" ")[0]
 
         payload = {
             "type": "get_log",
             "timestamp": time.time(),
-            "content": {"perm_id": perm_id}
+            "content": {"universal_id": universal_id}
         }
         try:
             response = requests.post(
@@ -118,13 +208,14 @@ class MatrixCommandBridge(QWidget):
                 data = response.json()
                 logs = data.get("log", "[NO LOG DATA RECEIVED]")
                 self.log_text.setPlainText(logs)
-                self.log_text.moveCursor(self.log_text.textCursor().End)
+                if self.auto_scroll_checkbox.isChecked():
+                    self.log_text.moveCursor(self.log_text.textCursor().End)
             else:
                 try:
                     message = response.json().get("message", response.text)
                 except Exception:
                     message = response.text
-                self.log_text.setPlainText(f"[MATRIX ERROR] Could not retrieve logs for {perm_id}:{message}")
+                self.log_text.setPlainText(f"[MATRIX ERROR] Could not retrieve logs for {universal_id}:{message}")
         except Exception as e:
             self.log_text.setPlainText(f"[ERROR] Failed to connect to Matrix:\n{str(e)}")
 
@@ -134,7 +225,10 @@ class MatrixCommandBridge(QWidget):
         self.tree_timer.start(interval * 1000)
 
     def request_tree_from_matrix(self):
+
+        self.tree_stack.setCurrentIndex(0)  # Show loading
         try:
+
             payload = {"type": "list_tree", "timestamp": time.time(), "content": {}}
             response = requests.post(
                 url=MATRIX_HOST,
@@ -149,20 +243,41 @@ class MatrixCommandBridge(QWidget):
                 self.render_tree_to_gui(tree)
             else:
                 self.status_label.setText("🔴 Disconnected")
+
+
         except Exception:
             self.status_label.setText("🔴 Disconnected")
+
+        self.tree_stack.setCurrentIndex(1)  # Show tree
 
     def render_tree_to_gui(self, tree):
         output = self.render_tree(tree)
         self.tree_display.clear()
+        # Flat universal_id lookup for handle_tree_click
+        self.agent_tree_flat = {}
+
+        def recurse_flatten(node):
+            if not isinstance(node, dict):
+                return
+            if "universal_id" in node:
+                self.agent_tree_flat[node["universal_id"]] = node
+            for child in node.get("children", []):
+                recurse_flatten(child)
+
+        recurse_flatten(tree)
+
         header = QListWidgetItem(f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]")
         header.setForeground(QColor("#888"))
         self.tree_display.addItem(header)
-        for line, perm_id, color in output:
+        for line, universal_id, color in output:
             item = QListWidgetItem(line)
-            item.setData(Qt.UserRole, perm_id)
+            item.setData(Qt.UserRole, universal_id)
             item.setForeground(QColor("#33ff33") if color == "green" else QColor("#ff5555") if color == "red" else QColor("#33ff33"))
             self.tree_display.addItem(item)
+
+        if universal_id == self.input_universal_id.text().strip():
+            self.tree_display.setCurrentItem(item)
+            self.tree_display.scrollToItem(item)
 
     def render_tree(self, node, indent="", is_last=True):
         output = []
@@ -170,8 +285,8 @@ class MatrixCommandBridge(QWidget):
             output.append((f"{indent}└─ [INVALID NODE STRUCTURE: {node}]", "none", "red"))
             return output
 
-        perm_id = node.get("permanent_id") or node.get("name") or "unknown"
-        agent_type = (node.get("name") or node.get("permanent_id", "")).split("-")[0].lower()
+        universal_id = node.get("universal_id") or node.get("name") or "unknown"
+        agent_type = (node.get("name") or node.get("universal_id", "")).split("-")[0].lower()
         icon_map = {
             "matrix": "🧠", "reaper": "💀", "scavenger": "🧹", "sentinel": "🛡️",
             "oracle": "🔮", "mailman": "📬", "logger": "❓", "worker": "🧍",
@@ -186,21 +301,22 @@ class MatrixCommandBridge(QWidget):
         if agent_type not in icon_map:
             icon = "❓"
 
-        die_path = os.path.join("comm", perm_id, "incoming", "die")
+        die_path = os.path.join("comm", universal_id, "incoming", "die")
         if os.path.exists(die_path):
-            perm_id += " ⚠️ [DOWN]"
+            universal_id += " ⚠️ [DOWN]"
             color = "red"
 
         if node.get("confirmed"):
             color = "green"
 
         children = node.get("children", [])
+        display_id = universal_id  # keep raw ID untouched
         if isinstance(children, list) and children:
-            perm_id += f" ({len(children)})"
+            display_id += f" ({len(children)})"
 
         prefix = "└─ " if is_last else "├─ "
-        line = f"{indent}{prefix}{icon} {perm_id}"
-        output.append((line, perm_id, color))
+        line = f"{indent}{prefix}{icon} {display_id}"
+        output.append((line, universal_id, color))
 
         for i, child in enumerate(children):
             last = (i == len(children) - 1)
@@ -220,24 +336,35 @@ class MatrixCommandBridge(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(6)
 
-        self.agent_name = QLineEdit("agent_name")
-        self.perm_id = QLineEdit("permanent_id")
-        self.target_id = QLineEdit("target_permanent_id")
-        self.delegate = QLineEdit("comma,separated,delegated")
+        self.input_agent_name = QLineEdit("agent_name")
+        self.input_universal_id = QLineEdit("universal_id")
+        self.input_target_universal_id = QLineEdit("target_universal_id")
+        self.input_delegated = QLineEdit("comma,separated,delegated")
 
-        for widget in [self.agent_name, self.perm_id, self.target_id, self.delegate]:
+        for widget in [self.input_agent_name, self.input_universal_id, self.input_target_universal_id, self.input_delegated]:
             widget.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
             layout.addWidget(widget)
-
-        for label in ["RESUME AGENT", "SHUTDOWN AGENT", "INJECT TO TREE", "CALL REAPER", "DELETE SUBTREE"]:
-            btn = QPushButton(label)
-            btn.setStyleSheet("background-color: #1e1e1e; color: #33ff33; border: 1px solid #00ff66;")
-            layout.addWidget(btn)
 
         self.upload_btn = QPushButton("Upload Agent Code")
         self.upload_btn.clicked.connect(self.upload_agent_code)
         self.upload_btn.setStyleSheet("background-color: #1e1e1e; color: #33ff33; border: 1px solid #00ff66;")
         layout.addWidget(self.upload_btn)
+
+        self.payload_editor = QTextEdit()
+        self.payload_editor.setPlaceholderText("Enter JSON payload to send to agent over the wire...")
+        self.payload_editor.setStyleSheet("background-color: #000; color: #00ffcc; font-family: Courier;")
+        self.payload_editor.setFixedHeight(150)
+        layout.addWidget(self.payload_editor)
+
+        send_payload_btn = QPushButton("🚀 SEND PAYLOAD TO AGENT")
+        send_payload_btn.clicked.connect(self.send_payload_to_matrix)
+        send_payload_btn.setStyleSheet(
+            "background-color: #111; color: #00ffcc; border: 1px solid #00ff66; font-weight: bold;")
+        layout.addWidget(send_payload_btn)
+
+        reboot_btn = QPushButton("💥 HARD BOOT SYSTEM")
+        reboot_btn.clicked.connect(self.send_reboot_agent)
+        layout.addWidget(reboot_btn)
 
         toggle_btn = QPushButton("🧠 Switch to Code View")
         toggle_btn.clicked.connect(lambda: self.stack.setCurrentIndex(1))
@@ -246,6 +373,38 @@ class MatrixCommandBridge(QWidget):
 
         box.setLayout(layout)
         return box
+
+    def send_reboot_agent(self):
+
+        from PyQt5.QtWidgets import QMessageBox
+
+        confirm = QMessageBox.question(self, "Confirm Reboot",
+                                       "⚠️ This will trigger a hard system reboot via bootloader.\nProceed?",
+                                       QMessageBox.Yes | QMessageBox.No)
+        if confirm != QMessageBox.Yes:
+            return
+
+        payload = {
+            "type": "spawn_agent",
+            "content": {
+                "agent_name": "reboot_agent",
+                "universal_id": "reboot-1",
+                "filesystem": {},
+                "config": {
+                    "confirm": "YES",  # ✅ REQUIRED
+                    "shutdown_all": True,
+                    "reboot_matrix": True
+                }
+            }
+        }
+
+        requests.post(
+            url=MATRIX_HOST,
+            json=payload,
+            cert=CLIENT_CERT,
+            verify=False,
+            timeout=REQUEST_TIMEOUT
+        )
 
     def check_matrix_connection(self):
         try:
@@ -262,11 +421,17 @@ class MatrixCommandBridge(QWidget):
         except Exception:
             self.status_label.setText("🔴 Disconnected")
 
-
     def build_tree_panel(self):
         box = QGroupBox("🧠 Hive Tree View")
         layout = QVBoxLayout()
 
+        # Tree loading label
+        self.tree_loading_label = QLabel("⏳ Loading agent tree from Matrix...")
+        self.tree_loading_label.setAlignment(Qt.AlignCenter)
+        self.tree_loading_label.setStyleSheet("color: #888; font-size: 16px; font-weight: bold;")
+        self.tree_loading_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Tree list
         self.tree_display = QListWidget()
         self.tree_display.itemClicked.connect(self.handle_tree_click)
         self.tree_display.setStyleSheet("""
@@ -287,22 +452,59 @@ class MatrixCommandBridge(QWidget):
             }
         """)
 
+        # Stack view for toggling between loading and tree
+        self.tree_stack = QStackedLayout()
+        self.tree_stack.addWidget(self.tree_loading_label)  # index 0
+        self.tree_stack.addWidget(self.tree_display)  # index 1
+
+        self.agent_info_panel = QLabel("[ Select an agent from the tree to view details ]")
+        action_layout = QHBoxLayout()
+        self.resume_btn = QPushButton("RESUME")
+        self.shutdown_btn = QPushButton("SHUTDOWN")
+        self.inject_btn = QPushButton("INJECT")
+        self.reaper_btn = QPushButton("REAPER")
+        self.delete_btn = QPushButton("DELETE")
+
+        for btn in [self.resume_btn, self.shutdown_btn, self.inject_btn, self.reaper_btn, self.delete_btn]:
+            btn.setStyleSheet("background-color: #1e1e1e; color: #33ff33; border: 1px solid #00ff66;")
+            action_layout.addWidget(btn)
+
+        layout.addLayout(action_layout)
+        self.agent_info_panel.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.agent_info_panel.setStyleSheet("""
+            QLabel {
+                color: #33ff33;
+                font-family: Courier;
+                font-size: 13px;
+                padding: 10px;
+                border: 1px solid #00ff66;
+            }
+        """)
+        layout.addWidget(self.agent_info_panel)
+
+        # Button
         reload_btn = QPushButton("Reload Tree")
         reload_btn.clicked.connect(self.request_tree_from_matrix)
         reload_btn.setStyleSheet("background-color: #111; color: #33ff33; border: 1px solid #00ff66;")
 
-        layout.addWidget(self.tree_display)
+        self.resume_btn.clicked.connect(self.handle_resume_agent)
+        self.shutdown_btn.clicked.connect(self.handle_shutdown_agent)
+        self.inject_btn.clicked.connect(self.handle_inject_to_tree)
+        self.reaper_btn.clicked.connect(self.handle_call_reaper)
+        self.delete_btn.clicked.connect(self.handle_delete_subtree)
+
+
+        layout.addLayout(self.tree_stack)
         layout.addWidget(reload_btn)
         box.setLayout(layout)
         return box
-
 
     def build_log_panel(self):
         box = QGroupBox("📡 Agent Intel Logs")
         layout = QVBoxLayout()
 
         self.log_input = QLineEdit()
-        self.log_input.setPlaceholderText("Enter agent perm_id to view logs")
+        self.log_input.setPlaceholderText("Enter agent universal_id to view logs")
         self.log_input.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
 
         view_btn = QPushButton("View Logs")
@@ -323,11 +525,115 @@ class MatrixCommandBridge(QWidget):
             }
         """)
 
+        self.auto_scroll_checkbox = QCheckBox("Auto-scroll logs")
+        self.auto_scroll_checkbox.setChecked(True)
+        self.auto_scroll_checkbox.setStyleSheet("color: #33ff33; font-family: Courier;")
+        layout.addWidget(self.auto_scroll_checkbox)
+
+
         layout.addWidget(self.log_input)
         layout.addWidget(view_btn)
         layout.addWidget(self.log_text)
         box.setLayout(layout)
         return box
+
+    def handle_resume_agent(self):
+        universal_id = self.input_universal_id.text().strip()
+        if not universal_id:
+            self.status_label.setText("⚠️ No agent selected.")
+            return
+
+        payload = {
+            "type": "resume",
+            "content": {
+                "targets": [universal_id]
+            }
+        }
+
+        self.send_post_to_matrix(payload, f"Resume sent to {universal_id}")
+
+    def handle_shutdown_agent(self):
+        universal_id = self.input_universal_id.text().strip()
+        if not universal_id:
+            self.status_label.setText("⚠️ No agent selected.")
+            return
+
+        payload = {
+            "type": "stop",
+            "content": {
+                "targets": [universal_id]
+            }
+        }
+
+        self.send_post_to_matrix(payload, f"Shutdown signal sent to {universal_id}")
+
+    def handle_inject_to_tree(self):
+        target = self.input_target_universal_id.text().strip()
+        universal_id = self.input_universal_id.text().strip()
+        agent_name = self.input_agent_name.text().strip()
+        delegated = [x.strip() for x in self.input_delegated.text().split(",") if x.strip()]
+
+        if not target or not universal_id or not agent_name:
+            self.status_label.setText("⚠️ Missing fields.")
+            return
+
+        payload = {
+            "type": "inject",
+            "content": {
+                "target_universal_id": target,
+                "universal_id": universal_id,
+                "agent_name": agent_name,
+                "delegated": delegated
+            }
+        }
+
+        self.send_post_to_matrix(payload, f"Injected {agent_name} under {target}")
+
+    def handle_call_reaper(self):
+        universal_id = self.input_universal_id.text().strip()
+        if not universal_id:
+            self.status_label.setText("⚠️ No agent selected.")
+            return
+
+        payload = {
+            "type": "kill",
+            "content": {
+                "targets": [universal_id]
+            }
+        }
+
+        self.send_post_to_matrix(payload, f"Reaper dispatched for {universal_id}")
+
+    def handle_delete_subtree(self):
+        universal_id = self.input_universal_id.text().strip()
+        if not universal_id:
+            self.status_label.setText("⚠️ No agent selected.")
+            return
+
+        payload = {
+            "type": "delete_subtree",
+            "content": {
+                "universal_id": universal_id
+            }
+        }
+
+        self.send_post_to_matrix(payload, f"Subtree delete issued for {universal_id}")
+
+    def send_post_to_matrix(self, payload, success_message):
+        try:
+            response = requests.post(
+                url=MATRIX_HOST,
+                json=payload,
+                cert=CLIENT_CERT,
+                verify=False,
+                timeout=REQUEST_TIMEOUT
+            )
+            if response.status_code == 200:
+                self.status_label.setText(f"✅ {success_message}")
+            else:
+                self.status_label.setText(f"❌ Matrix error: {response.status_code}")
+        except Exception as e:
+            self.status_label.setText(f"❌ Connection failed: {e}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

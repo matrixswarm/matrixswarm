@@ -22,15 +22,15 @@ class TreeDisseminator:
         if not tp:
             return False
 
-        top_node_id = tp.root.get("permanent_id")
+        top_node_id = tp.root.get("universal_id")
         if not top_node_id:
-            print("[TREE-DISSEMINATOR] Root node missing permanent_id.")
+            print("[TREE-DISSEMINATOR] Root node missing universal_id.")
             return False
 
         delegated = tp.query_children_by_id(top_node_id)
-        for perm_id in delegated:
-            print(f"[TREE-DISSEMINATOR] Disseminating to: {perm_id}")
-            propagate_tree_slice(tp, perm_id, self.comm_path)
+        for universal_id in delegated:
+            print(f"[TREE-DISSEMINATOR] Disseminating to: {universal_id}")
+            propagate_tree_slice(tp, universal_id, self.comm_path)
         return True
 
     def disseminate_if_changed(self):

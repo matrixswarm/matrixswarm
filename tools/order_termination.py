@@ -2,11 +2,11 @@ import os
 import json
 import time
 
-def send_termination(permanent_id, comm_root="/sites/orbit/python/comm"):
-    """ Send a 'die' command to a specific agent by permanent_id. """
-    target_dir = os.path.join(comm_root, permanent_id, "incoming")
+def send_termination(universal_id, comm_root="/sites/orbit/python/comm"):
+    """ Send a 'die' command to a specific agent by universal_id. """
+    target_dir = os.path.join(comm_root, universal_id, "incoming")
     if not os.path.isdir(target_dir):
-        print(f"[ERROR] Comm path not found for {permanent_id}: {target_dir}")
+        print(f"[ERROR] Comm path not found for {universal_id}: {target_dir}")
         return
 
     filename = f"kill_{int(time.time())}.cmd"
@@ -14,14 +14,14 @@ def send_termination(permanent_id, comm_root="/sites/orbit/python/comm"):
 
     command = {
         "action": "die",
-        "target": permanent_id,
+        "target": universal_id,
         "reason": "order_66"
     }
 
     with open(full_path, "w") as f:
         json.dump(command, f, indent=2)
 
-    print(f"[ORDER-66] Execution order for {permanent_id} issued → {full_path}")
+    print(f"[ORDER-66] Execution order for {universal_id} issued → {full_path}")
 
 # Example:
 if __name__ == "__main__":

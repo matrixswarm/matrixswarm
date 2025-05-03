@@ -4,6 +4,7 @@ import psutil
 import time
 import signal
 from pathlib import Path
+from agent.core.class_lib.processes.reaper import Reaper
 
 class ReaperPermanentIdHandler:
     def __init__(self, pod_root, comm_root, logger=None):
@@ -14,10 +15,9 @@ class ReaperPermanentIdHandler:
     def default_logger(self, message):
         print(message)
 
-    def process_all_permanent_ids(self, perm_ids, tombstone_mode=False, wait_seconds=20):
-        from agent.core.class_lib.processes.reaper import Reaper
+    def process_all_universal_ids(self, universal_ids, tombstone_mode=False, wait_seconds=20, tombstone_comm=True):
 
-        self.logger.log("[REAPER-HANDLER] Starting permanent_id reaping...")
+        self.logger.log("[REAPER-HANDLER] Starting universal_id reaping...")
 
         agent_paths = []
         for pod_dir in self.pod_root.iterdir():
@@ -27,20 +27,20 @@ class ReaperPermanentIdHandler:
             try:
                 with open(boot_file, "r") as f:
                     data = json.load(f)
-                if data.get("permanent_id") in perm_ids:
+                if data.get("universal_id") in universal_ids:
                     agent_paths.append(pod_dir)
             except Exception as e:
                 self.logger.log(f"[REAPER-HANDLER][ERROR] Reading {boot_file}: {e}")
 
         if not agent_paths:
-            self.logger.log("[REAPER-HANDLER][WARNING] No matching agents found for perm_ids.")
+            self.logger.log("[REAPER-HANDLER][WARNING] No matching agents found for universal_ids.")
             return
 
         reaper = Reaper(self.pod_root, self.comm_root, timeout_sec=wait_seconds, logger=self.logger.log)
         reaper.tombstone_mode = tombstone_mode
+        reaper.tombstone_comm = tombstone_comm  # 👈 Inject this as an attribute
 
-        # 🔥 MISSION TARGET LOCK-IN
-        reaper.mission_targets = set(perm_ids)  # <<< ADD THIS LINE
+        reaper.mission_targets = set(universal_ids)
 
         reaper.pass_out_die_cookies(agent_paths)
 
@@ -52,4 +52,4 @@ class ReaperPermanentIdHandler:
             self.logger.log("[REAPER-HANDLER][WARNING] Agents survived initial shutdown. Escalating...")
             reaper.escalate_shutdown()
 
-        self.logger.log("[REAPER-HANDLER] Permanent_id reaping operation complete.")
+        self.logger.log("[REAPER-HANDLER] Universal_id reaping operation complete.")

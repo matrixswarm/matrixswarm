@@ -15,22 +15,22 @@ class KillChainLockManager:
         self.tp = tree_parser_obj
 
     def lock_targets(self, kill_list):
-        for perm_id in kill_list:
-            node = self.tp.nodes.get(perm_id)
+        for universal_id in kill_list:
+            node = self.tp.nodes.get(universal_id)
             if not node:
-                print(f"[LOCK] Could not find node {perm_id}! Skipping.")
+                print(f"[LOCK] Could not find node {universal_id}! Skipping.")
                 continue
 
-            print(f"[LOCK] Marking {perm_id} as operation_in_progress.")
+            print(f"[LOCK] Marking {universal_id} as operation_in_progress.")
             node["operation_in_progress"] = True
 
-            parent = self.find_parent_of_node(perm_id)
+            parent = self.find_parent_of_node(universal_id)
             if not parent:
-                print(f"[LOCK] No parent found for {perm_id}. Skipping prune.")
+                print(f"[LOCK] No parent found for {universal_id}. Skipping prune.")
                 continue  # 🚨 Don't try to prune if no parent
 
             if "children" not in parent:
-                print(f"[LOCK] Parent of {perm_id} has no children array. Skipping prune.")
+                print(f"[LOCK] Parent of {universal_id} has no children array. Skipping prune.")
                 continue
 
             if parent and "children" in parent:
@@ -38,20 +38,20 @@ class KillChainLockManager:
                 original_children = list(parent["children"])  # Make a safe shallow copy
                 parent["children"] = [
                     child for child in original_children
-                    if isinstance(child, dict) and child.get("permanent_id") != perm_id
+                    if isinstance(child, dict) and child.get("universal_id") != universal_id
                 ]
                 after = len(parent["children"])
                 if before != after:
-                    print(f"[LOCK] Pruned {before - after} child(ren) from parent of {perm_id}.")
+                    print(f"[LOCK] Pruned {before - after} child(ren) from parent of {universal_id}.")
 
-    def find_parent_of_node(self, child_perm_id):
+    def find_parent_of_node(self, child_universal_id):
         def recurse(node):
             if not node or not isinstance(node, dict):
                 return None
             for child in node.get("children", []):
                 if not isinstance(child, dict):
                     continue
-                if child.get("permanent_id") == child_perm_id:
+                if child.get("universal_id") == child_universal_id:
                     return node
                 result = recurse(child)
                 if result:
@@ -64,8 +64,8 @@ class KillChainLockManager:
         """
         Mark frozen nodes as permanently killed after Reaper success.
         """
-        for perm_id in kill_list:
-            node = self.tp.nodes.get(perm_id)
+        for universal_id in kill_list:
+            node = self.tp.nodes.get(universal_id)
             if node:
                 node.pop("operation_in_progress", None)
                 node["killed"] = True
@@ -77,8 +77,8 @@ class KillChainLockManager:
         """
         Optional: Release locks without marking as killed (abort/recovery protocol).
         """
-        for perm_id in kill_list:
-            node = self.tp.nodes.get(perm_id)
+        for universal_id in kill_list:
+            node = self.tp.nodes.get(universal_id)
             if node:
                 node.pop("operation_in_progress", None)
 

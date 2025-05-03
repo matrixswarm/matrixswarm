@@ -36,6 +36,7 @@ class Reaper:
         self.pass_out_die_cookies(agent_paths)
 
         # Wait for agents to stop gracefully within timeout
+
         shutdown_success = self.wait_for_agents_shutdown()
 
         if not shutdown_success:
@@ -64,26 +65,29 @@ class Reaper:
                 if not os.path.isfile(boot_path):
                     continue
 
+
+
                 with open(boot_path, "r") as f:
                     boot_data = json.load(f)
 
-                perm_id = boot_data.get("permanent_id")
+                universal_id = boot_data.get("universal_id")
                 pid = boot_data.get("pid")
                 cmdline = boot_data.get("cmd", [])
 
-                if not perm_id:
+                if not universal_id:
                     continue
 
                     # 🔥 MISSION TARGET FILTER
-                if self.mission_targets and perm_id not in self.mission_targets:
+                if self.mission_targets and universal_id not in self.mission_targets:
                     continue  # ⚡ Skip non-targets
 
-                comm_path = os.path.join(self.comm_root, perm_id, "incoming")
+                comm_path = os.path.join(self.comm_root, universal_id, "incoming")
                 os.makedirs(comm_path, exist_ok=True)
                 die_path = os.path.join(comm_path, "die")
 
                 JsonSafeWrite.safe_write(die_path, "terminate")
-                self.log_info(f"[REAPER][info] `die` cookie distributed for {perm_id}.")
+
+                self.log_info(f"[REAPER][info] `die` cookie distributed for {universal_id}.")
 
                 if self.tombstone_mode:
                     # COMM tombstone
@@ -94,12 +98,12 @@ class Reaper:
                     pod_tombstone_path = os.path.join(agent_path, "tombstone")
                     try:
                         Path(pod_tombstone_path).write_text("true")
-                        self.log_info(f"[REAPER][info] Tombstones dropped for {perm_id} in comm and pod.")
+                        self.log_info(f"[REAPER][info] Tombstones dropped for {universal_id} in comm and pod.")
                     except Exception as e:
                         self.log_info(f"[REAPER][error] Failed to drop tombstone in pod {agent_path}: {e}")
 
                 # Track agent
-                self.agents[perm_id] = {
+                self.agents[universal_id] = {
                     "pid": pid,
                     "details": {
                         "cmd": cmdline,
@@ -117,15 +121,17 @@ class Reaper:
         while total_wait_time <= self.timeout:
             survivors.clear()
 
-            for perm_id, agent_info in self.agents.items():
+            for universal_id, agent_info in self.agents.items():
+
+
                 if self.is_cmdline_still_alive(agent_info):
-                    survivors.append(perm_id)
+                    survivors.append(universal_id)
 
             if not survivors:
                 self.log_info("[REAPER][info] All agents have exited cleanly.")
                 return True  # shutdown_success = True
 
-            self.log_info(f"[REAPER][info] Agent {perm_id} is still breathing...")
+            self.log_info(f"[REAPER][info] Agent {universal_id} is still breathing...")
 
             time.sleep(check_interval)
             total_wait_time += check_interval
@@ -173,11 +179,11 @@ class Reaper:
         """
         Escalates shutdown procedure using exact cmd matching from boot.json.
         """
-        for perm_id, agent_info in self.agents.items():
+        for universal_id, agent_info in self.agents.items():
             try:
                 cmd_target = agent_info.get("details", {}).get("cmd")
                 if not cmd_target:
-                    self.log_info(f"[REAPER][error] No cmdline stored for agent {perm_id}. Skipping.")
+                    self.log_info(f"[REAPER][error] No cmdline stored for agent {universal_id}. Skipping.")
                     continue
 
                 # Find matching PIDs
@@ -200,7 +206,7 @@ class Reaper:
                         self.log_info(f"[REAPER][info] SIGKILL sent to PID {pid}. Process forcibly terminated.")
 
             except Exception as e:
-                self.log_info(f"[REAPER][error] Failed escalation for {perm_id}: {e}")
+                self.log_info(f"[REAPER][error] Failed escalation for {universal_id}: {e}")
 
     def find_bigbang_agents(self, pod_root, global_id="bb:"):
         """
@@ -220,14 +226,14 @@ class Reaper:
                     boot_data = json.load(f)
 
                 cmd = boot_data.get("cmd", [])
-                perm_id = boot_data.get("permanent_id")
+                universal_id = boot_data.get("universal_id")
 
-                if not cmd or not perm_id:
+                if not cmd or not universal_id:
                     continue
 
                 # Check if global_id (like \"bb:\") is anywhere in the cmd args
                 if any(global_id in part for part in cmd):
-                    matching_agents[perm_id] = {
+                    matching_agents[universal_id] = {
                         "uuid": uuid,
                         "cmd": cmd,
                         "pid": boot_data.get("pid")

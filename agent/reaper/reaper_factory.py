@@ -1,22 +1,21 @@
 from uuid import uuid4
 from datetime import datetime
 
-def make_reaper_node(targets, perm_ids, mission_name=None):
-    """
-    Build a DisposableReaperAgent tree node with an embedded kill list and perm_ids.
-    """
+def make_reaper_node(targets, universal_ids, mission_name=None, tombstone_comm=True):
+    from uuid import uuid4
+    from datetime import datetime
+
     uid = uuid4().hex[:6]
     kill_id = mission_name or f"reaper-strike-{uid}"
 
     node = {
-        "permanent_id": kill_id,
+        "universal_id": kill_id,
         "name": "reaper",
-        "filesystem": {
-            "folders": []
-        },
+        "filesystem": { "folders": [] },
         "config": {
             "kill_list": targets,
-            "perm_ids": perm_ids,  # <<<< THIS IS THE BIG ADD
+            "universal_ids": universal_ids,
+            "tombstone_comm": tombstone_comm,
             "created": datetime.now().strftime("%Y%m%d%H%M%S")
         }
     }

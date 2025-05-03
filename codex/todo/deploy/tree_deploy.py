@@ -17,19 +17,19 @@ def deploy_tree():
         print(f"[!] Failed to parse tree.json: {e}")
         return
 
-    for perm_id, children in tree.items():
-        path = os.path.join(COMM_DIR, perm_id)
+    for universal_id, children in tree.items():
+        path = os.path.join(COMM_DIR, universal_id)
         os.makedirs(path, exist_ok=True)
         directive_path = os.path.join(path, "directives")
         try:
             with open(directive_path, "w") as f:
                 json.dump({
-                    "permanent_id": perm_id,
+                    "universal_id": universal_id,
                     "delegated": children
                 }, f, indent=2)
-            print(f"✅ Injected: {perm_id} → {children}")
+            print(f"✅ Injected: {universal_id} → {children}")
         except Exception as e:
-            print(f"❌ Failed to write {perm_id}: {e}")
+            print(f"❌ Failed to write {universal_id}: {e}")
 
     print("\n🌱 Tree deployed successfully from tree.json\n")
 
@@ -42,8 +42,8 @@ def print_tree(tree, root="matrix", indent=""):
 
 def show_tree():
     tree = {}
-    for perm_id in os.listdir(COMM_DIR):
-        path = os.path.join(COMM_DIR, perm_id)
+    for universal_id in os.listdir(COMM_DIR):
+        path = os.path.join(COMM_DIR, universal_id)
         if not os.path.isdir(path):
             continue
         directive_path = os.path.join(path, "directives")
@@ -52,9 +52,9 @@ def show_tree():
         try:
             with open(directive_path, "r") as f:
                 directives = json.load(f)
-            tree[perm_id] = directives.get("delegated", [])
+            tree[universal_id] = directives.get("delegated", [])
         except Exception as e:
-            print(f" - Failed to read {perm_id}: {e}")
+            print(f" - Failed to read {universal_id}: {e}")
 
     if not tree:
         print("[!] No live structure found. Checking local tree.json...")

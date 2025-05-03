@@ -13,12 +13,12 @@ Choose a mission file from `/deploy/teams/`
 Each file should follow this structure:
 ```json
 {
-  "perm_id": "recon-unit",
+  "universal_id": "recon-unit",
   "agent_name": "ReconAgent",
   "delegated": ["scout-1", "logger-2"]
 }
 ```
-- `perm_id`: the primary agent’s permanent ID
+- `universal_id`: the primary agent’s permanent ID
 - `agent_name`: name of the source class
 - `delegated`: list of children to spawn
 

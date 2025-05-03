@@ -14,7 +14,7 @@ import threading
 
 from agent.core.boot_agent import BootAgent
 #from agent.core.class_lib.processes.reaper import Reaper  # Import Big Reaperfrom agent.core.class_lib.processes.reaper import Reaper  # Big Reaper
-from agent.core.class_lib.processes.reaper_permanent_id_handler import ReaperPermanentIdHandler  # PID Handler
+from agent.core.class_lib.processes.reaper_universal_id_handler import ReaperPermanentIdHandler  # PID Handler
 
 class ReaperAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
@@ -26,12 +26,12 @@ class ReaperAgent(BootAgent):
         # Load targets, kill ID, and initialize paths
         config = tree_node.get("config", {})
         self.targets = command_line_args.get("targets") or config.get("kill_list", [])
-        self.perm_ids = command_line_args.get("perm_ids") or config.get("perm_ids", {})
+        self.universal_ids = command_line_args.get("universal_ids") or config.get("universal_ids", {})
         self.kill_id = command_line_args.get("kill_id") or config.get("kill_id") or f"reap-{int(time.time())}"
         self.outbox_path = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox")
         os.makedirs(self.outbox_path, exist_ok=True)
 
-        self.permanent_id_handler = ReaperPermanentIdHandler(self.path_resolution['pod_path'], self.path_resolution['comm_path'], logger=self.logger)
+        self.universal_id_handler = ReaperPermanentIdHandler(self.path_resolution['pod_path'], self.path_resolution['comm_path'], logger=self.logger)
 
 
     def post_boot(self):
@@ -53,17 +53,17 @@ class ReaperAgent(BootAgent):
         """
         self.log("[INFO] Inserting hit team...")
 
-        # Filter `self.targets` based on valid perm_ids
-        filtered_perm_ids = {perm_id: self.perm_ids[perm_id] for perm_id in self.targets if perm_id in self.perm_ids}
+        # Filter `self.targets` based on valid universal_ids
+        filtered_universal_ids = {universal_id: self.universal_ids[universal_id] for universal_id in self.targets if universal_id in self.universal_ids}
 
-        if not filtered_perm_ids:
+        if not filtered_universal_ids:
             self.log("[WARNING] No valid targets found in the provided target list.")
             self.running = False  # Mark the agent as stopped
             return
 
         # Use central handler to process all valid targets at once
         try:
-            self.permanent_id_handler.process_all_permanent_ids(filtered_perm_ids, tombstone_mode=True, wait_seconds=20)
+            self.universal_id_handler.process_all_universal_ids(filtered_universal_ids, tombstone_mode=True, wait_seconds=20)
             self.log("[INFO] Mission completed successfully.")
         except Exception as e:
             self.log(f"[ERROR] Failed to complete mission: {str(e)}")
@@ -78,7 +78,7 @@ class ReaperAgent(BootAgent):
         """
         try:
 
-            incoming_dir = os.path.join(self.path_resolution["comm_path"], self.command_line_args["permanent_id"], "incoming")
+            incoming_dir = os.path.join(self.path_resolution["comm_path"], self.command_line_args["universal_id"], "incoming")
             os.makedirs(incoming_dir, exist_ok=True)
 
             pod_dir = os.path.join(self.path_resolution["pod_path"], self.command_line_args["install_name"])
@@ -106,14 +106,14 @@ class ReaperAgent(BootAgent):
         finally:
             self.running = False  # Always stop running, even if tombstone writing fails
 
-    def attempt_kill(self, perm_id):
+    def attempt_kill(self, universal_id):
         """
         Deliver 'die' and 'tombstone' signals to a directory and wait for graceful shutdown.
         Escalates with Permanent ID Handler if the process resists termination.
         """
         # Paths for the target
-        pod_path = os.path.join(self.path_resolution['pod_path'], perm_id)
-        comm_path = os.path.join(self.path_resolution['comm_path'], perm_id)
+        pod_path = os.path.join(self.path_resolution['pod_path'], universal_id)
+        comm_path = os.path.join(self.path_resolution['comm_path'], universal_id)
 
         # Send 'die' and 'tombstone' signals via `comm_path`
         incoming = os.path.join(comm_path, "incoming")
@@ -123,7 +123,7 @@ class ReaperAgent(BootAgent):
         with open(os.path.join(incoming, "tombstone"), "w") as f:
             f.write("true")
 
-        self.log(f"[DISPOSABLE-REAPER] Die and tombstone delivered to {perm_id}")
+        self.log(f"[DISPOSABLE-REAPER] Die and tombstone delivered to {universal_id}")
 
         # Monitor shutdown success via hello.moto file
         hello_path = os.path.join(pod_path, "hello.moto")
@@ -131,25 +131,25 @@ class ReaperAgent(BootAgent):
         elapsed = 0
         while elapsed < max_wait:
             if not os.path.exists(hello_path):
-                self.log(f"[DISPOSABLE-REAPER] {perm_id} down gracefully.")
+                self.log(f"[DISPOSABLE-REAPER] {universal_id} down gracefully.")
                 return True
             time.sleep(3)
             elapsed += 3
 
         # Escalate with PID handler if process resists
-        self.log(f"[DISPOSABLE-REAPER] {perm_id} resisted — invoking Full PID Handler escalation.")
-        self.escalate_with_pid_handler(perm_id)
+        self.log(f"[DISPOSABLE-REAPER] {universal_id} resisted — invoking Full PID Handler escalation.")
+        self.escalate_with_pid_handler(universal_id)
         return False
 
-    def escalate_with_pid_handler(self, perm_id):
+    def escalate_with_pid_handler(self, universal_id):
         """
         Escalate the shutdown process using the Permanent ID handler for the specified target.
         """
         try:
-            self.permanent_id_handler.shutdown_processes(perm_id, perm_id)
-            self.log(f"[DISPOSABLE-REAPER] PID Handler escalation complete for {perm_id}")
+            self.universal_id_handler.shutdown_processes(universal_id, universal_id)
+            self.log(f"[DISPOSABLE-REAPER] PID Handler escalation complete for {universal_id}")
         except Exception as e:
-            self.log(f"[DISPOSABLE-REAPER] PID Handler escalation FAILED for {perm_id}: {e}")
+            self.log(f"[DISPOSABLE-REAPER] PID Handler escalation FAILED for {universal_id}: {e}")
 
     def send_mission_report(self, results):
         """

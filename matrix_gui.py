@@ -28,9 +28,9 @@ def open_killops_window(root, payload_dir):
     win.title("KillOps Command Center")
     win.geometry("400x200")  # Force a clean size
 
-    Label(win, text="Target perm_id(s):").grid(row=0, column=0, sticky="w")
-    perm_id_var = StringVar()
-    Entry(win, textvariable=perm_id_var, width=40).grid(row=0, column=1)
+    Label(win, text="Target universal_id(s):").grid(row=0, column=0, sticky="w")
+    universal_id_var = StringVar()
+    Entry(win, textvariable=universal_id_var, width=40).grid(row=0, column=1)
 
     Label(win, text="Mode:").grid(row=1, column=0, sticky="w")
     mode_var = StringVar(value="single")
@@ -41,9 +41,9 @@ def open_killops_window(root, payload_dir):
 
 
     def send_stop():
-        targets = [x.strip() for x in perm_id_var.get().split(",") if x.strip()]
+        targets = [x.strip() for x in universal_id_var.get().split(",") if x.strip()]
         if not targets:
-            messagebox.showerror("Invalid Input", "Please enter at least one perm_id to stop.")
+            messagebox.showerror("Invalid Input", "Please enter at least one universal_id to stop.")
             return
 
         payload = {
@@ -77,9 +77,9 @@ def open_killops_window(root, payload_dir):
 
     def send_resume():
 
-        targets = [x.strip() for x in perm_id_var.get().split(",") if x.strip()]
+        targets = [x.strip() for x in universal_id_var.get().split(",") if x.strip()]
         if not targets:
-            messagebox.showerror("Invalid Input", "Enter at least one perm_id.")
+            messagebox.showerror("Invalid Input", "Enter at least one universal_id.")
             return
 
         payload = {
@@ -109,7 +109,7 @@ def open_killops_window(root, payload_dir):
 
 
     def send_kill():
-        targets = [x.strip() for x in perm_id_var.get().split(",") if x.strip()]
+        targets = [x.strip() for x in universal_id_var.get().split(",") if x.strip()]
         mode = mode_var.get()
         annihilate = annihilate_var.get()
         timestamp = int(time.time())
@@ -196,13 +196,13 @@ class MatrixGUI(tk.Tk):
         self.agent_name.insert(0, "agent_name")
         self.agent_name.pack(pady=5)
 
-        self.perm_id = tk.Entry(left, width=25)
-        self.perm_id.insert(0, "permanent_id")
-        self.perm_id.pack(pady=5)
+        self.universal_id = tk.Entry(left, width=25)
+        self.universal_id.insert(0, "universal_id")
+        self.universal_id.pack(pady=5)
 
-        self.target_permanent_id = tk.Entry(left, width=25)
-        self.target_permanent_id.insert(0, "target_permanent_id")
-        self.target_permanent_id.pack(pady=5)
+        self.target_universal_id = tk.Entry(left, width=25)
+        self.target_universal_id.insert(0, "target_universal_id")
+        self.target_universal_id.pack(pady=5)
 
         self.delegated = tk.Entry(left, width=25)
         self.delegated.insert(0, "comma,separated,delegated")
@@ -289,16 +289,16 @@ class MatrixGUI(tk.Tk):
         CodexPanel(codex_win)
 
     def resume_agent(self):
-        perm_id = self.perm_id.get().strip()
-        if not perm_id:
-            messagebox.showwarning("No perm_id", "Enter a perm_id to resume.")
+        universal_id = self.universal_id.get().strip()
+        if not universal_id:
+            messagebox.showwarning("No universal_id", "Enter a universal_id to resume.")
             return
 
         payload = {
             "type": "resume",
             "timestamp": time.time(),
             "content": {
-                "targets": [perm_id]
+                "targets": [universal_id]
             }
         }
 
@@ -311,7 +311,7 @@ class MatrixGUI(tk.Tk):
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
-                messagebox.showinfo("Resumed", f"Resume signal sent to {perm_id}.")
+                messagebox.showinfo("Resumed", f"Resume signal sent to {universal_id}.")
             else:
                 messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
         except Exception as e:
@@ -342,13 +342,13 @@ class MatrixGUI(tk.Tk):
             with open(team_file, "r") as f:
                 team_data = json.load(f)
 
-            target_perm_id = self.agent_select.get().strip()
-            print(f"[DEBUG] Dropdown returned: {repr(target_perm_id)}")
+            target_universal_id = self.agent_select.get().strip()
+            print(f"[DEBUG] Dropdown returned: {repr(target_universal_id)}")
 
-            if not target_perm_id or target_perm_id == "---":
+            if not target_universal_id or target_universal_id == "---":
                 messagebox.showwarning(
                     "No Target Selected",
-                    f"Dropdown returned: {repr(target_perm_id)}\nPlease select a valid agent to deploy under."
+                    f"Dropdown returned: {repr(target_universal_id)}\nPlease select a valid agent to deploy under."
                 )
                 return
 
@@ -356,7 +356,7 @@ class MatrixGUI(tk.Tk):
                 "type": "inject_team",
                 "timestamp": time.time(),
                 "content": {
-                    "target_perm_id": target_perm_id,
+                    "target_universal_id": target_universal_id,
                     "subtree": team_data
                 }
             }
@@ -444,7 +444,7 @@ cert = ("certs/client.crt", "certs/client.key"),
                 self.tree_display.delete("1.0", tk.END)
                 self.tree_display.insert(tk.END, f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]\n")
 
-                for idx, (line, perm_id) in enumerate(output):
+                for idx, (line, universal_id) in enumerate(output):
                     tag = f"perm_{idx}"
                     self.tree_display.insert(tk.END, line + "\n", tag)
 
@@ -454,8 +454,8 @@ cert = ("certs/client.crt", "certs/client.key"),
                     elif "⚠️" in line:
                         self.tree_display.tag_config(tag, foreground="#ff5555")  # Red downed
 
-                    if perm_id != "none":
-                        self.tree_display.tag_bind(tag, "<Button-1>", self.make_click_callback(perm_id))
+                    if universal_id != "none":
+                        self.tree_display.tag_bind(tag, "<Button-1>", self.make_click_callback(universal_id))
 
             else:
                 messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
@@ -468,11 +468,11 @@ cert = ("certs/client.crt", "certs/client.key"),
             output.append((f"{indent}- [INVALID NODE STRUCTURE: {node}]", "none"))
             return output
 
-        perm_id = node.get("permanent_id") or node.get("name") or "unknown"
-        label = perm_id
+        universal_id = node.get("universal_id") or node.get("name") or "unknown"
+        label = universal_id
 
         # ⚠️ Check for DIE file
-        die_path = f"/comm/{perm_id}/incoming/die"
+        die_path = f"/comm/{universal_id}/incoming/die"
         if os.path.exists(die_path):
             label += " ⚠️ [DOWN]"
 
@@ -488,7 +488,7 @@ cert = ("certs/client.crt", "certs/client.key"),
             children = []
 
         line = f"{indent}- {label}"
-        output.append((line, perm_id))
+        output.append((line, universal_id))
         for child in children:
             output.extend(self.render_tree(child, indent + "  "))
         return output
@@ -513,7 +513,7 @@ cert = ("certs/client.crt", "certs/client.key"),
             for child in tree.get_delegates(node):
                 recurse(child, indent + "  ")
 
-        root_node = tree.nodes.get("matrix")  # ← Replace "matrix" with actual root perm_id if dynamic
+        root_node = tree.nodes.get("matrix")  # ← Replace "matrix" with actual root universal_id if dynamic
         if root_node:
             recurse(root_node)
         else:
@@ -526,10 +526,10 @@ cert = ("certs/client.crt", "certs/client.key"),
 
     def send_spawn(self):
         agent = self.agent_name.get()
-        perm = self.perm_id.get()
+        perm = self.universal_id.get()
         delegated = [x.strip() for x in self.delegated.get().split(",") if x.strip()]
         directive = {
-            "permanent_id": perm,
+            "universal_id": perm,
             "agent_name": agent,
             "delegated": delegated
         }
@@ -538,10 +538,10 @@ cert = ("certs/client.crt", "certs/client.key"),
     def send_injection(self):
 
         #id of target parent
-        target_perm_id =self.target_permanent_id.get().strip()
+        target_universal_id =self.target_universal_id.get().strip()
 
         #this is the unique id of the agent
-        perm = self.perm_id.get().strip()
+        perm = self.universal_id.get().strip()
 
         #this is agent that will be spawned
         agent = self.agent_name.get().strip()
@@ -549,8 +549,8 @@ cert = ("certs/client.crt", "certs/client.key"),
         delegated = [x.strip() for x in self.delegated.get().split(",") if x.strip()]
 
         directive = {
-            "target_perm_id": target_perm_id,
-            "perm_id": perm,
+            "target_universal_id": target_universal_id,
+            "universal_id": perm,
             "agent_name": agent,
             "delegated": delegated
         }
@@ -583,14 +583,14 @@ cert = ("certs/client.crt", "certs/client.key"),
             messagebox.showerror("Connection Failed", str(e))
 
     def shutdown_agent(self):
-        perm = self.perm_id.get()
+        perm = self.universal_id.get()
         path = f"/comm/reaper-root/payload/kill_{perm}.json"
         with open(path, "w") as f:
-            json.dump({"perm_id": perm}, f, indent=2)
+            json.dump({"universal_id": perm}, f, indent=2)
         messagebox.showinfo("Shutdown", f"Kill order sent for {perm}")
 
     def kill_subtree(self):
-        target = self.perm_id.get().strip()
+        target = self.universal_id.get().strip()
         if not target:
             return
         subtree = self.get_subtree(target)
@@ -600,7 +600,7 @@ cert = ("certs/client.crt", "certs/client.key"),
         messagebox.showinfo("Subtree Terminated", f"{len(subtree)} agents marked for death.")
 
     def resume_subtree(self):
-        target = self.perm_id.get().strip()
+        target = self.universal_id.get().strip()
         if not target:
             return
         subtree = self.get_subtree(target)
@@ -612,7 +612,7 @@ cert = ("certs/client.crt", "certs/client.key"),
 
 
     def delete_subtree(self):
-        perm = self.perm_id.get()
+        perm = self.universal_id.get()
         from agent.core.live_tree import LiveTree
         tree = LiveTree()
         tree.delete_subtree(perm)
@@ -643,7 +643,7 @@ cert = ("certs/client.crt", "certs/client.key"),
                 lines = []
 
                 # The root node is the entire tree object
-                root_node = tree if isinstance(tree, dict) and "permanent_id" in tree else None
+                root_node = tree if isinstance(tree, dict) and "universal_id" in tree else None
                 if root_node:
                     lines = self.render_tree(root_node)
                 else:
@@ -652,31 +652,31 @@ cert = ("certs/client.crt", "certs/client.key"),
                 self.tree_display.delete("1.0", tk.END)
                 self.tree_display.insert(tk.END, f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]\n\n")
 
-                for idx, (line, perm_id) in enumerate(lines):
+                for idx, (line, universal_id) in enumerate(lines):
                     tag = f"perm_{idx}"
                     self.tree_display.insert(tk.END, line + "\n", tag)
-                    if perm_id != "none":
+                    if universal_id != "none":
                         # Inject it into the log input as well
                         self.agent_log_entry.delete(0, tk.END)
-                        self.agent_log_entry.insert(0, perm_id)
+                        self.agent_log_entry.insert(0, universal_id)
 
-                        self.tree_display.tag_bind(tag, "<Button-1>", self.make_click_callback(perm_id))
+                        self.tree_display.tag_bind(tag, "<Button-1>", self.make_click_callback(universal_id))
 
-                        print(f"[CLICK-BIND] Clicked tag bound to perm_id: {perm_id}")
+                        print(f"[CLICK-BIND] Clicked tag bound to universal_id: {universal_id}")
             else:
                 messagebox.showerror("Matrix Error", f"{response.status_code}: {response.text}")
 
         except Exception as e:
             messagebox.showerror("Request Failed", str(e))
 
-    def view_logs_for(self, perm_id):
+    def view_logs_for(self, universal_id):
         import requests
 
         payload = {
             "type": "get_log",
             "timestamp": time.time(),
             "content": {
-                "perm_id": perm_id
+                "universal_id": universal_id
             }
         }
 
@@ -694,7 +694,7 @@ cert = ("certs/client.crt", "certs/client.key"),
                 self.log_box.delete("1.0", tk.END)
                 self.log_box.insert(tk.END, logs)
                 self.log_box.see(tk.END)
-                print(f"[REMOTE-LOG] Loaded logs for {perm_id}")
+                print(f"[REMOTE-LOG] Loaded logs for {universal_id}")
             else:
                 self.log_box.delete("1.0", tk.END)
                 self.log_box.insert(tk.END, f"[ERROR] Server responded: {response.text}")
@@ -704,9 +704,9 @@ cert = ("certs/client.crt", "certs/client.key"),
             self.log_box.insert(tk.END, f"[ERROR] Failed to retrieve logs: {e}")
 
     def view_logs(self):
-        perm_id = self.agent_log_entry.get().strip()
-        print(f"[LOG-GUI] Request to view logs for: {perm_id}")
-        log_path = f"/sites/orbit/python/comm/{perm_id}/logs/agent.log"
+        universal_id = self.agent_log_entry.get().strip()
+        print(f"[LOG-GUI] Request to view logs for: {universal_id}")
+        log_path = f"/sites/orbit/python/comm/{universal_id}/logs/agent.log"
         print(f"[LOG-GUI] Final path used: {log_path}")
 
         if os.path.exists(log_path):
@@ -718,10 +718,10 @@ cert = ("certs/client.crt", "certs/client.key"),
                 self.log_box.see(tk.END)
             except Exception as e:
                 self.log_box.delete("1.0", tk.END)
-                self.log_box.insert(tk.END, f"[ERROR] Could not read log for {perm_id}: {e}")
+                self.log_box.insert(tk.END, f"[ERROR] Could not read log for {universal_id}: {e}")
         else:
             self.log_box.delete("1.0", tk.END)
-            self.log_box.insert(tk.END, f"[ERROR] No log found for {perm_id}")
+            self.log_box.insert(tk.END, f"[ERROR] No log found for {universal_id}")
 
     def view_tags(self):
         if os.path.exists("/deploy/missions.json"):
@@ -736,15 +736,15 @@ cert = ("certs/client.crt", "certs/client.key"),
 
     def shutdown_subtree(self):
 
-        perm_id = self.perm_id.get().strip()
-        if not perm_id:
-            messagebox.showwarning("Missing perm_id", "Please enter a perm_id.")
+        universal_id = self.universal_id.get().strip()
+        if not universal_id:
+            messagebox.showwarning("Missing universal_id", "Please enter a universal_id.")
             return
 
         payload = {
             "type": "shutdown_subtree",
             "content": {
-                "perm_id": perm_id
+                "universal_id": universal_id
             }
         }
 

@@ -13,7 +13,7 @@ class Watchdog2Agent(BootAgent, DelegationMixin):
         super().__init__(path_resolution, command_line_args)
         self.orbits = {}
         self.pending_resurrections = {}
-        self.label = self.command_line_args.get("permanent_id", "UNKNOWN").upper()
+        self.label = self.command_line_args.get("universal_id", "UNKNOWN").upper()
 
     def worker_pre(self):
         self.log("[WATCHDOG-2] Agent initialized. Resurrection monitoring engaged.")
@@ -75,18 +75,18 @@ class Watchdog2Agent(BootAgent, DelegationMixin):
         except:
             return False
 
-    def recover_agent(self, perm_id):
+    def recover_agent(self, universal_id):
         matrix_comm = os.path.join(self.path_resolution["comm_path"], "matrix", "incoming")
         os.makedirs(matrix_comm, exist_ok=True)
         request = {
             "action": "request_delegation",
-            "requester": perm_id
+            "requester": universal_id
         }
         filename = f"request_delegation_{int(time.time())}.cmd"
         full_path = os.path.join(matrix_comm, filename)
         with open(full_path, "w") as f:
             json.dump(request, f, indent=2)
-        self.log(f"[WATCHDOG-2] Recovery request dispatched for {perm_id} → {filename}")
+        self.log(f"[WATCHDOG-2] Recovery request dispatched for {universal_id} → {filename}")
 
     def process_command(self, command):
         try:

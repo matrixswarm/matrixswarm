@@ -65,7 +65,7 @@ class MetricsAgent(BootAgent):
 
     def log_metrics(self, data):
         payload = {
-            "uuid": self.command_line_args["permanent_id"],
+            "uuid": self.command_line_args["universal_id"],
             "timestamp": time.time(),
             "severity": "info",
             "msg": f"CPU: {data['cpu']}, RAM: {data['ram_used_percent']}%, Disk Free: {data['disk_free_gb']} GB, Uptime: {data['uptime_sec']} sec"
@@ -77,7 +77,7 @@ class MetricsAgent(BootAgent):
 
     def query_oracle(self, summary):
         query = {
-            "source": self.command_line_args["permanent_id"],
+            "source": self.command_line_args["universal_id"],
             "query_type": "trend_analysis",
             "timestamp": time.time(),
             "payload": summary

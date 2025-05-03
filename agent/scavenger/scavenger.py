@@ -27,7 +27,7 @@ class ScavengerAgent(BootAgent):
         self.command_line_args = command_line_args
 
         self.orbits = {}
-        self.watch_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args['permanent_id'], "payload")
+        self.watch_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args['universal_id'], "payload")
         os.makedirs(self.watch_path, exist_ok=True)
 
     def post_boot(self):
@@ -65,22 +65,22 @@ class ScavengerAgent(BootAgent):
                 for fname in os.listdir(self.watch_path):
                     if not fname.endswith(".cmd"):
                         continue
-                    perm_id = fname.replace("scavenge_", "").replace("kill_", "").replace(".cmd", "")
+                    universal_id = fname.replace("scavenge_", "").replace("kill_", "").replace(".cmd", "")
                     full_path = os.path.join(self.watch_path, fname)
-                    self.execute_stop(perm_id, annihilate="scavenge" in fname)
+                    self.execute_stop(universal_id, annihilate="scavenge" in fname)
                     os.remove(full_path)
             except Exception as e:
                 self.log(f"[SCAVENGER][COMMAND ERROR] {e}")
             time.sleep(2)
 
-    def execute_stop(self, perm_id, annihilate=True):
-        comm_path = os.path.join(self.path_resolution['comm_path'], perm_id)
+    def execute_stop(self, universal_id, annihilate=True):
+        comm_path = os.path.join(self.path_resolution['comm_path'], universal_id)
         die_path = os.path.join(comm_path, "incoming", "die")
         JsonSafeWrite.safe_write(die_path, "terminate")
-        self.log(f"[SCAVENGER] Sent die signal to {perm_id}")
+        self.log(f"[SCAVENGER] Sent die signal to {universal_id}")
         status = "pause_requested"
-        self.send_confirmation(perm_id, status)
-        self.notify_matrix_to_verify(perm_id)
+        self.send_confirmation(universal_id, status)
+        self.notify_matrix_to_verify(universal_id)
 
     def scavenger_sweep(self):
         self.log("[SCAVENGER] Background sweep active. Scanning every 5 minutes...")
@@ -106,13 +106,13 @@ class ScavengerAgent(BootAgent):
 
                         with open(boot_path, "r") as f:
                             boot_data = json.load(f)
-                            perm_id = boot_data.get("permanent_id")
+                            universal_id = boot_data.get("universal_id")
                             cmdline_target = boot_data.get("cmd", [])
 
-                        if not perm_id or not cmdline_target:
+                        if not universal_id or not cmdline_target:
                             continue
 
-                        comm_path = os.path.join(comm_root, perm_id)
+                        comm_path = os.path.join(comm_root, universal_id)
                         tombstone_comm = os.path.join(comm_path, "incoming", "tombstone")
                         tombstone_pod = os.path.join(pod_path, "tombstone")
 
@@ -141,16 +141,16 @@ class ScavengerAgent(BootAgent):
                                 continue
 
                         if still_alive:
-                            self.log(f"[SCAVENGER][WARNING] Agent {perm_id} still breathing by cmdline. Delaying sweep.")
+                            self.log(f"[SCAVENGER][WARNING] Agent {universal_id} still breathing by cmdline. Delaying sweep.")
                             continue
 
-                        self.log(f"[SCAVENGER] Sweeping corpse: {perm_id} (UUID {uuid})")
+                        self.log(f"[SCAVENGER] Sweeping corpse: {universal_id} (UUID {uuid})")
                         if os.path.exists(pod_path):
                             shutil.rmtree(pod_path)
                         if os.path.exists(comm_path):
                             shutil.rmtree(comm_path)
 
-                        self.send_confirmation(perm_id, status="terminated")
+                        self.send_confirmation(universal_id, status="terminated")
 
                     except Exception as e:
                         self.log(f"[SCAVENGER][SWEEP-UUID-ERROR] {e}")
@@ -159,32 +159,32 @@ class ScavengerAgent(BootAgent):
                 self.log(f"[SCAVENGER][SWEEP-MAIN-ERROR] {e}")
             interruptible_sleep(self, 120)
 
-    def send_confirmation(self, perm_id, status):
+    def send_confirmation(self, universal_id, status):
         outbox = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox")
         os.makedirs(outbox, exist_ok=True)
         payload = {
             "status": status,
-            "perm_id": perm_id,
+            "universal_id": universal_id,
             "timestamp": time.time(),
-            "message": f"{perm_id} {status} by Scavenger."
+            "message": f"{universal_id} {status} by Scavenger."
         }
-        fpath = os.path.join(outbox, f"reaper_{perm_id}.json")
+        fpath = os.path.join(outbox, f"reaper_{universal_id}.json")
         with open(fpath, "w") as f:
             json.dump(payload, f, indent=2)
-        self.log(f"[SCAVENGER] Confirmed: {perm_id} ➔ {status}")
+        self.log(f"[SCAVENGER] Confirmed: {universal_id} ➔ {status}")
 
-    def notify_matrix_to_verify(self, perm_id):
-        verify_path = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox", f"verify_{perm_id}.json")
+    def notify_matrix_to_verify(self, universal_id):
+        verify_path = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox", f"verify_{universal_id}.json")
         payload = {
             "type": "verify_branch",
-            "perm_id": perm_id,
-            "origin": self.command_line_args.get("permanent_id", "unknown"),
+            "universal_id": universal_id,
+            "origin": self.command_line_args.get("universal_id", "unknown"),
             "timestamp": time.time(),
             "status": "post_kill"
         }
         with open(verify_path, "w") as f:
             json.dump(payload, f, indent=2)
-        self.log(f"[SCAVENGER] Verification request sent for: {perm_id}")
+        self.log(f"[SCAVENGER] Verification request sent for: {universal_id}")
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))

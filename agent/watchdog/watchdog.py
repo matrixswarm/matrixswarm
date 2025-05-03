@@ -58,7 +58,7 @@ class WatchdogAgent(BootAgent):
             "details": {
                 "url": self.ping_url,
                 "error": error_message,
-                "perm_id": self.command_line_args["permanent_id"],
+                "universal_id": self.command_line_args["universal_id"],
                 "uuid": self.command_line_args["install_name"],
                 "timestamp": time.time()
             }

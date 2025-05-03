@@ -40,7 +40,7 @@ class UptimePingerAgent(BootAgent):
     def send_log(self, target, status_code, response_time, success):
         msg = f"{'UP' if success else 'DOWN'}: {target} [{status_code}] in {response_time:.2f}s" if success else f"DOWN: {target} [{status_code}]"
         payload = {
-            "uuid": self.command_line_args["permanent_id"],
+            "uuid": self.command_line_args["universal_id"],
             "timestamp": time.time(),
             "severity": "info" if success else "error",
             "msg": msg

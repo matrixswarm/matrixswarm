@@ -20,12 +20,12 @@ def list_active_hive(pod_root="pod"):
             with open(boot_file, "r") as f:
                 boot_data = json.load(f)
 
-            perm_id = boot_data.get("permanent_id")
+            universal_id = boot_data.get("universal_id")
             pid = boot_data.get("pid")
             cmdline = boot_data.get("cmd", [])
             boot_time = boot_data.get("boot_time", 0)
 
-            if not perm_id or not pid or not cmdline:
+            if not universal_id or not pid or not cmdline:
                 continue
 
             alive = False
@@ -39,7 +39,7 @@ def list_active_hive(pod_root="pod"):
                     continue
 
             if alive:
-                print(f"🔵 Agent: {perm_id}")
+                print(f"🔵 Agent: {universal_id}")
                 print(f"   PID: {pid}")
                 print(f"   CMD: {' '.join(cmdline)}")
                 print(f"   Uptime: {int(uptime)} seconds ({uptime/60:.2f} minutes)")

@@ -43,11 +43,11 @@ class ReactorAgent(BootAgent):
         except Exception as e:
             self.log(f"[REACTOR][ERROR] {e}")
 
-    def deploy_defense_agent(self, perm_id, agent_name):
+    def deploy_defense_agent(self, universal_id, agent_name):
         spawn_payload = {
             "command": "spawn_agent",
             "payload": {
-                "perm_id": perm_id,
+                "universal_id": universal_id,
                 "agent_name": agent_name,
                 "directives": {
                     "watch_path": "/etc",
@@ -59,14 +59,14 @@ class ReactorAgent(BootAgent):
         path = os.path.join(self.spawn_target, fname)
         with open(path, "w") as f:
             json.dump(spawn_payload, f, indent=2)
-        self.log(f"[REACTOR] Dispatched spawn request for {agent_name} as {perm_id}.")
+        self.log(f"[REACTOR] Dispatched spawn request for {agent_name} as {universal_id}.")
 
     def broadcast(self, message):
         try:
             mailman_dir = os.path.join(self.path_resolution["comm_path"], "mailman-1", "payload")
             os.makedirs(mailman_dir, exist_ok=True)
             payload = {
-                "uuid": self.command_line_args.get("permanent_id", "reactor-1"),
+                "uuid": self.command_line_args.get("universal_id", "reactor-1"),
                 "timestamp": time.time(),
                 "severity": "info",
                 "msg": message

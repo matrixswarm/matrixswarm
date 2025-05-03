@@ -68,7 +68,7 @@ class SentinelAgent(BootAgent):
         prompt = {
             "file": filepath,
             "last_modified_days": round(age_days, 2),
-            "reply_to": self.command_line_args["permanent_id"]
+            "reply_to": self.command_line_args["universal_id"]
         }
         filename = f"stale_{uuid.uuid4().hex}.prompt"
         with open(os.path.join(self.oracle_payload, filename), "w") as f:
@@ -86,7 +86,7 @@ class SentinelAgent(BootAgent):
 
     def execute_cmd(self, cmd):
         log_entry = {
-            "source": self.command_line_args.get("permanent_id", "update-sentinel"),
+            "source": self.command_line_args.get("universal_id", "update-sentinel"),
             "type": "action",
             "event": cmd.get("action"),
             "target": cmd.get("target"),
