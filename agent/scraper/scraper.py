@@ -59,7 +59,7 @@ class ScraperAgent(BootAgent):
             links = [a["href"] for a in soup.find_all("a", href=True)]
 
             payload = {
-                "uuid": self.command_line_args["permanent_id"],
+                "uuid": self.command_line_args["universal_id"],
                 "timestamp": time.time(),
                 "target": url,
                 "title": title,

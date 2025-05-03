@@ -14,7 +14,7 @@ class FileWatchAgent(BootAgent):
         config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
         self.watch_path = config.get("watch_path", "/etc/")
         self.send_to = config.get("send_to", "mailman-1")
-        self.agent_id = self.command_line_args.get("permanent_id", "filewatch")
+        self.agent_id = self.command_line_args.get("universal_id", "filewatch")
 
         self.target_payload = os.path.join(
             self.path_resolution["comm_path"], self.send_to, "payload"

@@ -21,16 +21,16 @@ def check_lingers():
 
     # Ghost comms: have communication setup but no pod alive
     ghost_comms = comms - pods
-    for perm_id in ghost_comms:
-        print(f"[STALE COMM] /comm/{perm_id} has no matching /pod agent")
+    for universal_id in ghost_comms:
+        print(f"[STALE COMM] /comm/{universal_id} has no matching /pod agent")
 
     # Missing or empty hello.moto check
-    for perm_id in comms:
-        moto_path = os.path.join(COMM_DIR, perm_id, "hello.moto")
+    for universal_id in comms:
+        moto_path = os.path.join(COMM_DIR, universal_id, "hello.moto")
         if not os.path.exists(moto_path):
-            print(f"[MISSING] hello.moto for {perm_id} is absent")
+            print(f"[MISSING] hello.moto for {universal_id} is absent")
         elif not os.listdir(moto_path):
-            print(f"[DEAD] hello.moto for {perm_id} is empty — agent silent")
+            print(f"[DEAD] hello.moto for {universal_id} is empty — agent silent")
 
     print("\n👁️ Ghost scan complete. Review above for anomalies.\n")
 

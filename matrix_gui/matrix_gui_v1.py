@@ -36,9 +36,9 @@ class MatrixV1(tk.Tk):
         self.agent_name.insert(0, "agent_name")
         self.agent_name.pack(pady=5)
 
-        self.perm_id = tk.Entry(left, width=25)
-        self.perm_id.insert(0, "permanent_id")
-        self.perm_id.pack(pady=5)
+        self.universal_id = tk.Entry(left, width=25)
+        self.universal_id.insert(0, "universal_id")
+        self.universal_id.pack(pady=5)
 
         self.delegated = tk.Entry(left, width=25)
         self.delegated.insert(0, "comma,separated,delegated")
@@ -96,17 +96,17 @@ class MatrixV1(tk.Tk):
 
     def send_spawn(self):
         agent = self.agent_name.get()
-        perm = self.perm_id.get()
+        perm = self.universal_id.get()
         delegated = [x.strip() for x in self.delegated.get().split(",") if x.strip()]
         directive = {
-            "permanent_id": perm,
+            "universal_id": perm,
             "agent_name": agent,
             "delegated": delegated
         }
         self.send_to_matrix("spawn", directive)
 
     def inject_tree(self):
-        perm = self.perm_id.get()
+        perm = self.universal_id.get()
         delegated = [x.strip() for x in self.delegated.get().split(",") if x.strip()]
         tree = LiveTree()
         tree.inject(perm, delegated)
@@ -141,14 +141,14 @@ class MatrixV1(tk.Tk):
         self.tree_display.insert(tk.END, "\n".join(output))
 
     def shutdown_agent(self):
-        perm = self.perm_id.get()
+        perm = self.universal_id.get()
         path = f"/comm/reaper-root/payload/kill_{perm}.json"
         with open(path, "w") as f:
-            json.dump({"perm_id": perm}, f, indent=2)
+            json.dump({"universal_id": perm}, f, indent=2)
         messagebox.showinfo("Shutdown", f"Kill order sent for {perm}")
 
     def delete_subtree(self):
-        perm = self.perm_id.get()
+        perm = self.universal_id.get()
         tree = LiveTree()
         tree.delete_subtree(perm)
         messagebox.showinfo("Subtree Deleted", f"Deleted all nodes under {perm}")
@@ -158,21 +158,21 @@ class MatrixV1(tk.Tk):
         messagebox.showinfo("Reaper", "Reaper called")
 
     def view_logs(self):
-        perm_id = self.agent_log_entry.get().strip()
-        log_path = f"/sites/orbit/python/pod/{perm_id}/log.txt"
+        universal_id = self.agent_log_entry.get().strip()
+        log_path = f"/sites/orbit/python/pod/{universal_id}/log.txt"
         if os.path.exists(log_path):
             with open(log_path) as f:
                 logs = f.read()
             self.log_box.delete("1.0", tk.END)
             self.log_box.insert(tk.END, logs)
         else:
-            messagebox.showerror("Log Missing", f"No log.txt for {perm_id}")
+            messagebox.showerror("Log Missing", f"No log.txt for {universal_id}")
 
     def send_injection(self):
-        perm = self.perm_id.get()
+        perm = self.universal_id.get()
         delegated = [x.strip() for x in self.delegated.get().split(",") if x.strip()]
         directive = {
-            "perm_id": perm,
+            "universal_id": perm,
             "delegated": delegated
         }
         self.send_to_matrix("inject", directive)

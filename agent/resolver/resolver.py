@@ -29,13 +29,13 @@ class ServiceDirectoryAgent(BootAgent):
             self.log(f"[RESOLVER][ERROR] {e}")
 
     def parse_tree(self, node):
-        perm_id = node.get("permanent_id")
+        universal_id = node.get("universal_id")
         name = node.get("name")
         app = node.get("app")
         if name:
             if name not in self.directory:
                 self.directory[name] = []
-            self.directory[name].append({"perm_id": perm_id, "app": app})
+            self.directory[name].append({"universal_id": universal_id, "app": app})
         for child in node.get("children", []):
             self.parse_tree(child)
 
@@ -47,11 +47,11 @@ class ServiceDirectoryAgent(BootAgent):
                 app = q.get("app")
                 results = []
                 if svc in self.directory:
-                    results = [a["perm_id"] for a in self.directory[svc] if not app or a["app"] == app]
+                    results = [a["universal_id"] for a in self.directory[svc] if not app or a["app"] == app]
                 response = {
                     "type": "resolve_response",
                     "results": results,
-                    "source": self.command_line_args["permanent_id"],
+                    "source": self.command_line_args["universal_id"],
                     "timestamp": time.time()
                 }
                 self.send_to_matrix(response)

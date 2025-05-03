@@ -21,10 +21,10 @@ def list_comm():
     if not os.path.exists(COMM_DIR):
         print(" - No comm directory found.")
         return
-    for perm_id in os.listdir(COMM_DIR):
-        perm_path = os.path.join(COMM_DIR, perm_id)
+    for universal_id in os.listdir(COMM_DIR):
+        perm_path = os.path.join(COMM_DIR, universal_id)
         if os.path.isdir(perm_path):
-            print(f" - perm_id: {perm_id}")
+            print(f" - universal_id: {universal_id}")
 
 
 def main():

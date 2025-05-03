@@ -13,7 +13,7 @@ Thus was born:
 ## 🧠 Tree Delivery Protocol
 
 ### When Matrix spawns an agent, she:
-- Writes a clean `agent_tree.json` to the agent’s `/comm/{perm_id}/` directory
+- Writes a clean `agent_tree.json` to the agent’s `/comm/{universal_id}/` directory
 - Injects only the slice relevant to that node
 - Optionally adds a `tree_hash` to validate directive integrity
 

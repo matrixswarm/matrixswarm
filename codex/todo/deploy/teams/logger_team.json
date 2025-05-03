@@ -1,16 +1,16 @@
 {
-  "permanent_id": "logger-root",
+  "universal_id": "logger-root",
   "agent_name": "logger",
   "delegated": ["logger-1", "logger-2"],
   "children": [
     {
-      "permanent_id": "logger-1",
+      "universal_id": "logger-1",
       "agent_name": "logger",
       "delegated": [],
       "children": []
     },
     {
-      "permanent_id": "logger-2",
+      "universal_id": "logger-2",
       "agent_name": "logger",
       "delegated": [],
       "children": []

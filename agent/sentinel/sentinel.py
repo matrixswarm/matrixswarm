@@ -25,7 +25,7 @@ class SentinelAgent(BootAgent):
         self.command_line_args=command_line_args
         config = tree_node.get("config", {})
         self.watching = config.get("watching", "the Matrix")
-        self.permanent_id = config.get("permanent_id", None)
+        self.universal_id = config.get("universal_id", None)
         self.target_node = None
         self.time_delta_timeout = config.get("timeout", 30)  # Default 5 min if not set
 
@@ -46,42 +46,42 @@ class SentinelAgent(BootAgent):
         self.log("[SENTINEL] Watch cycle started.")
         while self.running:
 
-            if self.permanent_id:
+            if self.universal_id:
 
                 try:
                     if self.target_node is None:
-                        response = self.receive_node_response(self.permanent_id)
+                        response = self.receive_node_response(self.universal_id)
                         if response is not None:
                             self.target_node = {k: v for k, v in response.items()}
                             self.log(self.target_node)
                         interruptible_sleep(self, 5)
                         continue
 
-                    perm_id = self.target_node.get("permanent_id")
+                    universal_id = self.target_node.get("universal_id")
 
-                    if not perm_id:
-                        self.log("[SENTINEL][WATCH] Target node missing perm_id. Breathing idle.")
+                    if not universal_id:
+                        self.log("[SENTINEL][WATCH] Target node missing universal_id. Breathing idle.")
                         interruptible_sleep(self, 5)
                         continue
 
-                    die_file = os.path.join(self.path_resolution['comm_path'], perm_id, 'incoming', 'die')
+                    die_file = os.path.join(self.path_resolution['comm_path'], universal_id, 'incoming', 'die')
 
                     if os.path.exists(die_file):
-                        self.log(f"[SENTINEL][BLOCKED] {perm_id} has die file.")
+                        self.log(f"[SENTINEL][BLOCKED] {universal_id} has die file.")
                         interruptible_sleep(self, 10)
                         continue
 
-                    time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], perm_id)
+                    time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], universal_id)
                     if time_delta is not None and time_delta < self.time_delta_timeout:
                         interruptible_sleep(self, 10)
                         continue
 
                     self.spawn_agent_direct(
-                        perm_id=perm_id,
+                        universal_id=universal_id,
                         agent_name=self.target_node.get("name"),
                         tree_node=self.target_node
                     )
-                    self.log(f"[SENTINEL][SPAWNED] {perm_id} respawned successfully.")
+                    self.log(f"[SENTINEL][SPAWNED] {universal_id} respawned successfully.")
 
 
 
@@ -93,18 +93,18 @@ class SentinelAgent(BootAgent):
 
             interruptible_sleep(self, 10)
 
-    def receive_node_response(self, perm_id):
-        incoming_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args.get("permanent_id", "sentinel"), "incoming")
+    def receive_node_response(self, universal_id):
+        incoming_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args.get("universal_id", "sentinel"), "incoming")
         if not os.path.exists(incoming_path):
             return None
 
         # 🔥 If no Matrix response, check local tree file
-        agent_tree_file = os.path.join(self.path_resolution['comm_path'], perm_id, "agent_tree.json")
+        agent_tree_file = os.path.join(self.path_resolution['comm_path'], universal_id, "agent_tree.json")
         if os.path.exists(agent_tree_file):
             try:
                 with open(agent_tree_file, "r") as f:
                     node = json.load(f)
-                self.log(f"[SENTINEL] Loaded agent_tree.json for {perm_id}.")
+                self.log(f"[SENTINEL] Loaded agent_tree.json for {universal_id}.")
                 return node
             except Exception as e:
                 self.log(f"[SENTINEL][TREE-ERROR] {e}")

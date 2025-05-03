@@ -19,26 +19,15 @@ from datetime import datetime
 from class_lib.file_system.file_system_builder import FileSystemBuilder
 from path_manager import PathManager
 from agent.core.class_lib.logging.logger import Logger
+from agent.core.constants import UNIVERSE_ID
 
 class CoreSpawner:
-    def __init__(self, site_root="/sites/orbit/python", comm_root="matrixline", pod_root="pod"):
-
-        pm=PathManager()
-
-        paths = {
-            "pod": "pod",
-            "agent": "agent",
-            "comm": "comm",
-        }
-
-        pm.add_paths(paths)
+    def __init__(self, path_manager=None):
+        pm = path_manager or PathManager(use_session_root=True)
 
         self.root_path = pm.get_path("root")
-
         self.comm_path = pm.get_path("comm")
-
         self.pod_path = pm.get_path("pod")
-
         self.agent_path = pm.get_path("agent")
 
         os.makedirs(self.comm_path, exist_ok=True)
@@ -47,6 +36,7 @@ class CoreSpawner:
 
 
     def get_path(self, prefix_dir=None, variable_name_dir=None, postfix_dir=None):
+
         root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
         path = root_path
 
@@ -82,9 +72,9 @@ class CoreSpawner:
             os.makedirs(root, exist_ok=True)
             print(f"[SPAWNER] Verified structure: {root}")
 
-    def ensure_comm_channel(self, permanent_id, file_spec, agent_directive=None):
+    def ensure_comm_channel(self, universal_id, file_spec, agent_directive=None):
 
-        base = os.path.join(self.comm_path, permanent_id)
+        base = os.path.join(self.comm_path, universal_id)
 
         os.makedirs(base, exist_ok=True)
 
@@ -101,7 +91,7 @@ class CoreSpawner:
 
             folders = fs_node.get("folders", [])
             if folders:
-                print(f"[FS-BUILDER] Merging folders from directive for {permanent_id}")
+                print(f"[FS-BUILDER] Merging folders from directive for {universal_id}")
                 fsb.process_selection(base, folders)
 
             files = fs_node.get("files", {})
@@ -118,7 +108,7 @@ class CoreSpawner:
 
         return base
 
-    def create_runtime(self, permanent_id):
+    def create_runtime(self, universal_id):
         new_uuid = f"{str(uuid.uuid4())}"
         pod_path = os.path.join(self.pod_path, new_uuid)
         os.makedirs(pod_path, exist_ok=True)
@@ -155,7 +145,7 @@ class CoreSpawner:
 
         return good, content
 
-    def spawn_agent(self, universe_id, spawn_uuid, agent_name, permanent_id, spawner, tree_node=None):
+    def spawn_agent(self, spawn_uuid, agent_name, universal_id, spawner, tree_node=None):
 
         try:
 
@@ -172,69 +162,95 @@ class CoreSpawner:
             with open(full_path, "r") as f:
                 file_content = f.read()  # Read the entire file content
 
-            path_resolver = textwrap.dedent("""
-            import sys
-            if path_resolution['agent_path'] not in sys.path:
-                sys.path.append(path_resolution['agent_path'])
-            if path_resolution['root_path'] not in sys.path:
-                sys.path.append(path_resolution['root_path'])
-            """)
 
             #when the process is spawned it has no way to find the root and the lib path
             #so prepend it with these facts
-            root_path = '"root_path": "' + self.root_path + '",' + "\n"
-            pod_path = '"pod_path": "' + self.pod_path + '",' + "\n"
-            comm_path = '"comm_path": "' + self.comm_path + '",'+ "\n"
-            agent_path = '"agent_path": "' + self.agent_path + '",' + "\n"
-            incoming_path_template = '"incoming_path_template": "' + os.path.join(self.comm_path, '$permanent_id', "incoming") + '",' + "\n"
-            comm_path_resolved = '"comm_path_resolved": "' +  os.path.join(self.comm_path, permanent_id) + '",' + "\n"
+            path_dict = {
+                "root_path": self.root_path,
+                "pod_path": self.pod_path,
+                "comm_path": self.comm_path,
+                "agent_path": self.agent_path,
+                "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
+                "comm_path_resolved": os.path.join(self.comm_path, universal_id),
+            }
+            path_resolution = 'path_resolution=' + json.dumps(path_dict, indent=4) + '\n'
 
-            matrix_name = '"matrix": "matrix",' + "\n"
-            universe_name = '"universe_id": "' + universe_id + '",' + "\n"
-            spawner_name = '"spawner": "' + spawner + '",' + "\n"
-            permanent_id_name = '"permanent_id": "' + permanent_id + '",' + "\n"
-            agent_name_name = '"agent_name": "' + agent_name + '",' + "\n"
-            install_name = '"install_name": "' + spawn_uuid + '",' + "\n"
-
-            #written to the top of the script, runtime src
-            path_resolution = 'path_resolution={\n'+ root_path + pod_path + comm_path + agent_path + incoming_path_template + comm_path_resolved + '}\n' + path_resolver
-            command_line_args = 'command_line_args={\n' + install_name + matrix_name + universe_name + spawner_name + permanent_id_name + agent_name_name + '}\n'
+            cmd_args = {
+                "install_name": spawn_uuid,
+                "matrix": "matrix",
+                "spawner": spawner,
+                "universal_id": universal_id,
+                "agent_name": agent_name,
+            }
+            command_line_args = 'command_line_args=' + json.dumps(cmd_args, indent=4) + '\n'
 
             tree_node_blob = ""
             if tree_node:
                 try:
                     tree_node_blob = f"tree_node = {repr(tree_node)}\n"
                 except Exception as e:
-                    print(f"[SPAWN-ERROR] Could not encode tree_node for {permanent_id}: {e}")
+                    print(f"[SPAWN-ERROR] Could not encode tree_node for {universal_id}: {e}")
 
+            agent_path_bootstrap = textwrap.dedent("""
+                import sys
+                import os
+                
+                # Dynamically compute site root (two levels up from pod/run)
+                site_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                if site_root not in sys.path:
+                    sys.path.insert(0, site_root)
+                
+                # Inject venv site-packages if present
+                venv_site = "/sites/orbit/python/logai-env/lib/python3.12/site-packages"
+                if os.path.exists(venv_site) and venv_site not in sys.path:
+                    sys.path.insert(0, venv_site)
+                
+                # Inject agent *root* path (parent of /agent)
+                agent_path = path_resolution.get("agent_path")
+                agent_root = os.path.abspath(os.path.join(agent_path, "..")) if agent_path else None
+                if agent_root and agent_root not in sys.path:
+                    sys.path.insert(0, agent_root)
+                
+                # Use injected root path directly
+                root_path = path_resolution.get("root_path", site_root)
+                if root_path not in sys.path:
+                    sys.path.insert(0, root_path)
+                                
+                """)
+
+
+            path_resolver = (
+                f"path_resolution = {json.dumps(path_dict, indent=4)}\n"
+                f"command_line_args = {json.dumps(cmd_args, indent=4)}\n"
+                f"tree_node = {repr(tree_node)}\n"
+
+            )
 
             with open(run_path, "w") as f:
-                f.write(path_resolution + command_line_args + tree_node_blob + file_content)
+                f.write(path_resolver + agent_path_bootstrap + "\n" + file_content)
 
 
-            #payload = json.dumps(live_data).encode("utf-8")
-            #encrypted = core.encrypt(payload)
-            #with open(os.path.join(spawn_path, "live.json.enc"), "wb") as f:
-             #   f.write(encrypted)
 
-            logger = Logger(comm_path_resolved)
+            logger = Logger(os.path.join(self.comm_path, universal_id))
+
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
 
             # WRITE SPAWN LOG
-            # Log the spawn to /comm/{perm_id}/spawn/
+            # Log the spawn to /comm/{universal_id}/spawn/
             try:
                 spawn_record = {
                     "uuid": spawn_uuid,
-                    "permanent_id": permanent_id,
+                    "universal_id": universal_id,
                     "agent_name": agent_name,
                     "parent": spawner,
-                    "timestamp": time.time()
+                    "timestamp": timestamp
                 }
 
 
-                spawn_dir = os.path.join(self.comm_path, permanent_id, "spawn")
+                spawn_dir = os.path.join(self.comm_path, universal_id, "spawn")
                 os.makedirs(spawn_dir, exist_ok=True)
 
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
                 filename = f"{timestamp}_{spawn_uuid}.spawn"
                 filepath = os.path.join(spawn_dir, filename)
 
@@ -243,16 +259,16 @@ class CoreSpawner:
 
                 logger.log(f"[SPAWN-LOG] Spawn recorded at {filepath}")
             except Exception as e:
-                logger.log(f"[SPAWN-LOG-ERROR] Failed to log spawn for {permanent_id}: {e}")
+                logger.log(f"[SPAWN-LOG-ERROR] Failed to log spawn for {universal_id}: {e}")
 
             #GO TIME
-            logger.log(f"[SPAWN-MGR] About to spawn: {permanent_id}")
+            logger.log(f"[SPAWN-MGR] About to spawn: {universal_id}")
 
             cmd = [
                 "python3",
                 run_path,
-                "--job", f"{universe_id}:{spawner}:{permanent_id}:{agent_name}",
-                "--ts", datetime.now().strftime("%Y%m%d%H%M%S%f")
+                "--job", f"{UNIVERSE_ID}:{spawner}:{universal_id}:{agent_name}",
+                "--ts", timestamp
             ]
 
             process = subprocess.Popen(
@@ -265,8 +281,8 @@ class CoreSpawner:
             )
 
             install = {
-                "permanent_id": permanent_id,
-                "boot_time": time.time(),
+                "universal_id": universal_id,
+                "boot_time": timestamp,
                 "pid": process.pid,
                 "cmd": cmd
             }

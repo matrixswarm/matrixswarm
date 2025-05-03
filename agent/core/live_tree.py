@@ -26,18 +26,18 @@ class LiveTree:
                 json.dump(self.data, f, indent=2)
             print(f"[TREE] Saved tree to: {self.path}")
 
-    def get_delegates(self, perm_id):
-        return self.data.get(perm_id, [])
+    def get_delegates(self, universal_id):
+        return self.data.get(universal_id, [])
 
-    def inject(self, perm_id, delegated):
-        self.data[perm_id] = delegated
-        print(f"[TREE] Injected: {perm_id} → {delegated}")
+    def inject(self, universal_id, delegated):
+        self.data[universal_id] = delegated
+        print(f"[TREE] Injected: {universal_id} → {delegated}")
         self.save()
 
-    def delete_node(self, perm_id):
-        if perm_id in self.data:
-            del self.data[perm_id]
-            print(f"[TREE] Deleted node: {perm_id}")
+    def delete_node(self, universal_id):
+        if universal_id in self.data:
+            del self.data[universal_id]
+            print(f"[TREE] Deleted node: {universal_id}")
             self.save()
 
     def delete_subtree(self, root):

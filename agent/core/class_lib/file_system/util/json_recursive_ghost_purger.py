@@ -4,7 +4,7 @@ class JsonChildPurge():
     def the_purge(node):
         clean = []
         for child in node.get("children", []):
-            if isinstance(child, dict) and child.get("permanent_id"):
+            if isinstance(child, dict) and child.get("universal_id"):
                 JsonChildPurge.the_purge(child)
                 clean.append(child)
             else:

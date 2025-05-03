@@ -30,26 +30,26 @@ class BookOfLife:
         except Exception as e:
             print(f"[TREE-ERROR] Failed to save tree: {e}")
 
-    def update_agent(self, permanent_id, uuid, label, parent):
-        self.tree[permanent_id] = {
+    def update_agent(self, universal_id, uuid, label, parent):
+        self.tree[universal_id] = {
             "uuid": uuid,
             "label": label,
             "parent": parent,
             "last_seen": time.time(),
             "status": "alive"
         }
-        print(f"[TREE-UPDATE] {permanent_id} → {uuid} under {parent}")
+        print(f"[TREE-UPDATE] {universal_id} → {uuid} under {parent}")
         self.save()
 
-    def mark_dead(self, permanent_id):
-        if permanent_id in self.tree:
-            self.tree[permanent_id]["status"] = "dead"
-            self.tree[permanent_id]["last_seen"] = time.time()
-            print(f"[TREE] Marked {permanent_id} as dead")
+    def mark_dead(self, universal_id):
+        if universal_id in self.tree:
+            self.tree[universal_id]["status"] = "dead"
+            self.tree[universal_id]["last_seen"] = time.time()
+            print(f"[TREE] Marked {universal_id} as dead")
             self.save()
 
-    def get_branch(self, permanent_id):
-        return self.tree.get(permanent_id, None)
+    def get_branch(self, universal_id):
+        return self.tree.get(universal_id, None)
 
     def list_children(self, parent):
         return [pid for pid, data in self.tree.items() if data.get("parent") == parent]

@@ -74,18 +74,18 @@ class OracleAgent(BootAgent):
         reason = query.get("reason", "No reason provided.")
         target = query.get("response_to", "matrix")
 
-        perm_id = payload.get("perm_id")
+        universal_id = payload.get("universal_id")
         agent_name = payload.get("agent_name")
         directives = payload.get("directives", {})
 
-        if not perm_id or not agent_name:
-            self.log("[ORACLE][SPAWN][ERROR] Missing perm_id or agent_name.")
+        if not universal_id or not agent_name:
+            self.log("[ORACLE][SPAWN][ERROR] Missing universal_id or agent_name.")
             return
 
         spawn_cmd = {
             "command": "spawn_agent",
             "payload": {
-                "perm_id": perm_id,
+                "universal_id": universal_id,
                 "agent_name": agent_name,
                 "directives": directives
             }
@@ -106,7 +106,7 @@ class OracleAgent(BootAgent):
                 "uuid": "oracle-1",
                 "timestamp": time.time(),
                 "severity": "info",
-                "msg": f"Spawn order issued to Matrix for {agent_name} ({perm_id}) :: {reason}"
+                "msg": f"Spawn order issued to Matrix for {agent_name} ({universal_id}) :: {reason}"
             }
             with open(os.path.join(mailman, f"oracle_notice_{int(time.time())}.json"), "w") as f:
                 json.dump(notice, f, indent=2)

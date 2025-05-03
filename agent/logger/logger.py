@@ -32,7 +32,7 @@ class LoggerAgent(BootAgent):
             self.log("[COMMAND] Delegate update received. Saving tree and spawning.")
             tree_path = os.path.join(
                 self.path_resolution["comm_path"],
-                self.command_line_args["permanent_id"],
+                self.command_line_args["universal_id"],
                 "agent_tree.json"
             )
             with open(tree_path, "w") as f:

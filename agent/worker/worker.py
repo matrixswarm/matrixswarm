@@ -27,17 +27,17 @@ class WorkerAgent(BootAgent, DelegationMixin):
         self.log("[WORKER] WorkerAgent shutting down. Task queue suspended.")
 
     def do_task_once(self):
-        perm_id = self.command_line_args.get("permanent_id")
+        universal_id = self.command_line_args.get("universal_id")
 
-        if perm_id == "worker-backup-2":
+        if universal_id == "worker-backup-2":
             load_averages = os.getloadavg()
             self.log(f"Load averages — 1min: {load_averages[0]}, 5min: {load_averages[1]}, 15min: {load_averages[2]}")
 
-        elif perm_id == "worker-backup-1":
+        elif universal_id == "worker-backup-1":
             net_stats = psutil.net_io_counters()
             self.log(f"Network — Bytes Sent: {net_stats.bytes_sent}, Received: {net_stats.bytes_recv}")
 
-        elif perm_id == "worker-backup-3":
+        elif universal_id == "worker-backup-3":
             import tracemalloc
             tracemalloc.start()
             snapshot = tracemalloc.take_snapshot()
@@ -56,7 +56,7 @@ class WorkerAgent(BootAgent, DelegationMixin):
 
             tree_path = os.path.join(
                 self.path_resolution["comm_path"],
-                self.command_line_args["permanent_id"],
+                self.command_line_args["universal_id"],
                 "agent_tree.json"
             )
 

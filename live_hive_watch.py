@@ -25,12 +25,12 @@ def live_hive_watch(pod_root="pod", interval_sec=5):
                     with open(boot_file, "r") as f:
                         boot_data = json.load(f)
 
-                    perm_id = boot_data.get("permanent_id")
+                    universal_id = boot_data.get("universal_id")
                     pid = boot_data.get("pid")
                     cmdline = boot_data.get("cmd", [])
                     boot_time = boot_data.get("boot_time", 0)
 
-                    if not perm_id or not pid or not cmdline:
+                    if not universal_id or not pid or not cmdline:
                         continue
 
                     alive = False
@@ -46,7 +46,7 @@ def live_hive_watch(pod_root="pod", interval_sec=5):
 
                     if alive:
                         agent_count += 1
-                        print(f"🔵 {perm_id.ljust(20)} PID: {str(pid).ljust(7)} Uptime: {int(uptime)}s ({uptime/60:.1f} min)")
+                        print(f"🔵 {universal_id.ljust(20)} PID: {str(pid).ljust(7)} Uptime: {int(uptime)}s ({uptime/60:.1f} min)")
                         print(f"   CMD: {' '.join(cmdline)}")
                         print("-"*80)
 

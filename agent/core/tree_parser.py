@@ -6,7 +6,7 @@ import tempfile
 
 class TreeParser:
     CHILDREN_KEY = "children"
-    PERMANENT_ID_KEY = "permanent_id"
+    UNIVERSAL_ID_KEY = "universal_id"
 
     def __init__(self, root, tree_path=None):
         """
@@ -38,13 +38,13 @@ class TreeParser:
             return
 
         # Extract the permanent ID of the node
-        permanent_id = node.get(self.PERMANENT_ID_KEY)
-        if not permanent_id:
+        universal_id = node.get(self.UNIVERSAL_ID_KEY)
+        if not universal_id:
             return
 
         # Check and process duplicates
-        if permanent_id in self.nodes:
-            self.duplicates.append(permanent_id)
+        if universal_id in self.nodes:
+            self.duplicates.append(universal_id)
             return
 
         # Add the node to self.nodes
@@ -56,23 +56,23 @@ class TreeParser:
             print(f"{key} → {value.get('name', '[NO NAME]')}")
 
         for child in node.get(self.CHILDREN_KEY, []):
-            if not isinstance(child, dict) or not child.get("permanent_id"):
+            if not isinstance(child, dict) or not child.get("universal_id"):
                 print(f"[TREE][WARNING] Skipping malformed child node: {child}")
                 continue
             self._parse_nodes(child)
 
     def _validate_and_store_node(self, node):
         """
-        Validates and stores a node, ensuring unique `permanent_id`.
+        Validates and stores a node, ensuring unique `universal_id`.
         """
-        permanent_id = node.get(self.PERMANENT_ID_KEY)
-        if not permanent_id:
+        universal_id = node.get(self.UNIVERSAL_ID_KEY)
+        if not universal_id:
            return
 
         # Clean up malformed children
         valid_children = []
         for child in node.get(self.CHILDREN_KEY, []):
-           if isinstance(child, dict) and child.get("permanent_id"):
+           if isinstance(child, dict) and child.get("universal_id"):
                valid_children.append(child)
            else:
                print(f"[TREE] ⚠️ Malformed child skipped: {child}")
@@ -81,31 +81,31 @@ class TreeParser:
         node.setdefault(self.CHILDREN_KEY, [])
 
         # Add the node if it's not a duplicate
-        if permanent_id not in self.nodes:
-            self.nodes[permanent_id] = node
+        if universal_id not in self.nodes:
+            self.nodes[universal_id] = node
         else:
-            self.duplicates.append(permanent_id)
+            self.duplicates.append(universal_id)
             return
 
         # Ensure children is properly initialized
         node.setdefault(self.CHILDREN_KEY, [])
 
-    def get_first_level_child_ids(self, permanent_id):
+    def get_first_level_child_ids(self, universal_id):
         """
-        Get a list of permanent_ids for all direct children of a node.
+        Get a list of universal_ids for all direct children of a node.
         """
-        node = self._find_node(self.root, permanent_id)
+        node = self._find_node(self.root, universal_id)
         if not node:
             return []
-        return [child["permanent_id"] for child in node.get(self.CHILDREN_KEY, []) if "permanent_id" in child]
+        return [child["universal_id"] for child in node.get(self.CHILDREN_KEY, []) if "universal_id" in child]
 
-    def get_first_level_children(self, permanent_id):
+    def get_first_level_children(self, universal_id):
         """
-        Retrieve all first-level children of the node with the given `permanent_id`.
+        Retrieve all first-level children of the node with the given `universal_id`.
         Only direct (one-level) children are included.
         """
         # Find the node in the tree using `_find_node`
-        node = self._find_node(self.root, permanent_id)
+        node = self._find_node(self.root, universal_id)
 
         # If the node is not found, return an empty list
         if not node:
@@ -117,55 +117,55 @@ class TreeParser:
         # Return the full children list (only one level down)
         return first_level_children
 
-    def _find_node(self, node, permanent_id):
+    def _find_node(self, node, universal_id):
         """
-        Recursively searches for a node by `permanent_id`.
+        Recursively searches for a node by `universal_id`.
 
         Args:
             node (dict): The current node being searched.
-            permanent_id (str): The permanent ID of the target node.
+            universal_id (str): The permanent ID of the target node.
 
         Returns:
-            dict: The node with the matching `permanent_id`, or None if not found.
+            dict: The node with the matching `universal_id`, or None if not found.
         """
         if not node:
             return None  # Base case: no node to search
 
-        if node.get(self.PERMANENT_ID_KEY) == permanent_id:
+        if node.get(self.UNIVERSAL_ID_KEY) == universal_id:
             return node  # Found the target node
 
         # Recursively search children
         for child in node.get(self.CHILDREN_KEY, []):
-            found = self._find_node(child, permanent_id)
+            found = self._find_node(child, universal_id)
             if found:  # Return as soon as the node is found
                 return found
 
         return None  # Return None if the node is not found in the current branch
 
-    def has_node(self, permanent_id):
-        return permanent_id in self.nodes
+    def has_node(self, universal_id):
+        return universal_id in self.nodes
 
-    def insert_node(self, new_node, parent_permanent_id=None):
+    def insert_node(self, new_node, parent_universal_id=None):
         """
         Insert a new node under the specified parent node.
         """
-        new_permanent_id = new_node.get(self.PERMANENT_ID_KEY)
-        if not new_permanent_id:
-            raise ValueError("New node must have a `permanent_id`.")
+        new_universal_id = new_node.get(self.UNIVERSAL_ID_KEY)
+        if not new_universal_id:
+            raise ValueError("New node must have a `universal_id`.")
 
         self._validate_and_store_node(new_node)
 
-        parent_node = self.root if parent_permanent_id is None else self._find_node(self.root, parent_permanent_id)
+        parent_node = self.root if parent_universal_id is None else self._find_node(self.root, parent_universal_id)
         if not parent_node:
-            raise ValueError(f"Parent with `permanent_id` {parent_permanent_id} not found.")
+            raise ValueError(f"Parent with `universal_id` {parent_universal_id} not found.")
 
         parent_node[self.CHILDREN_KEY].append(new_node)
 
-    def mark_confirmed(self, permanent_id):
+    def mark_confirmed(self, universal_id):
         """
         Marks a node as confirmed by setting a timestamp.
         """
-        node = self.nodes.get(permanent_id)
+        node = self.nodes.get(universal_id)
         if node:
             node["confirmed"] = time.time()
             return True
@@ -173,7 +173,7 @@ class TreeParser:
 
     def get_unconfirmed(self):
         """
-        Returns a list of permanent_ids for nodes that are not confirmed.
+        Returns a list of universal_ids for nodes that are not confirmed.
         """
         return [p for p, node in self.nodes.items() if "confirmed" not in node]
 
@@ -218,7 +218,7 @@ class TreeParser:
 
     def is_valid_tree(self):
         """
-        Validates the tree by checking for duplicate permanent_ids.
+        Validates the tree by checking for duplicate universal_ids.
         """
         return len(self.duplicates) == 0
 
@@ -228,11 +228,11 @@ class TreeParser:
         """
         return self.duplicates
 
-    def get_child_count_by_id(self, permanent_id):
+    def get_child_count_by_id(self, universal_id):
         """
-        Returns the count of direct children for a node by `permanent_id`.
+        Returns the count of direct children for a node by `universal_id`.
         """
-        return len(self.query_children_by_id(permanent_id))
+        return len(self.query_children_by_id(universal_id))
 
     def dump_all_nodes(self):
         """
@@ -244,18 +244,18 @@ class TreeParser:
             print("(self.nodes is empty!)")
             return None  # No nodes to dump
 
-        for permanent_id, node in self.nodes.items():
-            print(f"Permanent ID: {permanent_id}, Node: {node}")
+        for universal_id, node in self.nodes.items():
+            print(f"Permanent ID: {universal_id}, Node: {node}")
 
         return self.nodes  # Optionally return the `self.nodes` dictionary
 
-    def extract_subtree_by_id(self, permanent_id):
+    def extract_subtree_by_id(self, universal_id):
         """
-        Extract a full subtree rooted at the given `permanent_id`, including all children.
+        Extract a full subtree rooted at the given `universal_id`, including all children.
         Returns a deep copy of the node structure.
         """
         import copy
-        root_node = self._find_node(self.root, permanent_id)
+        root_node = self._find_node(self.root, universal_id)
         if not root_node:
             return None
 
@@ -324,7 +324,7 @@ class TreeParser:
         if not isinstance(subtree, dict):
             return False
 
-        new_root_id = subtree.get("permanent_id")
+        new_root_id = subtree.get("universal_id")
         if not new_root_id:
             return False
 
@@ -340,8 +340,8 @@ class TreeParser:
         flat = {}
 
         def recurse(node):
-            if isinstance(node, dict) and 'permanent_id' in node:
-                flat[node['permanent_id']] = node
+            if isinstance(node, dict) and 'universal_id' in node:
+                flat[node['universal_id']] = node
             for child in node.get('children', []):
                 recurse(child)
 
@@ -362,7 +362,7 @@ class TreeParser:
         """
 
         def recursive_purge(node):
-            if not isinstance(node, dict) or not node.get(self.PERMANENT_ID_KEY):
+            if not isinstance(node, dict) or not node.get(self.UNIVERSAL_ID_KEY):
                 return None
 
             clean_children = []
@@ -379,9 +379,9 @@ class TreeParser:
         self.root = recursive_purge(self.root)
         return self.root
 
-    def find_parent_of(self, child_perm_id):
+    def find_parent_of(self, child_universal_id):
         """
-        Recursively find the parent node that has a child with the given permanent_id.
+        Recursively find the parent node that has a child with the given universal_id.
         """
 
         def recurse(node):
@@ -399,9 +399,9 @@ class TreeParser:
                     print(f"[RECURSE] Skipping bad child: {child}")
                     continue  # skip non-dict children
 
-                child_perm = child.get(self.PERMANENT_ID_KEY, None)
-                if child_perm == child_perm_id:
-                    print(f"[RECURSE] FOUND parent of {child_perm_id} under node {node.get(self.PERMANENT_ID_KEY)}")
+                child_perm = child.get(self.UNIVERSAL_ID_KEY, None)
+                if child_perm == child_universal_id:
+                    print(f"[RECURSE] FOUND parent of {child_universal_id} under node {node.get(self.UNIVERSAL_ID_KEY)}")
                     return node
 
                 result = recurse(child)
@@ -410,29 +410,29 @@ class TreeParser:
 
             return None
 
-        print(f"[FIND_PARENT] Starting parent search for {child_perm_id}")
+        print(f"[FIND_PARENT] Starting parent search for {child_universal_id}")
         return recurse(self.root)
 
 
-    def get_subtree_nodes(self, perm_id):
+    def get_subtree_nodes(self, universal_id):
         """
-        Get all nodes under and including the given perm_id.
+        Get all nodes under and including the given universal_id.
         """
-        if perm_id not in self.nodes:
+        if universal_id not in self.nodes:
             return []
 
         result = []
 
         def collect(node):
-            result.append(node[self.PERMANENT_ID_KEY])
+            result.append(node[self.UNIVERSAL_ID_KEY])
             for child in node.get(self.CHILDREN_KEY, []):
                 collect(child)
 
-        collect(self.nodes[perm_id])
+        collect(self.nodes[universal_id])
         return result
 
-    def get_node(self, perm_id):
+    def get_node(self, universal_id):
         """
-        Retrieve a node directly by its permanent_id.
+        Retrieve a node directly by its universal_id.
         """
-        return self.nodes.get(perm_id, None)
+        return self.nodes.get(universal_id, None)

@@ -37,7 +37,7 @@ class SweepCommanderAgent(BootAgent):
                 "dead_pods": self.count_dead_pods(),
                 "active_uuid": self.command_line_args["install_name"]
             },
-            "reply_to": self.command_line_args["permanent_id"]
+            "reply_to": self.command_line_args["universal_id"]
         }
         fname = f"sweep_{uuid.uuid4().hex}.prompt"
         with open(os.path.join(self.oracle_payload, fname), "w") as f:

@@ -20,7 +20,7 @@ This is the canonical Matrix core directive — the structure all other deployme
 
 ```json
 {
-  "permanent_id": "matrix",
+  "universal_id": "matrix",
   "name": "matrix",
   "filesystem": {
     "folders": [
@@ -34,33 +34,33 @@ This is the canonical Matrix core directive — the structure all other deployme
   },
   "children": [
     {
-      "permanent_id": "guardian-1",
+      "universal_id": "guardian-1",
       "name": "sentinel",
       "app": "matrix-core",
       "filesystem": {},
       "config": {},
       "children": [
         {
-          "permanent_id": "guardian-2",
+          "universal_id": "guardian-2",
           "name": "sentinel",
           "app": "matrix-core",
           "filesystem": {},
           "children": [
             {
-              "permanent_id": "guardian-3",
+              "universal_id": "guardian-3",
               "name": "sentinel",
               "app": "matrix-core",
               "filesystem": {},
               "config": {},
               "children": [
                 {
-                  "permanent_id": "guardian-4",
+                  "universal_id": "guardian-4",
                   "name": "sentinel",
                   "app": "matrix-core",
                   "filesystem": {},
                   "config": {
                     "watching": "the Queen",
-                    "permanent_id": "matrix"
+                    "universal_id": "matrix"
                   }
                 }
               ]
@@ -71,19 +71,19 @@ This is the canonical Matrix core directive — the structure all other deployme
       ]
     },
     {
-      "permanent_id": "context-agent-1",
+      "universal_id": "context-agent-1",
       "name": "app_context",
       "app": "matrix-core",
       "children": []
     },
     {
-      "permanent_id": "resolver-1",
+      "universal_id": "resolver-1",
       "name": "resolver",
       "app": "matrix-core",
       "children": []
     },
     {
-      "permanent_id": "matrix-https",
+      "universal_id": "matrix-https",
       "name": "matrix_https",
       "app": "matrix-core",
       "delegated": [],
@@ -99,7 +99,7 @@ This is the canonical Matrix core directive — the structure all other deployme
       }
     },
     {
-      "permanent_id": "scavenger-strike",
+      "universal_id": "scavenger-strike",
       "name": "scavenger",
       "app": "matrix-core",
       "filesystem": {
@@ -108,7 +108,7 @@ This is the canonical Matrix core directive — the structure all other deployme
       "config": {}
     },
     {
-      "permanent_id": "commander-1",
+      "universal_id": "commander-1",
       "name": "commander",
       "app": "matrix-core",
       "children": []

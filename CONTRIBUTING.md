@@ -40,7 +40,7 @@ class YourAgent(BootAgent):
 Create a mission file to spawn it:
 ```json
 {
-  "perm_id": "youragent-1",
+  "universal_id": "youragent-1",
   "agent_name": "YourAgent",
   "delegated": []
 }
@@ -82,7 +82,7 @@ Put them in `/certs/` and you’re good to go.
 ### A single agent:
 ```json
 {
-  "perm_id": "logger-1",
+  "universal_id": "logger-1",
   "agent_name": "Logger",
   "delegated": []
 }
@@ -92,7 +92,7 @@ Put them in `/certs/` and you’re good to go.
 Place it in `deploy/teams/logger_team.json`:
 ```json
 {
-  "perm_id": "logger-alpha",
+  "universal_id": "logger-alpha",
   "agent_name": "Logger",
   "delegated": ["listener-1", "watchdog-2"]
 }

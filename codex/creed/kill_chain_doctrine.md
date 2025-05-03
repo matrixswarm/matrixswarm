@@ -27,7 +27,7 @@ Edit
 ## 2. Target Lock 🎯
 
 - Matrix walks her living memory (`agent_tree_master.json`).
-- She finds the target `perm_id` and all delegated descendants.
+- She finds the target `universal_id` and all delegated descendants.
 
 ---
 

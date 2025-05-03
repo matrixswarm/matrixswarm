@@ -57,7 +57,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
         #tree_path = os.path.join(
         #    self.path_resolution["comm_path"],
-        #    self.command_line_args["permanent_id"],  # dynamically resolves to 'matrix'
+        #    self.command_line_args["universal_id"],  # dynamically resolves to 'matrix'
         #    "agent_tree.json"
         #)
 
@@ -73,9 +73,9 @@ class MatrixAgent(DelegationMixin, BootAgent):
     def post_boot(self):
         message = "I'm watching..."
         # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
-        perm_id = self.command_line_args.get("permanent_id", "matrix")
-        self.delegate_tree_to_agent(self.command_line_args.get("permanent_id", perm_id))
-        self.broadcast(f"Delivered agent_tree slice to self ({perm_id})", severity="info")
+        universal_id = self.command_line_args.get("universal_id", "matrix")
+        self.delegate_tree_to_agent(self.command_line_args.get("universal_id", universal_id))
+        self.broadcast(f"Delivered agent_tree slice to self ({universal_id})", severity="info")
         #
         threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
@@ -90,11 +90,12 @@ class MatrixAgent(DelegationMixin, BootAgent):
     def broadcast(self, message, severity="info"):
         try:
 
+            #this folder is always dropped, even if mailman not installed
             mailman_dir = os.path.join(self.path_resolution["comm_path"], "mailman-1", "payload")
             os.makedirs(mailman_dir, exist_ok=True)
 
             payload = {
-                "uuid": self.command_line_args.get("permanent_id", "matrix"),
+                "uuid": self.command_line_args.get("universal_id", "matrix"),
                 "timestamp": time.time(),
                 "severity": severity,
                 "msg": message
@@ -114,7 +115,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
     def json_hash(obj):
         return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
 
-    # watches comm for any added permanent_ids, and adds the agent_tree instantly
+    # watches comm for any added universal_ids, and adds the agent_tree instantly
     def comm_directory_watcher(self):
         print("[COMM-WATCHER] Watching /comm/ for new agents...")
         i = inotify.adapters.Inotify()
@@ -125,7 +126,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
             if "IN_CREATE" in type_names or "IN_MOVED_TO" in type_names:
                 try:
-                    # Only act on new directories (perm_ids)
+                    # Only act on new directories (universal_ids)
                     full_path = os.path.join(path, filename)
                     if os.path.isdir(full_path):
                         print(f"[COMM-WATCHER] New comm directory detected: {filename}")
@@ -134,22 +135,22 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     self.log(f"[COMM-WATCHER-ERROR] {e}")
 
 
-    def delegate_tree_to_agent(self, perm_id):
+    def delegate_tree_to_agent(self, universal_id):
         try:
             tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree_master.json')
             tp = TreeParser.load_tree(tree_path)
             if not tp:
-                self.log(f"[DELEGATE] Failed to load master tree for {perm_id}")
+                self.log(f"[DELEGATE] Failed to load master tree for {universal_id}")
                 return
 
-            subtree = tp.extract_subtree_by_id(perm_id)
+            subtree = tp.extract_subtree_by_id(universal_id)
             if not subtree:
-                self.log(f"[DELEGATE] No subtree found for {perm_id}, sending empty tree.")
+                self.log(f"[DELEGATE] No subtree found for {universal_id}, sending empty tree.")
                 subtree = {}
 
-            out_path = os.path.join(self.path_resolution["comm_path"], perm_id, "agent_tree.json")
+            out_path = os.path.join(self.path_resolution["comm_path"], universal_id, "agent_tree.json")
             JsonSafeWrite.safe_write(out_path, subtree)
-            self.log(f"[DELEGATE] Tree delivered to {perm_id}")
+            self.log(f"[DELEGATE] Tree delivered to {universal_id}")
         except Exception as e:
             self.log(f"[DELEGATE-ERROR] {e}")
 
@@ -177,7 +178,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
     #executing commands
     def command_listener(self):
         path = Template(self.path_resolution["incoming_path_template"])
-        incoming_path = path.substitute(permanent_id=self.command_line_args["matrix"])
+        incoming_path = path.substitute(universal_id=self.command_line_args["matrix"])
         incoming_path = EnsureTrailingSlash.ensure_trailing_slash(incoming_path)
 
         payload_dir = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
@@ -191,11 +192,11 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 for filename in glob.glob(incoming_path + '*:_tree_slice_request.cmd'):
                     try:
                         os.remove(filename)
-                        perm_id = os.path.basename(filename).split(':')[0].strip()
-                        if not perm_id:
-                            raise ValueError(f"[TREE-REFRESH][ERROR] No perm_id in filename {filename}")
+                        universal_id = os.path.basename(filename).split(':')[0].strip()
+                        if not universal_id:
+                            raise ValueError(f"[TREE-REFRESH][ERROR] No universal_id in filename {filename}")
 
-                        target_incoming_path = os.path.join(self.path_resolution['comm_path'], perm_id, 'agent_tree.json')
+                        target_incoming_path = os.path.join(self.path_resolution['comm_path'], universal_id, 'agent_tree.json')
                         tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
 
                         tp = TreeParser.load_tree(tree_path)
@@ -203,9 +204,9 @@ class MatrixAgent(DelegationMixin, BootAgent):
                             self.log("[TREE-REFRESH][ERROR] Failed to load tree.")
                             continue
 
-                        subtree = tp.extract_subtree_by_id(perm_id) or {}
+                        subtree = tp.extract_subtree_by_id(universal_id) or {}
                         JsonSafeWrite.safe_write(target_incoming_path, subtree)
-                        self.log(f"[TREE-REFRESH] Tree slice sent to {perm_id}.")
+                        self.log(f"[TREE-REFRESH] Tree slice sent to {universal_id}.")
 
                     except Exception as e:
                         self.log(f"[TREE-REFRESH][ERROR] {e}")
@@ -227,7 +228,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     content = payload.get("content", {})
 
                     if ctype == "spawn_agent":
-                        self.log(f"[SPAWN] Now injecting agent: {content.get('perm_id')}")
+                        self.log(f"[SPAWN] Now injecting agent: {content.get('universal_id')}")
                         self.swarm.handle_injection(content)
 
                     elif ctype == "inject":
@@ -236,32 +237,32 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
                     elif ctype == "node_query":
                         requestor = content.get("requestor")
-                        target_perm_id = content.get("perm_id")
+                        target_universal_id = content.get("universal_id")
 
                         tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
                         tp = TreeParser.load_tree(tree_path)
 
-                        node = tp.get_node(target_perm_id)
+                        node = tp.get_node(target_universal_id)
 
                         reply = {
                             "type": "node_response",
                             "content": {
-                                "perm_id": target_perm_id,
+                                "universal_id": target_universal_id,
                                 "node": node
                             }
                         }
 
                         outbox = os.path.join(self.path_resolution['comm_path'], requestor, "incoming")
                         os.makedirs(outbox, exist_ok=True)
-                        response_file = os.path.join(outbox, f"node_response_{target_perm_id}.json")
+                        response_file = os.path.join(outbox, f"node_response_{target_universal_id}.json")
 
                         with open(response_file, "w") as f:
                             json.dump(reply, f, indent=2)
 
-                        self.log(f"[MATRIX] Sent node response for {target_perm_id} to {requestor}.")
+                        self.log(f"[MATRIX] Sent node response for {target_universal_id} to {requestor}.")
                     elif ctype == "inject_team":
                         self.log(f"[INJECT-TEAM] Injecting agent team.")
-                        self.swarm.handle_team_injection(content.get("subtree"), content.get("target_perm_id"))
+                        self.swarm.handle_team_injection(content.get("subtree"), content.get("target_universal_id"))
 
                     elif ctype == "stop":
                         targets = content.get("targets", [])
@@ -272,14 +273,14 @@ class MatrixAgent(DelegationMixin, BootAgent):
                             self.log(f"[STOP] Sent stop signal to {t}")
 
                     elif ctype == "kill":
-                        target_perm_id = content.get("target")
+                        target_universal_id = content.get("target")
                         tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
                         tp = TreeParser.load_tree(tree_path)
                         if tp is None:
                             self.log("[KILL][ERROR] Tree load failed, aborting kill.")
                             continue
 
-                        kill_list = self.collect_kill_list(tp, target_perm_id)
+                        kill_list = self.collect_kill_list(tp, target_universal_id)
                         self.log(f"[KILL] Kill List: {kill_list}")
 
                         kcm = KillChainLockManager(tp)
@@ -288,14 +289,28 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
                         # Inject reaper mission
                         reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
-                        #tp.insert_node(reaper_node, parent_permanent_id="matrix")
+                        #tp.insert_node(reaper_node, parent_universal_id="matrix")
                         #tp.save_tree(tree_path)
 
-                        self.spawn_agent_direct(reaper_node["permanent_id"], reaper_node["name"], reaper_node)
+                        self.spawn_agent_direct(reaper_node["universal_id"], reaper_node["name"], reaper_node)
 
                         self.delegation_refresh()
 
                         self.log(f"[KILL] Reaper dispatched for {kill_list}")
+
+                    elif ctype == "forward":
+                        target = payload.get("target")
+                        inner = payload.get("payload")
+                        if target and inner:
+                            fwd_path = os.path.join(self.path_resolution["comm_path"], target, "payload")
+                            os.makedirs(fwd_path, exist_ok=True)
+                            fname = f"forwarded_{int(time.time())}.json"
+                            with open(os.path.join(fwd_path, fname), "w") as f:
+                                json.dump(inner, f, indent=2)
+                            self.log(f"[FORWARD] Payload forwarded to {target}")
+
+                    elif ctype == "replace_agent":
+                        self.handle_replace_agent(payload.get("content", {}))
 
                     else:
                         self.log(f"[PAYLOAD][UNKNOWN] Unrecognized payload type: {ctype}")
@@ -322,16 +337,16 @@ class MatrixAgent(DelegationMixin, BootAgent):
         def recurse(node):
             if not node or not isinstance(node, dict):
                 return
-            perm_id = node.get("permanent_id")
-            if not perm_id or perm_id in visited:
+            universal_id = node.get("universal_id")
+            if not universal_id or universal_id in visited:
                 return
-            visited.add(perm_id)
+            visited.add(universal_id)
 
             # Don't recurse into commander-1 even if we see it
-            if perm_id == "commander-1" and root_id != "commander-1":
+            if universal_id == "commander-1" and root_id != "commander-1":
                 return
 
-            result.append(perm_id)
+            result.append(universal_id)
             for child in node.get("children", []):
                 recurse(child)
 
@@ -364,8 +379,8 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     self.log("[VERIFY-TREE] Could not load master tree.")
                     return
 
-                for perm_id in os.listdir(self.path_resolution["comm_path"]):
-                    target_dir = os.path.join(self.path_resolution["comm_path"], perm_id)
+                for universal_id in os.listdir(self.path_resolution["comm_path"]):
+                    target_dir = os.path.join(self.path_resolution["comm_path"], universal_id)
                     if not os.path.isdir(target_dir):
                         continue
 
@@ -373,7 +388,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     needs_update = False
 
                     # Get what SHOULD be there
-                    expected_subtree = tp.extract_subtree_by_id(perm_id)
+                    expected_subtree = tp.extract_subtree_by_id(universal_id)
                     if not expected_subtree:
                         expected_subtree = {}
 
@@ -389,12 +404,12 @@ class MatrixAgent(DelegationMixin, BootAgent):
                                 if current_hash != expected_hash:
                                     needs_update = True
                         except Exception as e:
-                            self.log(f"[VERIFY-TREE] {perm_id} tree parse fail: {e}")
+                            self.log(f"[VERIFY-TREE] {universal_id} tree parse fail: {e}")
                             needs_update = True
 
                     if needs_update:
-                        self.delegate_tree_to_agent(perm_id)
-                        self.broadcast(f"Refreshed agent_tree for {perm_id}", severity="info")
+                        self.delegate_tree_to_agent(universal_id)
+                        self.broadcast(f"Refreshed agent_tree for {universal_id}", severity="info")
 
         except Exception as e:
             self.log(f"[VERIFY-TREE] Error: {e}")
@@ -416,10 +431,10 @@ class MatrixAgent(DelegationMixin, BootAgent):
             pod_root = self.path_resolution['pod_path']
             comm_root = self.path_resolution['comm_path']
 
-            dead_perm_ids = set()
+            dead_universal_ids = set()
 
-            for perm_id in list(tp.get_all_nodes_flat()):
-                if perm_id == "matrix":
+            for universal_id in list(tp.get_all_nodes_flat()):
+                if universal_id == "matrix":
                     continue  # Never remove matrix herself
 
                 pod_uuid = None
@@ -430,13 +445,13 @@ class MatrixAgent(DelegationMixin, BootAgent):
                             continue
                         with open(boot_path, "r") as f:
                             boot_data = json.load(f)
-                        if boot_data.get("permanent_id") == perm_id:
+                        if boot_data.get("universal_id") == universal_id:
                             pod_uuid = pod_dir
                             break
                     except Exception:
                         continue
 
-                comm_tombstone = os.path.join(comm_root, perm_id, "incoming", "tombstone")
+                comm_tombstone = os.path.join(comm_root, universal_id, "incoming", "tombstone")
                 pod_tombstone = os.path.join(pod_root, pod_uuid, "tombstone") if pod_uuid else None
 
                 tombstone_found = False
@@ -446,13 +461,13 @@ class MatrixAgent(DelegationMixin, BootAgent):
                     tombstone_found = True
 
                 if tombstone_found:
-                    dead_perm_ids.add(perm_id)
+                    dead_universal_ids.add(universal_id)
 
-            if not dead_perm_ids:
+            if not dead_universal_ids:
                 self.log("[BULWARK] No tombstoned agents found. Hive remains at full strength.")
                 return
 
-            for dead_id in dead_perm_ids:
+            for dead_id in dead_universal_ids:
                 try:
                     tp.remove_node(dead_id)
                     self.log(f"[BULWARK] Purged fallen agent: {dead_id}")
@@ -465,11 +480,8 @@ class MatrixAgent(DelegationMixin, BootAgent):
         except Exception as e:
             self.log(f"[BULWARK][CRASH] {e}")
 
-
-
-
     def propagate_all_delegates(self):
-        from agent.core.tree_parser import TreeParser
+
         from agent.core.tree_propagation import propagate_tree_slice
 
         tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree.json')
@@ -479,51 +491,45 @@ class MatrixAgent(DelegationMixin, BootAgent):
             return
 
         all_nodes = tp.get_all_nodes_flat()
-        for perm_id in all_nodes:
-            propagate_tree_slice(tp, perm_id, self.path_resolution["comm_path"])
+        for universal_id in all_nodes:
+            propagate_tree_slice(tp, universal_id, self.path_resolution["comm_path"])
 
     def handle_replace_agent(self, content):
-        old_id = content.get("target_perm_id")
+        old_id = content.get("target_universal_id")
         new_node = content.get("new_agent")
-        new_id = new_node.get("perm_id")
+        hotswap = content.get("hotswap", False)
 
         if not old_id or not new_node:
             self.log("[REPLACE] Missing required fields.")
             return
 
-        from agent.core.tree_parser import TreeParser
-
-        tree_path = self.tree_path  # or path_resolution["tree_file"]
+        tree_path = self.tree_path
         tp = TreeParser.load_tree(tree_path)
         if not tp or not tp.has_node(old_id):
             self.log(f"[REPLACE] Agent '{old_id}' not found in tree.")
             return
 
-        # Find parent
         parent = tp.find_parent_of(old_id)
         if not parent:
             self.log(f"[REPLACE] Could not find parent of '{old_id}'.")
             return
 
-        # Send die to old agent
-        die_file = os.path.join(self.path_resolution["comm_path"], old_id, "incoming", "die")
-        JsonSafeWrite.safe_write(die_file, "terminate")
-        self.log(f"[REPLACE] Issued die to {old_id}")
-
-        # Mark tombstone so parent doesn't respawn
-        tomb = os.path.join(self.path_resolution["comm_path"], old_id, "incoming", "tombstone")
-        JsonSafeWrite.safe_write(tomb, "true")
-
-        # Remove old node from tree
-        tp.remove_node(old_id)
-
-        # Inject new node under same parent
-        tp.insert_node(new_node, parent_permanent_id=parent)
+        # Update existing node in-place instead of removing
+        node = tp.get_node(old_id)
+        node.update(new_node)  # Overwrites name, config, etc.
         tp.save_tree(tree_path)
 
-        # Spawn the new agent
-        self.spawn_agent(new_id)
-        self.log(f"[REPLACE] Spawned replacement: {new_id}")
+        # Create reaper node with selective tombstone
+        from agent.reaper.reaper_factory import make_reaper_node
+        kill_list = [old_id]
+        universal_ids = {old_id: old_id}
+        reaper = make_reaper_node(kill_list, universal_ids)
+        if hotswap:
+            reaper["config"]["tombstone_comm"] = False  # only pod gets tomb
+
+        self.spawn_agent_direct(reaper["universal_id"], reaper["name"], reaper)
+
+        self.log(f"[REPLACE] Agent {old_id} replaced in tree and reaper dispatched.")
 
 if __name__ == "__main__":
     # label = None

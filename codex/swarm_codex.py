@@ -4,7 +4,7 @@
 
 SWARM_CODEX = [
     {
-        "perm_id": "matrix",
+        "universal_id": "matrix",
         "agent_name": "MatrixAgent",
         "role": "Central Cortex",
         "banner": "🧠 MATRIX AGENT",
@@ -13,7 +13,7 @@ SWARM_CODEX = [
         "status": "Immortal"
     },
     {
-        "perm_id": "reaper-root",
+        "universal_id": "reaper-root",
         "agent_name": "ReaperAgent",
         "role": "Tactical Cleanup",
         "banner": "☠ REAPER AGENT",
@@ -22,7 +22,7 @@ SWARM_CODEX = [
         "status": "Active"
     },
     {
-        "perm_id": "scavenger-root",
+        "universal_id": "scavenger-root",
         "agent_name": "ScavengerAgent",
         "role": "Runtime Sweeper",
         "banner": "🧹 SCAVENGER AGENT",
@@ -31,7 +31,7 @@ SWARM_CODEX = [
         "status": "Active"
     },
     {
-        "perm_id": "sentinel-alpha",
+        "universal_id": "sentinel-alpha",
         "agent_name": "SentinelAgent",
         "role": "Heartbeat Monitor",
         "banner": "🛡 SENTINEL AGENT",
@@ -40,7 +40,7 @@ SWARM_CODEX = [
         "status": "Active"
     },
     {
-        "perm_id": "mailman-1",
+        "universal_id": "mailman-1",
         "agent_name": "MailmanAgent",
         "role": "Message Relay",
         "banner": "📬 MAILMAN AGENT",
@@ -49,7 +49,7 @@ SWARM_CODEX = [
         "status": "Standby"
     },
     {
-        "perm_id": "unknown",
+        "universal_id": "unknown",
         "agent_name": "GhostNode",
         "role": "Residual Process",
         "banner": "👻 UNKNOWN",
@@ -58,7 +58,7 @@ SWARM_CODEX = [
         "status": "Banished"
     },
     {
-        "perm_id": "watchdog",
+        "universal_id": "watchdog",
         "agent_name": "WatchdogAgent",
         "role": "Site Monitor & Uptime Enforcer",
         "banner": "🧠 WATCHDOG AGENT 🧠",
@@ -75,7 +75,7 @@ SWARM_CODEX = [
         "description": "Central Cortex · Tree Dispatcher · Prime Director"
     },
     {
-        "perm_id": "reaper",
+        "universal_id": "reaper",
         "agent_name": "ReaperAgent",
         "role": "High-Authority Cleanup Unit",
         "banner": "☠ REAPER AGENT ☠",
@@ -86,7 +86,7 @@ SWARM_CODEX = [
         "description": "Handles escalated kill orders. Graceful first, lethal if ignored."
     },
     {
-      "perm_id": "oracle-1",
+      "universal_id": "oracle-1",
       "agent_name": "OracleAgent",
       "role": "Swarm Interpreter",
       "banner": "🔮 ORACLE AGENT",
@@ -97,7 +97,7 @@ SWARM_CODEX = [
       "description": "Reads prompts from the swarm. Speaks back wisdom."
     },
     {
-      "perm_id": "sweeper_commander-1",
+      "universal_id": "sweeper_commander-1",
       "agent_name": "SweepCommanderAgent",
       "role": "Tactical AI Cleaner",
       "banner": "🧹 SWEEP COMMANDER",
@@ -122,7 +122,7 @@ def print_codex():
     print("\n🧠 SWARM CODEX — ACTIVE LEDGER")
     print("══════════════════════════════════════════════════")
     for agent in SWARM_CODEX:
-        print(f"{agent['banner']} :: {agent['perm_id']} [{agent['role']}] — {agent['status']}")
+        print(f"{agent['banner']} :: {agent['universal_id']} [{agent['role']}] — {agent['status']}")
     print("══════════════════════════════════════════════════\n")
 
 # If run standalone, print the codex

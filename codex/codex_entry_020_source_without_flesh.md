@@ -16,7 +16,7 @@ Matrix responds.
 2. If `source_code_path` is missing:
    - Matrix sends a `.query_source` to designated resolver
    - Waits for `.srcdrop` or archive push
-3. Extracts to `/agent_src/{perm_id}/`
+3. Extracts to `/agent_src/{universal_id}/`
 4. Spawns as usual
 
 ---

@@ -1,28 +1,74 @@
 from dotenv import load_dotenv
 import os
+import re
 import sys
 import time
-load_dotenv()
+import json
+import argparse
 from agent.core.path_manager import PathManager
 from agent.core.core_spawner import CoreSpawner
 from agent.core.tree_parser import TreeParser
 from agent.core.class_lib.processes.reaper import Reaper
-cp = CoreSpawner()
+from agent.core.swarm_session_root import SwarmSessionRoot
 
-import json
+load_dotenv()
+
+# Parse CLI arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("--kill", action="store_true", help="Kill all agents in current or given path")
+parser.add_argument("-p", "--path", type=str, help="Manually specify swarm root")
+parser.add_argument("--list-universes", action="store_true", help="List all known universes + reboots")
+args = parser.parse_args()
+
+# List all universes
+if args.list_universes:
+    base = "/matrix"
+    if not os.path.exists(base):
+        print("[LIST] No matrix directory found.")
+        sys.exit(0)
+
+    for universe in os.listdir(base):
+        uni_path = os.path.join(base, universe)
+        if not os.path.isdir(uni_path):
+            continue
+
+        print(f"\n🌌 Universe: {universe}")
+        for session in sorted(os.listdir(uni_path)):
+            path = os.path.join(uni_path, session)
+            if os.path.isdir(path) and session != "latest":
+                print(f"  └─ {session}")
+    sys.exit(0)
+
+# Setup session from override or SwarmSessionRoot
+if args.path:
+    swarm_root = args.path
+    pod_path = os.path.join(swarm_root, "pod")
+    comm_path = os.path.join(swarm_root, "comm")
+    agent_path = os.environ.get("AGENT_PATH", "/sites/orbit/python/agent")
+    print(f"[BOOTLOADER] Manually overriding session: {swarm_root}")
+else:
+    pm = PathManager(use_session_root=True)
+    cp = CoreSpawner(path_manager=pm)
+    session = SwarmSessionRoot()
+    UNIVERSE_ID = session.universe_id
+    REBOOT_UUID = session.reboot_uuid
+    pod_path = pm.get_path("pod", trailing_slash=False)
+    comm_path = pm.get_path("comm", trailing_slash=False)
+    agent_path = pm.get_path("agent", trailing_slash=False)
+
+session = SwarmSessionRoot()
+UNIVERSE_ID = session.universe_id
+REBOOT_UUID = session.reboot_uuid
 
 MATRIX_UUID = "matrix"
 BOOTLOADER_UUID = "bootloader"
-UNIVERSE_ID = "bb" #big bang
-pm = PathManager()
 
-paths={
-    "pod": "pod",
-    "agent": "agent",
-    "comm": "comm",
-}
+print(f"[BOOTLOADER] 🧠 UNIVERSE_ID={UNIVERSE_ID}, REBOOT_UUID={REBOOT_UUID}")
 
-pm.add_paths(paths)
+print("[BOOTLOADER] PathManager Session Paths:")
+for k, v in pm.list_paths().items():
+    print(f"  {k}: {v}")
+
 
 #print(pm.construct_path("agent",str(uuid.uuid4()),'notify'))
 #exit()
@@ -34,11 +80,11 @@ def boot():
     hard_reset = True
 
     matrix_directive = {
-        "permanent_id": 'matrix',
+        "universal_id": 'matrix',
         "children": [
 
                 {
-                "permanent_id": "matrix-https",
+                "universal_id": "matrix-https",
                 "name": "matrix_https",
                 "delegated": [],
                 "filesystem": {
@@ -53,12 +99,12 @@ def boot():
                     }
                 },
                 {
-                    "permanent_id": "commander-2",
+                    "universal_id": "commander-2",
                     "name": "commander",
                     "children": []
                 },
                 {
-                    "permanent_id": "email-check-1",
+                    "universal_id": "email-check-1",
                     "name": "email_check",
                     "filesystem": {
                         "folders": [
@@ -74,7 +120,7 @@ def boot():
                     }
                 },
                 {
-                    "permanent_id": "mirror-9",
+                    "universal_id": "mirror-9",
                     "name": "filesystem_mirror",
                     "filesystem": {
                         "folders": [
@@ -90,7 +136,7 @@ def boot():
                 }
                 ,
                 {
-                    "permanent_id": "email-send-1",
+                    "universal_id": "email-send-1",
                     "name": "email_send",
                     "filesystem": {
                         "folders": [
@@ -105,7 +151,7 @@ def boot():
                     }
                 },
                 {
-                    "permanent_id": "worker-backup-2",
+                    "universal_id": "worker-backup-2",
                     "name": "worker",
                     "directives": {
                         "do something": ["sentinel-root"],
@@ -113,28 +159,28 @@ def boot():
                     },
                     "children": [
                               {
-                                "permanent_id": "logger-1",
+                                "universal_id": "logger-1",
                                 "name": "logger",
                                 "children": [
                                   {
-                                    "permanent_id": "logger-2",
+                                    "universal_id": "logger-2",
                                     "name": "logger",
                                     "children": [
                                       {
-                                        "permanent_id": "logger-3",
+                                        "universal_id": "logger-3",
                                         "name": "logger",
                                         "children": [
                                           {
-                                            "permanent_id": "logger-4",
+                                            "universal_id": "logger-4",
                                             "name": "logger",
                                             "children": [
                                                 {
-                                                    "permanent_id": "commander-1",
+                                                    "universal_id": "commander-1",
                                                     "name": "commander",
                                                     "children": []
                                                 },
                                                 {
-                                                    "permanent_id": "worker-backup-3",
+                                                    "universal_id": "worker-backup-3",
                                                     "name": "worker",
                                                     "children": []
                                                 }
@@ -153,7 +199,7 @@ def boot():
 
     # Short Circuit matrix_directive above
     matrix_directive = {
-        "permanent_id": 'matrix',
+        "universal_id": 'matrix',
         "name": "matrix",
         "filesystem": {
             "folders": [
@@ -167,7 +213,7 @@ def boot():
         },
 
         "children": [{
-                "permanent_id": "matrix-https",
+                "universal_id": "matrix-https",
                 "name": "matrix_https",
                 "delegated": [],
                 "filesystem": {
@@ -182,7 +228,7 @@ def boot():
                     }
                 },
                 {
-                    "permanent_id": "scavenger-strike",
+                    "universal_id": "scavenger-strike",
                     "name": "scavenger",
                     "filesystem": {
                         "folders": []
@@ -190,7 +236,7 @@ def boot():
                     "config": {}
                 },
                 {
-                    "permanent_id": "telegram-relay-1",
+                    "universal_id": "telegram-relay-1",
                     "name": "telegram_relay",
                     "config": {
                         "bot_token": os.getenv("TELEGRAM_API_KEY"),
@@ -200,7 +246,7 @@ def boot():
 
                 },
                 {
-                    "permanent_id": "mailman-1",
+                    "universal_id": "mailman-1",
                     "name": "mailman",
                     "filesystem": {
                         "folders": [
@@ -213,18 +259,18 @@ def boot():
                 },
 
                 {
-                    "permanent_id": "commander-1",
+                    "universal_id": "commander-1",
                     "name": "commander",
                     "children": [
                         {
-                            "permanent_id": "commander-2",
+                            "universal_id": "commander-2",
                             "name": "commander",
                             "children": []
                         },
                     ]
                 },
                 {
-                    "permanent_id": "oracle-1",
+                    "universal_id": "oracle-1",
                     "name": "oracle",
                     "filesystem": {
                         "folders": [
@@ -240,7 +286,7 @@ def boot():
                 },
 
                 {
-                    "permanent_id": "pinger-1",
+                    "universal_id": "pinger-1",
                     "name": "uptime_pinger",
                     "filesystem": {
                         "folders": [
@@ -254,7 +300,7 @@ def boot():
                     }
                 },
                 {
-                    "permanent_id": "metric-1",
+                    "universal_id": "metric-1",
                     "name": "metric",
                     "filesystem": {
                         "folders": [
@@ -269,7 +315,7 @@ def boot():
                 },
 
                 {
-                    "permanent_id": "scraper-1",
+                    "universal_id": "scraper-1",
                     "name": "scraper",
                     "filesystem": {
                         "folders": [
@@ -281,7 +327,7 @@ def boot():
                     }
                 },
                 {
-                    "permanent_id": "discord-relay-1",
+                    "universal_id": "discord-relay-1",
                     "name": "discord",
                     "filesystem": {
                         "folders": [
@@ -298,7 +344,7 @@ def boot():
 
     #MATRIX CORE DEPLOYMENT
     matrix_directive = {
-        "permanent_id": 'matrix',
+        "universal_id": 'matrix',
         "name": "matrix",
         "filesystem": {
             "folders": [
@@ -315,33 +361,33 @@ def boot():
 
             #MATRIX PROTECTION LAYER 4 SENTINELS
             {
-                "permanent_id": "guardian-1",
+                "universal_id": "guardian-1",
                 "name": "sentinel",
                 "app": "matrix-core",
                 "filesystem": {},
                 "config": {},
                 "children": [
                     {
-                        "permanent_id": "guardian-2",
+                        "universal_id": "guardian-2",
                         "name": "sentinel",
                         "app": "matrix-core",
                         "filesystem": {},
                         "children": [
                             {
-                                "permanent_id": "guardian-3",
+                                "universal_id": "guardian-3",
                                 "name": "sentinel",
                                 "app": "matrix-core",
                                 "filesystem": {},
                                 "config": {},
                                 "children": [
                                     {
-                                        "permanent_id": "guardian-4",
+                                        "universal_id": "guardian-4",
                                         "name": "sentinel",
                                         "app": "matrix-core",
                                         "filesystem": {},
                                         "config": {
                                             "watching": "the Queen",
-                                            "permanent_id": "matrix"
+                                            "universal_id": "matrix"
                                         }
                                     }
                                 ]
@@ -352,19 +398,19 @@ def boot():
                 ]
             },
             {
-                "permanent_id": "context-agent-1",
+                "universal_id": "context-agent-1",
                 "name": "app_context",
                 "app": "matrix-core",
                 "children": []
             },
             {
-                "permanent_id": "resolver-1",
+                "universal_id": "resolver-1",
                 "name": "resolver",
                 "app": "matrix-core",
                 "children": []
             },
             {
-            "permanent_id": "matrix-https",
+            "universal_id": "matrix-https",
             "name": "matrix_https",
             "delegated": [],
             "app": "matrix-core",
@@ -379,10 +425,8 @@ def boot():
                     "files": {}
                 }
             },
-
-
             {
-                "permanent_id": "scavenger-strike",
+                "universal_id": "scavenger-strike",
                 "name": "scavenger",
                 "app": "matrix-core",
                 "filesystem": {
@@ -392,16 +436,40 @@ def boot():
             },
 
             {
-                "permanent_id": "commander-1",
+                "universal_id": "commander-1",
                 "name": "commander",
                 "app": "matrix-core",
                 "children": []
 
             },
 
+
         ]
     }
 
+    matrix_directisve = {
+        "universal_id": 'matrix',
+        "name": "matrix",
+        "filesystem": {
+            "folders": [
+                {
+                    'name': 'payload',
+                    'type': 'd',
+                    'content': None
+                },
+            ],
+            "files": {}
+        },
+        "children": [
+            {
+                "universal_id": "commander-1",
+                "name": "commander",
+                "app": "matrix-core",
+                "children": []
+
+            },
+                ]
+    }
 
 
     # INSERT AGENT COMMAND
@@ -412,14 +480,14 @@ def boot():
             targ_idx = sys.argv.index("-targ")
 
             agent_name = sys.argv[name_idx + 1]
-            new_perm_id = sys.argv[pid_idx + 1]
-            target_perm_id = sys.argv[targ_idx + 1]
+            new_universal_id = sys.argv[pid_idx + 1]
+            target_universal_id = sys.argv[targ_idx + 1]
 
         except Exception as e:
             print(f"[BOOTLOADER][ERROR] Invalid agent insert syntax: {e}")
             sys.exit(1)
 
-        print(f"[BOOTLOADER] Sending insert request for agent {new_perm_id} ({agent_name}) under {target_perm_id}")
+        print(f"[BOOTLOADER] Sending insert request for agent {new_universal_id} ({agent_name}) under {target_universal_id}")
 
         payload_dir = os.path.join("comm", "matrix", "payload")
         os.makedirs(payload_dir, exist_ok=True)
@@ -427,9 +495,9 @@ def boot():
         inject_payload = {
             "type": "inject",
             "content": {
-                "perm_id": new_perm_id,
+                "universal_id": new_universal_id,
                 "agent_name": agent_name,
-                "target_perm_id": target_perm_id,
+                "target_universal_id": target_universal_id,
                 "filesystem": {
                     "folders": [{"name": "payload", "type": "d", "content": None}]
                 },
@@ -438,7 +506,7 @@ def boot():
         }
 
         timestamp = int(time.time())
-        payload_file = os.path.join(payload_dir, f"inject_{new_perm_id}_{timestamp}.json")
+        payload_file = os.path.join(payload_dir, f"inject_{new_universal_id}_{timestamp}.json")
 
         with open(payload_file, "w") as f:
             json.dump(inject_payload, f, indent=2)
@@ -448,15 +516,15 @@ def boot():
         sys.exit(0)
 
     # TARGETED KILL REQUEST
-    if "--kill-perm_id" in sys.argv:
-        idx = sys.argv.index("--kill-perm_id")
+    if "--kill-universal_id" in sys.argv:
+        idx = sys.argv.index("--kill-universal_id")
         if idx + 1 >= len(sys.argv):
-            print("[BOOTLOADER][ERROR] Missing permanent_id after --kill-perm_id")
+            print("[BOOTLOADER][ERROR] Missing universal_id after --kill-universal_id")
             sys.exit(1)
 
-        target_perm_id = sys.argv[idx + 1]
+        target_universal_id = sys.argv[idx + 1]
 
-        print(f"[BOOTLOADER] Sending kill request for {target_perm_id} to Matrix...")
+        print(f"[BOOTLOADER] Sending kill request for {target_universal_id} to Matrix...")
 
         payload_dir = os.path.join("comm", "matrix", "payload")
         os.makedirs(payload_dir, exist_ok=True)
@@ -464,12 +532,12 @@ def boot():
         kill_payload = {
             "type": "kill",
             "content": {
-                "target": target_perm_id
+                "target": target_universal_id
             }
         }
 
         timestamp = int(time.time())
-        payload_file = os.path.join(payload_dir, f"kill_{target_perm_id}_{timestamp}.json")
+        payload_file = os.path.join(payload_dir, f"kill_{target_universal_id}_{timestamp}.json")
 
         with open(payload_file, "w") as f:
             json.dump(kill_payload, f, indent=2)
@@ -481,19 +549,56 @@ def boot():
 
     #IS THIS A TEAR DOWN
     if "--kill" in sys.argv:
+        swarm_root = "/matrix/bb"
+        sessions = [d for d in os.listdir(swarm_root) if os.path.isdir(os.path.join(swarm_root, d))]
+        sessions = sorted(sessions)
 
-        reaper = Reaper('pod', 'comm', 60)
+        if not sessions:
+            print("[KILL] No swarm sessions found.")
+            sys.exit(1)
+
+        print("\n🧠 Active Swarm Sessions:\n")
+        for i, session in enumerate(sessions, 1):
+            tag = " (last)" if i == len(sessions) else ""
+            print(f"{i}.  {session}{tag}")
+
+        choice = input("\nChoose a session number to kill [default: last]: ").strip()
+        idx = int(choice) - 1 if choice else len(sessions) - 1
+        chosen = sessions[idx]
+
+        root = os.path.join(swarm_root, chosen)
+        pod_path = os.path.join(root, "pod")
+        comm_path = os.path.join(root, "comm")
+
+        print(f"\n[KILL] Executing shutdown for: {chosen}")
+        reaper = Reaper(
+            pod_root=pod_path,
+            comm_root=comm_path,
+            timeout_sec=60
+        )
         reaper.reap_all()
-        print("[BOOTLOADER] Kill switch triggered. Swarm shutdown complete.")
+
+        print("[KILL] Reaper complete. Nuking directories...")
+
+        for path in [pod_path, comm_path]:
+            if os.path.exists(path):
+                shutil.rmtree(path)
+                print(f"[KILL] Deleted: {path}")
+
+        print(f"[BOOTLOADER] Session {chosen} terminated.")
         sys.exit(0)
 
     ###### kill all running processes under pod/ then smoke the directories
     elif hard_reset:
 
         #this makes sure if any agents are running they close before we nuke the pod directory
-        reaper = Reaper('pod', 'comm')
+        reaper = Reaper(
+            pod_root=pm.get_path("pod", trailing_slash=False),
+            comm_root=pm.get_path("comm", trailing_slash=False)
+        )
 
         reaper.reap_all()
+
 
         cp.reset_hard()
 
@@ -522,14 +627,14 @@ def boot():
 
         ]
 
-        #v=PermanentIdExtract.get_dict_by_permanent_id(matrix_directive, MATRIX_UUID)
+        #v=PermanentIdExtract.get_dict_by_universal_id(matrix_directive, MATRIX_UUID)
         #print(v)
         #exit(0)
         matrix_without_children = {k: v for k, v in matrix_directive.items() if k != "children"}
 
         cp.ensure_comm_channel(MATRIX_UUID, comm_file_spec, matrix_directive)
         new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)
-        cp.spawn_agent(UNIVERSE_ID, new_uuid, MATRIX_UUID, MATRIX_UUID, BOOTLOADER_UUID, matrix_without_children)
+        cp.spawn_agent(new_uuid, MATRIX_UUID, MATRIX_UUID, BOOTLOADER_UUID, matrix_without_children)
 
     else:
         cp.verify_soft()

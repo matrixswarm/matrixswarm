@@ -82,25 +82,25 @@ class MatrixHTTPS(BootAgent):
                 if ctype == "spawn":
                     self.log(f"'[MATRIX_HTTPS][PAYLOAD] Received Spawn command. Payload: ' {payload}")
                     #from agent.core.core_spawner import spawn_agent
-                    #spawn_agent("matrix", str(uuid.uuid4()), content.get("agent_name"), content.get("permanent_id"), "gui", directive=content)
+                    #spawn_agent("matrix", str(uuid.uuid4()), content.get("agent_name"), content.get("universal_id"), "gui", directive=content)
                     print('[MATRIX_HTTPS][PAYLOAD] Received Spawn command')
                 elif ctype == "inject":
                     self.log(f"[MATRIX-HTTPS][CMD][INJECTING] {payload}")
                     #id of agent that the new agent will be a child of, must be in tree
-                    target_perm_id = content.get("target_perm_id")
+                    target_universal_id = content.get("target_universal_id")
                     #id of new agent, which must be unique though the whole tree
-                    perm_id = content.get("perm_id")
+                    universal_id = content.get("universal_id")
                     #agent file to clone
                     agent_name = content.get("agent_name")
 
                     delegated = content.get("delegated", [])
 
 
-                    if perm_id and agent_name:
+                    if universal_id and agent_name:
 
                         directive = {
-                            "target_perm_id": target_perm_id,
-                            "perm_id": perm_id,
+                            "target_universal_id": target_universal_id,
+                            "universal_id": universal_id,
                             "agent_name": agent_name,
                             "delegated": delegated
                         }
@@ -123,20 +123,20 @@ class MatrixHTTPS(BootAgent):
                         self.log(f"[INJECT] Payload dropped to Matrix: {fpath}")
                         return jsonify({"status": "ok", "message": f"{agent_name} inject routed to Matrix"})
                     else:
-                        return jsonify({"status": "error", "message": "Missing perm_id or agent_name"}), 400
+                        return jsonify({"status": "error", "message": "Missing universal_id or agent_name"}), 400
 
                 elif ctype == "inject_team":
-                    target_perm_id = content.get("target_perm_id")
+                    target_universal_id = content.get("target_universal_id")
                     subtree = content.get("subtree")
 
-                    if not target_perm_id or not subtree:
-                        return jsonify({"status": "error", "message": "Missing target_perm_id or subtree"}), 400
+                    if not target_universal_id or not subtree:
+                        return jsonify({"status": "error", "message": "Missing target_universal_id or subtree"}), 400
 
                     inject_payload = {
                         "type": "inject_team",
                         "timestamp": time.time(),
                         "content": {
-                            "target_perm_id": target_perm_id,
+                            "target_universal_id": target_universal_id,
                             "subtree": subtree
                         }
                     }
@@ -148,7 +148,7 @@ class MatrixHTTPS(BootAgent):
                         json.dump(inject_payload, f, indent=2)
 
                     self.log(f"[INJECT_TEAM] Payload dropped to Matrix: {fpath}")
-                    return jsonify({"status": "ok", "message": f"Team injected under {target_perm_id}"})
+                    return jsonify({"status": "ok", "message": f"Team injected under {target_universal_id}"})
 
                 elif ctype == "stop":
                     content = payload.get("content", {})
@@ -182,23 +182,23 @@ class MatrixHTTPS(BootAgent):
                     if isinstance(targets, str):
                         targets = [targets]
 
-                    for perm_id in targets:
-                        die_path = os.path.join(self.path_resolution["comm_path"], perm_id, "incoming", "die")
-                        tombstone_path = os.path.join(self.path_resolution["comm_path"], perm_id, "incoming",
+                    for universal_id in targets:
+                        die_path = os.path.join(self.path_resolution["comm_path"], universal_id, "incoming", "die")
+                        tombstone_path = os.path.join(self.path_resolution["comm_path"], universal_id, "incoming",
                                                       "tombstone")
 
                         if os.path.exists(die_path):
                             os.remove(die_path)
-                            self.log(f"[MATRIX][RESUME] Removed die file for {perm_id}")
+                            self.log(f"[MATRIX][RESUME] Removed die file for {universal_id}")
 
                         if os.path.exists(tombstone_path):
                             os.remove(tombstone_path)
-                            self.log(f"[MATRIX][RESUME] Removed tombstone for {perm_id}")
+                            self.log(f"[MATRIX][RESUME] Removed tombstone for {universal_id}")
 
                 elif ctype == "shutdown_subtree":
-                    target_id = content.get("perm_id")
+                    target_id = content.get("universal_id")
                     if not target_id:
-                        return jsonify({"status": "error", "message": "Missing perm_id"}), 400
+                        return jsonify({"status": "error", "message": "Missing universal_id"}), 400
                     try:
 
                         from agent.core.tree_parser import TreeParser
@@ -221,9 +221,9 @@ class MatrixHTTPS(BootAgent):
                         return jsonify({"status": "error", "message": str(e)}), 500
 
                 elif ctype == "restart_subtree":
-                    target_id = content.get("perm_id")
+                    target_id = content.get("universal_id")
                     if not target_id:
-                        return jsonify({"status": "error", "message": "Missing perm_id"}), 400
+                        return jsonify({"status": "error", "message": "Missing universal_id"}), 400
 
                     try:
                         from agent.core.tree_parser import TreeParser
@@ -255,17 +255,17 @@ class MatrixHTTPS(BootAgent):
 
                 elif ctype == "delete_node":
                     self.log(f"[MATRIX-HTTPS][CMD][DELETE-NODE] {payload}")
-                    self.tree.delete_node(content.get("perm_id"))
+                    self.tree.delete_node(content.get("universal_id"))
                 elif ctype == "delete_subtree":
                     self.log(f"[MATRIX-HTTPS][CMD][DELETE-SUBTREE] {payload}")
-                    self.tree.delete_subtree(content.get("perm_id"))
+                    self.tree.delete_subtree(content.get("universal_id"))
                 elif ctype == "get_log":
                     self.log(f"[MATRIX-HTTPS][CMD][GET-LOG] {payload}")
-                    perm_id = content.get("perm_id")
-                    if not perm_id:
-                        return jsonify({"status": "error", "message": "Missing perm_id"}), 400
+                    universal_id = content.get("universal_id")
+                    if not universal_id:
+                        return jsonify({"status": "error", "message": "Missing universal_id"}), 400
 
-                    log_path = os.path.join(self.path_resolution["comm_path"], perm_id, "logs", "agent.log")
+                    log_path = os.path.join(self.path_resolution["comm_path"], universal_id, "logs", "agent.log")
 
                     if os.path.exists(log_path):
                         try:
@@ -276,8 +276,8 @@ class MatrixHTTPS(BootAgent):
                             self.log(f"[HTTPS-LOG] Error reading log: {e}")
                             return jsonify({"status": "error", "message": str(e)}), 500
                     else:
-                        self.log(f"[HTTPS-LOG] Log not found for {perm_id}")
-                        return jsonify({"status": "error", "message": f"No log found for {perm_id}"}), 404
+                        self.log(f"[HTTPS-LOG] Log not found for {universal_id}")
+                        return jsonify({"status": "error", "message": f"No log found for {universal_id}"}), 404
 
                 elif ctype == "list_tree":
                     tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
@@ -294,8 +294,22 @@ class MatrixHTTPS(BootAgent):
                         json.dump(payload, f, indent=2)
                         return jsonify({"status": "ok", "message": f"Kill payload routed to Matrix"})
 
+
                 else:
-                    return jsonify({"status": "error", "message": "Unknown command type."}), 400
+
+                    # Fallback: drop ANY unrecognized payload into Matrix's payload dir
+
+                    fallback_name = f"cmd_{ctype}_{int(time.time())}.json"
+
+                    fallback_path = os.path.join(self.payload_dir, fallback_name)
+
+                    with open(fallback_path, "w") as f:
+
+                        json.dump(payload, f, indent=2)
+
+                    self.log(f"[MATRIX-HTTPS][FALLBACK] Routed unknown command '{ctype}' to Matrix payload queue.")
+
+                    return jsonify({"status": "ok", "message": f"Command '{ctype}' routed to Matrix."})
 
                 return jsonify({"status": "ok", "message": f"Command {ctype} processed."})
 

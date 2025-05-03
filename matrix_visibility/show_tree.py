@@ -6,8 +6,8 @@ COMM_DIR = "/sites/orbit/python/comm"
 DEPLOY_TREE_PATH = "/deploy/tree.json"
 
 
-def load_delegates(perm_id):
-    directive_path = os.path.join(COMM_DIR, perm_id, "directives")
+def load_delegates(universal_id):
+    directive_path = os.path.join(COMM_DIR, universal_id, "directives")
     if not os.path.exists(directive_path):
         return []
     try:
@@ -15,17 +15,17 @@ def load_delegates(perm_id):
             directives = json.load(f)
         return directives.get("delegated", [])
     except Exception as e:
-        print(f" - Failed to read delegation for {perm_id}: {e}")
+        print(f" - Failed to read delegation for {universal_id}: {e}")
         return []
 
 
 def build_tree_from_live():
     tree = {}
-    for perm_id in os.listdir(COMM_DIR):
-        path = os.path.join(COMM_DIR, perm_id)
+    for universal_id in os.listdir(COMM_DIR):
+        path = os.path.join(COMM_DIR, universal_id)
         if not os.path.isdir(path):
             continue
-        tree[perm_id] = load_delegates(perm_id)
+        tree[universal_id] = load_delegates(universal_id)
     return tree
 
 

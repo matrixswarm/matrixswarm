@@ -65,7 +65,7 @@ class GoogleCalendarAgent(BootAgent):
 
                 message = {
                     "msg": f"📅 Upcoming: {summary} at {start}",
-                    "uuid": self.command_line_args.get("permanent_id", "calendar-agent-1"),
+                    "uuid": self.command_line_args.get("universal_id", "calendar-agent-1"),
                     "severity": "info"
                 }
 
