@@ -92,9 +92,10 @@ comm_file_spec = [
 MATRIX_UUID = matrix_directive.get("universal_id", "matrix")
 matrix_without_children = {k: v for k, v in matrix_directive.items() if k != "children"}
 
+
 cp.ensure_comm_channel(MATRIX_UUID, comm_file_spec, matrix_directive)
 new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)
-cp.spawn_agent(new_uuid, MATRIX_UUID, MATRIX_UUID, "site_boot", matrix_without_children)
+cp.spawn_agent(new_uuid, MATRIX_UUID, MATRIX_UUID, "site_boot", matrix_without_children, universe_id=universe_id)
 
 print(f"[✅] Matrix deployed at: {pod_path}")
 print("[🧠] The swarm is online.")

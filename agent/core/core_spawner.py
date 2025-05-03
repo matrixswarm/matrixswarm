@@ -145,7 +145,7 @@ class CoreSpawner:
 
         return good, content
 
-    def spawn_agent(self, spawn_uuid, agent_name, universal_id, spawner, tree_node=None):
+    def spawn_agent(self, spawn_uuid, agent_name, universal_id, spawner, tree_node=None, universe_id=None):
 
         try:
 
@@ -181,8 +181,9 @@ class CoreSpawner:
                 "spawner": spawner,
                 "universal_id": universal_id,
                 "agent_name": agent_name,
+                "universe": universe_id
             }
-            command_line_args = 'command_line_args=' + json.dumps(cmd_args, indent=4) + '\n'
+            command_line_args = """ + json.dumps(command_line_args, indent=4) + """
 
             tree_node_blob = ""
             if tree_node:
@@ -215,7 +216,6 @@ class CoreSpawner:
                 root_path = path_resolution.get("root_path", site_root)
                 if root_path not in sys.path:
                     sys.path.insert(0, root_path)
-                                
                 """)
 
 
@@ -267,7 +267,7 @@ class CoreSpawner:
             cmd = [
                 "python3",
                 run_path,
-                "--job", f"{UNIVERSE_ID}:{spawner}:{universal_id}:{agent_name}",
+                "--job", f"{universe_id}:{spawner}:{universal_id}:{agent_name}",
                 "--ts", timestamp
             ]
 
