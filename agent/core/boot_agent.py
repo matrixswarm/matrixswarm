@@ -182,7 +182,8 @@ class BootAgent(Agent):
             agent_name=agent_name,
             universal_id=universal_id,
             spawner=self.command_line_args["universal_id"],
-            tree_node=tree_node
+            tree_node=tree_node,
+            universe_id=self.command_line_args.get("universe", "unknown")
         )
 
         if result is None:
