@@ -18,6 +18,8 @@ args = parser.parse_args()
 universe_id = args.universe.strip()
 base_path = os.path.join("/matrix", universe_id, "latest")
 
+
+
 # Confirm
 print("==================================================")
 print("           MATRIX TERMINATION SEQUENCE")
@@ -29,6 +31,13 @@ print(f"[KILL] Base Path: {base_path}")
 pm = PathManager(root_path=base_path)
 pod_path = pm.get_path("pod", trailing_slash=False)
 comm_path = pm.get_path("comm", trailing_slash=False)
+
+# Validate pod path
+if not os.path.exists(pod_path):
+    print(f"[ERROR] Pod path does not exist: {pod_path}")
+    print(f"[INFO] Re-checking using ps aux | grep '{universe_id}' for live boot.")
+    exit(1)
+
 
 # Confirm paths exist
 if not os.path.exists(pod_path):

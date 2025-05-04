@@ -17,6 +17,7 @@ class TreeParser:
         self.duplicates = []  # To track any duplicate permanent IDs
         self.delegated = {}  # Any delegated data (not relevant here)
         self.tree_path = tree_path
+        self.rejected_subtrees = []  # Track rejected universal_ids
 
     def _initialize_data(self, data):
         """
@@ -32,33 +33,24 @@ class TreeParser:
     def _parse_nodes(self, node):
         """
         Recursively parse nodes and store them into self.nodes.
+        Rejects entire subtrees if a duplicate universal_id is found.
         """
-        # Handle empty or invalid nodes
-        if not node:
+        if not node or not isinstance(node, dict):
             return
 
-        # Extract the permanent ID of the node
         universal_id = node.get(self.UNIVERSAL_ID_KEY)
         if not universal_id:
             return
 
-        # Check and process duplicates
         if universal_id in self.nodes:
+            print(f"[TREE-REJECT] ❌ Duplicate universal_id '{universal_id}' — rejecting this subtree and all children.")
             self.duplicates.append(universal_id)
-            return
+            self.rejected_subtrees.append(universal_id)
+            return  # Skip entire subtree
 
-        # Add the node to self.nodes
         self._validate_and_store_node(node)
 
-        # Debugging the state of self.nodes after adding
-        print("Current state of self.nodes:")
-        for key, value in self.nodes.items():
-            print(f"{key} → {value.get('name', '[NO NAME]')}")
-
         for child in node.get(self.CHILDREN_KEY, []):
-            if not isinstance(child, dict) or not child.get("universal_id"):
-                print(f"[TREE][WARNING] Skipping malformed child node: {child}")
-                continue
             self._parse_nodes(child)
 
     def _validate_and_store_node(self, node):
@@ -284,6 +276,89 @@ class TreeParser:
             #self.log(f"[TREE] Failed to save tree: {e}")
             return False
 
+    def remove_exact_node(self, target_node):
+        """
+        Recursively remove the exact instance of a node from the tree by identity.
+        """
+
+        def recurse(node):
+            if not isinstance(node, dict):
+                return False
+
+            children = node.get(self.CHILDREN_KEY, [])
+            for i, child in enumerate(children):
+                if child is target_node:
+                    del children[i]
+                    print(f"[TREE-PRECISION] 🎯 Removed node '{target_node.get(self.UNIVERSAL_ID_KEY)}'")
+                    return True
+                if recurse(child):  # Dive deeper
+                    return True
+            return False
+
+        # Start at root
+        return recurse(self.root)
+
+    def pre_scan_for_duplicates(self, node):
+        """
+        Pre-scan the tree to detect duplicates and remove all but the first instance.
+        """
+        from collections import defaultdict
+
+        seen = defaultdict(list)
+
+        def recurse(n, path="root"):
+            if not isinstance(n, dict):
+                return
+            uid = n.get(self.UNIVERSAL_ID_KEY)
+            if uid:
+                seen[uid].append(n)
+            for child in n.get(self.CHILDREN_KEY, []):
+                recurse(child, path + f" > {uid}")
+
+        recurse(node)
+
+        # Keep the first instance, remove all subsequent ones
+        for uid, instances in seen.items():
+            if len(instances) > 1:
+                print(f"[TREE-SCAN] ⚠️ Found {len(instances)} clones of '{uid}' — purging {len(instances) - 1}")
+                self.rejected_subtrees.append(uid)
+                # Remove by ID, not direct node, so cleanup will strike even deep ghosts
+                for dup_node in instances[1:]:
+                    self.remove_exact_node(dup_node)
+                    self.rejected_subtrees.append(uid)
+
+    @classmethod
+    def load_tree_direct(cls, data):
+        """
+        Load tree from raw dictionary, cleanse it, parse nodes, and remove duplicates preemptively.
+        """
+        instance = cls(data)
+        instance.cleanse()
+        instance.pre_scan_for_duplicates(instance.root)  # Strike before parsing
+        instance._parse_nodes(instance.root)
+
+        #if instance.rejected_subtrees:
+        #    for uid in instance.rejected_subtrees:
+        #        instance._remove_node_and_children(uid)
+
+        return instance
+
+    def _remove_node_and_children(self, target_uid):
+        """
+        Removes the node and its entire subtree from the tree.
+        """
+        parent = self.find_parent_of(target_uid)
+
+        if parent:
+            children = parent.get(self.CHILDREN_KEY, [])
+            parent[self.CHILDREN_KEY] = [
+                c for c in children if c.get(self.UNIVERSAL_ID_KEY) != target_uid
+            ]
+            print(f"[TREE-REMOVE] 🌪 Removed duplicate subtree '{target_uid}' from parent '{parent.get(self.UNIVERSAL_ID_KEY)}'")
+        elif self.root.get(self.UNIVERSAL_ID_KEY) == target_uid:
+            print(f"[TREE-REMOVE] 🌪 Root node is duplicate '{target_uid}', clearing root.")
+            self.root = {self.UNIVERSAL_ID_KEY: "root", self.CHILDREN_KEY: []}
+
     @classmethod
     def load_tree(cls, input_path):
         try:
@@ -320,20 +395,27 @@ class TreeParser:
         return nodes
 
     def merge_subtree(self, subtree):
-
+        """
+        Attempt to merge a subtree into the tree. Rejects if any duplicate universal_ids exist.
+        """
         if not isinstance(subtree, dict):
+            return False
+
+        # Pre-scan for duplicate universal_ids
+        new_ids = {node["universal_id"] for node in self.flatten_tree(subtree) if "universal_id" in node}
+        collision = new_ids.intersection(set(self.nodes.keys()))
+        if collision:
+            print(f"[MERGE-REJECT] ❌ Subtree rejected due to duplicate IDs: {list(collision)}")
+            self.duplicates.extend(collision)
+            self.rejected_subtrees.extend(collision)
             return False
 
         new_root_id = subtree.get("universal_id")
         if not new_root_id:
             return False
 
-        if self.has_node(new_root_id):
-            self.log(f"[MERGE] Root node {new_root_id} already exists. Merge aborted.")
-            return False
-
-        # Merge by attaching to root if not already present
-        self.tree["children"].append(subtree)
+        self._parse_nodes(subtree)
+        self.root[self.CHILDREN_KEY].append(subtree)
         return True
 
     def get_all_nodes_flat(self):

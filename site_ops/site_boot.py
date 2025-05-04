@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import psutil
 
 # Path prep
 SITE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -48,6 +49,20 @@ args = parser.parse_args()
 universe_id = args.universe.strip()
 boot_name = args.directive.strip().replace(".py", "")
 
+# Prevent duplicate Matrix spawns for the same universe
+existing = psutil.process_iter(["cmdline"])
+dupe_label = f"{universe_id}:site_boot:matrix:matrix"
+
+# Prevent multiple instances of the same universe, still can happen but it will self rectify
+for proc in existing:
+    cmdline = " ".join(proc.info.get("cmdline") or [])
+    if dupe_label in cmdline:
+        print(f"[BLOCKED] Matrix already running in '{universe_id}'. Skipping boot.")
+        exit(1)
+
+
+
+
 # Base deploy target
 base_path = os.path.join("/matrix", universe_id, "latest")
 print(f"[BOOT] Universe path resolved: {base_path}")
@@ -76,13 +91,22 @@ reaper.reap_all()
 cp = CoreSpawner(path_manager=pm)
 cp.reset_hard()
 
-tp = TreeParser({})
+# Load and validate tree fully before saving
+tp = TreeParser.load_tree_direct(matrix_directive)
+
+if not tp:
+    print("[FATAL] Tree load failed. Invalid structure.")
+    exit(1)
+
+if tp.rejected_subtrees:
+    print(f"[RECOVERY] ⚠️ Removed duplicate nodes: {tp.rejected_subtrees}")
+
 comm_file_spec = [
     {
         'name': 'agent_tree_master.json',
         'type': 'f',
         'atomic': True,
-        'content': tp.load_dict(matrix_directive)
+        'content': tp.root
     },
     {'name': 'hello.moto', 'type': 'd'},
     {'name': 'incoming', 'type': 'd'},

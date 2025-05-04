@@ -24,8 +24,9 @@ import inotify.adapters
 import threading
 import hashlib
 import json
-from string import Template
+import copy
 
+from string import Template
 from agent.core.boot_agent import BootAgent
 
 from agent.core.tree_parser import TreeParser
@@ -36,7 +37,7 @@ from agent.core.swarm_manager import SwarmManager  # adjust path to match
 from agent.reaper.reaper_factory import make_reaper_node
 from agent.core.class_lib.hive.kill_chain_lock_manager import KillChainLockManager
 from agent.core.utils.swarm_sleep import interruptible_sleep
-
+from agent.core.utils.tree_backup import backup_agent_tree
 
 class MatrixAgent(DelegationMixin, BootAgent):
 
@@ -224,8 +225,12 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         os.remove(fpath)
                         continue
 
-                    ctype = payload.get("type")
-                    content = payload.get("content", {})
+                    if payload.get("type") == "payload":
+                        content = payload.get("payload", {})
+                        ctype = content.get("type")
+                    else:
+                        content = payload
+                        ctype = payload.get("type")
 
                     if ctype == "spawn_agent":
                         self.log(f"[SPAWN] Now injecting agent: {content.get('universal_id')}")
@@ -273,30 +278,45 @@ class MatrixAgent(DelegationMixin, BootAgent):
                             self.log(f"[STOP] Sent stop signal to {t}")
 
                     elif ctype == "kill":
-                        target_universal_id = content.get("target")
+
+                        # Load and snapshot
                         tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
+
                         tp = TreeParser.load_tree(tree_path)
                         if tp is None:
                             self.log("[KILL][ERROR] Tree load failed, aborting kill.")
-                            continue
+                            return
 
-                        kill_list = self.collect_kill_list(tp, target_universal_id)
+                        original_tree = copy.deepcopy(tp.root)
+
+                        self.log(f"[KILL][DEBUG] Raw content: {json.dumps(content, indent=2)}")
+
+                        kill_list = self.collect_kill_list(tp, content.get("target"))
                         self.log(f"[KILL] Kill List: {kill_list}")
 
                         kcm = KillChainLockManager(tp)
                         kcm.lock_targets(kill_list)
-                        tp.save_tree(tree_path)
 
-                        # Inject reaper mission
+                        if tp.root != original_tree:
+                            backup_dir = os.path.join(os.path.dirname(tree_path), "backups")
+                            os.makedirs(backup_dir, exist_ok=True)
+                            backup_agent_tree(tree_path, backup_dir=backup_dir,
+                                              replaced_node_id=content.get("target"),
+                                              new_node_id="reaper-hot-" + str(int(time.time())))
+                            tp.save_tree(tree_path)
+                            self.log("[KILL] Tree modified — backup created and saved.")
+                        else:
+                            self.log("[KILL] Tree unchanged — no backup or save needed.")
+
+                        self.log(f"[KILL][DEBUG] Current tree nodes: {list(tp.nodes.keys())}")
+                        self.log(f"[KILL][DEBUG] Target exists? {'oracle-1' in tp.nodes}")
+
                         reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
-                        #tp.insert_node(reaper_node, parent_universal_id="matrix")
-                        #tp.save_tree(tree_path)
-
                         self.spawn_agent_direct(reaper_node["universal_id"], reaper_node["name"], reaper_node)
 
                         self.delegation_refresh()
-
                         self.log(f"[KILL] Reaper dispatched for {kill_list}")
+
 
                     elif ctype == "forward":
                         target = payload.get("target")
@@ -329,32 +349,33 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 self.log(f"[COMMAND-LISTENER][CRASH] {e}")
                 interruptible_sleep(self, 3)
 
-    @staticmethod
-    def collect_kill_list(tp, root_id):
-        visited = set()
-        result = []
+    def collect_kill_list(self, tp, universal_id):
 
-        def recurse(node):
-            if not node or not isinstance(node, dict):
-                return
-            universal_id = node.get("universal_id")
-            if not universal_id or universal_id in visited:
-                return
-            visited.add(universal_id)
+        if not tp or not universal_id:
+            self.log("[KILL][ERROR] Missing tree or target universal_id.")
+            return []
 
-            # Don't recurse into commander-1 even if we see it
-            if universal_id == "commander-1" and root_id != "commander-1":
-                return
+        self.log(f"[KILL][DEBUG] Attempting to collect kill list for: {universal_id}")
+        self.log(f"[KILL][DEBUG] Tree contains: {len(tp.nodes)} nodes")
+        self.log(f"[KILL][DEBUG] Tree keys: {list(tp.nodes.keys())}")
 
-            result.append(universal_id)
-            for child in node.get("children", []):
-                recurse(child)
+        if not tp.has_node(universal_id):
+            self.log(f"[KILL][DEBUG] Node '{universal_id}' not found in index.")
+            return []
 
-        start_node = tp._find_node(tp.root, root_id)
-        if start_node:
-            recurse(start_node)
+        if not tp._find_node(tp.root, universal_id):
+            self.log(f"[KILL][DEBUG] Node '{universal_id}' exists but is disconnected from root. Skipping.")
+            return []
 
-        return result
+        subtree = tp.get_subtree_nodes(universal_id)
+
+        if not subtree:
+            self.log(f"[KILL][DEBUG] Subtree for '{universal_id}' is empty.")
+        else:
+            self.log(f"[KILL][DEBUG] Subtree for '{universal_id}' → {subtree}")
+
+        return subtree
+
 
     #send a copy of agent_tree to each node
     def perform_tree_master_validation(self):
