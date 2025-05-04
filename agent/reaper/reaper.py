@@ -14,7 +14,7 @@ import threading
 
 from agent.core.boot_agent import BootAgent
 #from agent.core.class_lib.processes.reaper import Reaper  # Import Big Reaperfrom agent.core.class_lib.processes.reaper import Reaper  # Big Reaper
-from agent.core.class_lib.processes.reaper_universal_id_handler import ReaperPermanentIdHandler  # PID Handler
+from agent.core.class_lib.processes.reaper_universal_id_handler import ReaperUniversalHandler  # PID Handler
 
 class ReaperAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
@@ -31,7 +31,7 @@ class ReaperAgent(BootAgent):
         self.outbox_path = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox")
         os.makedirs(self.outbox_path, exist_ok=True)
 
-        self.universal_id_handler = ReaperPermanentIdHandler(self.path_resolution['pod_path'], self.path_resolution['comm_path'], logger=self.logger)
+        self.universal_id_handler = ReaperUniversalHandler(self.path_resolution['pod_path'], self.path_resolution['comm_path'], logger=self.logger)
 
 
     def post_boot(self):

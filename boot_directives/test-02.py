@@ -74,6 +74,11 @@ matrix_directive = {
                     }
                 },
                 {
+                    "universal_id": "commander-1",
+                    "name": "commander",
+                    "children": []
+                },
+                {
                     "universal_id": "worker-backup-2",
                     "name": "worker",
                     "directives": {
@@ -97,19 +102,31 @@ matrix_directive = {
                                             "universal_id": "logger-4",
                                             "name": "logger",
                                             "children": [
-                                                {
-                                                    "universal_id": "commander-1",
-                                                    "name": "commander",
-                                                    "children": []
-                                                },
+
                                                 {
                                                     "universal_id": "worker-backup-3",
                                                     "name": "worker",
                                                     "children": []
                                                 }
                                             ]
-                                          }
-                                        ]
+                                          },
+                                            {
+                                                "universal_id": "email-check-1",
+                                                "name": "email_check",
+                                                "filesystem": {
+                                                    "folders": [
+                                                        {"name": "payload", "type": "d", "content": None}
+                                                    ]
+                                                },
+                                                "config": {
+                                                    "imap_host": os.getenv("EMAILCHECKAGENT_IMAP_HOST"),
+                                                    "email": os.getenv("EMAILCHECKAGENT_EMAIL"),
+                                                    "password": os.getenv("EMAILCHECKAGENT_PASSWORD"),
+                                                    "report_to": os.getenv("EMAILCHECKAGENT_REPORT_TO", "mailman-1"),
+                                                    "interval": int(os.getenv("EMAILCHECKAGENT_INTERVAL", 60))
+                                                }
+
+                                        }]
                                       }
                                     ]
                                   }

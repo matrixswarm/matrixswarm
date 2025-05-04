@@ -1,12 +1,9 @@
-import os
 import json
-import psutil
-import time
-import signal
+
 from pathlib import Path
 from agent.core.class_lib.processes.reaper import Reaper
 
-class ReaperPermanentIdHandler:
+class ReaperUniversalHandler:
     def __init__(self, pod_root, comm_root, logger=None):
         self.pod_root = Path(pod_root)
         self.comm_root = Path(comm_root)

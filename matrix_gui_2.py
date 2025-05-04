@@ -327,9 +327,42 @@ class MatrixCommandBridge(QWidget):
 
     def upload_agent_code(self):
         options = QFileDialog.Options()
-        file_name, _ = QFileDialog.getOpenFileName(self, "Select Agent Python File", "", "Python Files (*.py)", options=options)
-        if file_name:
-            print(f"[UPLOAD] Selected agent source: {file_name}")
+        file_name, _ = QFileDialog.getOpenFileName(self, "Select Agent Python File", "", "Python Files (*.py)",
+                                                   options=options)
+
+        if not file_name:
+            return
+
+        try:
+            with open(file_name, "rb") as f:
+                content = f.read()
+                encoded = base64.b64encode(content).decode("utf-8")
+                file_hash = hashlib.sha256(content).hexdigest()
+
+            agent_name = os.path.basename(file_name).replace(".py", "")
+            universal_id = self.input_universal_id.text().strip()
+
+            payload = {
+                "type": "replace_agent",
+                "content": {
+                    "target_universal_id": universal_id,
+                    "hotswap": True,
+                    "new_agent": {
+                        "universal_id": universal_id,
+                        "name": agent_name,
+                        "filesystem": {
+                            "files": {
+                                f"{agent_name}.py": encoded
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.send_post_to_matrix(payload, f"Uploaded and dispatched agent {agent_name} [{file_hash[:8]}...]")
+
+        except Exception as e:
+            self.status_label.setText(f"❌ Failed to upload: {e}")
 
     def build_command_panel(self):
         box = QGroupBox("🧩 Mission Console")
