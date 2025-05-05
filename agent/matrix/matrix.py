@@ -269,16 +269,34 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         elif ctype == "inject_team":
                             self.swarm.handle_team_injection(content.get("subtree"), content.get("target_universal_id"))
 
-                        elif ctype == "stop":
-                            targets = content.get("targets", [])
-                            if isinstance(targets, str):
-                                targets = [targets]
-                            for t in targets:
-                                self.swarm.kill_agent(t, annihilate=False)
-                                self.log(f"[STOP] Sent stop signal to {t}")
 
-                        elif ctype == "delete_agent":
-                            self.handle_kill_agent(content)
+                        elif ctype == "route_payload":
+
+                            content = payload.get("content", {})
+                            target = content.get("target_universal_id")
+                            folder = content.get("delivery", "payload")
+                            filetype = content.get("filetype", "json")  # ← new line
+                            payload_data = content.get("payload")
+
+                            if not (target and payload_data):
+                                self.logger.log("[ROUTE][ERROR] Missing target_universal_id or payload.")
+                                return {"status": "error", "message": "Missing target or payload."}
+
+                            try:
+                                dest_dir = os.path.join(self.path_resolution["comm_path"], target, folder)
+                                os.makedirs(dest_dir, exist_ok=True)
+                                filename = f"route_{int(time.time())}.{filetype}"
+                                full_path = os.path.join(dest_dir, filename)
+
+                                with open(full_path, "w") as f:
+                                    json.dump(payload_data, f, indent=2)
+
+                                self.logger.log(f"[ROUTE] Payload routed to {target}/{folder}/{filename}")
+                                return {"status": "ok", "message": f"Routed to {target}/{folder}/{filename}"}
+                            except Exception as e:
+                                self.logger.log(f"[ROUTE][FAIL] {e}")
+                                return {"status": "error", "message": str(e)}
+
 
                         elif ctype == "forward":
                             self.handle_forward_payload(payload)

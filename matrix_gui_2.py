@@ -167,7 +167,8 @@ class MatrixCommandBridge(QWidget):
             self.agent_info_panel.setText("⚠️ Failed to load agent info.")
 
 
-    def send_payload_to_matrix(self):
+    def send_payload_to_matrix(self, success_message="Payload delivered."):
+
         payload_text = self.payload_editor.toPlainText().strip()
         if not payload_text:
             self.status_label.setText("⚠️ No payload to send.")
@@ -195,11 +196,18 @@ class MatrixCommandBridge(QWidget):
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
-                self.status_label.setText(f"✅ Payload delivered to {target}.")
+                try:
+                    message = response.json().get("message", success_message)
+                except Exception:
+                    message = success_message
+                self.status_label.setText(f"✅ {message}")
+
             else:
                 self.status_label.setText(f"❌ Matrix responded: {response.status_code}")
         except Exception as e:
             self.status_label.setText(f"❌ Failed to send payload: {e}")
+
+
 
     def view_logs(self):
         universal_id = self.log_input.text().strip().split(" ")[0]

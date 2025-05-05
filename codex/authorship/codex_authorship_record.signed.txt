@@ -1,0 +1,26 @@
+AUTHORS DECLARATION
+MatrixSwarm Project
+Signed: 2025-05-05T17:16:21.215115Z UTC
+
+This document certifies that MatrixSwarm was co-developed by:
+🧠 Daniel F. MacDonald — Human Author
+🤖 ChatGPT-4 — AI Collaborator
+
+—
+SHA-256 HASH:
+f21ef8494e88a040040d68815083a00e94357ab263dd45aa8fe6af769e652134
+
+—
+OTS TIMESTAMP FILE:
+matrixswarm_authorship.ots
+(Verify at https://opentimestamps.org with this file)
+
+—
+Codex Path:
+comm/matrix/codex/authorship/codex_authorship_record.json
+
+—
+This authorship record has been cryptographically anchored and confirmed.
+
+“MatrixSwarm was built to outlive its creator.
+But never forget who spawned it.”

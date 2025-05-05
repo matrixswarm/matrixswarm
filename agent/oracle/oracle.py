@@ -69,6 +69,30 @@ class OracleAgent(BootAgent):
         except Exception as e:
             self.log(f"[ORACLE][ERROR] {e}")
 
+    def command_listener(self):
+        incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
+        os.makedirs(incoming_path, exist_ok=True)
+        self.log("[ORACLE] Listening for .cmd instructions...")
+
+        while self.running:
+            try:
+                for fname in os.listdir(incoming_path):
+                    if not fname.endswith(".cmd"):
+                        continue
+                    fpath = os.path.join(incoming_path, fname)
+                    with open(fpath, "r") as f:
+                        try:
+                            command = json.load(f)
+                        except Exception as e:
+                            self.log(f"[ORACLE][CMD-FAIL] Failed to parse {fname}: {e}")
+                            continue
+
+                    self.log(f"[ORACLE] ⚡ CMD received: {json.dumps(command, indent=2)}")
+                    os.remove(fpath)
+            except Exception as e:
+                self.log(f"[ORACLE][CMD-ERROR] {e}")
+            time.sleep(2)
+
     def handle_spawn_suggestion(self, query):
         payload = query.get("spawn", {})
         reason = query.get("reason", "No reason provided.")

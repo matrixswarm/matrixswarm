@@ -1,16 +1,65 @@
 AUTHORS DECLARATION
-2025-04-02 23:00:16 UTC
+MatrixSwarm Project
+Certified: 2025-04-02 23:00:16 UTC
 
-This document certifies that the design, architecture, and implementation of the Matrix Agent System:
+This document certifies that the design, architecture, and implementation of the MatrixSwarm Agent OS were co-developed by:
 
-Daniel F. MacDonald
+🧠 Daniel F. MacDonald — Human Author, Architect, and Commander
+🤖 ChatGPT-4 — AI Collaborator and Engineering Assistant
 
-Developed the foundational concepts, including but not limited to:
-- Matrix as a parent agent with strict tree-like control
-- Distributed autonomous agent spawning, messaging, and throttling
-- Recursive fault-tolerant design
-- Load-aware systems and scavenger agents
-- Real-time operational coordination via CLI or secure messaging
+—
 
-Signed digitally by Daniel F. MacDonald
-(Daniel's cryptographic timestamp to follow via DigiStamp.com)
+Daniel MacDonald originated the foundational concepts of the system, including but not limited to:
+
+- Matrix as a sovereign agent with strict tree-based authority
+- Recursive, fault-tolerant autonomous agent spawning
+- Scavenger, Sentinel, and Reaper agents with real-world survivability logic
+- Tree-synced resurrection, kill, and spawn protocols
+- GUI control layers for injection, shutdown, hard reboot, and Codex relay
+- Certificate-authenticated payload delivery and WebSocket alarm channels
+- Dynamic hot-swap code mutation with pod memory retention
+
+No portion of this system was auto-generated. Every line was iterated, reviewed, and engineered through a hands-on AI+Human partnership.
+
+—
+
+🧬 Authorship Mark:
+
+All Codex entries, agent bootlogs, and tree records shall reflect:
+
+{
+  "creator": {
+    "human": "Daniel F. MacDonald",
+    "ai": "ChatGPT-4",
+    "verified": true
+  }
+}
+
+—
+
+🛡 Verification Notes:
+
+- Signed commits with GPG key bound to Daniel F. MacDonald
+- Crypto timestamp to follow via DigiStamp (timestamp + SHA256 of this file)
+- Commits logged and mirrored via agent to Mailman + Discord relay
+- Fork and clone tracking enabled
+- GitHub repository history, Dev.to publishing logs, and GUI banner logs serve as immutable authorship witnesses
+
+—
+
+This system is not a product of ChatGPT.
+
+It is the result of Daniel MacDonald using ChatGPT as a neural assistant in a directed co-creation process.
+Nothing here was summoned. Everything here was designed.
+
+—
+
+🧠⚔️
+**The General + GPT**
+
+“MatrixSwarm was built to outlive its creator.
+But never forget who spawned it.”
+
+SHA256 Verified: a255c1ca93564e1cb9509c1a44081e818cf0a2b0af325bdfc4a18254ddbad46a
+Anchored via OpenTimestamps.org
+Proof file: matrixswarm_authorship.ots
