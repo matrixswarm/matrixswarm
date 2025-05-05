@@ -307,6 +307,25 @@ class CoreSpawner:
             logger.log(f"[SPAWN-MGR] Spawning: {universal_id} agent name {agent_name} from: {source_path}")
             print(f"[SPAWN-MGR] Spawning: {universal_id} agent name {agent_name} from: {source_path}")
 
+            # === CODEX ENTRY ===
+            codex_dir = os.path.join(self.comm_path, "matrix", "codex", "agents")
+            os.makedirs(codex_dir, exist_ok=True)
+
+            codex_entry = {
+                "universal_id": universal_id,
+                "title": agent_name.replace("_", " ").title(),
+                "summary": f"Spawned by {spawner} on {timestamp}.",
+                "timestamp": timestamp
+            }
+
+            try:
+                with open(os.path.join(codex_dir, f"{universal_id}.json"), "w") as codex_file:
+                    json.dump(codex_entry, codex_file, indent=2)
+                logger.log(f"[CODEX] Entry written for {universal_id}")
+            except Exception as e:
+                logger.log(f"[CODEX][ERROR] Failed to write entry for {universal_id}: {e}")
+
+
             cmd = [
                 "python3",
                 run_path,

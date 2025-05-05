@@ -9,6 +9,8 @@ if SITE_ROOT not in sys.path:
 
 from agent.core.class_lib.processes.reaper import Reaper
 from agent.core.path_manager import PathManager
+from agent.core.utils import resolve_latest_symlink
+
 
 # CLI setup
 parser = argparse.ArgumentParser(description="Matrix Swarm Terminator")
@@ -19,6 +21,8 @@ universe_id = args.universe.strip()
 base_path = os.path.join("/matrix", universe_id, "latest")
 
 
+resolve_latest_symlink.resolve_latest_symlink(universe_id)
+latest_path = os.path.join("/matrix", universe_id, "latest")
 
 # Confirm
 print("==================================================")

@@ -32,6 +32,8 @@ class MatrixCommandBridge(QWidget):
         self.check_matrix_connection()
         self.hotswap_btn.setEnabled(False)
 
+
+
     def setup_ui(self):
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
@@ -88,8 +90,15 @@ class MatrixCommandBridge(QWidget):
         container = QWidget()
         layout = QVBoxLayout()
         label = QLabel("[CODE VIEW] Future codex, code preview, or live injection shell will go here.")
+        self.codex_display = QTextEdit()
+        self.codex_display.setReadOnly(True)
+        self.codex_display.setStyleSheet("background-color: #000; color: #00ffcc; font-family: Courier;")
+        layout.addWidget(self.codex_display)
+
+        self.load_codex_entries()
         label.setStyleSheet("color: #33ff33; font-family: Courier; padding: 20px;")
         layout.addWidget(label)
+
 
         back_btn = QPushButton("⬅️ Return to Command View")
         back_btn.clicked.connect(lambda: self.stack.setCurrentIndex(0))
@@ -505,6 +514,53 @@ class MatrixCommandBridge(QWidget):
             timeout=REQUEST_TIMEOUT
         )
 
+    def handle_delete_agent(self):
+        from PyQt5.QtWidgets import QMessageBox
+
+        universal_id = self.input_universal_id.text().strip()
+        if not universal_id:
+            self.status_label.setText("⚠️ No agent selected.")
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"⚠️ This will erase the agent’s Codex record,\nkill its pod, and remove it from the tree.\n\nPermanently delete {universal_id}?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if confirm != QMessageBox.Yes:
+            self.status_label.setText("🛑 Deletion canceled.")
+            return
+
+        payload = {
+            "type": "delete_agent",
+            "timestamp": time.time(),
+            "content": {
+                "target_universal_id": universal_id
+            }
+        }
+        print(payload)
+        self.send_post_to_matrix(payload, f"🗑 Deleted {universal_id}")
+
+    def load_codex_entries(self):
+        codex_dir = "/comm/matrix/codex/agents"
+        if not os.path.exists(codex_dir):
+            self.codex_display.setPlainText("[CODEX] No entries found.")
+            return
+
+        entries = []
+        for file in os.listdir(codex_dir):
+            try:
+                with open(os.path.join(codex_dir, file)) as f:
+                    data = json.load(f)
+                    entry = f"🧬 {data.get('universal_id', '???')} – {data.get('title', 'Untitled')}\n{data.get('summary', '')}"
+                    entries.append(entry)
+            except Exception as e:
+                entries.append(f"[ERROR] Failed to load {file}: {e}")
+
+        self.codex_display.setPlainText("\n\n".join(entries) if entries else "[CODEX] Empty.")
+
     def check_matrix_connection(self):
         try:
             response = requests.get(
@@ -590,7 +646,7 @@ class MatrixCommandBridge(QWidget):
         self.shutdown_btn.clicked.connect(self.handle_shutdown_agent)
         self.inject_btn.clicked.connect(self.handle_inject_to_tree)
         self.reaper_btn.clicked.connect(self.handle_call_reaper)
-        self.delete_btn.clicked.connect(self.handle_delete_subtree)
+        self.delete_btn.clicked.connect(self.handle_delete_agent)
 
 
         layout.addLayout(self.tree_stack)
