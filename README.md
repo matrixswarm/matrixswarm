@@ -3,7 +3,7 @@
 # **THE FIRST AI OPERATING SYSTEM**
 
 ## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.  
-## Agents don’t run under you — they live beside you.
+## No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
 
 ✅ No containers.  
 ✅ No servers.  
@@ -225,6 +225,106 @@ On first boot:
 - Logs start flowing into `/comm/`
 
 ---
+## 🧠 Agent Architecture + Tutorial
+
+### 🧩 Core Concepts
+
+#### Worker Agents
+- Inherit from `BootAgent`
+- Override `worker()` to define their task loop
+- Post logs and heartbeats
+- Live in `/pod/{uuid}/` and communicate via `/comm/{universal_id}/`
+
+Common examples:
+- Pingers, system monitors, relay agents, loggers
+
+#### Boot Agents
+All agents extend `BootAgent`. It handles:
+- Lifecycle threading (heartbeat, command, spawn)
+- Dynamic throttling
+- Optional pre/post hooks (`worker_pre`, `worker_post`)
+- Spawn manager to detect and revive missing children
+
+#### Aux Calls
+Available to all agents:
+- `spawn_manager()` → walks the tree, spawns children
+- `command_listener()` → reacts to `.cmd` files
+- `request_tree_slice_from_matrix()` → ask Matrix for updated subtree
+- `start_dynamic_throttle()` → load-aware pacing
+
+---
+
+### 📁 Filesystem Structure
+Each agent is deployed in two zones:
+
+#### 1. Runtime pod:
+/pod/{uuid}/
+├── run (agent process)
+├── log.txt
+└── heartbeat.token
+shell
+#### 2. Communication pod:
+/comm/{universal_id}/
+├── payload/
+├── incoming/
+├── hello.moto/
+└── agent_tree.json
+---
+
+### 🧪 Tutorial: Build Your First Agent
+
+#### 1. Create the Agent Code
+```python
+from agent.core.boot_agent import BootAgent
+
+class MyAgent(BootAgent):
+    def worker(self):
+        self.log("I'm alive!")
+        time.sleep(5)
+
+2. Add the Directive
+{
+  "universal_id": "my_agent",
+  "name": "MyAgent",
+  "agent_path": "boot_payload/my_agent/my_agent.py",
+  "children": []
+}
+
+3. Drop the Agent Code
+/boot_payload/my_agent/my_agent.py
+
+4. Deploy with Matrix
+python3 reboot.py --universe demo --directive test_tree
+Boom. Agent spawned. Directory structure built. Logs flowing.
+
+🌐 Live Features (v1.0)
+
+✅ Live agent hot-swapping
+
+✅ Tree-based delegated spawning
+
+✅ Crash detection & failover
+
+✅ File-based command queueing
+
+✅ Load-aware dynamic throttling
+
+🛠️ Contribute or Extend
+
+You can:
+
+Add agents
+
+Build new payload interpreters
+
+Expand the swarm brain
+
+Write spawn logic or lore banners
+
+Just fork and submit a pull.
+
+“This system was built to outlive its creator. Spawn wisely.”
+```
 
 ## 💻 GUI Control Center
 
