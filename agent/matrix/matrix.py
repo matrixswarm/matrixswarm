@@ -25,7 +25,8 @@ import threading
 import hashlib
 import json
 import copy
-
+import base64
+import shutil
 from string import Template
 from agent.core.boot_agent import BootAgent
 
@@ -53,6 +54,20 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
         self.swarm = SwarmManager(path_resolution)
 
+        matrix_id = self.command_line_args.get("matrix", "matrix")
+        self.tree_path = os.path.join(
+            self.path_resolution["comm_path"],
+            matrix_id,
+            "agent_tree_master.json"
+        )
+
+        # Inject payload_path if it's not already present
+        if "payload_path" not in self.path_resolution:
+            self.path_resolution["payload_path"] = os.path.join(
+                self.path_resolution["comm_path"],
+                "matrix",
+                "payload"
+            )
 
         #from agent.core.tree_disseminator import TreeDisseminator
 
@@ -138,8 +153,8 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
     def delegate_tree_to_agent(self, universal_id):
         try:
-            tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree_master.json')
-            tp = TreeParser.load_tree(tree_path)
+
+            tp = TreeParser.load_tree(self.tree_path)
             if not tp:
                 self.log(f"[DELEGATE] Failed to load master tree for {universal_id}")
                 return
@@ -179,44 +194,43 @@ class MatrixAgent(DelegationMixin, BootAgent):
     #executing commands
     def command_listener(self):
         path = Template(self.path_resolution["incoming_path_template"])
-        incoming_path = path.substitute(universal_id=self.command_line_args["matrix"])
-        incoming_path = EnsureTrailingSlash.ensure_trailing_slash(incoming_path)
+        incoming_path = EnsureTrailingSlash.ensure_trailing_slash(
+            path.substitute(universal_id=self.command_line_args["matrix"]))
 
-        payload_dir = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
+        payload_dir = self.path_resolution.get("payload_path") or os.path.join(self.path_resolution["comm_path"],
+                                                                               "matrix", "payload")
         os.makedirs(payload_dir, exist_ok=True)
+        archive_dir = os.path.join(os.path.dirname(payload_dir), "processed")
+        os.makedirs(archive_dir, exist_ok=True)
 
-        print(f"[CMD-LISTENER] Listening for commands in {incoming_path} and payloads...")
+        self.log(f"[CMD-LISTENER] Listening for commands in {incoming_path} and payloads...")
 
         while self.running:
             try:
-                # Handle tree refresh requests
+                # TREE SLICE REQUEST HANDLING
                 for filename in glob.glob(incoming_path + '*:_tree_slice_request.cmd'):
                     try:
                         os.remove(filename)
                         universal_id = os.path.basename(filename).split(':')[0].strip()
                         if not universal_id:
                             raise ValueError(f"[TREE-REFRESH][ERROR] No universal_id in filename {filename}")
-
-                        target_incoming_path = os.path.join(self.path_resolution['comm_path'], universal_id, 'agent_tree.json')
-                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
-
-                        tp = TreeParser.load_tree(tree_path)
+                        tp = TreeParser.load_tree(self.tree_path)
                         if not tp:
                             self.log("[TREE-REFRESH][ERROR] Failed to load tree.")
                             continue
-
                         subtree = tp.extract_subtree_by_id(universal_id) or {}
-                        JsonSafeWrite.safe_write(target_incoming_path, subtree)
-                        self.log(f"[TREE-REFRESH] Tree slice sent to {universal_id}.")
-
+                        out_path = os.path.join(self.path_resolution["comm_path"], universal_id, "agent_tree.json")
+                        JsonSafeWrite.safe_write(out_path, subtree)
+                        self.log(f"[TREE-REFRESH] Tree slice sent to {universal_id}")
                     except Exception as e:
                         self.log(f"[TREE-REFRESH][ERROR] {e}")
 
-                # Handle payload commands
+                # PAYLOAD COMMAND HANDLING
                 for fname in sorted(os.listdir(payload_dir)):
                     fpath = os.path.join(payload_dir, fname)
                     if not fname.endswith(".json"):
                         continue
+
                     try:
                         with open(fpath) as f:
                             payload = json.load(f)
@@ -225,129 +239,219 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         os.remove(fpath)
                         continue
 
-                    if payload.get("type") == "payload":
-                        content = payload.get("payload", {})
-                        ctype = content.get("type")
-                    else:
-                        content = payload
+                    archived_path = os.path.join(archive_dir, fname)
+                    try:
+                        shutil.move(fpath, archived_path)
+                        self.log(f"[PAYLOAD] Archived: {fname} → {archived_path}")
+                    except Exception as e:
+                        self.log(f"[PAYLOAD][ERROR] Could not archive {fname}: {e}")
+                        continue
+
+                    try:
+
+                        if "type" not in payload or "content" not in payload:
+                            self.log("[PAYLOAD][REJECTED] Non-standard payload structure.")
+                            continue
+
                         ctype = payload.get("type")
+                        content = payload.get("content", {})
 
-                    if ctype == "spawn_agent":
-                        self.log(f"[SPAWN] Now injecting agent: {content.get('universal_id')}")
-                        self.swarm.handle_injection(content)
+                        if not ctype:
+                            self.log("[PAYLOAD][ERROR] Payload missing 'type'. Skipping.")
+                            continue
 
-                    elif ctype == "inject":
-                        self.log(f"[INJECT] Injecting agent from payload.")
-                        self.swarm.handle_injection(content)
+                        if ctype == "spawn_agent":
+                            self.swarm.handle_injection(content)
 
-                    elif ctype == "node_query":
-                        requestor = content.get("requestor")
-                        target_universal_id = content.get("universal_id")
+                        elif ctype == "inject":
+                            self.swarm.handle_injection(content)
 
-                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
-                        tp = TreeParser.load_tree(tree_path)
+                        elif ctype == "inject_team":
+                            self.swarm.handle_team_injection(content.get("subtree"), content.get("target_universal_id"))
 
-                        node = tp.get_node(target_universal_id)
+                        elif ctype == "stop":
+                            targets = content.get("targets", [])
+                            if isinstance(targets, str):
+                                targets = [targets]
+                            for t in targets:
+                                self.swarm.kill_agent(t, annihilate=False)
+                                self.log(f"[STOP] Sent stop signal to {t}")
 
-                        reply = {
-                            "type": "node_response",
-                            "content": {
-                                "universal_id": target_universal_id,
-                                "node": node
-                            }
-                        }
+                        elif ctype == "kill":
+                            self.handle_kill_agent(content)
 
-                        outbox = os.path.join(self.path_resolution['comm_path'], requestor, "incoming")
-                        os.makedirs(outbox, exist_ok=True)
-                        response_file = os.path.join(outbox, f"node_response_{target_universal_id}.json")
+                        elif ctype == "forward":
+                            self.handle_forward_payload(payload)
 
-                        with open(response_file, "w") as f:
-                            json.dump(reply, f, indent=2)
+                        elif ctype == "node_query":
+                            self.handle_node_query(content)
 
-                        self.log(f"[MATRIX] Sent node response for {target_universal_id} to {requestor}.")
-                    elif ctype == "inject_team":
-                        self.log(f"[INJECT-TEAM] Injecting agent team.")
-                        self.swarm.handle_team_injection(content.get("subtree"), content.get("target_universal_id"))
+                        if ctype == "replace_agent":
 
-                    elif ctype == "stop":
-                        targets = content.get("targets", [])
-                        if isinstance(targets, str):
-                            targets = [targets]
-                        for t in targets:
-                            self.swarm.kill_agent(t, annihilate=False)
-                            self.log(f"[STOP] Sent stop signal to {t}")
+                            new_agent = content.get("new_agent", {})
 
-                    elif ctype == "kill":
+                            self.log(f"[DEBUG] validate_or_prepare_agent() received: {json.dumps(new_agent, indent=2)}")
 
-                        # Load and snapshot
-                        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["matrix"], 'agent_tree_master.json')
+                            self.handle_replace_payload(content)
 
-                        tp = TreeParser.load_tree(tree_path)
-                        if tp is None:
-                            self.log("[KILL][ERROR] Tree load failed, aborting kill.")
-                            return
-
-                        original_tree = copy.deepcopy(tp.root)
-
-                        self.log(f"[KILL][DEBUG] Raw content: {json.dumps(content, indent=2)}")
-
-                        kill_list = self.collect_kill_list(tp, content.get("target"))
-                        self.log(f"[KILL] Kill List: {kill_list}")
-
-                        kcm = KillChainLockManager(tp)
-                        kcm.lock_targets(kill_list)
-
-                        if tp.root != original_tree:
-                            backup_dir = os.path.join(os.path.dirname(tree_path), "backups")
-                            os.makedirs(backup_dir, exist_ok=True)
-                            backup_agent_tree(tree_path, backup_dir=backup_dir,
-                                              replaced_node_id=content.get("target"),
-                                              new_node_id="reaper-hot-" + str(int(time.time())))
-                            tp.save_tree(tree_path)
-                            self.log("[KILL] Tree modified — backup created and saved.")
                         else:
-                            self.log("[KILL] Tree unchanged — no backup or save needed.")
+                            self.log(f"[PAYLOAD][UNKNOWN] Unrecognized payload type: {ctype}")
 
-                        self.log(f"[KILL][DEBUG] Current tree nodes: {list(tp.nodes.keys())}")
-                        self.log(f"[KILL][DEBUG] Target exists? {'oracle-1' in tp.nodes}")
+                    except Exception as e:
+                        self.log(f"[PAYLOAD][ERROR] Failed to execute {fname}: {e}")
 
-                        reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
-                        self.spawn_agent_direct(reaper_node["universal_id"], reaper_node["name"], reaper_node)
-
-                        self.delegation_refresh()
-                        self.log(f"[KILL] Reaper dispatched for {kill_list}")
-
-
-                    elif ctype == "forward":
-                        target = payload.get("target")
-                        inner = payload.get("payload")
-                        if target and inner:
-                            fwd_path = os.path.join(self.path_resolution["comm_path"], target, "payload")
-                            os.makedirs(fwd_path, exist_ok=True)
-                            fname = f"forwarded_{int(time.time())}.json"
-                            with open(os.path.join(fwd_path, fname), "w") as f:
-                                json.dump(inner, f, indent=2)
-                            self.log(f"[FORWARD] Payload forwarded to {target}")
-
-                    elif ctype == "replace_agent":
-                        self.handle_replace_agent(payload.get("content", {}))
-
-                    else:
-                        self.log(f"[PAYLOAD][UNKNOWN] Unrecognized payload type: {ctype}")
-
-                    # Always clean up payload file
-                    os.remove(fpath)
-                    self.log(f"[PAYLOAD] Processed: {fname}")
-
-                # Sanity: Make sure agents have updated trees
+                # Tree sanity check every cycle
                 self.perform_tree_master_validation()
-
-                # Breath control
                 interruptible_sleep(self, 2)
 
             except Exception as e:
                 self.log(f"[COMMAND-LISTENER][CRASH] {e}")
                 interruptible_sleep(self, 3)
+
+    def handle_replace_payload(self, content):
+
+        new_agent = content.get("new_agent", {})
+        src = new_agent.get("source_payload")
+
+        target_uid = content.get("target_universal_id")
+
+        if target_uid == "matrix":
+            self.log("[REPLACE] ❌ Cannot target Matrix for self-replacement. Operation aborted.")
+            return
+
+        if not target_uid:
+            self.log("[REPLACE] ❌ Missing 'target_universal_id'. Cannot dispatch Reaper.")
+            return
+
+        if target_uid == "matrix":
+            self.log("[REPLACE] ❌ Cannot target Matrix for self-replacement. Operation aborted.")
+            return
+
+        if src:
+            try:
+                decoded = base64.b64decode(src["payload"]).decode()
+                sha_check = hashlib.sha256(decoded.encode()).hexdigest()
+
+                if sha_check != src["sha256"]:
+                    self.log(f"[REPLACE] ❌ SHA-256 mismatch. Payload rejected.")
+                    return
+
+                agent_name = new_agent["name"]
+                payload_dir = os.path.join(self.path_resolution["root_path"], "boot_payload", agent_name)
+                os.makedirs(payload_dir, exist_ok=True)
+
+                file_path = os.path.join(payload_dir, f"{agent_name}.py")
+                with open(file_path, "w") as f:
+                    f.write(decoded)
+
+                self.log(f"[REPLACE] ✅ Payload source installed to {file_path}")
+
+            except Exception as e:
+                self.log(f"[REPLACE] ❌ Failed to install source payload: {e}")
+                return
+
+        if not self.validate_or_prepare_agent(new_agent):
+            self.log("[REPLACE] ❌ Validation or prep failed. Replacement skipped.")
+            return
+
+        if not self.handle_replace_agent(content):
+            self.log("[REPLACE] ❌ Replacement failed. Tree untouched. Aborting Reaper dispatch.")
+            return
+
+        # 🎯 Gather kill list and full field set
+        kill_list = [target_uid]
+        universal_ids = {target_uid: target_uid}
+
+        # Pull optional flags from new_agent["source_payload"] or agent config
+        reaper_config = new_agent.get("reaper", {})
+        tombstone_comm = reaper_config.get("tombstone_comm", True)
+        tombstone_pod = reaper_config.get("tombstone_pod", True)
+        cleanup_die = reaper_config.get("cleanup_die", True)
+        delay = reaper_config.get("delay", 2)
+
+        # 🛠 Create reaper node with full config
+        reaper_node = make_reaper_node(
+            kill_list,
+            universal_ids,
+            tombstone_comm=tombstone_comm,
+            tombstone_pod=tombstone_pod,
+            delay=delay,
+            cleanup_die=cleanup_die
+        )
+
+        # 🛰 Deploy the bird
+        self.spawn_agent_direct(reaper_node["universal_id"], reaper_node["name"], reaper_node)
+        self.delegation_refresh()
+        self.log(
+            f"[REPLACE] 🧨 Reaper dispatched for {kill_list} with pod={tombstone_pod}, comm={tombstone_comm}, cleanup_die={cleanup_die}")
+
+    def handle_kill_agent(self, content):
+        tp = TreeParser.load_tree(self.tree_path)
+        if tp is None:
+            self.log("[KILL][ERROR] Tree load failed, aborting kill.")
+            return
+
+        original_tree = copy.deepcopy(tp.root)
+        kill_list = self.collect_kill_list(tp, content.get("target"))
+        kcm = KillChainLockManager(tp)
+        kcm.lock_targets(kill_list)
+
+        if tp.root != original_tree:
+            backup_dir = os.path.join(os.path.dirname(self.tree_path), "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            backup_agent_tree(self.tree_path, backup_dir=backup_dir,
+                              replaced_node_id=content.get("target"),
+                              new_node_id="reaper-hot-" + str(int(time.time())))
+            tp.save_tree(self.tree_path)
+            self.log("[KILL] Tree modified — backup created and saved.")
+        else:
+            self.log("[KILL] Tree unchanged — no backup or save needed.")
+
+        reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
+        self.spawn_agent_direct(reaper_node["universal_id"], reaper_node["name"], reaper_node)
+        self.delegation_refresh()
+        self.log(f"[KILL] Reaper dispatched for {kill_list}")
+
+    def handle_forward_payload(self, payload):
+        target = payload.get("target")
+        inner = payload.get("payload")
+
+        if not target or not inner:
+            self.log("[FORWARD][ERROR] Missing target or payload.")
+            return
+
+        fwd_path = os.path.join(self.path_resolution["comm_path"], target, "payload")
+        os.makedirs(fwd_path, exist_ok=True)
+
+        fname = f"forwarded_{int(time.time())}.json"
+        with open(os.path.join(fwd_path, fname), "w") as f:
+            json.dump(inner, f, indent=2)
+
+        self.log(f"[FORWARD] Payload forwarded to {target}")
+
+    def handle_node_query(self, content):
+        requestor = content.get("requestor")
+        target_universal_id = content.get("universal_id")
+
+        tp = TreeParser.load_tree(self.tree_path)
+        node = tp.get_node(target_universal_id) if tp else None
+
+        reply = {
+            "type": "node_response",
+            "content": {
+                "universal_id": target_universal_id,
+                "node": node
+            }
+        }
+
+        outbox = os.path.join(self.path_resolution["comm_path"], requestor, "incoming")
+        os.makedirs(outbox, exist_ok=True)
+
+        response_file = os.path.join(outbox, f"node_response_{target_universal_id}.json")
+        with open(response_file, "w") as f:
+            json.dump(reply, f, indent=2)
+
+        self.log(f"[NODE-QUERY] Response sent for {target_universal_id} to {requestor}")
 
     def collect_kill_list(self, tp, universal_id):
 
@@ -518,39 +622,105 @@ class MatrixAgent(DelegationMixin, BootAgent):
     def handle_replace_agent(self, content):
         old_id = content.get("target_universal_id")
         new_node = content.get("new_agent")
-        hotswap = content.get("hotswap", False)
 
         if not old_id or not new_node:
             self.log("[REPLACE] Missing required fields.")
-            return
+            return False
 
-        tree_path = self.tree_path
-        tp = TreeParser.load_tree(tree_path)
+        tp = TreeParser.load_tree(self.tree_path)
         if not tp or not tp.has_node(old_id):
             self.log(f"[REPLACE] Agent '{old_id}' not found in tree.")
-            return
+            return False
 
         parent = tp.find_parent_of(old_id)
         if not parent:
             self.log(f"[REPLACE] Could not find parent of '{old_id}'.")
-            return
+            return False
+
+        # Validate universal_id override
+        new_uid = new_node.get("universal_id")
+        if new_uid and new_uid != old_id:
+            self.log(
+                f"[REPLACE] ❌ New node contains conflicting universal_id '{new_uid}'. Must match '{old_id}' or be omitted.")
+            return False
 
         # Update existing node in-place instead of removing
         node = tp.get_node(old_id)
-        node.update(new_node)  # Overwrites name, config, etc.
-        tp.save_tree(tree_path)
+        ALLOWED_FIELDS = {"name", "app", "config", "filesystem", "directives"}
 
-        # Create reaper node with selective tombstone
-        from agent.reaper.reaper_factory import make_reaper_node
-        kill_list = [old_id]
-        universal_ids = {old_id: old_id}
-        reaper = make_reaper_node(kill_list, universal_ids)
-        if hotswap:
-            reaper["config"]["tombstone_comm"] = False  # only pod gets tomb
+        updated = False
+        for key in ALLOWED_FIELDS:
+            if key in new_node:
+                node[key] = new_node[key]
+                self.log(f"[REPLACE] ✅ Field '{key}' updated on '{old_id}'")
+                updated = True
 
-        self.spawn_agent_direct(reaper["universal_id"], reaper["name"], reaper)
+        if updated:
+            # 💾 Only back up if something was actually changed
+            backup_path = self.tree_path.replace(".json", f"_backup_{int(time.time())}.json")
+            tp.save(backup_path)
+            self.log(f"[REPLACE] 💾 Tree backed up to: {backup_path}")
 
-        self.log(f"[REPLACE] Agent {old_id} replaced in tree and reaper dispatched.")
+            # Save patched tree
+            tp.save_tree(self.tree_path)
+            self.log(f"[REPLACE] 💾 Tree saved with updated agent '{old_id}'")
+
+
+            # 🔁 Re-delegate the target agent
+            self.delegate_tree_to_agent(old_id)
+            self.log(f"[REPLACE] 🔁 Delegated new agent_tree to {old_id}")
+
+            # 🔁 Re-delegate the parent who spawns this agent
+            parent_id = tp.find_parent_of(old_id)
+            if parent_id["universal_id"]:
+                self.delegate_tree_to_agent(parent_id["universal_id"])
+                self.log(f"[REPLACE] 🔁 Updated parent {parent_id["universal_id"]} with patched child '{old_id}'")
+            else:
+                self.log(f"[REPLACE] ⚠️ No parent found for '{old_id}', possible orphaned spawn chain.")
+
+            return True
+        else:
+            self.log(f"[REPLACE] ⚠️ No valid fields were updated for agent '{old_id}'. Replace aborted.")
+
+    def validate_or_prepare_agent(self, new_agent):
+
+        self.log(f"[DEBUG] validate_or_prepare_agent() received: {json.dumps(new_agent, indent=2)}")
+
+        agent_name = new_agent.get("name")
+        if not agent_name:
+            self.log("[REPLACE-VALIDATE] ❌ Missing agent 'name'.")
+            return False
+
+        required_fields = ["name"]
+        for key in required_fields:
+            if key not in new_agent:
+                self.log(f"[REPLACE-VALIDATE] ❌ Missing required field: '{key}'")
+                return False
+
+        # Check standard agent path
+        agent_dir = os.path.join(self.path_resolution["agent_path"], agent_name)
+        entry_file = os.path.join(agent_dir, f"{agent_name}.py")
+
+        if os.path.exists(entry_file):
+            self.log(f"[REPLACE-VALIDATE] ✅ Agent source verified: {entry_file}")
+            return True
+
+        # 🧠 Check boot payload directory
+        boot_payload_dir = os.path.join(self.path_resolution["root_path"], "boot_payload", agent_name)
+        boot_payload_file = os.path.join(boot_payload_dir, f"{agent_name}.py")
+
+        if os.path.exists(boot_payload_file):
+            self.log(f"[REPLACE-VALIDATE] ✅ Boot-payload source verified: {boot_payload_file}")
+            return True
+
+        # Check for install payload
+        payload_path = os.path.join(self.path_resolution["payload_path"], f"{agent_name}_install.pkg")
+        if os.path.exists(payload_path):
+            self.log(f"[REPLACE-VALIDATE] 💾 Agent source missing but install payload found: {payload_path}")
+            return False
+
+        self.log(f"[REPLACE-VALIDATE] ❌ No source and no install payload for '{agent_name}'. Replace aborted.")
+        return False
 
 if __name__ == "__main__":
     # label = None

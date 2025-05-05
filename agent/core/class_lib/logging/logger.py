@@ -6,7 +6,6 @@ class Logger:
         self.log_file = os.path.join(comm_path_resolved, logs, file_name)
         os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
 
-
     def log(self, message, level="INFO", print_to_console=True):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         log_entry = f"{timestamp} [{level}] {message}"

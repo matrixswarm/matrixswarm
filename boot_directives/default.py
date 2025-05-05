@@ -112,6 +112,10 @@ matrix_directive = {
             "children": []
 
         },
-
+        {
+            "universal_id": "logger-2",
+            "name": "logger",
+            "children": []
+        },
     ]
 }

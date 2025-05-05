@@ -150,6 +150,31 @@ class MatrixHTTPS(BootAgent):
                     self.log(f"[INJECT_TEAM] Payload dropped to Matrix: {fpath}")
                     return jsonify({"status": "ok", "message": f"Team injected under {target_universal_id}"})
 
+
+                elif ctype == "replace_agent":
+
+                    full_payload = {
+
+                        "type": "replace_agent",
+
+                        "timestamp": time.time(),
+
+                        "content": content
+
+                    }
+
+                    fname = f"replace_agent_{int(time.time())}.json"
+
+                    fpath = os.path.join(self.payload_dir, fname)
+
+                    with open(fpath, "w") as f:
+
+                        json.dump(full_payload, f, indent=2)
+
+                    self.log(f"[REPLACE_AGENT] Payload routed to Matrix: {fpath}")
+
+                    return jsonify({"status": "ok", "message": "replace_agent queued for Matrix"})
+
                 elif ctype == "stop":
                     content = payload.get("content", {})
                     targets = content.get("targets", [])
@@ -194,6 +219,21 @@ class MatrixHTTPS(BootAgent):
                         if os.path.exists(tombstone_path):
                             os.remove(tombstone_path)
                             self.log(f"[MATRIX][RESUME] Removed tombstone for {universal_id}")
+
+                elif ctype in {"restart_subtree", "delete_node", "delete_subtree"}:
+                    payload = {
+                        "type": ctype,
+                        "timestamp": time.time(),
+                        "content": content
+                    }
+                    fname = f"{ctype}_{int(time.time())}.json"
+                    fpath = os.path.join(self.payload_dir, fname)
+
+                    with open(fpath, "w") as f:
+                        json.dump(payload, f, indent=2)
+
+                    self.log(f"[MATRIX-HTTPS][QUEUED] {ctype} → {fpath}")
+                    return jsonify({"status": "ok", "message": f"{ctype} routed to Matrix"})
 
                 elif ctype == "shutdown_subtree":
                     target_id = content.get("universal_id")
@@ -252,13 +292,6 @@ class MatrixHTTPS(BootAgent):
                         self.log(f"[MATRIX-HTTPS][ERROR] Restart Subtree: {str(e)}")
                         return jsonify({"status": "error", "message": str(e)}), 500
 
-
-                elif ctype == "delete_node":
-                    self.log(f"[MATRIX-HTTPS][CMD][DELETE-NODE] {payload}")
-                    self.tree.delete_node(content.get("universal_id"))
-                elif ctype == "delete_subtree":
-                    self.log(f"[MATRIX-HTTPS][CMD][DELETE-SUBTREE] {payload}")
-                    self.tree.delete_subtree(content.get("universal_id"))
                 elif ctype == "get_log":
                     self.log(f"[MATRIX-HTTPS][CMD][GET-LOG] {payload}")
                     universal_id = content.get("universal_id")

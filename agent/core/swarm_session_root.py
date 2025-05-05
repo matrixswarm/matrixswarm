@@ -27,6 +27,7 @@ class SwarmSessionRoot:
 
         self.root_path = os.environ.get("SWARM_ROOT", "/sites/orbit/python")
         self.base_path = os.path.join("/matrix", self.universe_id, self.reboot_uuid)
+        self.boot_payload_path = os.path.join(self.base_path, "boot_payload")
         self.comm_path = os.path.join(self.base_path, "comm")
         self.pod_path = os.path.join(self.base_path, "pod")
         self.agent_path = os.environ.get("AGENT_PATH", os.path.join(self.root_path, "agent"))
@@ -38,6 +39,9 @@ class SwarmSessionRoot:
 
         self.logger = Logger(os.path.join(self.comm_path, "logs"))
         self.logger.log(f"[SESSION] UNIVERSE_ID={self.universe_id} REBOOT_UUID={self.reboot_uuid}")
+
+
+
 
     def set_latest_symlink(self):
         latest_path = os.path.join("/matrix", self.universe_id, "latest")

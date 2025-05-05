@@ -14,7 +14,9 @@ class Reaper:
         self.comm_root = Path(comm_root)
         self.timeout = timeout_sec  # Max wait time for graceful shutdown
 
-        self.tombstone_mode = False
+        self.tombstone_mode = True  # existing
+        self.tombstone_comm = True  # existing
+        self.tombstone_pod = True
         self.mission_targets = set()  # ⚡ WARP: Targets this Reaper is allowed to kill
 
         self.reaped = []
@@ -65,8 +67,6 @@ class Reaper:
                 if not os.path.isfile(boot_path):
                     continue
 
-
-
                 with open(boot_path, "r") as f:
                     boot_data = json.load(f)
 
@@ -90,17 +90,17 @@ class Reaper:
                 self.log_info(f"[REAPER][info] `die` cookie distributed for {universal_id}.")
 
                 if self.tombstone_mode:
-                    # COMM tombstone
-                    tombstone_comm_path = os.path.join(comm_path, "tombstone")
-                    JsonSafeWrite.safe_write(tombstone_comm_path, "true")
+                    if getattr(self, "tombstone_comm", True):
+                        tombstone_comm_path = os.path.join(comm_path, "tombstone")
+                        JsonSafeWrite.safe_write(tombstone_comm_path, "true")
 
-                    # POD tombstone
-                    pod_tombstone_path = os.path.join(agent_path, "tombstone")
-                    try:
-                        Path(pod_tombstone_path).write_text("true")
-                        self.log_info(f"[REAPER][info] Tombstones dropped for {universal_id} in comm and pod.")
-                    except Exception as e:
-                        self.log_info(f"[REAPER][error] Failed to drop tombstone in pod {agent_path}: {e}")
+                    if getattr(self, "tombstone_pod", True):
+                        pod_tombstone_path = os.path.join(agent_path, "tombstone")
+                        try:
+                            Path(pod_tombstone_path).write_text("true")
+                            self.log_info(f"[REAPER][info] Pod tombstone dropped for {universal_id}.")
+                        except Exception as e:
+                            self.log_info(f"[REAPER][error] Failed to drop pod tombstone for {universal_id}: {e}")
 
                 # Track agent
                 self.agents[universal_id] = {

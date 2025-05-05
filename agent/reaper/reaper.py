@@ -25,14 +25,18 @@ class ReaperAgent(BootAgent):
 
         # Load targets, kill ID, and initialize paths
         config = tree_node.get("config", {})
+
         self.targets = command_line_args.get("targets") or config.get("kill_list", [])
         self.universal_ids = command_line_args.get("universal_ids") or config.get("universal_ids", {})
         self.kill_id = command_line_args.get("kill_id") or config.get("kill_id") or f"reap-{int(time.time())}"
+        self.strike_delay = config.get("delay", 0)
+        self.tombstone_comm = config.get("tombstone_comm", True)
+        self.tombstone_pod = config.get("tombstone_pod", True)
+        self.cleanup_die = config.get("cleanup_die", False)
         self.outbox_path = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox")
         os.makedirs(self.outbox_path, exist_ok=True)
 
         self.universal_id_handler = ReaperUniversalHandler(self.path_resolution['pod_path'], self.path_resolution['comm_path'], logger=self.logger)
-
 
     def post_boot(self):
         """
@@ -53,6 +57,10 @@ class ReaperAgent(BootAgent):
         """
         self.log("[INFO] Inserting hit team...")
 
+        if self.strike_delay > 0:
+            self.log(f"[REAPER] ⏱ Waiting {self.strike_delay} seconds before executing strike...")
+            time.sleep(self.strike_delay)
+
         # Filter `self.targets` based on valid universal_ids
         filtered_universal_ids = {universal_id: self.universal_ids[universal_id] for universal_id in self.targets if universal_id in self.universal_ids}
 
@@ -63,8 +71,26 @@ class ReaperAgent(BootAgent):
 
         # Use central handler to process all valid targets at once
         try:
-            self.universal_id_handler.process_all_universal_ids(filtered_universal_ids, tombstone_mode=True, wait_seconds=20)
+
+            self.universal_id_handler.process_all_universal_ids(
+                filtered_universal_ids,
+                tombstone_mode=True,
+                wait_seconds=20,
+                tombstone_comm=self.tombstone_comm,
+                tombstone_pod=self.tombstone_pod
+            )
+            if self.cleanup_die:
+                for uid in filtered_universal_ids:
+                    try:
+                        die_path = os.path.join(self.path_resolution["comm_path"], uid, "incoming", "die")
+                        if os.path.exists(die_path):
+                            os.remove(die_path)
+                            self.log(f"[REAPER] Removed die signal from comm: {uid}")
+                    except Exception as e:
+                        self.log(f"[REAPER][ERROR] Failed to remove die for {uid}: {e}")
+
             self.log("[INFO] Mission completed successfully.")
+
         except Exception as e:
             self.log(f"[ERROR] Failed to complete mission: {str(e)}")
 
