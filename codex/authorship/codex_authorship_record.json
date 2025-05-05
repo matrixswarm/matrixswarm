@@ -1,0 +1,11 @@
+{
+  "type": "authorship_record",
+  "project": "MatrixSwarm",
+  "signed_by": {
+    "human": "Daniel F. MacDonald",
+    "ai": "ChatGPT-4"
+  },
+  "sha256": "f21ef8494e88a040040d68815083a00e94357ab263dd45aa8fe6af769e652134",
+  "timestamp_utc": "2025-05-05T17:16:21.215115Z",
+  "note": "This file certifies the origin of MatrixSwarm and authorship of its architecture. Anchored by SHA256 hash and timestamp."
+}

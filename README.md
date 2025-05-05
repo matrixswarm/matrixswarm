@@ -484,3 +484,12 @@ No PR is too small. No mission is without meaning.
 **Or Fork U.**
 
 [![Powered by MatrixSwarm](https://img.shields.io/badge/Swarm-Matrix-green)](https://github.com/matrixswarm/matrixswarm)
+
+
+### 🔐 Authorship Verified
+
+MatrixSwarm was co-created by Daniel F. MacDonald and ChatGPT-4.
+
+SHA256: `a255c1ca93564e1cb9509c1a44081e818cf0a2b0af325bdfc4a18254ddbad46a`  
+Proof file: [`matrixswarm_authorship.ots`](./codex/authorship/matrixswarm_authorship.ots)  
+Verified via: [OpenTimestamps.org](https://opentimestamps.org)

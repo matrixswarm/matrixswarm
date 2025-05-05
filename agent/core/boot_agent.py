@@ -2,17 +2,14 @@
 import os
 import time
 import traceback
-from string import Template
-from agent.core.agent import Agent
 import threading
-from datetime import datetime
-from agent.core.class_lib.time_utils.time_passed import TimePassed
+import json
 from agent.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from agent.core.core_spawner import CoreSpawner
-from agent.core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
 from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from agent.core.path_manager import PathManager
-
+from string import Template
+from agent.core.agent import Agent
 
 class BootAgent(Agent):
 
@@ -52,7 +49,46 @@ class BootAgent(Agent):
         self.log("[BOOT] Default post_boot (override me if needed)")
 
     def command_listener(self):
-        self.log("[COMMAND] No command_listener implemented. Skipping.")
+        incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
+        os.makedirs(incoming_path, exist_ok=True)
+        self.log("[COMMAND] Listening for .cmd files...")
+
+        while self.running:
+            try:
+                for fname in os.listdir(incoming_path):
+                    if not fname.endswith(".cmd"):
+                        continue
+
+                    fpath = os.path.join(incoming_path, fname)
+                    with open(fpath, "r") as f:
+                        try:
+                            packet = json.load(f)
+                        except Exception as e:
+                            self.log(f"[COMMAND][FAIL] Could not parse {fname}: {e}")
+                            continue
+
+                    os.remove(fpath)
+
+                    cmd_type = packet.get("command")
+                    if not cmd_type:
+                        self.log(f"[COMMAND][SKIP] No 'command' field in packet: {fname}")
+                        continue
+
+                    handler_name = f"cmd_{cmd_type}"
+                    if hasattr(self, handler_name):
+                        try:
+                            handler = getattr(self, handler_name)
+                            handler(packet)
+                            self.log(f"[COMMAND] Handled command: {cmd_type}")
+                        except Exception as e:
+                            self.log(f"[COMMAND][ERROR] Handler '{handler_name}' crashed: {e}")
+                    else:
+                        self.log(f"[COMMAND][MISS] No handler found for command: {cmd_type}")
+
+            except Exception as e:
+                self.log(f"[COMMAND][LOOP-ERROR] {e}")
+
+            time.sleep(2)
 
     def _throttled_worker_wrapper(self):
         self.log("[BOOT] Throttled worker wrapper engaged.")
