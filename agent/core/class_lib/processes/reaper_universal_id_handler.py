@@ -12,7 +12,7 @@ class ReaperUniversalHandler:
     def default_logger(self, message):
         print(message)
 
-    def process_all_universal_ids(self, universal_ids, tombstone_mode=False, wait_seconds=20, tombstone_comm=True):
+    def process_all_universal_ids(self, universal_ids, tombstone_mode=False, wait_seconds=20, tombstone_comm=True, tombstone_pod=True):
 
         self.logger.log("[REAPER-HANDLER] Starting universal_id reaping...")
 
@@ -35,7 +35,8 @@ class ReaperUniversalHandler:
 
         reaper = Reaper(self.pod_root, self.comm_root, timeout_sec=wait_seconds, logger=self.logger.log)
         reaper.tombstone_mode = tombstone_mode
-        reaper.tombstone_comm = tombstone_comm  # 👈 Inject this as an attribute
+        reaper.tombstone_comm = tombstone_comm
+        reaper.tombstone_pod = tombstone_pod
 
         reaper.mission_targets = set(universal_ids)
 

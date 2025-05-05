@@ -13,7 +13,10 @@ import requests
 import os
 import json
 import time
-
+import base64
+import hashlib
+import string
+import random
 MATRIX_HOST = "https://147.135.68.135:65431/matrix" #put your own ip here, not mine
 CLIENT_CERT = ("certs/client.crt", "certs/client.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
 REQUEST_TIMEOUT = 5
@@ -27,7 +30,7 @@ class MatrixCommandBridge(QWidget):
         self.setup_status_bar()
         self.setup_timers()
         self.check_matrix_connection()
-
+        self.hotswap_btn.setEnabled(False)
 
     def setup_ui(self):
         self.main_layout = QVBoxLayout()
@@ -123,10 +126,11 @@ class MatrixCommandBridge(QWidget):
                 print(f"[TREE-CLICK] No node found for universal_id: {universal_id}")
                 return
 
-            self.input_agent_name.setText(node.get("name", ""))
+            universal_id = item.data(Qt.UserRole)
             self.input_universal_id.setText(universal_id)
-            self.input_target_universal_id.setText("")
-            self.input_delegated.setText(",".join(node.get("delegated", [])))
+            self.hotswap_btn.setEnabled(True)
+            if hasattr(self, "log_panel"):
+                self.log_panel.append(f"[GUI] Selected agent: {universal_id}")
 
             info_lines = [
                 f"🧠 Name: {node.get('name', '')}",
@@ -325,44 +329,99 @@ class MatrixCommandBridge(QWidget):
 
         return output
 
-    def upload_agent_code(self):
+    def random_suffix(self,length=5):
+        return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+    def hotswap_agent_code(self):
+        import importlib.util
+        import base64
+        import hashlib
+        import os
+
         options = QFileDialog.Options()
-        file_name, _ = QFileDialog.getOpenFileName(self, "Select Agent Python File", "", "Python Files (*.py)",
-                                                   options=options)
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Agent Python File",
+            "",
+            "Python Files (*.py)",
+            options=options
+        )
 
         if not file_name:
             return
 
         try:
+            # Load .py source and hash
             with open(file_name, "rb") as f:
-                content = f.read()
-                encoded = base64.b64encode(content).decode("utf-8")
-                file_hash = hashlib.sha256(content).hexdigest()
+                code = f.read()
+                encoded = base64.b64encode(code).decode("utf-8")
+                file_hash = hashlib.sha256(code).hexdigest()
 
-            agent_name = os.path.basename(file_name).replace(".py", "")
-            universal_id = self.input_universal_id.text().strip()
 
+            # Grab current universal_id from GUI
+            target_uid = self.input_universal_id.text().strip()
+
+            # Try to get base name from the tree
+            base_name = self.agent_tree_flat.get(target_uid, {}).get("name")
+
+            # Fallback to filename if no tree mapping
+            if not base_name:
+                base_name = os.path.basename(file_name).replace(".py", "")
+
+            suffix = self.random_suffix(5)
+
+            # Generate randomized hot swap ID
+            suffix = self.random_suffix(5)
+            randomized_name = f"{base_name}_bp_{suffix}"
+
+            # 🔍 Load optional deploy_directive.py
+            source_dir = os.path.dirname(file_name)
+            directive_path = os.path.join(source_dir, "deploy_directive.py")
+
+            if os.path.exists(directive_path):
+                spec = importlib.util.spec_from_file_location("deploy_directive", directive_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                deploy_data = module.directive
+            else:
+                deploy_data = {}
+
+            # 🔒 Enforce all required fields and fallback structure
+            deploy_data["name"] = randomized_name
+            deploy_data.setdefault("app", "matrix-core")
+            deploy_data.setdefault("hotswap", True)
+            deploy_data.setdefault("config", {})
+            deploy_data.setdefault("filesystem", {})
+            deploy_data.setdefault("directives", {})
+
+            # ⚡ Universal ID: GUI input or fallback to randomized
+            universal_id = self.input_universal_id.text().strip() or randomized_name
+            deploy_data["universal_id"] = target_uid
+
+            # 🧠 Inject encoded source and SHA256
+            deploy_data["source_payload"] = {
+                "payload": encoded,
+                "sha256": file_hash
+            }
+
+            # 🎯 Final payload
             payload = {
                 "type": "replace_agent",
+                "timestamp": time.time(),
                 "content": {
                     "target_universal_id": universal_id,
-                    "hotswap": True,
-                    "new_agent": {
-                        "universal_id": universal_id,
-                        "name": agent_name,
-                        "filesystem": {
-                            "files": {
-                                f"{agent_name}.py": encoded
-                            }
-                        }
-                    }
+                    "new_agent": deploy_data,
+                    "hotswap": True
                 }
             }
 
-            self.send_post_to_matrix(payload, f"Uploaded and dispatched agent {agent_name} [{file_hash[:8]}...]")
+            print("🧠 FINAL new_agent:", json.dumps(deploy_data, indent=2))
+
+            # ✅ Launch
+            self.send_post_to_matrix(payload, f"🔥 Hotswap deployed for {universal_id} [{file_hash[:8]}...]")
 
         except Exception as e:
-            self.status_label.setText(f"❌ Failed to upload: {e}")
+            self.status_label.setText(f"❌ Hotswap failed: {e}")
 
     def build_command_panel(self):
         box = QGroupBox("🧩 Mission Console")
@@ -378,10 +437,16 @@ class MatrixCommandBridge(QWidget):
             widget.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
             layout.addWidget(widget)
 
-        self.upload_btn = QPushButton("Upload Agent Code")
-        self.upload_btn.clicked.connect(self.upload_agent_code)
-        self.upload_btn.setStyleSheet("background-color: #1e1e1e; color: #33ff33; border: 1px solid #00ff66;")
-        layout.addWidget(self.upload_btn)
+
+        #self.upload_btn = QPushButton("Upload Agent Code")
+        #self.upload_btn.clicked.connect(self.upload_agent_code)
+
+        self.hotswap_btn = QPushButton("🔥 Hotswap")
+        self.hotswap_btn.clicked.connect(self.hotswap_agent_code)
+        self.hotswap_btn.setToolTip("Replace the agent's logic with a live hot-swapped source file.")
+        self.hotswap_btn.setStyleSheet("background-color: #1e1e1e; color: #ff4444; border: 1px solid #00ff66;")
+        self.hotswap_btn.setEnabled(False)
+        layout.addWidget(self.hotswap_btn)
 
         self.payload_editor = QTextEdit()
         self.payload_editor.setPlaceholderText("Enter JSON payload to send to agent over the wire...")
@@ -419,6 +484,7 @@ class MatrixCommandBridge(QWidget):
 
         payload = {
             "type": "spawn_agent",
+            "timestamp": time.time(),
             "content": {
                 "agent_name": "reboot_agent",
                 "universal_id": "reboot-1",
@@ -578,6 +644,7 @@ class MatrixCommandBridge(QWidget):
 
         payload = {
             "type": "resume",
+            "timestamp": time.time(),
             "content": {
                 "targets": [universal_id]
             }
@@ -593,6 +660,7 @@ class MatrixCommandBridge(QWidget):
 
         payload = {
             "type": "stop",
+            "timestamp": time.time(),
             "content": {
                 "targets": [universal_id]
             }
@@ -612,6 +680,7 @@ class MatrixCommandBridge(QWidget):
 
         payload = {
             "type": "inject",
+            "timestamp": time.time(),
             "content": {
                 "target_universal_id": target,
                 "universal_id": universal_id,
@@ -630,6 +699,7 @@ class MatrixCommandBridge(QWidget):
 
         payload = {
             "type": "kill",
+            "timestamp": time.time(),
             "content": {
                 "targets": [universal_id]
             }
@@ -645,6 +715,7 @@ class MatrixCommandBridge(QWidget):
 
         payload = {
             "type": "delete_subtree",
+            "timestamp": time.time(),
             "content": {
                 "universal_id": universal_id
             }

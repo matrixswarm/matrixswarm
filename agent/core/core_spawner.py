@@ -2,7 +2,6 @@
 import sys
 import os
 import textwrap
-from unicodedata import unidata_version
 
 # Add the directory containing this script to the PYTHONPATH
 current_directory = os.path.dirname(os.path.abspath(__file__))  # Directory of the current script
@@ -149,18 +148,61 @@ class CoreSpawner:
 
         try:
 
+            with open("/matrix/spawn.log", "a") as f:
+                f.write(f"{datetime.now().isoformat()} :: {universal_id} → {agent_name}\n")
+
+            logger = Logger(os.path.join(self.comm_path, universal_id))
             spawn_path = os.path.join(self.pod_path, spawn_uuid)
             os.makedirs(spawn_path, exist_ok=True)
 
-            #get source agent
-            #paste it to run tme
-            full_path = os.path.join(self.agent_path, agent_name, agent_name+'.py')
+            base_name = agent_name.split("_bp_")[0] if "_bp_" in agent_name else agent_name
+            source_path = os.path.join(self.agent_path, base_name, f"{base_name}.py")
+
+            path_dict = {
+                "root_path": self.root_path,
+                "pod_path": self.pod_path,
+                "comm_path": self.comm_path,
+                "agent_path": self.agent_path,
+                "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
+                "comm_path_resolved": os.path.join(self.comm_path, universal_id),
+                "session_path": os.path.dirname(self.pod_path.rstrip("/"))
+            }
+
+            if "_bp_" in agent_name:
+                base_name = agent_name.split("_bp_")[0]
+                session_path = path_dict["session_path"]
+
+                paths = [
+                    os.path.join(session_path, "boot_payload", agent_name, f"{agent_name}.py"),
+                    os.path.join(session_path, "boot_payload", base_name, f"{base_name}.py"),
+                    os.path.join(self.root_path, "boot_payload", agent_name, f"{agent_name}.py"),
+                    os.path.join(self.root_path, "boot_payload", base_name, f"{base_name}.py"),
+                    os.path.join(self.agent_path, base_name, f"{base_name}.py")  # ultimate fallback
+                ]
+
+                for p in paths:
+                    logger.log(f"[SPAWN-DEBUG] Boot check path: {p}")
+
+                for path in paths:
+                    if os.path.exists(path):
+                        source_path = path
+                        logger.log(f"[SPAWN] ✅ Loaded agent: {agent_name} from: {source_path}")
+                        break
+
 
             run_path = os.path.join(spawn_path, "run")
 
-            # Open the file in read mode
-            with open(full_path, "r") as f:
-                file_content = f.read()  # Read the entire file content
+
+            if not source_path or not os.path.exists(source_path):
+                logger.log(f"[SPAWN-ERROR] Source path not resolved or file missing. Cannot boot agent: {agent_name}")
+                return
+
+            # 🔥 Load the agent source file
+            with open(source_path, "r") as f:
+                file_content = f.read()
+
+
+
 
 
             #when the process is spawned it has no way to find the root and the lib path
@@ -169,7 +211,7 @@ class CoreSpawner:
                 "root_path": self.root_path,
                 "pod_path": self.pod_path,
                 "comm_path": self.comm_path,
-                "agent_path": self.agent_path,
+                "agent_path": self.agent_path,  # still here
                 "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
                 "comm_path_resolved": os.path.join(self.comm_path, universal_id),
             }
@@ -262,7 +304,8 @@ class CoreSpawner:
                 logger.log(f"[SPAWN-LOG-ERROR] Failed to log spawn for {universal_id}: {e}")
 
             #GO TIME
-            logger.log(f"[SPAWN-MGR] About to spawn: {universal_id}")
+            logger.log(f"[SPAWN-MGR] Spawning: {universal_id} agent name {agent_name} from: {source_path}")
+            print(f"[SPAWN-MGR] Spawning: {universal_id} agent name {agent_name} from: {source_path}")
 
             cmd = [
                 "python3",

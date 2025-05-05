@@ -9,6 +9,8 @@ class PathManager:
             session = SwarmSessionRoot()
             self.set_from_session(session)
             self.session = session
+            self.paths["session_path"] = session.base_path
+            self.paths["session_boot_payload"] = os.path.join(session.base_path, "boot_payload")
         else:
             # Resolve one level up from this file
             self.root_path = root_path or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
