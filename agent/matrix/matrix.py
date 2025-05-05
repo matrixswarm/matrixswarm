@@ -277,7 +277,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
                                 self.swarm.kill_agent(t, annihilate=False)
                                 self.log(f"[STOP] Sent stop signal to {t}")
 
-                        elif ctype == "kill":
+                        elif ctype == "delete_agent":
                             self.handle_kill_agent(content)
 
                         elif ctype == "forward":
@@ -392,7 +392,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
             return
 
         original_tree = copy.deepcopy(tp.root)
-        kill_list = self.collect_kill_list(tp, content.get("target"))
+        kill_list = self.collect_kill_list(tp, content.get("target_universal_id"))
         kcm = KillChainLockManager(tp)
         kcm.lock_targets(kill_list)
 
