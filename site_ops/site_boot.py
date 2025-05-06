@@ -108,9 +108,6 @@ comm_file_spec = [
         'atomic': True,
         'content': tp.root
     },
-    {'name': 'hello.moto', 'type': 'd'},
-    {'name': 'incoming', 'type': 'd'},
-    {'name': 'payload', 'type': 'd'}
 ]
 
 MATRIX_UUID = matrix_directive.get("universal_id", "matrix")

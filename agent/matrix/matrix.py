@@ -269,34 +269,9 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         elif ctype == "inject_team":
                             self.swarm.handle_team_injection(content.get("subtree"), content.get("target_universal_id"))
 
-
                         elif ctype == "route_payload":
 
-                            content = payload.get("content", {})
-                            target = content.get("target_universal_id")
-                            folder = content.get("delivery", "payload")
-                            filetype = content.get("filetype", "json")  # ← new line
-                            payload_data = content.get("payload")
-
-                            if not (target and payload_data):
-                                self.logger.log("[ROUTE][ERROR] Missing target_universal_id or payload.")
-                                return {"status": "error", "message": "Missing target or payload."}
-
-                            try:
-                                dest_dir = os.path.join(self.path_resolution["comm_path"], target, folder)
-                                os.makedirs(dest_dir, exist_ok=True)
-                                filename = f"route_{int(time.time())}.{filetype}"
-                                full_path = os.path.join(dest_dir, filename)
-
-                                with open(full_path, "w") as f:
-                                    json.dump(payload_data, f, indent=2)
-
-                                self.logger.log(f"[ROUTE] Payload routed to {target}/{folder}/{filename}")
-                                return {"status": "ok", "message": f"Routed to {target}/{folder}/{filename}"}
-                            except Exception as e:
-                                self.logger.log(f"[ROUTE][FAIL] {e}")
-                                return {"status": "error", "message": str(e)}
-
+                            return self.route_payload_to_target(payload.get("content", {}))
 
                         elif ctype == "forward":
                             self.handle_forward_payload(payload)
@@ -304,7 +279,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
                         elif ctype == "node_query":
                             self.handle_node_query(content)
 
-                        if ctype == "replace_agent":
+                        elif ctype == "replace_agent":
 
                             new_agent = content.get("new_agent", {})
 
@@ -325,6 +300,57 @@ class MatrixAgent(DelegationMixin, BootAgent):
             except Exception as e:
                 self.log(f"[COMMAND-LISTENER][CRASH] {e}")
                 interruptible_sleep(self, 3)
+
+    def route_payload_to_target(self, content):
+        from agent.core.tree_parser import TreeParser
+
+        target = content.get("target_universal_id")
+        folder = content.get("delivery", "payload")
+        filetype = content.get("filetype", "json")
+        payload_data = content.get("payload")
+
+        if not (target and payload_data):
+            self.logger.log("[ROUTE][ERROR] Missing target_universal_id or payload.")
+            return {"status": "error", "message": "Missing target or payload."}
+
+        try:
+            # Handle broadcast
+            if target == "broadcast":
+                tree = TreeParser.load_tree(self.tree_path)
+                if not tree:
+                    raise Exception("Agent tree unavailable.")
+
+                agents = tree.all_universal_ids()
+                count = 0
+
+                for uid in agents:
+                    if uid == "matrix":
+                        continue
+                    dest_dir = os.path.join(self.path_resolution["comm_path"], uid, folder)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    filename = f"broadcast_{int(time.time())}.{filetype}"
+                    full_path = os.path.join(dest_dir, filename)
+                    with open(full_path, "w") as f:
+                        json.dump(payload_data, f, indent=2)
+                    count += 1
+
+                self.logger.log(f"[ROUTE] Broadcast delivered to {count} agents in folder '{folder}'")
+                return {"status": "ok", "message": f"Broadcast sent to {count} agents."}
+
+            # Targeted delivery
+            dest_dir = os.path.join(self.path_resolution["comm_path"], target, folder)
+            os.makedirs(dest_dir, exist_ok=True)
+            filename = f"route_{int(time.time())}.{filetype}"
+            full_path = os.path.join(dest_dir, filename)
+            with open(full_path, "w") as f:
+                json.dump(payload_data, f, indent=2)
+
+            self.logger.log(f"[ROUTE] Payload routed to {target}/{folder}/{filename}")
+            return {"status": "ok", "message": f"Routed to {target}/{folder}/{filename}"}
+
+        except Exception as e:
+            self.logger.log(f"[ROUTE][FAIL] {e}")
+            return {"status": "error", "message": str(e)}
 
     def handle_replace_payload(self, content):
 

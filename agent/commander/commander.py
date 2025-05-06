@@ -39,8 +39,9 @@ class CommanderAgent(BootAgent):
                     continue
 
             try:
-                latest = max((os.path.getmtime(os.path.join(hello_path, f)) for f in os.listdir(hello_path)), default=0)
-                delta = time.time() - latest
+                ping_file = os.path.join(comm_root, agent_id, "hello.moto", "last.ping")
+                if os.path.exists(ping_file):
+                    delta = time.time() - os.path.getmtime(ping_file)
                 status = "✅" if delta < 20 else "⚠️"
                 flat.append((agent_id, round(delta, 1), status))
             except:

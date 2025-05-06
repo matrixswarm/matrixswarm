@@ -78,7 +78,7 @@ class BootAgent(Agent):
                     if hasattr(self, handler_name):
                         try:
                             handler = getattr(self, handler_name)
-                            handler(packet)
+                            handler(command=cmd_type, packet=packet)
                             self.log(f"[COMMAND] Handled command: {cmd_type}")
                         except Exception as e:
                             self.log(f"[COMMAND][ERROR] Handler '{handler_name}' crashed: {e}")
@@ -201,10 +201,7 @@ class BootAgent(Agent):
 
         spawner = CoreSpawner()
 
-        comm_file_spec = [
-            {"name": "hello.moto", "type": "d", "content": None},
-            {"name": "incoming", "type": "d", "content": None}
-        ]
+        comm_file_spec = []
 
         # Ensure comm channel (basic folders)
         spawner.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))
@@ -241,8 +238,5 @@ class BootAgent(Agent):
         JsonSafeWrite.safe_write(os.path.join(matrix_incoming_path, request),  '1')
 
         self.log(f"[TREE_SLICE_REQUEST] Sent request to matrix from {self.command_line_args["universal_id"]}.")
-
-    def command_listener(self):
-        print("Override command_listener() in subclass.")
 
 

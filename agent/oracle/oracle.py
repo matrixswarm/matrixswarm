@@ -4,24 +4,27 @@
 import os
 import json
 import time
+import threading
 from openai import OpenAI
 from agent.core.boot_agent import BootAgent
 from agent.core.utils.swarm_sleep import interruptible_sleep
+from agent.core.mixin.broadcast_listener import BroadcastListenerMixin
 
-class OracleAgent(BootAgent):
+class OracleAgent(BootAgent, BroadcastListenerMixin):
     def __init__(self, path_resolution, command_line_args):
         super().__init__(path_resolution, command_line_args)
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.client = OpenAI(api_key=self.api_key)
         self.prompt_path = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
         self.outbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "outbox")
-        os.makedirs(self.outbox_path, exist_ok=True)
+
 
     def worker_pre(self):
         if not self.api_key:
             self.log("[ORACLE][ERROR] No API key detected. Is your .env loaded?")
         else:
-            self.log("[ORACLE] Oracle initialized. Awaiting prompt.")
+            self.log("[ORACLE] Pre-boot hooks initialized.")
+            threading.Thread(target=self.start_broadcast_listener, daemon=True).start()
 
     def worker_post(self):
         self.log("[ORACLE] Oracle shutting down. No more prophecies today.")
@@ -69,29 +72,17 @@ class OracleAgent(BootAgent):
         except Exception as e:
             self.log(f"[ORACLE][ERROR] {e}")
 
-    def command_listener(self):
-        incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
-        os.makedirs(incoming_path, exist_ok=True)
-        self.log("[ORACLE] Listening for .cmd instructions...")
+    def on_broadcast_codex_sync(self, packet):
+        self.log(f"[ORACLE] ⚡ Received Codex sync broadcast: {packet}")
+        # Optional: self.reload_codex(), self.confirm(), etc.
 
-        while self.running:
-            try:
-                for fname in os.listdir(incoming_path):
-                    if not fname.endswith(".cmd"):
-                        continue
-                    fpath = os.path.join(incoming_path, fname)
-                    with open(fpath, "r") as f:
-                        try:
-                            command = json.load(f)
-                        except Exception as e:
-                            self.log(f"[ORACLE][CMD-FAIL] Failed to parse {fname}: {e}")
-                            continue
+    #called from command_listener() in boot_agent
+    def cmd_diagnose(self, command, packet):
+        self.log(f"[COMMAND] Received '{command}' with payload: {json.dumps(packet, indent=2)}")
 
-                    self.log(f"[ORACLE] ⚡ CMD received: {json.dumps(command, indent=2)}")
-                    os.remove(fpath)
-            except Exception as e:
-                self.log(f"[ORACLE][CMD-ERROR] {e}")
-            time.sleep(2)
+    def on_broadcast_reboot(self, packet):
+        self.log(f"[ORACLE] Broadcast requested reboot.")
+        self.running = False
 
     def handle_spawn_suggestion(self, query):
         payload = query.get("spawn", {})

@@ -6,13 +6,7 @@ matrix_directive = {
         "universal_id": 'matrix',
         "name": "matrix",
         "filesystem": {
-            "folders": [
-                {
-                    'name': 'payload',
-                    'type': 'd',
-                    'content': None
-                },
-            ],
+            "folders": [],
             "files": {}
         },
 
@@ -21,13 +15,7 @@ matrix_directive = {
                 "name": "matrix_https",
                 "delegated": [],
                 "filesystem": {
-                    "folders": [
-                                {
-                                'name': 'payload',
-                                'type': 'd',
-                                'content': None
-                                },
-                            ],
+                    "folders": [],
                     "files": {}
                     }
                 },
@@ -54,10 +42,8 @@ matrix_directive = {
                     "name": "mailman",
                     "filesystem": {
                         "folders": [
-                            {"name": "payload", "type": "d", "content": None},
                             {"name": "mail", "type": "d", "content": None},
                             {"name": "tally", "type": "d", "content": None},
-                            {"name": "incoming", "type": "d", "content": None}
                         ]
                     }
                 },
@@ -78,11 +64,6 @@ matrix_directive = {
                     "name": "oracle",
                     "filesystem": {
                         "folders": [
-                            {
-                                "name": "payload",
-                                "type": "d",
-                                "content": None
-                            }
                         ],
                         "files": {}
                     },
@@ -93,9 +74,7 @@ matrix_directive = {
                     "universal_id": "pinger-1",
                     "name": "uptime_pinger",
                     "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d", "content": None}
-                        ]
+                        "folders": []
                     },
                     "config": {
                         "targets": ["https://dragoart.com", "https://matrixswarm.com"],
@@ -107,9 +86,7 @@ matrix_directive = {
                     "universal_id": "metric-1",
                     "name": "metric",
                     "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d", "content": None}
-                        ]
+                        "folders": []
                     },
                     "config": {
                         "interval_sec": 10,
@@ -122,9 +99,7 @@ matrix_directive = {
                     "universal_id": "scraper-1",
                     "name": "scraper",
                     "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d", "content": None}
-                        ]
+                        "folders": []
                     },
                     "config": {
                         "report_to": "mailman-1"
@@ -134,9 +109,7 @@ matrix_directive = {
                     "universal_id": "discord-relay-1",
                     "name": "discord",
                     "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d"},
-                        ]
+                        "folders": []
                     },
                     "config": {
                         "bot_token": os.getenv("DISCORD_TOKEN"),

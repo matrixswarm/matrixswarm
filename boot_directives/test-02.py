@@ -11,13 +11,7 @@ matrix_directive = {
                 "name": "matrix_https",
                 "delegated": [],
                 "filesystem": {
-                    "folders": [
-                                {
-                                'name': 'payload',
-                                'type': 'd',
-                                'content': None
-                                },
-                            ],
+                    "folders": [],
                     "files": {}
                     }
                 },
@@ -30,9 +24,7 @@ matrix_directive = {
                     "universal_id": "email-check-1",
                     "name": "email_check",
                     "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d", "content": None}
-                        ]
+                        "folders": []
                     },
                     "config": {
                         "imap_host": os.getenv("EMAILCHECKAGENT_IMAP_HOST"),
@@ -46,9 +38,7 @@ matrix_directive = {
                     "universal_id": "mirror-9",
                     "name": "filesystem_mirror",
                     "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d"}
-                        ]
+                        "folders": []
                     },
                     "config": {
                         "watch_path": "/etc",
@@ -62,9 +52,7 @@ matrix_directive = {
                     "universal_id": "email-send-1",
                     "name": "email_send",
                     "filesystem": {
-                        "folders": [
-                            {"name": "payload", "type": "d", "content": None}
-                        ]
+                        "folders": []
                     },
                     "config": {
                         "smtp_host": os.getenv("EMAILSENDAGENT_SMTP_HOST"),
@@ -114,9 +102,7 @@ matrix_directive = {
                                                 "universal_id": "email-check-1",
                                                 "name": "email_check",
                                                 "filesystem": {
-                                                    "folders": [
-                                                        {"name": "payload", "type": "d", "content": None}
-                                                    ]
+                                                    "folders": []
                                                 },
                                                 "config": {
                                                     "imap_host": os.getenv("EMAILCHECKAGENT_IMAP_HOST"),
