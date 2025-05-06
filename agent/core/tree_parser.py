@@ -134,9 +134,6 @@ class TreeParser:
 
         return None  # Return None if the node is not found in the current branch
 
-    def has_node(self, universal_id):
-        return universal_id in self.nodes
-
     def insert_node(self, new_node, parent_universal_id=None):
         """
         Insert a new node under the specified parent node.
@@ -513,8 +510,20 @@ class TreeParser:
         collect(self.nodes[universal_id])
         return result
 
+    def walk_tree(self, node):
+        nodes = [node]
+        for child in node.get("children", []):
+            nodes.extend(self.walk_tree(child))
+        return nodes
+
+    def all_universal_ids(self):
+        return [n["universal_id"] for n in self.walk_tree(self.root)]
+
     def get_node(self, universal_id):
-        """
-        Retrieve a node directly by its universal_id.
-        """
-        return self.nodes.get(universal_id, None)
+        for node in self.walk_tree(self.root):
+            if node.get("universal_id") == universal_id:
+                return node
+        return None
+
+    def has_node(self, universal_id):
+        return self.get_node(universal_id) is not None

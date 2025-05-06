@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QListWidget, QListWidgetItem,
     QLineEdit, QGroupBox, QSplitter, QFileDialog,
-    QTextEdit, QStatusBar, QSizePolicy, QStackedLayout, QCheckBox
+    QTextEdit, QStatusBar, QSizePolicy, QStackedLayout, QCheckBox, QComboBox
 )
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -31,8 +31,6 @@ class MatrixCommandBridge(QWidget):
         self.setup_timers()
         self.check_matrix_connection()
         self.hotswap_btn.setEnabled(False)
-
-
 
     def setup_ui(self):
         self.main_layout = QVBoxLayout()
@@ -186,7 +184,9 @@ class MatrixCommandBridge(QWidget):
             payload.setdefault("target", target)
             payload.setdefault("content", {})
             payload["content"].setdefault("universal_id", target)
-
+            #folder to deliever to
+            folder = self.folder_selector.currentText()
+            payload["content"]["delivery"] = folder
         try:
             response = requests.post(
                 url=MATRIX_HOST,
@@ -207,7 +207,10 @@ class MatrixCommandBridge(QWidget):
         except Exception as e:
             self.status_label.setText(f"❌ Failed to send payload: {e}")
 
-
+    def handle_alarm_message(self, msg):
+        alarm = json.loads(msg)
+        print(f"🔥 ALARM RECEIVED: {alarm}")
+        self.status_label.setText(f"🚨 {alarm.get('universal_id')} ALERT: {alarm.get('cause')}")
 
     def view_logs(self):
         universal_id = self.log_input.text().strip().split(" ")[0]
@@ -464,6 +467,12 @@ class MatrixCommandBridge(QWidget):
         self.hotswap_btn.setStyleSheet("background-color: #1e1e1e; color: #ff4444; border: 1px solid #00ff66;")
         self.hotswap_btn.setEnabled(False)
         layout.addWidget(self.hotswap_btn)
+
+        self.folder_selector = QComboBox()
+        self.folder_selector.addItems(["payload", "incoming", "queue", "stack", "replies", "broadcast"])
+        self.folder_selector.setStyleSheet("background-color: black; color: #00ffcc; font-family: Courier;")
+        layout.addWidget(QLabel("📁 Send to folder:"))
+        layout.addWidget(self.folder_selector)
 
         self.payload_editor = QTextEdit()
         self.payload_editor.setPlaceholderText("Enter JSON payload to send to agent over the wire...")

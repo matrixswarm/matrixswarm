@@ -7,13 +7,7 @@ matrix_directive = {
     "universal_id": 'matrix',
     "name": "matrix",
     "filesystem": {
-        "folders": [
-            {
-                'name': 'payload',
-                'type': 'd',
-                'content': None
-            },
-        ],
+        "folders": [],
         "files": {}
     },
 
@@ -57,31 +51,14 @@ matrix_directive = {
                 }
             ]
         },
-        {
-            "universal_id": "context-agent-1",
-            "name": "app_context",
-            "app": "matrix-core",
-            "children": []
-        },
-        {
-            "universal_id": "resolver-1",
-            "name": "resolver",
-            "app": "matrix-core",
-            "children": []
-        },
+
         {
         "universal_id": "matrix-https",
         "name": "matrix_https",
         "delegated": [],
         "app": "matrix-core",
         "filesystem": {
-            "folders": [
-                {
-                    'name': 'payload',
-                    'type': 'd',
-                    'content': None
-                },
-            ],
+            "folders": [],
                 "files": {}
             }
         },
@@ -113,8 +90,27 @@ matrix_directive = {
 
         },
         {
+            "universal_id": "service-registry-1",
+            "name": "service_registry",
+            "filesystem": {},
+            "config": {
+              "confirm": "YES",
+
+            }
+        },
+        {
             "universal_id": "logger-2",
             "name": "logger",
+            "children": []
+        },
+        {
+            "universal_id": "oracle-1",
+            "name": "oracle",
+            "filesystem": {
+                "folders": [
+                ],
+                "files": {}
+            },
             "children": []
         },
     ]

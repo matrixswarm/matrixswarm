@@ -9,7 +9,6 @@ if current_directory not in sys.path:
     sys.path.insert(0, current_directory)
 
 import json
-import time
 import uuid
 import shutil
 import subprocess
@@ -18,11 +17,20 @@ from datetime import datetime
 from class_lib.file_system.file_system_builder import FileSystemBuilder
 from path_manager import PathManager
 from agent.core.class_lib.logging.logger import Logger
-from agent.core.constants import UNIVERSE_ID
 
 class CoreSpawner:
     def __init__(self, path_manager=None):
         pm = path_manager or PathManager(use_session_root=True)
+
+        self.default_comm_file_spec = [
+            {"name": "hello.moto", "type": "d", "content": None},
+            {"name": "payload", "type": "d", "content": None},
+            {"name": "incoming", "type": "d", "content": None},
+            {"name": "queue", "type": "d", "content": None},
+            {"name": "stack", "type": "d", "content": None, "meta": "Long - term mission chaining"},
+            {"name": "replies", "type": "d", "content": None, "meta": "stack / Long - term mission chaining"},
+            {"name": "broadcast", "type": "d", "content": None, "meta": "Shared folder for swarms with listeners"},
+        ]
 
         self.root_path = pm.get_path("root")
         self.comm_path = pm.get_path("comm")
@@ -55,9 +63,6 @@ class CoreSpawner:
     def reset_hard(self):
 
         #NEED TO WAIT UNTIL ALL PROCESSES HAVE COMPLETED
-
-
-
         for root in [self.comm_path, self.pod_path]:
             for folder in os.listdir(root):
                 folder_path = os.path.join(root, folder)
@@ -81,9 +86,30 @@ class CoreSpawner:
 
         # Always process the default file_spec
         fsb = FileSystemBuilder()
-        fsb.process_selection(base, file_spec)
+        fsb.process_selection(base, self.default_comm_file_spec)
 
+        if self.default_comm_file_spec:
+            fs_node = {"folders": self.default_comm_file_spec}
+            print(f"[DEBUG] Processing default folders spec: {fs_node}")
+
+            folders = fs_node.get("folders", [])
+            if folders:
+                print(f"[FS-BUILDER] Merging folders from directive for {universal_id}")
+                fsb.process_selection(base, folders)
+
+            files = fs_node.get("files", {})
+            for name, content in files.items():
+                item = {
+                    "name": name,
+                    "type": "f",
+                    "content": content
+                }
+                fsb.process_item(base, item)
+
+        # process any special requirements
         # If agent_directive contains additional filesystem specs
+        fsb = FileSystemBuilder()
+        fsb.process_selection(base, file_spec)
         if agent_directive:
             fs_node = agent_directive if isinstance(agent_directive, dict) and "folders" in agent_directive else {}
             print(f"[DEBUG] Processing filesystem spec: {fs_node}")
@@ -192,7 +218,6 @@ class CoreSpawner:
 
             run_path = os.path.join(spawn_path, "run")
 
-
             if not source_path or not os.path.exists(source_path):
                 logger.log(f"[SPAWN-ERROR] Source path not resolved or file missing. Cannot boot agent: {agent_name}")
                 return
@@ -200,10 +225,6 @@ class CoreSpawner:
             # 🔥 Load the agent source file
             with open(source_path, "r") as f:
                 file_content = f.read()
-
-
-
-
 
             #when the process is spawned it has no way to find the root and the lib path
             #so prepend it with these facts

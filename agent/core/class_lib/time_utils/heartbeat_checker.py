@@ -1,16 +1,11 @@
 import os
 import time
 
-def last_heartbeat_delta(comm_path, agent_id):
-    hello_path = os.path.join(comm_path, agent_id, "hello.moto")
-    if not os.path.isdir(hello_path):
-        return None  # no hello.moto folder
-
+def last_heartbeat_delta(comm_root, agent_id):
     try:
-        latest = max(
-            (os.path.getmtime(os.path.join(hello_path, f)) for f in os.listdir(hello_path)),
-            default=0
-        )
-        return time.time() - latest
+        path = os.path.join(comm_root, agent_id, "hello.moto", "last.ping")
+        if not os.path.exists(path):
+            return None
+        return time.time() - os.path.getmtime(path)
     except Exception:
         return None
