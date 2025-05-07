@@ -3,8 +3,6 @@ import os
 import time
 import json
 from string import Template
-from datetime import datetime
-from agent.core.class_lib.file_system.file_directory_pruner import FileDirectoryPruner
 from agent.core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
 from agent.core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
 from agent.core.class_lib.logging.logger import Logger

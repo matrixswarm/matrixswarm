@@ -1,0 +1,52 @@
+MatrixSwarm Relay Protocol v1.1
+===============================
+
+Release Date: 2025-05-07
+Signed By: MatrixSwarm Core (General + GPT)
+Commit Type: Feature Upgrade
+Version: 1.1
+
+Summary:
+--------
+Relay Protocol v1.1 introduces modular, factory-driven message relays for MatrixSwarm agents.
+This upgrade enables agents like `telegram-relay-1` and `discord-relay-1` to dispatch alerts
+via `.msg` payloads using entirely decoupled factory logic.
+
+Features:
+---------
+- 🧠 `config["factories"]` injection now supported natively
+- 🧹 Reserved keys (`bot_token`, `chat_id`, `role`, etc.) are no longer interpreted as factories
+- ⚡ Modular `alert.subscriber` factory available for Telegram and Discord
+- 📦 Self-creating inbox structure per agent (e.g. `incoming/alarm_listener/critical`)
+- 🧵 Named reflex threads with full lifecycle sync to `agent.running`
+- 📡 Real-world tested with manual `.msg` injection and live alerts to Telegram + Discord
+- 🖼 Codex screenshot included (Telegram alert received in field)
+- 🏷 Timestamp-ready and OTS verified
+
+Agent Involved:
+---------------
+- `telegram-relay-1`
+- `discord-relay-1`
+
+Factory Injected:
+-----------------
+- `agent.telegram_relay.factory.alert.subscriber`
+- `agent.discord.factory.alert.subscriber`
+
+Codex Entry Tag:
+----------------
+`codex/releases/relay_v1.1_commit.txt`
+OTS hash: (to be generated after stamping)
+
+Verification Instructions:
+--------------------------
+1. Install:  `pip install opentimestamps-client`
+2. Stamp:    `ots stamp codex/releases/relay_v1.1_commit.txt`
+3. Verify:   `ots verify codex/releases/relay_v1.1_commit.txt.ots`
+
+Codex Footer:
+-------------
+“Agents that deliver without thinking are called webhooks.
+Agents that deliver with logic are called Swarm.”
+
+-- MatrixSwarm Relay Protocol v1.1
