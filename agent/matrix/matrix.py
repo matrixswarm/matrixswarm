@@ -110,6 +110,9 @@ class MatrixAgent(DelegationMixin, BootAgent):
             mailman_dir = os.path.join(self.path_resolution["comm_path"], "mailman-1", "payload")
             os.makedirs(mailman_dir, exist_ok=True)
 
+            alarm_dir = os.path.join(self.path_resolution["comm_path"], "alarm", "incoming")
+            os.makedirs(alarm_dir, exist_ok=True)
+
             payload = {
                 "uuid": self.command_line_args.get("universal_id", "matrix"),
                 "timestamp": time.time(),

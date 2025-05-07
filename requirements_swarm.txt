@@ -1,0 +1,7 @@
+flask
+flask-socketio
+eventlet
+discord.py
+requests
+psutil
+opentimestamps-client

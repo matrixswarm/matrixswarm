@@ -1,0 +1,29 @@
+{
+  "title": "Alarm Reflex Protocol v1.0",
+  "timestamp": "2025-05-06T16:23:17.356931Z",
+  "agent": "alarm-streamer-1",
+  "action": "reflex_alert",
+  "description": "AlarmStreamerAgent now emits real-time WebSocket alerts and relays .msg packets to all delegated children.",
+  "confirmed": true,
+  "delegation_model": "Agent reads its `delegated` field to discover alert relays and dispatches accordingly.",
+  "payload_format": {
+    "type": "alarm",
+    "fields": [
+      "universal_id",
+      "timestamp",
+      "level",
+      "cause"
+    ]
+  },
+  "delivery": {
+    "websocket": true,
+    "relay_fanout": true,
+    "target_paths": "/comm/{relay}/incoming/alarm_*.msg"
+  },
+  "example": {
+    "universal_id": "metrics-1",
+    "timestamp": "2025-05-06T23:10:00Z",
+    "level": "critical",
+    "cause": "CPU overload detected"
+  }
+}

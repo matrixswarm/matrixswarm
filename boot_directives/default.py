@@ -14,6 +14,8 @@ matrix_directive = {
     "children": [
 
         #MATRIX PROTECTION LAYER 4 SENTINELS
+        #4th SENTINEL WATCHES MATRIX, REST WATCH SENTINEL IN FRONT
+        #ONLY WAY TO KILL MATRIX WOULD BE TO KILL THEM ALL, TAKING ANY COMBO OF 4 OUT DOES NOTHING
         {
             "universal_id": "guardian-1",
             "name": "sentinel",
@@ -79,16 +81,7 @@ matrix_directive = {
             "children": []
 
         },
-        {
-            "universal_id": "telegram-relay-1",
-            "name": "telegram_relay",
-            "config": {
-                "bot_token": os.getenv("TELEGRAM_API_KEY"),
-                "chat_id": os.getenv("TELEGRAM_CHAT_ID")
-            },
-            "children": []
 
-        },
         {
             "universal_id": "service-registry-1",
             "name": "service_registry",
@@ -99,16 +92,56 @@ matrix_directive = {
             }
         },
         {
-            "universal_id": "logger-2",
-            "name": "logger",
-            "children": []
+            "universal_id": "alarm-streamer-1",
+            "name": "alarm_streamer",
+            "children": [
+
+                        {
+                          "universal_id": "discord-relay-1",
+                          "name": "discord",
+                          "filesystem": {
+                            "folders": []
+                          },
+                          "config": {
+                            "bot_token": os.getenv("DISCORD_TOKEN"),
+                            "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
+                            "role": "alarm_listener",
+                            "factories": {
+                              "alert.subscriber": {
+                                  "levels": ["critical", "warning"],
+                                  "webhook_url": os.getenv("DISCORD_WEBHOOK_ALERT_URL"),
+                                  "bot_token": os.getenv("DISCORD_TOKEN"),
+                                  "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "universal_id": "telegram-relay-1",
+                          "name": "telegram_relay",
+                          "filesystem": {
+                            "folders": []
+                          },
+                          "config": {
+                            "bot_token": os.getenv("TELEGRAM_API_KEY"),
+                            "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+                            "role": "alarm_listener",
+                            "factories": {
+                              "alert.subscriber": {
+                                  "levels": ["critical", "warning"],
+                                  "bot_token": os.getenv("TELEGRAM_API_KEY"),
+                                  "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+                              }
+                            }
+                          }
+                        }
+                    ]
         },
         {
             "universal_id": "oracle-1",
             "name": "oracle",
             "filesystem": {
-                "folders": [
-                ],
+                "folders": [],
                 "files": {}
             },
             "children": []

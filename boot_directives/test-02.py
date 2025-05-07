@@ -4,6 +4,7 @@ load_dotenv()
 
 matrix_directive = {
         "universal_id": 'matrix',
+        "name": "matrix",
         "children": [
 
                 {

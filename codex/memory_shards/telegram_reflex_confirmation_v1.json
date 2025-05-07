@@ -1,0 +1,26 @@
+{
+  "title": "Telegram Reflex Confirmation v1",
+  "timestamp": "2025-05-07T15:04:23.559900Z",
+  "agent": "telegram-relay-1",
+  "status": "\ud83d\udd27 Factory Installed, Awaiting Fire",
+  "factory": "agent.telegram_relay.factory.alert.subscriber",
+  "config_shape": {
+    "role": "alarm_listener",
+    "alert.subscriber": {
+      "levels": [
+        "critical",
+        "warning"
+      ],
+      "telegram": {
+        "bot_token": "REDACTED",
+        "chat_id": "REDACTED"
+      }
+    }
+  },
+  "inbox_path": "/comm/telegram-relay-1/incoming/alarm_listener/{level}/",
+  "notes": [
+    "Telegram relay is spawned and factory path is resolved.",
+    "No log confirmation from factory yet; this shard serves as state marker.",
+    "Once message dispatch confirmed, Codex can evolve this to full confirmation v2."
+  ]
+}

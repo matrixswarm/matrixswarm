@@ -1,0 +1,24 @@
+{
+  "title": "Dynamic Throttle Protocol v1.0",
+  "timestamp": "2025-05-06T18:22:52.015155Z",
+  "agent": "BootAgent (inherited by all swarm agents)",
+  "feature": "Self-adjusting load-aware worker pacing",
+  "description": "Each agent dynamically adjusts its work loop delay based on system load average using start_dynamic_throttle().",
+  "parameters": {
+    "min_delay": 2,
+    "max_delay": 10,
+    "max_load": 2.0
+  },
+  "mechanism": {
+    "source": "os.getloadavg()[0]",
+    "scale_formula": "scale = min(1.0, (load_avg - max_load) / max_load)",
+    "delay_formula": "delay = min_delay + scale * (max_delay - min_delay)",
+    "trigger": "self.can_proceed = True"
+  },
+  "effect": "Worker thread only activates when system load is healthy or delay cycle expires.",
+  "benefit": [
+    "Prevents overload during swarm-wide operations",
+    "Agent loops adjust automatically to host stress",
+    "No external throttle controller required"
+  ]
+}

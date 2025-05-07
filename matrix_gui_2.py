@@ -13,8 +13,6 @@ import requests
 import os
 import json
 import time
-import base64
-import hashlib
 import string
 import random
 MATRIX_HOST = "https://147.135.68.135:65431/matrix" #put your own ip here, not mine

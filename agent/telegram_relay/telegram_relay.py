@@ -9,7 +9,7 @@ from agent.core.utils.swarm_sleep import interruptible_sleep
 
 class TelegramRelayAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+        super().__init__(path_resolution, command_line_args, tree_node)
 
         config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
 
@@ -24,8 +24,7 @@ class TelegramRelayAgent(BootAgent):
         self.log("[TELEGRAM] Telegram relay activated. Awaiting message drops...")
 
     def worker(self):
-        self.check_incoming_once()
-        interruptible_sleep(self, 5)
+        interruptible_sleep(self, 230)
 
     def worker_post(self):
         self.log("[TELEGRAM] Relay shutting down. No more echoes for now.")
@@ -69,6 +68,9 @@ class TelegramRelayAgent(BootAgent):
             self.log("[TELEGRAM] Message relayed.")
         except Exception as e:
             self.log(f"[TELEGRAM][ERROR] Telegram delivery failed: {e}")
+def on_alarm(self, payload):
+    msg = f"🚨 [{payload['level'].upper()}] {payload['universal_id']} — {payload['cause']}"
+    self.send_message_to_platform(msg)
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))

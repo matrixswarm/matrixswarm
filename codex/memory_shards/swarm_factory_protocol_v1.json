@@ -1,0 +1,23 @@
+{
+  "title": "Swarm Factory Protocol v1",
+  "timestamp": "2025-05-07T08:05:27.970495Z",
+  "description": "Agents dynamically load modular behaviors at runtime using path-based configuration keys defined in the Codex tree. Features are attached via factory modules located in core/factory/.",
+  "mechanism": {
+    "injection_point": "__init__() or boot() via resolve_factory_injections()",
+    "config_example": {
+      "messaging.consumer.alert": {
+        "token": "XXXX",
+        "chat_id": "YYYY"
+      }
+    },
+    "path_mapping": "messaging.consumer.alert \u2192 factory/messaging/consumer/alert.py",
+    "required_function": "attach(agent, config)"
+  },
+  "benefits": [
+    "Keeps agents lean and purpose-driven",
+    "No bloat from unused features",
+    "Supports structured namespace for modularity",
+    "Feature logic is fully self-contained"
+  ],
+  "status": "\u2705 Live"
+}
