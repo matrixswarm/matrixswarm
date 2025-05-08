@@ -60,9 +60,6 @@ for proc in existing:
         print(f"[BLOCKED] Matrix already running in '{universe_id}'. Skipping boot.")
         exit(1)
 
-
-
-
 # Base deploy target
 base_path = os.path.join("/matrix", universe_id, "latest")
 print(f"[BOOT] Universe path resolved: {base_path}")

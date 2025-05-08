@@ -23,6 +23,11 @@ class DiscordAgent(BootAgent):
         # Inject full tree_node so BootAgent sees config
         self.directives = tree_node if 'tree_node' in globals() else {}
 
+        self.inbox_paths=['incoming']
+        path = os.path.join(path_resolution["comm_path_resolved"], "incoming")
+        os.makedirs(path, exist_ok=True)
+        self.inbox_paths.append(path)
+
         # Local config for this agent
         config = self.directives.get("config", {})
         self.token = config.get("bot_token")
@@ -115,7 +120,7 @@ class DiscordAgent(BootAgent):
 
     def on_alarm(self, payload):
         msg = f"🚨 [{payload['level'].upper()}] {payload['universal_id']} — {payload['cause']}"
-        self.send_message_to_platform(msg)
+    #    self.send_message_to_platform(msg)
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))

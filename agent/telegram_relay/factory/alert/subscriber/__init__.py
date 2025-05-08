@@ -40,7 +40,6 @@ def attach(agent, config):
         while agent.running:
             try:
                 for inbox in agent.inbox_paths:
-                    agent.log(f"[DEBUG] Scanning inbox: {inbox}")
                     if not os.path.exists(inbox):
                         continue
                     for fname in os.listdir(inbox):
