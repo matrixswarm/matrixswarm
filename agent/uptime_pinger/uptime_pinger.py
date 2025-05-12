@@ -1,16 +1,20 @@
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import json
 import time
 import hashlib
 import requests
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class UptimePingerAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
 
-        config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
+        config = self.tree_node.get("config", {})
         self.targets = config.get("targets", ["https://example.com"])
         self.interval = config.get("interval_sec", 30)
         self.alert_to = config.get("alert_to", "mailman-1")
@@ -51,6 +55,5 @@ class UptimePingerAgent(BootAgent):
             json.dump(payload, f, indent=2)
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = UptimePingerAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

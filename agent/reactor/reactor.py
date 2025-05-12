@@ -1,12 +1,17 @@
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import json
 import time
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class ReactorAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
         self.payload_dir = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
         os.makedirs(self.payload_dir, exist_ok=True)
         self.spawn_target = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
@@ -77,17 +82,7 @@ class ReactorAgent(BootAgent):
         except Exception as e:
             self.log(f"[REACTOR][ERROR] {e}")
 
-
-
-
 if __name__ == "__main__":
-    # label = None
-    # if "--label" in sys.argv:
-    #   label = sys.argv[sys.argv.index("--label") + 1]
+    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent.boot()
 
-    # current directory of the agent script or it wont be able to find itself
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-
-    reactor = ReactorAgent(path_resolution, command_line_args)
-
-    reactor.boot()

@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
 )
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt5.QtGui import QColor, QFont, QPalette
 import sys
 import requests
@@ -15,13 +15,52 @@ import json
 import time
 import string
 import random
+import ssl
+import hashlib
+import base64
+
+import threading
+from PyQt5.QtCore import pyqtSignal
+
+
+def run_in_thread(callback=None, error_callback=None):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            def thread_target():
+                try:
+                    result = func(*args, **kwargs)
+                    if callback:
+                        QTimer.singleShot(0, lambda r=result: callback(r))  # ✅ this captures the result properly
+                except Exception as e:
+                    print(f"[THREAD][ERROR] {e}")
+                    if error_callback:
+                        QTimer.singleShot(0, lambda: error_callback(e))
+            threading.Thread(target=thread_target, daemon=True).start()
+        return wrapper
+    return decorator
+
+
 MATRIX_HOST = "https://147.135.68.135:65431/matrix" #put your own ip here, not mine
-CLIENT_CERT = ("certs/client.crt", "certs/client.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
+CLIENT_CERT = ("https_certs/server.fullchain.crt", "https_certs/server.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
 REQUEST_TIMEOUT = 5
+MATRIX_WEBSOCKET_HOST = "wss://147.135.68.135:8765"
+
+import asyncio
+import websockets
+
+#when tree click event
+class NodeSelectionEventBus(QObject):
+    node_selected = pyqtSignal(str)
+node_event_bus = NodeSelectionEventBus()
+
 
 class MatrixCommandBridge(QWidget):
+
+    message_received = pyqtSignal(str)
+    log_ready = pyqtSignal(dict, str)
     def __init__(self):
         super().__init__()
+
         self.setWindowTitle("MatrixSwarm V2: Command Bridge")
         self.setMinimumSize(1400, 800)
         self.setup_ui()
@@ -29,6 +68,14 @@ class MatrixCommandBridge(QWidget):
         self.setup_timers()
         self.check_matrix_connection()
         self.hotswap_btn.setEnabled(False)
+        node_event_bus.node_selected.connect(self.forward_to_health_probe)
+        self.message_received.connect(self.handle_websocket_message_safe)
+        self.start_websocket_listener(MATRIX_WEBSOCKET_HOST)
+        self.user_requested_log_view = False
+        self.current_selected_uid =None
+        self.last_probe_report = {}
+
+        self.log_ready.connect(self._handle_logs_result)
 
     def setup_ui(self):
         self.main_layout = QVBoxLayout()
@@ -47,8 +94,12 @@ class MatrixCommandBridge(QWidget):
         self.status_bar = QStatusBar()
         self.status_bar.setStyleSheet("color: #33ff33; background-color: #111; font-family: Courier;")
         self.status_bar.setFixedHeight(30)
-        self.status_label = QLabel("🔴 Disconnected")
+        self.status_label_matrix = QLabel("🔴 Matrix: Disconnected")
+        self.status_label = QLabel("")  # For user feedback messages
         self.status_bar.addPermanentWidget(self.status_label)
+        self.status_label_ws = QLabel("🔴 WS: Disconnected")
+        self.status_bar.addPermanentWidget(self.status_label_matrix)
+        self.status_bar.addPermanentWidget(self.status_label_ws)
         self.main_layout.addWidget(self.status_bar)
 
     def setup_timers(self):
@@ -59,12 +110,245 @@ class MatrixCommandBridge(QWidget):
 
         self.start_tree_autorefresh(interval=25)
 
+    def start_websocket_listener(self, url=MATRIX_WEBSOCKET_HOST):
+        """
+        Launch the WebSocket client on a separate thread using asyncio.
+        """
+
+        def run_ws():
+            asyncio.set_event_loop(asyncio.new_event_loop())
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(self.websocket_main_loop(url))
+
+        threading.Thread(target=run_ws, daemon=True).start()
+
+    async def websocket_main_loop(self, url):
+        """
+        Main asynchronous WebSocket loop.
+        """
+        try:
+            print(f"[WS] Connecting to: {url}")
+
+            ssl_context = None
+            if url.startswith("wss://"):
+                try:
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.load_cert_chain("socket_certs/client.crt", "socket_certs/client.key")
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                except Exception as e:
+                    print(f"[WS][SSL ERROR] Failed to create SSL context: {e}")
+
+            async with websockets.connect(url, ssl=ssl_context, ping_interval=15, ping_timeout=10) as websocket:
+                self.status_label_ws.setText("🟢 WS: Connected")
+                print("[WS] WebSocket connection established.")
+
+                while True:
+                    try:
+                        msg = await websocket.recv()
+                        self.message_received.emit(msg)
+                    except Exception as e:
+                        print(f"[WS][RECEIVE ERROR] {e}")
+                        break
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"[WS][ERROR] Failed to connect to WebSocket: {e}")
+            self.status_label_ws.setText("🔴 WS: Disconnected")
+
+
+    def handle_websocket_message_safe(self, msg: str):
+        try:
+            data = json.loads(msg)
+            msg_type = data.get("type")
+
+            if msg_type == "health_report":
+                report = data.get("content", {})
+                target = report.get("target_universal_id", "unknown")
+                source = report.get("source_probe", "unknown")
+                status = report.get("status", "unknown")
+                heartbeat = report.get("last_heartbeat", "?")
+
+                text = (
+                    f"🧼 HEALTH REPORT\n"
+                    f"• Target: {target}\n"
+                    f"• Source Probe: {source}\n"
+                    f"• Status: {status.upper()}\n"
+                    f"• Last heartbeat: {heartbeat} sec\n"
+                    f"• UUID: {report.get('spawn_uuid')}\n"
+                )
+
+                # Store last report for GUI panel
+                self.last_probe_report[target] = report
+
+                # Update display panel if selected
+                if self.current_selected_uid == target:
+                    QTimer.singleShot(0, lambda: self.handle_tree_click(self.find_tree_item_by_uid(target)))
+
+                if msg_type == "health_report":
+                    return  # 💣 completely skip appending
+
+                if msg_type == "health_report":
+                    report = data.get("content", {})
+                    target = report.get("target_universal_id", "unknown")
+
+                    # 🛑 BLOCK health logs from flooding log viewer
+                    if self.user_requested_log_view and self.log_input.text().strip() == target:
+                        print(f"[WS][SKIP] Blocking health_report for {target} from log viewer")
+                        return
+
+
+            else:
+                text = json.dumps(data, indent=2)
+                QTimer.singleShot(0, lambda: self.log_text.append(text))
+
+        except Exception as e:
+            print(f"[WS][ERROR] Could not parse WebSocket msg: {msg}\n{e}")
+
+    def _safe_log_append(self, text):
+        if self.log_text.document().blockCount() > 500:
+            self.log_text.setPlainText("")
+        self.log_text.append(text)
+
+    def handle_tree_click(self, item):
+        try:
+            universal_id = item.data(Qt.UserRole)
+            if not universal_id:
+                print("[WARN] Clicked tree item has no universal_id.")
+                return
+
+            print(f"[CLICK] Tree node selected: {universal_id}")
+            self.current_selected_uid = universal_id
+
+            # 🧠 Lookup node data
+            node = self.agent_tree_flat.get(universal_id)
+            if not node:
+                print(f"[ERROR] No node found in flat tree for: {universal_id}")
+                return
+
+            self.log_input.setText(universal_id)
+            self.view_logs()
+
+            # 🔊 Emit node event (for external probe requests etc.)
+            node_event_bus.node_selected.emit(universal_id)
+
+            # 🧠 Populate fields
+            self.input_agent_name.setText(node.get("name", ""))
+            self.input_universal_id.setText(universal_id)
+            self.input_target_universal_id.setText(universal_id)
+            delegates = node.get("delegated", [])
+            self.input_delegated.setText(",".join(delegates) if isinstance(delegates, list) else "")
+            self.user_requested_log_view = False
+
+            # 🧩 Update GUI state
+            self.hotswap_btn.setEnabled(True)
+            if hasattr(self, "log_panel"):
+                self.log_panel.append(f"[GUI] Selected agent: {universal_id}")
+
+            # 📋 Build info panel
+            info_lines = [
+                f"🧠 Name: {node.get('name', '')}",
+                f"🏠 Universal ID: {universal_id}",
+                f"👥 Delegates: {', '.join(delegates) if delegates else 'None'}",
+                f"📁 Filesystem: {json.dumps(node.get('filesystem', {}), indent=2)}",
+                f"⚙️ Config: {json.dumps(node.get('config', {}), indent=2)}"
+            ]
+
+            #if node.get("confirmed"):
+            #    info_lines.append("✅ Status: CONFIRMED / ALIVE")
+            #else:
+            #    info_lines.append("⚠️ Status: UNCONFIRMED / DOWN")
+
+            last_report = self.last_probe_report.get(universal_id)
+            if last_report:
+                info_lines.append(f"🛰️ Confirmed by: {last_report.get('source_probe', 'unknown')}")
+                info_lines.append(f"⏱️ Heartbeat age: {last_report.get('last_heartbeat')} sec")
+                info_lines.append(f"📦 UUID: {last_report.get('spawn_uuid')}")
+
+            self.agent_info_panel.setText("\n".join(info_lines))
+
+            # 📜 Update log view
+            self.log_input.setText(universal_id)
+            self.view_logs()
+
+            # 📡 Send fresh status ping to Matrix
+            status_payload = {
+                "type": "agent_status_report",
+                "timestamp": time.time(),
+                "content": {
+                    "target_universal_id": universal_id,
+                    "reply_to": "gui-agent"
+                }
+            }
+
+            @run_in_thread(
+                callback=lambda resp: print(
+                    f"[STATUS_REQUEST] Dispatched for {universal_id}") if resp.status_code == 200 else print(
+                    f"[STATUS_REQUEST][FAIL] Matrix returned {resp.status_code}"),
+                error_callback=lambda err: print(f"[STATUS_REQUEST][ERROR] {err}")
+            )
+            def task():
+                return requests.post(
+                    url=MATRIX_HOST,
+                    json=status_payload,
+                    cert=CLIENT_CERT,
+                    verify=False,
+                    timeout=REQUEST_TIMEOUT
+                )
+
+            task()
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            print(f"[TREE-CLICK][CRASH] {e}")
+            self.agent_info_panel.setText("⚠️ Failed to load agent info.")
+
+
+
+
+    def find_tree_item_by_uid(self, uid):
+        for i in range(self.tree_display.count()):
+            item = self.tree_display.item(i)
+            if item and item.data(Qt.UserRole) == uid:
+                return item
+        return None
+
+    def send_status_request(self, uid):
+        status_payload = {
+            "type": "agent_status_report",
+            "timestamp": time.time(),
+            "content": {
+                "target_universal_id": uid,
+                "reply_to": "gui-agent"
+            }
+        }
+
+        try:
+            response = requests.post(
+                url=MATRIX_HOST,
+                json=status_payload,
+                cert=CLIENT_CERT,
+                verify=False,
+                timeout=REQUEST_TIMEOUT
+            )
+            if response.status_code == 200:
+                print(f"[STATUS_REQUEST] Dispatched for {uid}")
+            else:
+                print(f"[STATUS_REQUEST][FAIL] Matrix returned {response.status_code}")
+        except Exception as e:
+            print(f"[STATUS_REQUEST][ERROR] {e}")
+
     def toggle_status_dot(self):
-        if self.status_label.text().endswith("Connected"):
+        if hasattr(self, "status_label_ws") and "Connected" in self.status_label_ws.text():
             dot = "🟢" if self.pulse_state else "⚫"
-            self.status_label.setText(f"{dot} Connected")
+            self.status_label_ws.setText(f"{dot} WS: Connected")
             self.pulse_state = not self.pulse_state
 
+        if hasattr(self, "status_label_matrix") and "Connected" in self.status_label_matrix.text():
+            dot = "🟢" if self.pulse_state else "⚫"
+            self.status_label_matrix.setText(f"{dot} Matrix: Connected")
     def build_command_view(self):
         container = QWidget()
         layout = QHBoxLayout(container)
@@ -117,74 +401,35 @@ class MatrixCommandBridge(QWidget):
             self.tree_loading_label.setText(f"{icon} Loading agent tree from Matrix...")
             self.loading_index += 1
 
-    def handle_tree_click(self, item):
-        try:
-            print("[CLICK] Triggered")
+    def pass_log_result(self, uid):
+        def _handler(result):
+            self._handle_logs_result(result, uid)
 
-            universal_id = item.data(Qt.UserRole)
-            if not universal_id:
-                print("[CLICK] No universal_id from UserRole")
-                return
+        return _handler
 
-            node = self.agent_tree_flat.get(universal_id)
-            if not node:
-                print(f"[TREE-CLICK] No node found for universal_id: {universal_id}")
-                return
+    def forward_to_health_probe(self, target_uid):
 
-            universal_id = item.data(Qt.UserRole)
-            self.input_universal_id.setText(universal_id)
-            self.hotswap_btn.setEnabled(True)
-            if hasattr(self, "log_panel"):
-                self.log_panel.append(f"[GUI] Selected agent: {universal_id}")
-
-            info_lines = [
-                f"🧠 Name: {node.get('name', '')}",
-                f"🆔 Perm ID: {universal_id}",
-                f"👥 Delegates: {', '.join(node.get('delegated', [])) or 'None'}",
-                f"📁 Filesystem: {json.dumps(node.get('filesystem', {}), indent=2)}",
-                f"⚙️ Config: {json.dumps(node.get('config', {}), indent=2)}"
-            ]
-
-            if node.get("confirmed"):
-                info_lines.append("✅ Status: ALIVE")
-            else:
-                info_lines.append("⚠️ Status: UNCONFIRMED / DOWN")
-
-            self.agent_info_panel.setText("\n".join(info_lines))
-            print("[CLICK] Update complete")
-
-            self.log_input.setText(universal_id)
-            self.view_logs()
-
-
-
-        except Exception as e:
-            print(f"[TREE-CLICK][CRASH] {e}")
-            self.agent_info_panel.setText("⚠️ Failed to load agent info.")
-
-
-    def send_payload_to_matrix(self, success_message="Payload delivered."):
-
-        payload_text = self.payload_editor.toPlainText().strip()
-        if not payload_text:
-            self.status_label.setText("⚠️ No payload to send.")
+        if not target_uid:
             return
 
-        try:
-            payload = json.loads(payload_text)
-        except json.JSONDecodeError as e:
-            self.status_label.setText(f"⚠️ Invalid JSON: {e}")
-            return
+        probe_uid = "health-probe-oracle-1"  # ✅ always send to probe
 
-        # Inject selected universal_id as target if not already set
-        target = self.input_universal_id.text().strip()
-        if target:
-            payload.setdefault("target", target)
-            payload.setdefault("content", {})
-            payload["content"].setdefault("universal_id", target)
-            #folder to deliever to
-            folder = self.folder_selector.currentText()
-            payload["content"]["delivery"] = folder
+        payload = {
+            "type": "forward_command",
+            "timestamp": time.time(),
+            "content": {
+                "target_universal_id": probe_uid,
+                "folder": "incoming",
+                "command": {
+                    "type": "agent_status_report",
+                    "filetype": "msg",
+                    "content": {
+                        "target_universal_id": target_uid
+                    }
+                }
+            }
+        }
+
         try:
             response = requests.post(
                 url=MATRIX_HOST,
@@ -194,16 +439,67 @@ class MatrixCommandBridge(QWidget):
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
-                try:
-                    message = response.json().get("message", success_message)
-                except Exception:
-                    message = success_message
-                self.status_label.setText(f"✅ {message}")
-
+                print(f"[HEALTH-FORWARD] Probe sent to {probe_uid} for {target_uid}")
             else:
-                self.status_label.setText(f"❌ Matrix responded: {response.status_code}")
+                print(f"[HEALTH-FORWARD][FAIL] Matrix returned {response.status_code}")
         except Exception as e:
-            self.status_label.setText(f"❌ Failed to send payload: {e}")
+            print(f"[HEALTH-FORWARD][ERROR] {e}")
+
+    def send_payload_to_matrix(self, success_message="Payload delivered."):
+        payload_text = self.payload_editor.toPlainText().strip()
+        if not payload_text:
+            self.status_label.setText("⚠️ No payload to send.")
+            return
+
+        try:
+            raw_cmd = json.loads(payload_text)
+
+            # 🧠 Automatically set filetype if reflex-based
+            reflex_keywords = ["report", "status", "ping", "update", "heartbeat"]
+            cmd_type = raw_cmd.get("type", "").lower()
+
+            if not raw_cmd.get("filetype"):
+                if any(keyword in cmd_type for keyword in reflex_keywords) or cmd_type.startswith("agent_"):
+                    raw_cmd["filetype"] = "msg"  # Reflex-safe routing
+                else:
+                    raw_cmd["filetype"] = "cmd"  # Default fallback
+
+        except json.JSONDecodeError as e:
+
+            self.status_label.setText(f"⚠️ Invalid JSON: {e}")
+
+            return
+
+        target = self.input_universal_id.text().strip()
+        if not target:
+            self.status_label.setText("⚠️ No target selected.")
+            return
+
+        # Build forward_command payload
+        fwd_payload = {
+            "type": "forward_command",
+            "timestamp": time.time(),
+            "content": {
+                "target_universal_id": target,
+                "command": raw_cmd,
+                "folder": self.folder_selector.currentText()
+            }
+        }
+
+        try:
+            response = requests.post(
+                url=MATRIX_HOST,
+                json=fwd_payload,
+                cert=CLIENT_CERT,
+                verify=False,
+                timeout=REQUEST_TIMEOUT
+            )
+            if response.status_code == 200:
+                self.status_label.setText(f"✅ {success_message}")
+            else:
+                self.status_label.setText(f"❌ Matrix error: {response.status_code}")
+        except Exception as e:
+            self.status_label.setText(f"❌ Connection failed: {e}")
 
     def handle_alarm_message(self, msg):
         alarm = json.loads(msg)
@@ -212,34 +508,124 @@ class MatrixCommandBridge(QWidget):
 
     def view_logs(self):
         universal_id = self.log_input.text().strip().split(" ")[0]
+        if not universal_id:
+            print("[LOG] ❌ No universal_id set for log fetch.")
+            return
+
+        self.user_requested_log_view = True
+        print(f"[LOG] View Logs requested for: {universal_id}")
 
         payload = {
             "type": "get_log",
             "timestamp": time.time(),
             "content": {"universal_id": universal_id}
         }
-        try:
-            response = requests.post(
-                url=MATRIX_HOST,
-                json=payload,
-                cert=CLIENT_CERT,
-                verify=False,
-                timeout=REQUEST_TIMEOUT
-            )
-            if response.status_code == 200:
-                data = response.json()
-                logs = data.get("log", "[NO LOG DATA RECEIVED]")
-                self.log_text.setPlainText(logs)
-                if self.auto_scroll_checkbox.isChecked():
-                    self.log_text.moveCursor(self.log_text.textCursor().End)
-            else:
+
+        def threaded_log_fetch():
+            try:
+                print(f"[THREAD] Sending log request for {universal_id}")
+                response = requests.post(
+                    url=MATRIX_HOST,
+                    json=payload,
+                    cert=CLIENT_CERT,
+                    verify=False,
+                    timeout=REQUEST_TIMEOUT
+                )
+                print(f"[THREAD] Response code: {response.status_code}")
+
                 try:
-                    message = response.json().get("message", response.text)
-                except Exception:
-                    message = response.text
-                self.log_text.setPlainText(f"[MATRIX ERROR] Could not retrieve logs for {universal_id}:{message}")
-        except Exception as e:
-            self.log_text.setPlainText(f"[ERROR] Failed to connect to Matrix:\n{str(e)}")
+                    parsed_json = response.json()
+                except Exception as json_error:
+                    print(f"[THREAD] JSON parse failed: {json_error}")
+                    parsed_json = {}
+
+                result = {
+                    "status_code": response.status_code,
+                    "text": response.text,
+                    "json": parsed_json
+                }
+
+                self.log_ready.emit(result, universal_id)  # 🔥 Safe signal to GUI thread
+
+            except Exception as e:
+                print(f"[THREAD][EXCEPTION] {e}")
+                QTimer.singleShot(0, lambda: self.log_text.setPlainText(f"[ERROR] {str(e)}"))
+
+        threading.Thread(target=threaded_log_fetch, daemon=True).start()
+
+    def _handle_logs_result(self, result, uid):
+        print(f"[LOG] 🔄 _handle_logs_result called for {uid}")
+
+        log_data = result.get("json", {}).get("log")
+        if not log_data:
+            log_data = result.get("text", "")
+            print(f"[WARN] Fallback to raw text for {uid}")
+
+        if not log_data:
+            print(f"[ERROR] No log data found for {uid}")
+            self.log_text.setPlainText(f"[NO LOG DATA FOUND] for {uid}")
+            return
+
+        if isinstance(log_data, (dict, list)):
+            safe_log = json.dumps(log_data, indent=2)
+        else:
+            safe_log = str(log_data)
+
+        safe_log = safe_log.replace("\\n", "\n")
+        if len(safe_log) > 50000:
+            safe_log = safe_log[-50000:]
+
+        print(f"[UI] Rendering {len(safe_log)} characters for {uid}")
+        self.log_text.setVisible(True)
+        self.log_text.setPlainText(safe_log)
+        self.log_text.raise_()
+        self.log_text.repaint()
+        self.repaint()
+        if self.auto_scroll_checkbox.isChecked():
+            self.log_text.moveCursor(self.log_text.textCursor().End)
+            self.log_text.ensureCursorVisible()
+
+
+    def build_log_panel(self):
+        box = QGroupBox("📡 Agent Intel Logs")
+        layout = QVBoxLayout()
+
+        self.log_input = QLineEdit()
+        self.log_input.setPlaceholderText("Enter agent universal_id to view logs")
+        self.log_input.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
+
+        view_btn = QPushButton("View Logs")
+        view_btn.clicked.connect(self.view_logs)
+        print("[DEBUG] View Logs button wired.")
+        view_btn.setStyleSheet("background-color: #111; color: #33ff33; border: 1px solid #00ff66;")
+
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setMinimumHeight(300)
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #000;
+                color: #33ff33;
+                font-family: Courier;
+                font-size: 13px;
+                padding: 10px;
+                border: 1px solid #00ff66;
+            }
+        """)
+
+        self.auto_scroll_checkbox = QCheckBox("Auto-scroll logs")
+        self.auto_scroll_checkbox.setChecked(True)
+        self.auto_scroll_checkbox.setStyleSheet("color: #33ff33; font-family: Courier;")
+        layout.addWidget(self.auto_scroll_checkbox)
+
+
+        layout.addWidget(self.log_input)
+        layout.addWidget(view_btn)
+        layout.addWidget(self.log_text)
+        box.setLayout(layout)
+        return box
+
+
 
     def start_tree_autorefresh(self, interval=10):
         self.tree_timer = QTimer(self)
@@ -260,46 +646,56 @@ class MatrixCommandBridge(QWidget):
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
-                self.status_label.setText("🟢 Connected")
+                self.status_label_matrix.setText("🟢 Connected")
                 tree = response.json().get("tree", {})
                 self.render_tree_to_gui(tree)
             else:
-                self.status_label.setText("🔴 Disconnected")
+                self.status_label_matrix.setText("🔴 Disconnected")
 
 
         except Exception:
-            self.status_label.setText("🔴 Disconnected")
+            self.status_label_matrix.setText("🔴 Disconnected")
 
         self.tree_stack.setCurrentIndex(1)  # Show tree
 
     def render_tree_to_gui(self, tree):
-        output = self.render_tree(tree)
+        output = self.render_tree(tree)  # (line, universal_id, color)
         self.tree_display.clear()
-        # Flat universal_id lookup for handle_tree_click
+
         self.agent_tree_flat = {}
 
         def recurse_flatten(node):
             if not isinstance(node, dict):
                 return
-            if "universal_id" in node:
-                self.agent_tree_flat[node["universal_id"]] = node
+            uid = node.get("universal_id")
+            if uid:
+                self.agent_tree_flat[uid] = node
             for child in node.get("children", []):
                 recurse_flatten(child)
 
         recurse_flatten(tree)
 
+        # 🧠 Add timestamp header
         header = QListWidgetItem(f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]")
         header.setForeground(QColor("#888"))
+        header.setFlags(header.flags() & ~Qt.ItemIsSelectable)  # make header unclickable
         self.tree_display.addItem(header)
+
+        # 🔍 Track current UID for reselect
+        current_uid = self.input_universal_id.text().strip()
+
         for line, universal_id, color in output:
             item = QListWidgetItem(line)
             item.setData(Qt.UserRole, universal_id)
-            item.setForeground(QColor("#33ff33") if color == "green" else QColor("#ff5555") if color == "red" else QColor("#33ff33"))
+            item.setForeground(QColor("#33ff33") if color == "green" else QColor("#ff5555"))
             self.tree_display.addItem(item)
 
-        if universal_id == self.input_universal_id.text().strip():
-            self.tree_display.setCurrentItem(item)
-            self.tree_display.scrollToItem(item)
+
+            if universal_id == current_uid:
+                self.tree_display.setCurrentItem(item)
+                self.tree_display.scrollToItem(item)
+
+
 
     def render_tree(self, node, indent="", is_last=True):
         output = []
@@ -324,9 +720,17 @@ class MatrixCommandBridge(QWidget):
             icon = "❓"
 
         die_path = os.path.join("comm", universal_id, "incoming", "die")
+        tomb_path = os.path.join("comm", universal_id, "incoming", "tombstone")
+
         if os.path.exists(die_path):
-            universal_id += " ⚠️ [DOWN]"
+            universal_id += " 💤"
+            color = "gray"
+
+        elif os.path.exists(tomb_path):
+            universal_id += " ⚰️"
             color = "red"
+
+
 
         if node.get("confirmed"):
             color = "green"
@@ -514,7 +918,7 @@ class MatrixCommandBridge(QWidget):
                 "universal_id": "reboot-1",
                 "filesystem": {},
                 "config": {
-                    "confirm": "YES",  # ✅ REQUIRED
+                    "confirm": "YES",
                     "shutdown_all": True,
                     "reboot_matrix": True
                 }
@@ -555,6 +959,7 @@ class MatrixCommandBridge(QWidget):
                 "target_universal_id": universal_id
             }
         }
+
         print(payload)
         self.send_post_to_matrix(payload, f"🗑 Deleted {universal_id}")
 
@@ -585,11 +990,11 @@ class MatrixCommandBridge(QWidget):
                 timeout=REQUEST_TIMEOUT
             )
             if response.status_code == 200:
-                self.status_label.setText("🟢 Connected")
+                self.status_label_matrix.setText("🟢 Matrix: Connected")
             else:
-                self.status_label.setText("🔴 Disconnected")
+                self.status_label_matrix.setText("🔴 Matrix: Disconnected")
         except Exception:
-            self.status_label.setText("🔴 Disconnected")
+            self.status_label_matrix.setText("🔴 Matrix: Disconnected")
 
     def build_tree_panel(self):
         box = QGroupBox("🧠 Hive Tree View")
@@ -669,44 +1074,6 @@ class MatrixCommandBridge(QWidget):
         box.setLayout(layout)
         return box
 
-    def build_log_panel(self):
-        box = QGroupBox("📡 Agent Intel Logs")
-        layout = QVBoxLayout()
-
-        self.log_input = QLineEdit()
-        self.log_input.setPlaceholderText("Enter agent universal_id to view logs")
-        self.log_input.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
-
-        view_btn = QPushButton("View Logs")
-        view_btn.clicked.connect(self.view_logs)
-        view_btn.setStyleSheet("background-color: #111; color: #33ff33; border: 1px solid #00ff66;")
-
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setMinimumHeight(300)
-        self.log_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #000;
-                color: #33ff33;
-                font-family: Courier;
-                font-size: 13px;
-                padding: 10px;
-                border: 1px solid #00ff66;
-            }
-        """)
-
-        self.auto_scroll_checkbox = QCheckBox("Auto-scroll logs")
-        self.auto_scroll_checkbox.setChecked(True)
-        self.auto_scroll_checkbox.setStyleSheet("color: #33ff33; font-family: Courier;")
-        layout.addWidget(self.auto_scroll_checkbox)
-
-
-        layout.addWidget(self.log_input)
-        layout.addWidget(view_btn)
-        layout.addWidget(self.log_text)
-        box.setLayout(layout)
-        return box
-
     def handle_resume_agent(self):
         universal_id = self.input_universal_id.text().strip()
         if not universal_id:
@@ -714,14 +1081,14 @@ class MatrixCommandBridge(QWidget):
             return
 
         payload = {
-            "type": "resume",
+            "type": "resume_subtree",
             "timestamp": time.time(),
             "content": {
-                "targets": [universal_id]
+                "universal_id": universal_id
             }
         }
 
-        self.send_post_to_matrix(payload, f"Resume sent to {universal_id}")
+        self.send_post_to_matrix(payload, f"Resume signal sent to subtree under {universal_id}")
 
     def handle_shutdown_agent(self):
         universal_id = self.input_universal_id.text().strip()
@@ -730,37 +1097,126 @@ class MatrixCommandBridge(QWidget):
             return
 
         payload = {
-            "type": "stop",
+            "type": "shutdown_subtree",
             "timestamp": time.time(),
             "content": {
-                "targets": [universal_id]
+                "universal_id": universal_id
             }
         }
 
-        self.send_post_to_matrix(payload, f"Shutdown signal sent to {universal_id}")
+        self.send_post_to_matrix(payload, f"Shutdown signal sent to subtree under {universal_id}")
 
+            #INJECT AGENT INTO TREE
     def handle_inject_to_tree(self):
-        target = self.input_target_universal_id.text().strip()
-        universal_id = self.input_universal_id.text().strip()
-        agent_name = self.input_agent_name.text().strip()
-        delegated = [x.strip() for x in self.input_delegated.text().split(",") if x.strip()]
+        import base64, os, hashlib, json, random
+        from PyQt5.QtWidgets import QFileDialog
 
-        if not target or not universal_id or not agent_name:
-            self.status_label.setText("⚠️ Missing fields.")
+        def random_suffix(length=5):
+            return ''.join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=length))
+
+        file_name, _ = QFileDialog.getOpenFileName(self, "Select Agent or Directive", "",
+                                                   "Python or JSON Files (*.py *.json)")
+        if not file_name:
             return
 
-        payload = {
-            "type": "inject",
-            "timestamp": time.time(),
-            "content": {
-                "target_universal_id": target,
-                "universal_id": universal_id,
-                "agent_name": agent_name,
-                "delegated": delegated
-            }
-        }
+        suffix = "_" + random_suffix(5)
+        payload = None
 
-        self.send_post_to_matrix(payload, f"Injected {agent_name} under {target}")
+        # ──────────────────────────────
+        # 🧠 CASE: JSON TEAM FILE
+        # ──────────────────────────────
+        if file_name.endswith(".json"):
+            with open(file_name) as f:
+                data = json.load(f)
+
+            def recurse_suffix(node):
+                if "universal_id" in node:
+                    node["universal_id"] += suffix
+                for child in node.get("children", []):
+                    recurse_suffix(child)
+                return node
+
+            data = recurse_suffix(data)
+            self.inject_sources_into_tree(data)
+
+            payload = {
+                "type": "inject",
+                "timestamp": time.time(),
+                "content": {
+                    "target_universal_id": self.input_target_universal_id.text().strip(),
+                    "subtree": data
+                }
+            }
+
+        # ──────────────────────────────
+        # 🧠 CASE: SINGLE .py AGENT
+        # ──────────────────────────────
+        elif file_name.endswith(".py"):
+            with open(file_name, "rb") as f:
+                code = f.read()
+            encoded = base64.b64encode(code).decode()
+            sha = hashlib.sha256(code).hexdigest()
+
+            agent_name = os.path.basename(file_name).replace(".py", "")
+            base_path = os.path.dirname(file_name)
+            directive_path = os.path.join(base_path, "deploy_directive.py")
+
+            if os.path.exists(directive_path):
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("deploy_directive", directive_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                directive = module.directive
+            else:
+                directive = {}
+
+
+            if "name" not in directive:
+                directive["name"] = agent_name
+
+            if "universal_id" not in directive:
+                directive["universal_id"] = agent_name  # default fallback
+
+
+            # Ensure universal_id exists and suffix it
+            uid = directive.get("universal_id", agent_name)
+            directive["universal_id"] = uid + suffix
+            directive.setdefault("filesystem", {})
+            directive.setdefault("config", {})
+            directive["source_payload"] = {
+                "payload": encoded,
+                "sha256": sha
+            }
+
+            payload = {
+                "type": "inject",
+                "timestamp": time.time(),
+                "content": {
+                    "target_universal_id": self.input_target_universal_id.text().strip(),
+                    **directive
+                }
+            }
+            print("🧠 INJECT PAYLOAD:", json.dumps(payload, indent=2))
+
+        if payload:
+            self.send_post_to_matrix(payload, f"Injected {payload['content'].get('agent_name', 'team')} ✅")
+
+    def inject_sources_into_tree(self, node):
+        name = node.get("name")
+        if name:
+            path = os.path.join("inject_payloads", f"{name}.py")
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    code = f.read()
+                    encoded = base64.b64encode(code).decode()
+                    sha = hashlib.sha256(code).hexdigest()
+                    node["source_payload"] = {
+                        "payload": encoded,
+                        "sha256": sha
+                    }
+        for child in node.get("children", []):
+            self.inject_sources_into_tree(child)
+
 
     def handle_call_reaper(self):
         universal_id = self.input_universal_id.text().strip()
@@ -795,20 +1251,46 @@ class MatrixCommandBridge(QWidget):
         self.send_post_to_matrix(payload, f"Subtree delete issued for {universal_id}")
 
     def send_post_to_matrix(self, payload, success_message):
-        try:
-            response = requests.post(
+        @run_in_thread(
+            callback=lambda resp: self.status_label.setText(f"✅ {success_message}") if resp.status_code == 200
+            else self.status_label.setText(f"❌ Matrix error: {resp.status_code}"),
+            error_callback=lambda err: self.status_label.setText(f"❌ Connection failed: {err}")
+        )
+        def task():
+            return requests.post(
                 url=MATRIX_HOST,
                 json=payload,
                 cert=CLIENT_CERT,
                 verify=False,
                 timeout=REQUEST_TIMEOUT
             )
-            if response.status_code == 200:
-                self.status_label.setText(f"✅ {success_message}")
-            else:
-                self.status_label.setText(f"❌ Matrix error: {response.status_code}")
-        except Exception as e:
-            self.status_label.setText(f"❌ Connection failed: {e}")
+
+        task()
+
+
+    def open_file_picker(self):
+        QTimer.singleShot(0, self._open_picker_blocking)
+
+    def _open_picker_blocking(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "Select File", "", "Python or JSON Files (*.py *.json)")
+        if file_name:
+            self.process_injection_file(file_name)
+
+    def post_async(self, payload, on_success=None, on_fail=None):
+        def worker():
+            try:
+                response = requests.post(MATRIX_HOST, json=payload, cert=CLIENT_CERT, verify=False, timeout=REQUEST_TIMEOUT)
+                if response.status_code == 200 and on_success:
+                    QTimer.singleShot(0, lambda: on_success(response))
+                elif on_fail:
+                    QTimer.singleShot(0, lambda: on_fail(response))
+            except Exception as e:
+                if on_fail:
+                    QTimer.singleShot(0, lambda: on_fail(e))
+        threading.Thread(target=worker, daemon=True).start()
+
+
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

@@ -6,19 +6,22 @@
 # ║   Forged in the signal of Hive Zero | v2.1 Directive   ║
 # ║ Accepts: scan / detect / respawn / delay / confirm     ║
 # ╚════════════════════════════════════════════════════════╝
-import sys
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import time
 import json
 import uuid
 from datetime import datetime
 
-from agent.core.utils.swarm_sleep import interruptible_sleep
-from agent.core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
 
-class SentinelAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
         config = command_line_args.get("config", {})
         self.scan_path = config.get("scan_path", "/tmp")
         self.age_threshold_days = config.get("age_threshold_days", 90)
@@ -113,8 +116,6 @@ class SentinelAgent(BootAgent):
         else:
             self.log(f"[SENTINEL] Unknown or malformed action: {action}")
 
-
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = SentinelAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

@@ -1,16 +1,20 @@
-# ServiceDirectoryAgent with inotify-triggered updates
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import json
 import time
 import threading
-from agent.core.boot_agent import BootAgent
+from core.boot_agent import BootAgent
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.utils.swarm_sleep import interruptible_sleep
 
-class ServiceRegistryAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
         self.directory = {}
         self.tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
         self.incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
@@ -131,7 +135,6 @@ class ServiceRegistryAgent(BootAgent):
         observer.join()
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = ServiceRegistryAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()
 

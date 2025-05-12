@@ -1,18 +1,22 @@
 # 🧠 OracleAgent — MatrixSwarm Prototype
 # Purpose: Responds to `.prompt` files dropped into its payload folder
 # Returns OpenAI-generated responses into `outbox/`
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import json
 import time
 import threading
 from openai import OpenAI
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
-from agent.core.mixin.broadcast_listener import BroadcastListenerMixin
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class OracleAgent(BootAgent, BroadcastListenerMixin):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.client = OpenAI(api_key=self.api_key)
         self.prompt_path = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
@@ -182,9 +186,6 @@ class OracleAgent(BootAgent, BroadcastListenerMixin):
             except Exception as e:
                 self.log(f"[ORACLE][REPLY-FAIL] Failed to deliver reply: {e}")
 
-
-
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    oracle = OracleAgent(path_resolution, command_line_args)
-    oracle.boot()
+    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent.boot()

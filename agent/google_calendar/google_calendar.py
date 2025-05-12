@@ -2,22 +2,25 @@
 # ║            📅 GOOGLE CALENDAR AGENT (v1) — SCOUT           ║
 # ║   Scans calendar events and relays to swarm in real time  ║
 # ╚════════════════════════════════════════════════════════════╝
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import json
 import time
 import datetime
-from datetime import datetime, timedelta, timezone
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta, timezone
 
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
 
-class GoogleCalendarAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
         config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
         self.calendar_id = config.get("calendar_id", "primary")
         self.interval = int(config.get("interval", 300))
@@ -82,6 +85,5 @@ class GoogleCalendarAgent(BootAgent):
             self.log(f"[CALENDAR][ERROR] Failed to fetch events: {e}")
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = GoogleCalendarAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

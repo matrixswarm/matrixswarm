@@ -16,8 +16,7 @@ class BlankAgent(BootAgent):
 
     def worker(self):
         self.log("[BLANK] Worker loop alive.")
-
-            interruptible_sleep(self, 10)
+        interruptible_sleep(self, 10)
 
 if __name__ == "__main__":
     path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))

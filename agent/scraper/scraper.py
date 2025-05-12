@@ -1,16 +1,21 @@
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import time
 import json
 import requests
 from bs4 import BeautifulSoup
 import hashlib
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class ScraperAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
-        config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
+        config = self.tree_node.get("config", {})
         self.watch_dir = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
         self.report_to = config.get("report_to", "mailman-1")
         self.output_dir = os.path.join(self.path_resolution["comm_path"], self.report_to, "payload")
@@ -80,6 +85,5 @@ class ScraperAgent(BootAgent):
             self.log(f"[SCRAPER][ERROR] Could not fetch {url}: {e}")
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = ScraperAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

@@ -7,23 +7,26 @@
 # ║ Accepts: scan / detect / respawn / delay / confirm     ║
 # ╚════════════════════════════════════════════════════════╝
 # 🧭 UpdateSentinelAgent — Hardened Battlefield Version
-import sys
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
-import time
 import json
 import threading
 import traceback
 
-from agent.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
-from agent.core.utils.swarm_sleep import interruptible_sleep
-from agent.core.boot_agent import BootAgent
+from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
+from core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
 
-class SentinelAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
         self.path_resolution=path_resolution
         self.command_line_args=command_line_args
-        config = tree_node.get("config", {})
+        config = self.tree_node.get("config", {})
         self.watching = config.get("watching", "the Matrix")
         self.universal_id = config.get("universal_id", None)
         self.target_node = None
@@ -113,6 +116,5 @@ class SentinelAgent(BootAgent):
         return None
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = SentinelAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

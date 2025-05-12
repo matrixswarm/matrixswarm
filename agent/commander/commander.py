@@ -1,18 +1,20 @@
 # Matrix: An AI OS System
 # Copyright (c) 2025 Daniel MacDonald
 # Licensed under the MIT License. See LICENSE file in project root for details.
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import time
 import json
 
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-
-class CommanderAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
-        self.orbits = {}
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
 
     def pre_boot(self):
         self.log("[COMMANDER] Pre-boot check passed.")
@@ -91,15 +93,5 @@ class CommanderAgent(BootAgent):
         return False
 
 if __name__ == "__main__":
-    # label = None
-    # if "--label" in sys.argv:
-    #   label = sys.argv[sys.argv.index("--label") + 1]
-
-    pid = os.getpid()
-
-    # current directory of the agent script or it wont be able to find itself
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-
-    agent = CommanderAgent(path_resolution, command_line_args)
-
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

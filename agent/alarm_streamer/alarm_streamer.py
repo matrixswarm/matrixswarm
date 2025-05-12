@@ -1,3 +1,5 @@
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
 import eventlet
 eventlet.monkey_patch()
 
@@ -5,7 +7,6 @@ import threading
 import os
 import json
 import time
-import ssl
 from flask import Flask
 from flask_socketio import SocketIO
 from agent.core.utils.swarm_sleep import interruptible_sleep
@@ -27,12 +28,12 @@ def handle_connect():
 def handle_disconnect():
     print("[WS] Client disconnected")
 
-class AlarmStreamerAgent(BootAgent):
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
 
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
 
-        config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
+        config = self.tree_node.get("config", {}) if 'tree_node' in globals() else {}
         self.alarm_path = os.path.join(self.path_resolution["comm_path"], "alarm", "incoming")
         os.makedirs(self.alarm_path, exist_ok=True)
         self.seen_alarms = set()
@@ -121,6 +122,5 @@ class AlarmStreamerAgent(BootAgent):
             self.log(f"[RELAY-ERROR] Reflex walk failed: {e}")
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = AlarmStreamerAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

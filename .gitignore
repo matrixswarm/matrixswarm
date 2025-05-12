@@ -42,3 +42,21 @@ To OpenAI.txt
 *.sj
 *.sh
 *.bak
+
+# TLS certs
+socket_certs/
+https_certs/
+*.crt
+*.key
+*.csr
+*.srl
+
+# Swarm logs and runtime traces
+comm/**/logs/
+*.log
+agent.log
+
+# Deploy/test junk
+*.bak
+*.sh
+deploy_directive.py

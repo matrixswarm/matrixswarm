@@ -1,9 +1,15 @@
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import time
-from agent.core.boot_agent import BootAgent
+from core.boot_agent import BootAgent
 
-class RebootAgent(BootAgent):
-    def worker_pre(self):
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
 
         if shutdown_all:
             self.log("[REBOOT] Triggering swarm-wide kill via bootloader.")
@@ -48,25 +54,5 @@ class RebootAgent(BootAgent):
         return False
 
 if __name__ == "__main__":
-    path_resolution = {
-        "pod_path_resolved": os.path.dirname(os.path.abspath(__file__)),
-        "comm_path_resolved": "comm/reboot-1"
-    }
-
-    command_line_args = {
-        "universal_id": "reboot-1",
-        "agent_name": "reboot_agent",
-        "install_name": "manual-reboot-call"
-    }
-
-    tree_node = {
-        "config": {
-            "confirm": "YES",
-            "shutdown_all": True,
-            "reboot_matrix": True
-        }
-    }
-
-    agent = RebootAgent(path_resolution, command_line_args)
-    agent.tree_node = tree_node
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

@@ -1,4 +1,8 @@
 #Authored by Daniel F MacDonald and ChatGPT
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 from flask import Flask, request, jsonify
 import ssl
 import os
@@ -6,11 +10,12 @@ import json
 import threading
 import time
 
-from agent.core.boot_agent import BootAgent
+from core.boot_agent import BootAgent
 
-class MatrixHTTPS(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
         self.app = Flask(__name__)
         self.port = 65431
         self.payload_dir = os.path.join(path_resolution['comm_path'], "matrix", "payload")
@@ -68,6 +73,60 @@ class MatrixHTTPS(BootAgent):
 
         @self.app.route("/matrix", methods=["POST"])
         def receive_command():
+            try:
+                payload = request.get_json()
+                ctype = payload.get("type")
+                content = payload.get("content", {})
+                timestamp = payload.get("timestamp", time.time())
+
+                self.log(f"[MATRIX-HTTPS][RECEIVED] {ctype} → {content}")
+
+                # === 1. Matrix-HTTPS native commands ===
+                if ctype == "get_log":
+                    uid = content.get("universal_id")
+                    if not uid:
+                        return jsonify({"status": "error", "message": "Missing universal_id"}), 400
+
+                    log_path = os.path.join(self.path_resolution["comm_path"], uid, "logs", "agent.log")
+                    if os.path.exists(log_path):
+                        try:
+                            with open(log_path, "r", errors="ignore") as f:  # Ignore encoding issues
+                                lines = f.readlines()[-100:]  # Return the last 100 lines (prevent memory overload)
+                                return jsonify({"status": "ok", "log": "".join(lines)}), 200
+                        except Exception as e:
+                            return jsonify({"status": "error", "message": str(e)}), 500
+
+                    return jsonify({"status": "error", "message": f"Log not found for {uid}"}), 404
+
+                elif ctype == "list_tree":
+                    tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
+                    if os.path.exists(tree_path):
+                        with open(tree_path) as f:
+                            return jsonify({"status": "ok", "tree": json.load(f)})
+                    return jsonify({"status": "error", "message": "agent_tree_master.json not found"}), 404
+
+                elif ctype == "ping":
+                    return jsonify({"status": "ok"}), 200
+
+                # === 2. All other commands go to Matrix ===
+                target = "matrix"
+                target_dir = os.path.join(self.path_resolution["comm_path"], target, "incoming")
+                os.makedirs(target_dir, exist_ok=True)
+
+                fname = f"{ctype}_{int(timestamp)}.cmd"
+                fpath = os.path.join(target_dir, fname)
+
+                with open(fpath, "w") as f:
+                    json.dump(payload, f, indent=2)
+
+                self.log(f"[MATRIX-HTTPS][FORWARDED] {ctype} → {fpath}")
+                return jsonify({"status": "ok", "message": f"{ctype} routed to Matrix"})
+
+            except Exception as e:
+                self.log(f"[MATRIX-HTTPS][ERROR] {e}")
+                return jsonify({"status": "error", "message": str(e)}), 500
+
+        def receive_commasdfsdfsdnd():
 
             try:
                 payload = request.get_json()
@@ -81,7 +140,7 @@ class MatrixHTTPS(BootAgent):
 
                 if ctype == "spawn":
                     self.log(f"'[MATRIX_HTTPS][PAYLOAD] Received Spawn command. Payload: ' {payload}")
-                    #from agent.core.core_spawner import spawn_agent
+                    #from core.core_spawner import spawn_agent
                     #spawn_agent("matrix", str(uuid.uuid4()), content.get("agent_name"), content.get("universal_id"), "gui", directive=content)
                     print('[MATRIX_HTTPS][PAYLOAD] Received Spawn command')
                 elif ctype == "inject":
@@ -220,20 +279,6 @@ class MatrixHTTPS(BootAgent):
                             os.remove(tombstone_path)
                             self.log(f"[MATRIX][RESUME] Removed tombstone for {universal_id}")
 
-                elif ctype in {"restart_subtree", "delete_node", "delete_subtree"}:
-                    payload = {
-                        "type": ctype,
-                        "timestamp": time.time(),
-                        "content": content
-                    }
-                    fname = f"{ctype}_{int(time.time())}.json"
-                    fpath = os.path.join(self.payload_dir, fname)
-
-                    with open(fpath, "w") as f:
-                        json.dump(payload, f, indent=2)
-
-                    self.log(f"[MATRIX-HTTPS][QUEUED] {ctype} → {fpath}")
-                    return jsonify({"status": "ok", "message": f"{ctype} routed to Matrix"})
 
                 elif ctype == "shutdown_subtree":
                     target_id = content.get("universal_id")
@@ -241,7 +286,7 @@ class MatrixHTTPS(BootAgent):
                         return jsonify({"status": "error", "message": "Missing universal_id"}), 400
                     try:
 
-                        from agent.core.tree_parser import TreeParser
+                        from core.tree_parser import TreeParser
                         tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
                         tp = TreeParser.load_tree(tree_path)
                         subtree_ids = tp.get_subtree_nodes(target_id)
@@ -266,7 +311,7 @@ class MatrixHTTPS(BootAgent):
                         return jsonify({"status": "error", "message": "Missing universal_id"}), 400
 
                     try:
-                        from agent.core.tree_parser import TreeParser
+                        from core.tree_parser import TreeParser
                         tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
                         tp = TreeParser.load_tree(tree_path)
                         subtree_ids = tp.get_subtree_nodes(target_id)
@@ -291,6 +336,22 @@ class MatrixHTTPS(BootAgent):
                     except Exception as e:
                         self.log(f"[MATRIX-HTTPS][ERROR] Restart Subtree: {str(e)}")
                         return jsonify({"status": "error", "message": str(e)}), 500
+
+                elif ctype in {"restart_subtree", "delete_node", "delete_subtree"}:
+                    payload = {
+                        "type": ctype,
+                        "timestamp": time.time(),
+                        "content": content
+                    }
+                    fname = f"{ctype}_{int(time.time())}.json"
+                    fpath = os.path.join(self.payload_dir, fname)
+
+                    with open(fpath, "w") as f:
+                        json.dump(payload, f, indent=2)
+
+                    self.log(f"[MATRIX-HTTPS][QUEUED] {ctype} → {fpath}")
+                    return jsonify({"status": "ok", "message": f"{ctype} routed to Matrix"})
+
 
                 elif ctype == "get_log":
                     self.log(f"[MATRIX-HTTPS][CMD][GET-LOG] {payload}")
@@ -346,12 +407,6 @@ class MatrixHTTPS(BootAgent):
 
                 return jsonify({"status": "ok", "message": f"Command {ctype} processed."})
 
-
-
-            except Exception as e:
-                self.log(f"[CMD] Error processing command: {e}")
-                return jsonify({"status": "error", "message": str(e)}), 500
-
             except Exception as e:
 
                 self.log(f"[ERROR] Command handling failed: {str(e)}")
@@ -361,16 +416,12 @@ class MatrixHTTPS(BootAgent):
     def run_server(self):
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
 
-        context.load_verify_locations(cafile="certs/rootCA.pem")
+        context.load_verify_locations(cafile="https_certs/rootCA.pem")
         context.verify_mode = ssl.CERT_REQUIRED
-        context.load_cert_chain(certfile="certs/server.fullchain.crt", keyfile="certs/server.key")
+        context.load_cert_chain(certfile="https_certs/server.fullchain.crt", keyfile="https_certs/server.key")
         self.log(f"[HTTPS] Listening on port {self.port}")
         self.app.run(host="0.0.0.0", port=self.port, ssl_context=context)
 
 if __name__ == "__main__":
-
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-
-    agent = MatrixHTTPS(path_resolution, command_line_args)
-
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

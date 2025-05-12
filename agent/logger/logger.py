@@ -1,13 +1,16 @@
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import json
 import time
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class LoggerAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
-        self.orbits = {}
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
 
     def worker_pre(self):
         self.log("[LOGGER] Booted and ready for timestamp duty.")
@@ -42,6 +45,5 @@ class LoggerAgent(BootAgent):
         self.log(f"[COMMAND] Received command: {command}")
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = LoggerAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

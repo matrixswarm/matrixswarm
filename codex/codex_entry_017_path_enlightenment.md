@@ -14,7 +14,7 @@ Thus was forged:
 A unified, boot-safe procedure that:
 
 - Injects agent and root paths into `sys.path`
-- Ensures `agent.core` modules are visible *before* imports
+- Ensures `core` modules are visible *before* imports
 - Grants agents visibility to their shared ancestry
 - Prevents boot-time confusion, even inside `/pod/{uuid}/run`
 
@@ -38,7 +38,7 @@ if root_path and root_path not in sys.path:
 Then:
 
 ```python
-from agent.core.path_resolver import patch_sys_path
+from core.path_resolver import patch_sys_path
 patch_sys_path(path_resolution)
 ```
 

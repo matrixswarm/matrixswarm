@@ -275,7 +275,7 @@ shell
 
 #### 1. Create the Agent Code
 ```python
-from agent.core.boot_agent import BootAgent
+from core.boot_agent import BootAgent
 
 class MyAgent(BootAgent):
     def worker(self):

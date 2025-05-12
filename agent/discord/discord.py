@@ -2,6 +2,10 @@
 # ║                  📡 DISCORD AGENT V3 📡                  ║
 # ║     Matrix-Compatible · Swarm Speaker · Relay-Class     ║
 # ╚══════════════════════════════════════════════════════════╝
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import threading
 import json
@@ -9,19 +13,18 @@ import discord as discord_real
 from discord.ext import commands
 import asyncio
 
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class DiscordAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
         super().__init__(path_resolution, command_line_args, tree_node)
-
 
         self.discord_client = None
         self.bot = None
 
         # Inject full tree_node so BootAgent sees config
-        self.directives = tree_node if 'tree_node' in globals() else {}
+        self.directives = self.tree_node
 
         self.inbox_paths=['incoming']
         path = os.path.join(path_resolution["comm_path_resolved"], "incoming")
@@ -123,6 +126,5 @@ class DiscordAgent(BootAgent):
     #    self.send_message_to_platform(msg)
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = DiscordAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

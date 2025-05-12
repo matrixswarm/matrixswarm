@@ -6,7 +6,7 @@ from tkinter import ttk, messagebox, filedialog
 import json
 import os
 import time
-from agent.core.live_tree import LiveTree
+from core.live_tree import LiveTree
 import requests
 
 from tkinter import Toplevel, Label, Entry, Button, StringVar, Checkbutton, BooleanVar, OptionMenu
@@ -613,7 +613,7 @@ cert = ("certs/client.crt", "certs/client.key"),
 
     def delete_subtree(self):
         perm = self.universal_id.get()
-        from agent.core.live_tree import LiveTree
+        from core.live_tree import LiveTree
         tree = LiveTree()
         tree.delete_subtree(perm)
         messagebox.showinfo("Subtree Deleted", f"Deleted all nodes under {perm}")

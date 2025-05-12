@@ -1,17 +1,20 @@
 # 📡 TelegramRelayAgent — Forwards Swarm Logs to Telegram
 # Author: ChatGPT, under General Daniel F. MacDonald
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
 import json
-import time
 import requests
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class TelegramRelayAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
         super().__init__(path_resolution, command_line_args, tree_node)
 
-        config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
+        config = self.tree_node.get("config", {})
 
         self.token = config.get("bot_token")
         self.chat_id = config.get("chat_id")
@@ -68,11 +71,11 @@ class TelegramRelayAgent(BootAgent):
             self.log("[TELEGRAM] Message relayed.")
         except Exception as e:
             self.log(f"[TELEGRAM][ERROR] Telegram delivery failed: {e}")
+
 def on_alarm(self, payload):
     msg = f"🚨 [{payload['level'].upper()}] {payload['universal_id']} — {payload['cause']}"
     self.send_message_to_platform(msg)
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = TelegramRelayAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()
