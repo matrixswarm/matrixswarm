@@ -7,22 +7,16 @@ matrix_directive = {
         },
 
         "children": [
-                {
-                  "universal_id": "blank-agent-1",
-                  "name": "blank_agent",
-                  "config": {
-                    "role": "observer",
-                    "filesystem": {
-                        "folders": [],
+        {
+                "universal_id": "matrix-https",
+                "name": "matrix_https",
+                "delegated": [],
+                "app": "matrix-core",
+                "filesystem": {
+                    "folders": [],
                         "files": {}
-                    },
-                    "factories": {
-                      "alert.subscriber": {
-                        "levels": ["info"],
-                        "msg": "Hello, Matrix."
-                      }
                     }
-                  }
-                }
+                },
+
             ],
 }

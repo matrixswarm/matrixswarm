@@ -27,7 +27,7 @@ The result?
 ## ✅ The Fix
 
 - Bootstrap first
-- Patch path *before* you go reaching for `agent.core`
+- Patch path *before* you go reaching for `core`
 - Remember that agents are like clones: they spawn smart, but they boot dumb
 
 ---

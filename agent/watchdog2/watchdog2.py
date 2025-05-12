@@ -1,13 +1,19 @@
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import time
 import json
 import os
 
-from agent.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
-from agent.core.mixin.delegation import DelegationMixin
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
+from core.mixin.delegation import DelegationMixin
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class Watchdog2Agent(BootAgent, DelegationMixin):
+class Agent(BootAgent, DelegationMixin):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
 
     def __init__(self, path_resolution, command_line_args):
         super().__init__(path_resolution, command_line_args)
@@ -101,9 +107,6 @@ class Watchdog2Agent(BootAgent, DelegationMixin):
         except Exception as e:
             self.log(f"[CMD-ERROR] {e}")
 
-
 if __name__ == "__main__":
-
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = Watchdog2Agent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

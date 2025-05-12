@@ -6,25 +6,26 @@
 # ║  Accepts: .cmd / .json  |  Modes: soft/full   ║
 # ╚═══════════════════════════════════════════════╝
 
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 # DisposableReaperAgent.py
 import os
 import json
 import time
 import threading
 
-from agent.core.boot_agent import BootAgent
-#from agent.core.class_lib.processes.reaper import Reaper  # Import Big Reaperfrom agent.core.class_lib.processes.reaper import Reaper  # Big Reaper
-from agent.core.class_lib.processes.reaper_universal_id_handler import ReaperUniversalHandler  # PID Handler
+from core.boot_agent import BootAgent
+#from core.class_lib.processes.reaper import Reaper  # Import Big Reaperfrom core.class_lib.processes.reaper import Reaper  # Big Reaper
+from core.class_lib.processes.reaper_universal_id_handler import ReaperUniversalHandler  # PID Handler
 
-class ReaperAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        """
-        Initialize the ReaperAgent with the necessary configurations.
-        """
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
 
         # Load targets, kill ID, and initialize paths
-        config = tree_node.get("config", {})
+        config = self.tree_node.get("config", {})
 
         self.targets = command_line_args.get("targets") or config.get("kill_list", [])
         self.universal_ids = command_line_args.get("universal_ids") or config.get("universal_ids", {})
@@ -196,6 +197,5 @@ class ReaperAgent(BootAgent):
         self.log(f"[DISPOSABLE-REAPER] Mission report written: {report_path}")
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    agent = ReaperAgent(path_resolution, command_line_args)
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

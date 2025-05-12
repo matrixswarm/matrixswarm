@@ -5,21 +5,25 @@
 # ║     Forged in the core of Hive Zero | v3.0 Directive   ║
 # ║   ║
 # ╚════════════════════════════════════════════════════════╝
-import os
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import time
 import requests
 import json
 
-from agent.core.utils.swarm_sleep import interruptible_sleep
-from agent.core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
 
-class WatchdogAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
         self.failure_count = 0
 
     def worker_pre(self):
-        config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
+        config = self.tree_node.get("config", {}) if 'tree_node' in globals() else {}
         self.ping_url = config.get("ping_url", "https://matrixswarm.com")
         self.check_interval = config.get("check_interval_sec", 60)
         self.timeout = config.get("timeout_sec", 5)
@@ -68,15 +72,6 @@ class WatchdogAgent(BootAgent):
         elif self.alert_action == "log_only":
             self.log(f"[WATCHDOG][ALERT] (log_only): {json.dumps(alert)}")
 
-
 if __name__ == "__main__":
-    # label = None
-    # if "--label" in sys.argv:
-    #   label = sys.argv[sys.argv.index("--label") + 1]
-
-    # current directory of the agent script or it wont be able to find itself
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-
-    agent = WatchdogAgent(path_resolution, command_line_args)
-
+    agent = Agent(path_resolution, command_line_args, tree_node)
     agent.boot()

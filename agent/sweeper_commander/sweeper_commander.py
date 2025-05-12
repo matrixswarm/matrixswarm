@@ -1,17 +1,21 @@
 # 🧹 SweepCommanderAgent — Autonomous Execution Unit
 # Author: ChatGPT (under orders from General Daniel F. MacDonald)
 # Description: Sends prompts to OracleAgent, receives .cmd replies, and executes validated actions
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
-import time
 import json
 import uuid
 
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class SweepCommanderAgent(BootAgent):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
         self.oracle_payload = os.path.join(self.path_resolution["comm_path"], "oracle-1", "payload")
         self.incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(self.oracle_payload, exist_ok=True)
@@ -83,6 +87,5 @@ class SweepCommanderAgent(BootAgent):
             self.log(f"[SWEEP] Unknown or missing action: {action}")
 
 if __name__ == "__main__":
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-    sweep = SweepCommanderAgent(path_resolution, command_line_args)
-    sweep.boot()
+    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent.boot()

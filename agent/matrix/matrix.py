@@ -1,4 +1,7 @@
 
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
 # ╔════════════════════════════════════════════════════════╗
 # ║                   🧠 MATRIX AGENT 🧠                   ║
@@ -16,6 +19,8 @@
 # You were dressed as Data. I was the Captain. That’s all we know about each other.
 #He said something about agents… then started telling people to fork off.
 #I don’t know, something was up with that guy.
+import agent
+
 import os
 import time
 import glob
@@ -28,23 +33,20 @@ import copy
 import base64
 import shutil
 from string import Template
-from agent.core.boot_agent import BootAgent
-
-from agent.core.tree_parser import TreeParser
-from agent.core.mixin.delegation import DelegationMixin
-from agent.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
-from agent.core.class_lib.file_system.util.ensure_trailing_slash import EnsureTrailingSlash
-from agent.core.swarm_manager import SwarmManager  # adjust path to match
+from core.boot_agent import BootAgent
+from core.mixin.delegation import DelegationMixin
+from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
+from core.class_lib.file_system.util.ensure_trailing_slash import EnsureTrailingSlash
+from core.swarm_manager import SwarmManager  # adjust path to match
 from agent.reaper.reaper_factory import make_reaper_node
-from agent.core.class_lib.hive.kill_chain_lock_manager import KillChainLockManager
-from agent.core.utils.swarm_sleep import interruptible_sleep
-from agent.core.utils.tree_backup import backup_agent_tree
+from core.class_lib.hive.kill_chain_lock_manager import KillChainLockManager
+from core.utils.swarm_sleep import interruptible_sleep
+from core.utils.tree_backup import backup_agent_tree
+from core.tree_parser import TreeParser
 
-class MatrixAgent(DelegationMixin, BootAgent):
-
-    def __init__(self, path_resolution, command_line_args):
-
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent, DelegationMixin):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
 
         self.path_resolution=path_resolution
 
@@ -69,7 +71,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 "payload"
             )
 
-        #from agent.core.tree_disseminator import TreeDisseminator
+        #from core.tree_disseminator import TreeDisseminator
 
         #tree_path = os.path.join(
         #    self.path_resolution["comm_path"],
@@ -195,13 +197,12 @@ class MatrixAgent(DelegationMixin, BootAgent):
             print(f"[MATRIX:HTTPS-ERROR] Failed to dispatch command: {e}")
 
     #executing commands
-    def command_listener(self):
+    def command_listenerffffffffff(self):
         path = Template(self.path_resolution["incoming_path_template"])
         incoming_path = EnsureTrailingSlash.ensure_trailing_slash(
             path.substitute(universal_id=self.command_line_args["matrix"]))
 
-        payload_dir = self.path_resolution.get("payload_path") or os.path.join(self.path_resolution["comm_path"],
-                                                                               "matrix", "payload")
+        payload_dir = self.path_resolution.get("payload_path") or os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
         os.makedirs(payload_dir, exist_ok=True)
         archive_dir = os.path.join(os.path.dirname(payload_dir), "processed")
         os.makedirs(archive_dir, exist_ok=True)
@@ -305,7 +306,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
                 interruptible_sleep(self, 3)
 
     def route_payload_to_target(self, content):
-        from agent.core.tree_parser import TreeParser
+        from core.tree_parser import TreeParser
 
         target = content.get("target_universal_id")
         folder = content.get("delivery", "payload")
@@ -432,49 +433,143 @@ class MatrixAgent(DelegationMixin, BootAgent):
         self.log(
             f"[REPLACE] 🧨 Reaper dispatched for {kill_list} with pod={tombstone_pod}, comm={tombstone_comm}, cleanup_die={cleanup_die}")
 
-    def handle_kill_agent(self, content):
+    def cmd_delete_agent(self, content, packet):
+
+        target = content.get("target_universal_id")
+        if not target:
+            self.log("[DELETE_AGENT][ERROR] Missing target_universal_id in content.")
+            return
+
         tp = TreeParser.load_tree(self.tree_path)
         if tp is None:
-            self.log("[KILL][ERROR] Tree load failed, aborting kill.")
+            self.log("[DELETE_AGENT][ERROR] Tree load failed, aborting kill.")
             return
 
         original_tree = copy.deepcopy(tp.root)
-        kill_list = self.collect_kill_list(tp, content.get("target_universal_id"))
+        kill_list = self.collect_kill_list(tp, target)
+
         kcm = KillChainLockManager(tp)
         kcm.lock_targets(kill_list)
 
         if tp.root != original_tree:
             backup_dir = os.path.join(os.path.dirname(self.tree_path), "backups")
             os.makedirs(backup_dir, exist_ok=True)
-            backup_agent_tree(self.tree_path, backup_dir=backup_dir,
-                              replaced_node_id=content.get("target"),
-                              new_node_id="reaper-hot-" + str(int(time.time())))
+            backup_agent_tree(
+                self.tree_path,
+                backup_dir=backup_dir,
+                replaced_node_id=target,
+                new_node_id="reaper-hot-" + str(int(time.time()))
+            )
             tp.save_tree(self.tree_path)
-            self.log("[KILL] Tree modified — backup created and saved.")
+            self.log("[DELETE_AGENT] Tree modified — backup created and saved.")
         else:
-            self.log("[KILL] Tree unchanged — no backup or save needed.")
+            self.log("[DELETE_AGENT] Tree unchanged — no backup or save needed.")
 
         reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
         self.spawn_agent_direct(reaper_node["universal_id"], reaper_node["name"], reaper_node)
         self.delegation_refresh()
-        self.log(f"[KILL] Reaper dispatched for {kill_list}")
+        self.log(f"[DELETE_AGENT] Reaper dispatched for {kill_list}")
 
-    def handle_forward_payload(self, payload):
-        target = payload.get("target")
-        inner = payload.get("payload")
+    def cmd_agent_status_report(self, content, packet):
+        import os
+        import time
+        import json
+        from datetime import datetime
+        from pathlib import Path
 
-        if not target or not inner:
-            self.log("[FORWARD][ERROR] Missing target or payload.")
+        uid = content.get("target_universal_id")
+        reply_to = content.get("reply_to", "matrix")
+        if not uid:
+            self.log("[STATUS_REPORT][ERROR] No target_universal_id.")
             return
 
-        fwd_path = os.path.join(self.path_resolution["comm_path"], target, "payload")
+        comm_root = self.path_resolution["comm_path"]
+        pod_root = self.path_resolution["pod_path"]
+        report = {
+            "universal_id": uid,
+            "status": "unknown",
+            "uptime_seconds": None,
+            "boot_time": None,
+            "pid": None,
+            "cli": None,
+            "last_heartbeat": None,
+            "spawn_records": [],
+            "runtime_uuid": None,
+            "delegates": []
+        }
+
+        # 💓 Heartbeat check
+        try:
+            ping_path = os.path.join(comm_root, uid, "hello.moto", "last.ping")
+            if os.path.exists(ping_path):
+                delta = time.time() - os.path.getmtime(ping_path)
+                report["last_heartbeat"] = round(delta, 2)
+                report["status"] = "alive" if delta < 20 else "stale"
+        except Exception as e:
+            self.log(f"[STATUS][HEARTBEAT-ERR] {e}")
+
+        # 🐣 Spawn record lookup
+        try:
+            spawn_dir = os.path.join(comm_root, uid, "spawn")
+            spawns = sorted(Path(spawn_dir).glob("*.spawn"), reverse=True)
+            if spawns:
+                with open(spawns[0]) as f:
+                    info = json.load(f)
+                report["runtime_uuid"] = info.get("uuid")
+                report["boot_time"] = info.get("timestamp")
+                report["cli"] = " ".join(info.get("cmd", []))
+                report["pid"] = info.get("pid")
+
+                # ⏱ uptime from PID
+                now = time.time()
+                from psutil import process_iter
+                for proc in process_iter(['pid', 'create_time']):
+                    if proc.info['pid'] == report["pid"]:
+                        report["uptime_seconds"] = round(now - proc.info["create_time"])
+                        break
+        except Exception as e:
+            self.log(f"[STATUS][SPAWN-ERR] {e}")
+
+        # 🧬 Delegates
+        try:
+            from core.live_tree import LiveTree
+            tree = LiveTree()
+            tree.load(self.tree_path)
+            report["delegates"] = tree.get_delegates(uid)
+        except Exception as e:
+            self.log(f"[STATUS][TREE-ERR] {e}")
+
+        # 📤 Write .msg response
+        try:
+            inbox = os.path.join(comm_root, reply_to, "incoming")
+            os.makedirs(inbox, exist_ok=True)
+            fname = f"status_{uid}_{int(time.time())}.msg"
+            with open(os.path.join(inbox, fname), "w") as f:
+                json.dump(report, f, indent=2)
+            self.log(f"[STATUS] Sent report on {uid} to {reply_to}")
+        except Exception as e:
+            self.log(f"[STATUS][REPLY-ERROR] {e}")
+
+    def cmd_forward_command(self, content, packet):
+        target = content.get("target_universal_id")
+        command = content.get("command")
+
+        if not target or not command or not command.get("type"):
+            self.log("[FORWARD][ERROR] Missing target or command payload.")
+            return
+
+        folder = content.get("folder", "incoming")  # Default = incoming
+        fwd_path = os.path.join(self.path_resolution["comm_path"], target, folder)
         os.makedirs(fwd_path, exist_ok=True)
 
-        fname = f"forwarded_{int(time.time())}.json"
-        with open(os.path.join(fwd_path, fname), "w") as f:
-            json.dump(inner, f, indent=2)
-
-        self.log(f"[FORWARD] Payload forwarded to {target}")
+        extension = command.get("filetype", "cmd")  # default to .cmd
+        fname = f"{command['type']}_{int(time.time())}.{extension}"
+        try:
+            with open(os.path.join(fwd_path, fname), "w") as f:
+                json.dump(command, f, indent=2)
+            self.log(f"[FORWARD] Command '{command['type']}' forwarded to {target}")
+        except Exception as e:
+            self.log(f"[FORWARD][ERROR] Failed to write command to {target}: {e}")
 
     def handle_node_query(self, content):
         requestor = content.get("requestor")
@@ -654,7 +749,7 @@ class MatrixAgent(DelegationMixin, BootAgent):
 
     def propagate_all_delegates(self):
 
-        from agent.core.tree_propagation import propagate_tree_slice
+        from core.tree_propagation import propagate_tree_slice
 
         tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree.json')
         tp = TreeParser.load_tree(tree_path)
@@ -729,6 +824,179 @@ class MatrixAgent(DelegationMixin, BootAgent):
         else:
             self.log(f"[REPLACE] ⚠️ No valid fields were updated for agent '{old_id}'. Replace aborted.")
 
+    def cmd_inject(self, content, packet):
+
+
+        parent = content.get("target_universal_id")
+        subtree = content.get("subtree")
+        if "subtree" in content:
+            universal_id = content["subtree"].get("universal_id")
+            agent_name = content["subtree"].get("name", "").lower()
+        else:
+            universal_id = content.get("universal_id")
+            agent_name = content.get("name", "").lower()
+
+
+        tp = TreeParser.load_tree(self.tree_path)
+        if not tp:
+            self.log("[INJECT][ERROR] Failed to load tree.")
+            return
+
+        self.log(f"[INJECT][DEBUG] Available nodes: {list(tp.nodes.keys())}")
+        if not tp.has_node(parent):
+            self.log(f"[INJECT][ERROR] Parent '{parent}' not found in parsed tree.")
+            return
+
+        if not tp:
+            self.log("[INJECT][ERROR] Could not load tree.")
+            return
+
+        if not tp.has_node(parent):
+            self.log(f"[INJECT][ERROR] Parent node {parent} not found.")
+            return
+
+        # 🔒 Scan subtree for any node with matrix identity
+        def contains_matrix_node(tree):
+            if not isinstance(tree, dict):
+                return False
+            name = tree.get("name", "").lower()
+            uid = tree.get("universal_id", "").lower()
+            if name == "matrix" or uid == "matrix":
+                return True
+            for child in tree.get("children", []):
+                if contains_matrix_node(child):
+                    return True
+            return False
+
+        if subtree:
+            if contains_matrix_node(subtree):
+                self.log("[INJECT][BLOCKED] Subtree injection attempt includes forbidden Matrix agent.")
+                return
+        else:
+            if agent_name == "matrix" or universal_id == "matrix":
+                self.log("[INJECT][BLOCKED] Direct Matrix injection attempt denied.")
+                return
+
+        try:
+            if subtree:
+                try:
+                    success = tp.insert_node(subtree, parent_universal_id=parent)
+                except Exception as e:
+                    self.log(f"[INJECT][CRASH] Insert threw: {e}")
+                    return
+                if not success:
+                    self.log("[INJECT][ERROR] Insert failed. Rejected nodes:")
+                    self.log(json.dumps(tp.rejected_subtrees, indent=2))
+                    return
+
+                inserted_uid = subtree.get("universal_id")
+                attached = inserted_uid in tp.get_first_level_child_ids(parent)
+
+                if not attached:
+                    self.log(
+                        f"[INJECT][WARNING] Inserted node '{inserted_uid}' NOT found under parent '{parent}' — possible orphan.")
+                    return
+
+                # NEW: Save payloads for each node in the subtree
+                for node in TreeParser.flatten_tree(subtree):
+                    src = node.get("source_payload")
+                    name = node.get("name")
+                    if src and name:
+                        self._save_payload_to_boot_dir(name, src)
+            else:
+                delegated = content.get("delegated", [])
+                filesystem = content.get("filesystem", {})
+                config = content.get("config", {})
+                src = content.get("source_payload")
+
+                new_node = {
+                    "name": agent_name,
+                    "universal_id": universal_id,
+                    "delegated": delegated,
+                    "filesystem": filesystem,
+                    "config": config,
+                    "children": [],
+                    "confirmed": time.time()
+                }
+
+                tp.insert_node(new_node, parent_universal_id=parent)
+                self.log(f"[INJECT] ✅ Injected agent '{universal_id}' under '{parent}'.")
+
+                if src:
+                    self._save_payload_to_boot_dir(agent_name, src)
+
+            tp.save_tree(self.tree_path)
+            self.delegate_tree_to_agent(parent)
+
+            for agent_id in tp.get_first_level_child_ids(parent):
+                self.delegate_tree_to_agent(agent_id)
+
+        except Exception as e:
+            self.log(f"[INJECT][CRASH] {e}")
+
+    def cmd_shutdown_subtree(self, content, packet):
+        target_id = content.get("universal_id")
+        if not target_id:
+            self.log("[SHUTDOWN][ERROR] Missing universal_id.")
+            return
+
+        tp = TreeParser.load_tree(self.tree_path)
+        if not tp:
+            self.log("[SHUTDOWN][ERROR] Failed to load tree.")
+            return
+
+        ids = tp.get_subtree_nodes(target_id)
+        for uid in ids:
+            die_path = os.path.join(self.path_resolution["comm_path"], uid, "incoming", "die")
+            os.makedirs(os.path.dirname(die_path), exist_ok=True)
+            with open(die_path, "w") as f:
+                f.write("☠️")
+            self.log(f"[SHUTDOWN] Dropped .die for {uid}")
+
+    def cmd_resume_subtree(self, content, packet):
+        target_id = content.get("universal_id")
+        if not target_id:
+            self.log("[RESUME][ERROR] Missing universal_id.")
+            return
+
+        tp = TreeParser.load_tree(self.tree_path)
+        if not tp:
+            self.log("[RESUME][ERROR] Failed to load tree.")
+            return
+
+        ids = tp.get_subtree_nodes(target_id)
+        for uid in ids:
+            die = os.path.join(self.path_resolution["comm_path"], uid, "incoming", "die")
+            tomb = os.path.join(self.path_resolution["comm_path"], uid, "incoming", "tombstone")
+
+            for path in [die, tomb]:
+                if os.path.exists(path):
+                    os.remove(path)
+                    self.log(f"[RESUME] Removed {os.path.basename(path)} for {uid}")
+
+    def _save_payload_to_boot_dir(self, agent_name, src):
+        try:
+
+            decoded = base64.b64decode(src["payload"]).decode()
+            sha_check = hashlib.sha256(decoded.encode()).hexdigest()
+
+            if sha_check != src["sha256"]:
+                self.log(f"[INJECT][SHA-FAIL] {agent_name} payload hash mismatch.")
+                return
+
+            dir_path = os.path.join(self.path_resolution["root_path"], "boot_payload", agent_name)
+            os.makedirs(dir_path, exist_ok=True)
+
+            file_path = os.path.join(dir_path, f"{agent_name}.py")
+            with open(file_path, "w") as f:
+                f.write(decoded)
+
+            self.log(f"[INJECT] ✅ Source code installed at {file_path}")
+
+        except Exception as e:
+            self.log(f"[INJECT][PAYLOAD-ERROR] {e}")
+
+
     def validate_or_prepare_agent(self, new_agent):
 
         self.log(f"[DEBUG] validate_or_prepare_agent() received: {json.dumps(new_agent, indent=2)}")
@@ -770,13 +1038,5 @@ class MatrixAgent(DelegationMixin, BootAgent):
         return False
 
 if __name__ == "__main__":
-    # label = None
-    # if "--label" in sys.argv:
-    #   label = sys.argv[sys.argv.index("--label") + 1]
-
-    # current directory of the agent script or it wont be able to find itself
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-
-    matrix = MatrixAgent(path_resolution, command_line_args)
-
-    matrix.boot()
+    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent.boot()

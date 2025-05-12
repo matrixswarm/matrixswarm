@@ -1,17 +1,20 @@
 # Matrix: An AI OS System
 # Copyright (c) 2025 Daniel MacDonald
 # Licensed under the MIT License. See LICENSE file in project root for details.
+
+# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
+# ======== 🛬 LANDING ZONE END 🛬 ========"
+
 import os
-import time
 import json
 import psutil
-from agent.core.boot_agent import BootAgent
-from agent.core.mixin.delegation import DelegationMixin
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
 
-class WorkerAgent(BootAgent, DelegationMixin):
-    def __init__(self, path_resolution, command_line_args):
-        super().__init__(path_resolution, command_line_args)
+class Agent(BootAgent):
+    def __init__(self, path_resolution, command_line_args, tree_node):
+        super().__init__(path_resolution, command_line_args, tree_node)
+
         self.path_resolution = path_resolution
         self.command_line_args = command_line_args
         self.orbits = {}
@@ -69,15 +72,5 @@ class WorkerAgent(BootAgent, DelegationMixin):
                 self.log(f"[COMMAND] Failed to save tree: {e}")
 
 if __name__ == "__main__":
-    # label = None
-    # if "--label" in sys.argv:
-    #   label = sys.argv[sys.argv.index("--label") + 1]
-
-    pid = os.getpid()
-
-    # current directory of the agent script or it wont be able to find itself
-    path_resolution["pod_path_resolved"] = os.path.dirname(os.path.abspath(__file__))
-
-    worker = WorkerAgent(path_resolution, command_line_args)
-
-    worker.boot()
+    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent.boot()

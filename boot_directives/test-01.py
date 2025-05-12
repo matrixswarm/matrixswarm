@@ -116,5 +116,14 @@ matrix_directive = {
                         "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
                     }
                 },
+                {
+                  "universal_id": "gpt-reflex",
+                  "name": "gpt_reflex",
+                  "config": {
+                    "api_key": os.getenv("OPENAI_API_KEY"),
+                    "model": "gpt-4"
+                  },
+                  "delegated": []
+                }
         ]
     }
