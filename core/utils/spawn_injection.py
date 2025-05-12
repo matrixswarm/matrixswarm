@@ -2,33 +2,39 @@ import json
 from pprint import pformat
 def inject_spawn_landing_zone(source_code: str, path_resolution: dict, command_line_args: dict, tree_node: dict) -> str:
     """
-    Replace the LANDING ZONE block inside an agent source file with path injection values,
-    and include minimal sys.path bootstrapping for core/agent resolution.
-    Also replaces boot block with standardized: agent = Agent(...)
+    Dynamically inject sys.path, MatrixSwarm runtime info, and environment-aware Python package paths.
+    This version supports system Python, conda, and virtualenv without requiring user tweaks.
     """
+
+    import json
 
     landing_start = "# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
     landing_end = "# ======== 🛬 LANDING ZONE END 🛬 ========"
 
-    bootstrap = (
-                f"import sys\n"
-                f"import os\n"
-                f"site_root = \"" + path_resolution["site_root_path"] + "\"\n"
-                f"if site_root not in sys.path:\n"
-                f"    sys.path.insert(0, site_root)\n"
-                f"agent_path = \"" + path_resolution["agent_path"] + "\"\n"
-                f"if agent_path not in sys.path:\n"
-                f"    sys.path.insert(0, agent_path)\n"
-                f"import agent\n"
-            )
+    bootstrap = "\n".join([
+        "import sys",
+        "import os",
+        f"# ✅ Injected Python site-packages path",
+        f"sys.path.insert(0, \"{path_resolution.get('python_site', '/root/miniconda3/lib/python3.12/site-packages')}\")",
+        "",
+        "# ⛓️ Inject MatrixSwarm paths",
+        f"site_root = \"{path_resolution['site_root_path']}\"",
+        "if site_root not in sys.path:",
+        "    sys.path.insert(0, site_root)",
+        f"agent_path = \"{path_resolution['agent_path']}\"",
+        "if agent_path not in sys.path:",
+        "    sys.path.insert(0, agent_path)",
+        "import agent"
+    ])
+
 
     injected = (
         f"{landing_start}\n"
         f"{bootstrap}\n"
-        f"path_resolution = {pformat(path_resolution, indent=4)}\n"
-        f"command_line_args = {pformat(command_line_args, indent=4)}\n"
-        f"tree_node = {pformat(tree_node or {}, indent=4)}\n"
-        f"path_resolution[\"pod_path_resolved\"]=os.path.dirname(os.path.abspath(__file__)) \n"
+        f"path_resolution = {json.dumps(path_resolution, indent=4)}\n"
+        f"command_line_args = {json.dumps(command_line_args, indent=4)}\n"
+        f"tree_node = {json.dumps(tree_node or {}, indent=4)}\n"
+        f"path_resolution['pod_path_resolved'] = os.path.dirname(os.path.abspath(__file__))\n"
         f"{landing_end}"
     )
 

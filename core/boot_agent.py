@@ -364,7 +364,7 @@ class BootAgent():
     def spawn_agent_direct(self, universal_id, agent_name, tree_node):
 
 
-        spawner = CoreSpawner(site_root_path=self.path_resolution["site_root_path"])
+        spawner = CoreSpawner(site_root_path=self.path_resolution["site_root_path"], python_site=self.path_resolution["python_site"], detected_python=self.path_resolution["python_exec"])
 
         comm_file_spec = []
 

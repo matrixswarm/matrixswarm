@@ -20,11 +20,14 @@ from core.class_lib.logging.logger import Logger
 from core.utils.spawn_injection import inject_spawn_landing_zone
 
 class CoreSpawner:
-    def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path'):
+    def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path', python_site=None, detected_python=None):
 
         pm = path_manager or PathManager(use_session_root=True, site_root_path=site_root_path)
 
         self.verbose=False
+
+        self.python_site=python_site
+        self.python_exec= detected_python
 
         self.default_comm_file_spec = [
             {"name": "hello.moto", "type": "d", "content": None},
@@ -179,6 +182,7 @@ class CoreSpawner:
 
         try:
 
+
             with open("/matrix/spawn.log", "a") as f:
                 f.write(f"{datetime.now().isoformat()} :: {universal_id} → {agent_name}\n")
 
@@ -240,7 +244,9 @@ class CoreSpawner:
                 "agent_path": self.agent_path,  # still here
                 "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
                 "comm_path_resolved": os.path.join(self.comm_path, universal_id),
-                "site_root_path": self.site_root_path
+                "site_root_path": self.site_root_path,
+                "python_site": self.python_site,
+                "python_exec": self.python_exec or "python3"
             }
             path_resolution = 'path_resolution=' + json.dumps(path_dict, indent=4) + '\n'
 
@@ -261,32 +267,6 @@ class CoreSpawner:
                     tree_node_blob = f"tree_node = {repr(tree_node)}\n"
                 except Exception as e:
                     print(f"[SPAWN-ERROR] Could not encode tree_node for {universal_id}: {e}")
-
-            agent_path_bootstrap = textwrap.dedent("""
-                import sys
-                import os
-                
-                # Dynamically compute site root (two levels up from pod/run)
-                site_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-                if site_root not in sys.path:
-                    sys.path.insert(0, site_root)
-                
-                # Inject venv site-packages if present
-                venv_site = "/sites/orbit/python/logai-env/lib/python3.12/site-packages"
-                if os.path.exists(venv_site) and venv_site not in sys.path:
-                    sys.path.insert(0, venv_site)
-                
-                # Inject agent *root* path (parent of /agent)
-                agent_path = path_resolution.get("agent_path")
-                agent_root = os.path.abspath(os.path.join(agent_path, "..")) if agent_path else None
-                if agent_root and agent_root not in sys.path:
-                    sys.path.insert(0, agent_root)
-                
-                # Use injected root path directly
-                root_path = path_resolution.get("root_path", site_root)
-                if root_path not in sys.path:
-                    sys.path.insert(0, root_path)
-                """)
 
             data = inject_spawn_landing_zone(file_content, path_dict, cmd_args, tree_node)
 
@@ -347,7 +327,7 @@ class CoreSpawner:
 
 
             cmd = [
-                "python3",
+                self.python_exec or "python3",
                 run_path,
                 "--job", f"{universe_id}:{spawner}:{universal_id}:{agent_name}",
                 "--ts", timestamp

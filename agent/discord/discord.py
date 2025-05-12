@@ -5,8 +5,9 @@
 
 # ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
 # ======== 🛬 LANDING ZONE END 🛬 ========"
-
 import os
+import sys
+sys.path.insert(0, "/root/miniconda3/lib/python3.12/site-packages")
 import threading
 import json
 import discord as discord_real
@@ -27,7 +28,7 @@ class Agent(BootAgent):
         self.directives = self.tree_node
 
         self.inbox_paths=['incoming']
-        path = os.path.join(path_resolution["comm_path_resolved"], "incoming")
+        path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(path, exist_ok=True)
         self.inbox_paths.append(path)
 
@@ -55,6 +56,7 @@ class Agent(BootAgent):
         try:
             self.log(f"[DISCORD] Client starting... Token length: {len(self.token)}")
             print(f"🧠 Token preview: {self.token[:10]}...{self.token[-5:]}")
+
             intents = discord_real.Intents.default()
             intents.messages = True
             intents.message_content = True
@@ -67,6 +69,8 @@ class Agent(BootAgent):
                 channel = self.bot.get_channel(self.channel_id)
                 if channel:
                     await channel.send("🧠 DiscordAgent V3e online and responding.")
+                else:
+                    self.log(f"[DISCORD][ERROR] Channel ID {self.channel_id} not found!")
 
             @self.bot.command()
             async def status(ctx):
@@ -81,11 +85,16 @@ class Agent(BootAgent):
                     self.log(f"[DISCORD][ERROR][GUEST] {e}")
                     await ctx.send("⚠️ Failed to log guest entry.")
 
-            self.bot.run(self.token)
+            # Launch in a clean async event loop
+            async def run_bot():
+                await self.bot.start(self.token)
+
+            threading.Thread(target=lambda: asyncio.run(run_bot()), daemon=True).start()
 
         except Exception as e:
             self.log(f"[DISCORD][ERROR] Client thread failed: {e}")
-            print(f"❌ Exception during Discord client run: {e}")
+            import traceback
+            traceback.print_exc()
 
     def payload_watcher(self):
         try:
