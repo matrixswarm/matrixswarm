@@ -1,3 +1,27 @@
+# 🐍 Python interpreter leftovers
+__pycache__/
+*.py[cod]
+
+# 💣 MatrixSwarm runtime
+comm/
+pod/
+*.spawn
+*.msg
+
+# 🔒 Sensitive keys & certs
+*.key
+*.crt
+*.csr
+socket_certs/
+https_certs/
+
+# 🧠 Agent build artifacts
+boot_payload/
+
+# 🛠 Dev files
+deploy_directive.py
+*.sh
+
 # Python system files
 __pycache__/
 *.py[cod]
@@ -60,3 +84,5 @@ agent.log
 *.bak
 *.sh
 deploy_directive.py
+# MatrixSwarm runtime data
+comm/
