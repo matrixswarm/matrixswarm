@@ -28,7 +28,7 @@ class Agent(BootAgent):
             self.log("[ORACLE][ERROR] No API key detected. Is your .env loaded?")
         else:
             self.log("[ORACLE] Pre-boot hooks initialized.")
-            threading.Thread(target=self.start_broadcast_listener, daemon=True).start()
+            #threading.Thread(target=self.start_broadcast_listener, daemon=True).start()
 
     def worker_post(self):
         self.log("[ORACLE] Oracle shutting down. No more prophecies today.")
@@ -171,20 +171,20 @@ class Agent(BootAgent):
             return f"[ORACLE][ERROR] Failed to query OpenAI: {e}"
 
     def send_oracle_reply(self, query, response):
-            recipient = query.get("response_to")
-            if not recipient:
-                self.log("[ORACLE][REPLY][ERROR] No response_to field in query.")
-                return
+        recipient = query.get("response_to")
+        if not recipient:
+            self.log("[ORACLE][REPLY][ERROR] No response_to field in query.")
+            return
 
-            try:
-                inbox = os.path.join(self.path_resolution["comm_path"], recipient, "incoming")
-                os.makedirs(inbox, exist_ok=True)
-                fname = f"oracle_response_{int(time.time())}.json"
-                with open(os.path.join(inbox, fname), "w") as f:
-                    json.dump(response, f, indent=2)
-                self.log(f"[ORACLE] Reply sent to {recipient}: {fname}")
-            except Exception as e:
-                self.log(f"[ORACLE][REPLY-FAIL] Failed to deliver reply: {e}")
+        try:
+            inbox = os.path.join(self.path_resolution["comm_path"], recipient, "incoming")
+            os.makedirs(inbox, exist_ok=True)
+            fname = f"oracle_response_{int(time.time())}.json"
+            with open(os.path.join(inbox, fname), "w") as f:
+                json.dump(response, f, indent=2)
+            self.log(f"[ORACLE] Reply sent to {recipient}: {fname}")
+        except Exception as e:
+            self.log(f"[ORACLE][REPLY-FAIL] Failed to deliver reply: {e}")
 
 if __name__ == "__main__":
     agent = Agent(path_resolution, command_line_args, tree_node)
