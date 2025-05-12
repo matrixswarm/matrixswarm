@@ -21,7 +21,8 @@ class Agent(BootAgent):
         self.client = OpenAI(api_key=self.api_key)
         self.prompt_path = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
         self.outbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "outbox")
-
+        os.makedirs(self.prompt_path, exist_ok=True)
+        os.makedirs(self.outbox_path, exist_ok=True)
 
     def worker_pre(self):
         if not self.api_key:

@@ -174,9 +174,10 @@ class BootAgent():
         incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(incoming_path, exist_ok=True)
         self.log("[COMMAND] Listening for standardized .cmd files...")
-
+        thread_token = "cmd_listener"
         while self.running:
             try:
+                self.check_for_thread_poke(thread_token)
                 for fname in os.listdir(incoming_path):
                     if not fname.endswith(".cmd"):
                         continue
@@ -217,9 +218,10 @@ class BootAgent():
         inbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(inbox_path, exist_ok=True)
         self.log("[REFLEX] Listening for .msg reflex queries...")
-
+        thread_token = "reflex_listener"
         while self.running:
             try:
+                self.check_for_thread_poke(thread_token)
                 for fname in os.listdir(inbox_path):
                     if not fname.endswith(".msg"):
                         continue
@@ -269,7 +271,10 @@ class BootAgent():
         while self.running:
             if getattr(self, "can_proceed", True):
                 self.can_proceed = False
+                self.log(f"[WORKER] Executing worker cycle...")
                 self.worker()
+                self.log(f"[WORKER] Cycle complete.")
+                self.check_for_thread_poke()
             else:
                 time.sleep(0.05)
 
@@ -279,6 +284,18 @@ class BootAgent():
                 self.worker_post()
             except Exception as e:
                 self.log(f"[WORKER_POST][ERROR] {e}")
+
+    #used to verify and map threads to verify consciousness
+    def check_for_thread_poke(self, thread_token="worker"):
+        poke_name = f"poke.{thread_token}"
+        poke_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming", poke_name)
+        poke_response = poke_path + ".response"
+
+        if os.path.exists(poke_path):
+            os.remove(poke_path)
+            with open(poke_response, "w") as f:
+                f.write(str(time.time()))
+            self.log(f"👊 [POKE] {thread_token} thread challenge answered.")
 
     def start_dynamic_throttle(self, min_delay=2, max_delay=10, max_load=2.0):
         def dynamic_throttle_loop():
@@ -297,7 +314,6 @@ class BootAgent():
 
         self.can_proceed = False
         threading.Thread(target=dynamic_throttle_loop, daemon=True).start()
-
 
     def spawn_manager(self):
 
