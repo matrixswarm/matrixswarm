@@ -25,8 +25,8 @@ def inject_spawn_landing_zone(source_code: str, path_resolution: dict, command_l
     injected = (
         f"{landing_start}\n"
         f"{bootstrap}\n"
-        f"path_resolution = {json.dumps(path_resolution, indent=4)}\n"
-        f"command_line_args = {json.dumps(command_line_args, indent=4)}\n"
+        f"path_resolution = {pformat(path_resolution, indent=4)}\n"
+        f"command_line_args = {pformat(command_line_args, indent=4)}\n"
         f"tree_node = {pformat(tree_node or {}, indent=4)}\n"
         f"path_resolution[\"pod_path_resolved\"]=os.path.dirname(os.path.abspath(__file__)) \n"
         f"{landing_end}"

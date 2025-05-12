@@ -9,8 +9,8 @@ import json
 import time
 from flask import Flask
 from flask_socketio import SocketIO
-from agent.core.utils.swarm_sleep import interruptible_sleep
-from agent.core.boot_agent import BootAgent
+from core.utils.swarm_sleep import interruptible_sleep
+from core.boot_agent import BootAgent
 
 # Flask + SocketIO app
 app = Flask(__name__)
@@ -33,7 +33,7 @@ class Agent(BootAgent):
         super().__init__(path_resolution, command_line_args, tree_node)
 
 
-        config = self.tree_node.get("config", {}) if 'tree_node' in globals() else {}
+        config = self.tree_node.get("config", {})
         self.alarm_path = os.path.join(self.path_resolution["comm_path"], "alarm", "incoming")
         os.makedirs(self.alarm_path, exist_ok=True)
         self.seen_alarms = set()

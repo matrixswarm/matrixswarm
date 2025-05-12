@@ -79,7 +79,6 @@ matrix_directive = {
             "name": "commander",
             "app": "matrix-core",
             "children": []
-
         },
 
         {
