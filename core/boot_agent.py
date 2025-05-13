@@ -53,10 +53,11 @@ class BootAgent():
         while self.running:
             try:
                 with open(ping_file, "w") as f:
-                    f.write(self.command_line_args["install_name"])
-                # self.log(f"[HEARTBEAT] Touched last.ping for {self.command_line_args['install_name']}")
+                    now = time.time()
+                    f.write(str(now))
+                    print(f"[HEARTBEAT] Touched last.ping for {ping_file} -> {now}")
             except Exception as e:
-                self.log(f"[HEARTBEAT][ERROR] Failed to write ping: {e}")
+                print(f"[HEARTBEAT][ERROR] Failed to write ping: {e} -> {ping_file} -> {now}")
             time.sleep(10)
 
     def enforce_singleton(self):
@@ -71,11 +72,10 @@ class BootAgent():
             if DuplicateProcessCheck.check_all_duplicate_risks(job_label=job_label, check_path=False):
                 self.running = False
                 print(
-                    f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["universal_id"]} : shutting down found job having a later timestamp \"--job {job_label}\"")
+                    f"[ENFORCE] {self.command_line_args['universal_id']} detected a newer process with job label: --job {job_label} — standing down.")
             else:
                 print(
-                    f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["universal_id"]} : safe to proceed no duplicate processes with label  \"--job {job_label}\"")
-
+                    f"[ENFORCE] {self.command_line_args['universal_id']} verified as primary instance for --job {job_label} — proceeding with mission.")
             # incoming:   die
             # example: change {root}/comm/{universal_id}/incoming = {root}/comm/worker-1/incoming
             #     look for die file in incoming only be 1 at anytime, and matrix command_thread will add/remove, spawn thread will
