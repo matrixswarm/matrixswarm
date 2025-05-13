@@ -174,10 +174,10 @@ class BootAgent():
         incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(incoming_path, exist_ok=True)
         self.log("[COMMAND] Listening for standardized .cmd files...")
-        thread_token = "cmd_listener"
+        emit_beacon = self.check_for_thread_poke("cmd_listener", 5)
         while self.running:
             try:
-                self.check_for_thread_poke(thread_token)
+                emit_beacon()
                 for fname in os.listdir(incoming_path):
                     if not fname.endswith(".cmd"):
                         continue
@@ -217,25 +217,43 @@ class BootAgent():
     def reflex_listener(self):
         inbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(inbox_path, exist_ok=True)
-        self.log("[REFLEX] Listening for .msg reflex queries...")
-        thread_token = "reflex_listener"
+        self.log("[REFLEX] Listening for .msg and .prompt reflex queries...")
+        emit_beacon = self.check_for_thread_poke("reflex_listener", 5)
         while self.running:
             try:
-                self.check_for_thread_poke(thread_token)
+                emit_beacon()
+
                 for fname in os.listdir(inbox_path):
+                    fpath = os.path.join(inbox_path, fname)
+
+                    # 🎯 PROMPT HANDLER
+                    if fname.endswith(".prompt"):
+                        try:
+                            with open(fpath, "r") as f:
+                                prompt = f.read().strip()
+                            os.remove(fpath)
+                            if hasattr(self, "msg_prompt"):
+                                self.msg_prompt(prompt,
+                                                {"type": "prompt", "source": self.command_line_args["universal_id"]})
+                                self.log(f"[REFLEX] ✅ Executed handler: msg_prompt")
+                            else:
+                                self.log("[REFLEX][MISS] No msg_prompt handler defined.")
+                        except Exception as e:
+                            self.log(f"[REFLEX][PROMPT-ERROR] {fname}: {e}")
+                        continue
+
+                    # 🎯 MSG HANDLER
                     if not fname.endswith(".msg"):
                         continue
 
-                    path = os.path.join(inbox_path, fname)
-                    with open(path, "r") as f:
-                        try:
+                    try:
+                        with open(fpath, "r") as f:
                             packet = json.load(f)
-                            #self.log(f"[REFLEX][DEBUG] {fname} → {json.dumps(packet, indent=2)}")
-                        except Exception as e:
-                            self.log(f"[REFLEX][PARSE-ERROR] {fname}: {e}")
-                            continue
+                    except Exception as e:
+                        self.log(f"[REFLEX][PARSE-ERROR] {fname}: {e}")
+                        continue
 
-                    os.remove(path)
+                    os.remove(fpath)
                     msg_type = packet.get("type")
                     content = packet.get("content", {})
 
@@ -257,9 +275,10 @@ class BootAgent():
                 self.log(f"[REFLEX][LOOP-ERROR] {e}")
             time.sleep(1)
 
+
     def _throttled_worker_wrapper(self):
         self.log("[BOOT] Throttled worker wrapper engaged.")
-
+        emit_beacon = self.check_for_thread_poke("worker", 5)
         # 🔹 Optional pre-hook (called ONCE before loop)
         if hasattr(self, "worker_pre"):
             try:
@@ -274,7 +293,7 @@ class BootAgent():
                 self.log(f"[WORKER] Executing worker cycle...")
                 self.worker()
                 self.log(f"[WORKER] Cycle complete.")
-                self.check_for_thread_poke()
+                emit_beacon()
             else:
                 time.sleep(0.05)
 
@@ -286,16 +305,22 @@ class BootAgent():
                 self.log(f"[WORKER_POST][ERROR] {e}")
 
     #used to verify and map threads to verify consciousness
-    def check_for_thread_poke(self, thread_token="worker"):
-        poke_name = f"poke.{thread_token}"
-        poke_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming", poke_name)
-        poke_response = poke_path + ".response"
+    def check_for_thread_poke(self, thread_token="worker", interval=5):
+        """
+        Emits a beacon by updating the mtime/content of a .poke.<thread> file,
+        once every `interval` seconds. Thread-safe, self-contained.
+        """
+        poke_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming", f"poke.{thread_token}")
+        last_emit = [0]  # mutable closure-safe
 
-        if os.path.exists(poke_path):
-            os.remove(poke_path)
-            with open(poke_response, "w") as f:
-                f.write(str(time.time()))
-            self.log(f"👊 [POKE] {thread_token} thread challenge answered.")
+        def emit():
+            now = time.time()
+            if now - last_emit[0] >= interval:
+                with open(poke_path, "w") as f:
+                    f.write(str(now))
+                last_emit[0] = now
+                print(f"[BEACON] {thread_token} emitted at {now}")
+        return emit
 
     def start_dynamic_throttle(self, min_delay=2, max_delay=10, max_load=2.0):
         def dynamic_throttle_loop():

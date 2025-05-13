@@ -77,6 +77,36 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[ORACLE][ERROR] {e}")
 
+    def msg_prompt(self, prompt, packet):
+        self.log("[ORACLE] Reflex prompt received.")
+
+        try:
+            system_message = self.tree_node.get("config", {}).get("system_message") or (
+                "You are Oracle, a neural AI agent embedded inside MatrixSwarm. "
+                "SentinelAgent guards integrity. ReaperAgent eliminates threats. You respond with clarity and confidence."
+            )
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7
+            ).choices[0].message.content.strip()
+
+            # ✅ Write the response to a .response file in outbox
+            outbox = os.path.join(self.path_resolution["comm_path_resolved"], "outbox")
+            os.makedirs(outbox, exist_ok=True)
+            out_path = os.path.join(outbox, f"{int(time.time())}.response")
+            with open(out_path, "w") as f:
+                f.write(response)
+
+            self.log("[ORACLE] Reflex prompt response written.")
+
+        except Exception as e:
+            self.log(f"[ORACLE][ERROR] Failed to handle reflex prompt: {e}")
+
+
     def on_broadcast_codex_sync(self, packet):
         self.log(f"[ORACLE] ⚡ Received Codex sync broadcast: {packet}")
         # Optional: self.reload_codex(), self.confirm(), etc.
