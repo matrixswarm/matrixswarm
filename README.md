@@ -95,30 +95,54 @@ MatrixSwarm now comes with a **three-part terminal toolkit**:
 
 ---
 
-### 🚀 Deploy the Swarm
+### 🚀 Deploy the Swarm – boots a new MatrixSwarm universe.
+
+---
+
+### 🚀 `site_boot.py` 
+
+
 
 ```bash
 python3 site_ops/site_boot.py --universe ai --directive test-01
 ```
 
-- `--universe` specifies which Matrix you’re launching (can run many)
-- `--directive` points to a Python file inside `boot_directives/`
-- Swarm boots from `matrix_directive` defined in that file
+#### Args:
+- `--universe`: ID of the Matrix universe (e.g., `ai`, `bb`, `os`)
+- `--directive`: Filename from `boot_directives/` to use (without `.py`)
+- `--reboot`: Optional. If set, skips full teardown and triggers a soft reboot
+- `--python-site`: Optional. Custom Python site-packages path (advanced)
+- `--python-bin`: Optional. Custom Python binary path (advanced)
+
+#### Behavior:
+- Loads agent tree from the directive
+- Injects `BootAgent` agents into `/pod/` and `/comm/`
+- Spawns the `MatrixAgent` and initiates the swarm
+- Uses your system's Python interpreter unless overridden
 
 ---
 
-### 💀 Terminate a Universe
+
+### 💀 Terminate a Universe – Annihilate the Swarm
+
+### 💀 `site_kill.py`
+
+Send a graceful but fatal signal to all agents in a Matrix universe.
 
 ```bash
-python3 site_ops/site_kill.py --universe ai
+python3 site_ops/site_kill.py --universe ai --cleanup
 ```
 
-- Sends `die` cookies to all agents
-- Waits for graceful shutdown
-- Nukes `/pod/` and `/comm/` directories
-- Leaves other universes untouched
+#### Args:
+- `--universe`: ID of the Matrix universe to kill (required)
+- `--cleanup`: Optional. After kill, delete all old `/matrix/{universe}/` boots except the latest
 
----
+#### Behavior:
+- Sends `die` signals into each agent’s comms
+- Waits for natural shutdown
+- Scans active memory to terminate leftover processes
+- Optionally purges stale directories from previous boots
+
 
 ### 🛰 List Swarm Activity
 
