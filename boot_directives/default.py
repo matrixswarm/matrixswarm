@@ -145,5 +145,17 @@ matrix_directive = {
             },
             "children": []
         },
+        {
+          "universal_id": "websocket-relay",
+          "name": "matrix_websocket",
+          "config": {
+            "port": 8765,
+            "factories": {
+                "reflex.health.status_report": {}
+            },
+          },
+          "filesystem": {},
+          "delegated": []
+        }
     ]
 }

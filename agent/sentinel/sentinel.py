@@ -56,7 +56,6 @@ class Agent(BootAgent):
                         response = self.receive_node_response(self.universal_id)
                         if response is not None:
                             self.target_node = {k: v for k, v in response.items()}
-                            self.log(self.target_node)
                         interruptible_sleep(self, 5)
                         continue
 
@@ -107,7 +106,7 @@ class Agent(BootAgent):
             try:
                 with open(agent_tree_file, "r") as f:
                     node = json.load(f)
-                self.log(f"[SENTINEL] Loaded agent_tree.json for {universal_id}.")
+                #self.log(f"[SENTINEL] Loaded agent_tree.json for {universal_id}.")
                 return node
             except Exception as e:
                 self.log(f"[SENTINEL][TREE-ERROR] {e}")

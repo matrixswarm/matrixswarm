@@ -16,52 +16,69 @@ class Agent(BootAgent):
         os.makedirs(self.inbox, exist_ok=True)
         self.log("[LINUX] Ready for scout missions.")
 
-    def worker(self):
-        files = [f for f in os.listdir(self.inbox) if f.endswith(".msg")]
-        for fname in files:
-            fpath = os.path.join(self.inbox, fname)
-            try:
-                with open(fpath, "r") as f:
-                    payload = json.load(f)
+    def msg_check(self, content, packet):
+        query_id = packet.get("query_id")
+        tracer_session_id= packet.get("tracer_session_id", "blank")
+        packet_id= packet.get("packet_id", -1)
+        command = content.get("check")
+        reflex_id = packet.get("reflex_id", "sgt-in-arms")
 
-                query_id = payload.get("query_id")
-                check = payload.get("check")
-                reflex_id = payload.get("reflex_id", "gpt-reflex")
+        if not query_id or not command:
+            self.log("[SCOUT][SKIP] Missing 'check' or 'query_id'")
+            return
 
-                if not query_id or not check:
-                    self.log(f"[LINUX][SKIP] Missing fields in {fname}")
-                    os.remove(fpath)
-                    continue
+        self.log(f"[SCOUT] Running check for query {query_id}: {command}")
+        #this runs the command
+        output, error = self.run_check(command)
+        self.reply(query_id, tracer_session_id, packet_id, output or "", reflex_id, command, error)
 
-                result = self.run_check(check)
-                self.reply(query_id, result, reflex_id)
-            except Exception as e:
-                self.log(f"[LINUX][ERROR] {e}")
-            try:
-                os.remove(fpath)
-            except:
-                pass
+    def save_local_report(self, report):
+        report_dir = os.path.join(self.path_resolution["comm_path_resolved"], "reports")
+        os.makedirs(report_dir, exist_ok=True)
+        with open(os.path.join(report_dir, f"{report['report_id']}.json"), "w") as f:
+            json.dump(report, f, indent=2)
 
     def run_check(self, command):
         try:
             output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=5)
-            return output.decode("utf-8").strip()
+            return output.decode("utf-8").strip(), None
         except subprocess.CalledProcessError as e:
-            return f"[ERROR] {e.output.decode().strip()}"
+            return "", e.output.decode("utf-8").strip()
         except Exception as e:
-            return f"[ERROR] Command failed: {e}"
+            return "", str(e)
 
-    def reply(self, query_id, message, reflex_id):
-        reply_path = os.path.join(self.path_resolution["comm_path"], reflex_id, "incoming", f"{query_id}.msg")
-        os.makedirs(os.path.dirname(reply_path), exist_ok=True)
-        reply = {
+    def report_back_to_oracle(mission_id, roundtrip, results):
+        return json.dumps({
+            "mission_id": mission_id,
+            "roundtrip": roundtrip,
+            "report": results
+        }, indent=2)
+
+    def reply(self, query_id, tracer_session_id, packet_id, message, reflex_id, command, error=None):
+
+        report = {
+            "type": "scan_cycle",
             "query_id": query_id,
-            "response": message,
+            "tracer_session_id": tracer_session_id,
+            "packet_id": packet_id,
+            "report_id": f"scan_{int(time.time())}",
+            "status": "failure" if error else "success",
+            "command": command,
+            "output": message if not error else None,
+            "error": error,
             "ts": int(time.time())
         }
+
+        reply_path = os.path.join(self.path_resolution["comm_path"], reflex_id, "incoming", f"{query_id}.msg")
+        os.makedirs(os.path.dirname(reply_path), exist_ok=True)
         with open(reply_path, "w") as f:
-            json.dump(reply, f, indent=2)
-        self.log(f"[LINUX] Scout report sent to {reflex_id}/{query_id}.msg")
+            json.dump(report, f, indent=2)
+
+        self.save_to_trace_session(report, msg_type="msg")
+
+        self.log(f"[SCOUT] Sent report → {reflex_id}/{query_id}.msg")
+
+
 
 if __name__ == "__main__":
     agent = Agent(path_resolution, command_line_args, tree_node)

@@ -362,7 +362,9 @@ class MatrixCommandBridge(QWidget):
         splitter.addWidget(self.center_panel)
         splitter.addWidget(self.right_panel)
         splitter.setSizes([300, 800, 300])
-
+        splitter.setStretchFactor(0, 0)  # Left panel
+        splitter.setStretchFactor(1, 1)  # Center panel grows/shrinks most
+        splitter.setStretchFactor(2, 0)  # Right panel
         layout.addWidget(splitter)
         return container
 
@@ -618,6 +620,7 @@ class MatrixCommandBridge(QWidget):
         self.auto_scroll_checkbox.setStyleSheet("color: #33ff33; font-family: Courier;")
         layout.addWidget(self.auto_scroll_checkbox)
 
+        box.setMinimumWidth(300)
 
         layout.addWidget(self.log_input)
         layout.addWidget(view_btn)
