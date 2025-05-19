@@ -47,7 +47,6 @@ class Agent(BootAgent):
 
     def post_boot(self):
         self.log("[DISCORD] Payload watcher thread starting...")
-        threading.Thread(target=self.payload_watcher, daemon=True).start()
 
         self.log("[DISCORD] Starting client thread...")
         threading.Thread(target=self.start_discord_client, daemon=True).start()
@@ -96,39 +95,29 @@ class Agent(BootAgent):
             import traceback
             traceback.print_exc()
 
-    def payload_watcher(self):
+    def msg_send_packet_incoming(self, content, packet):
         try:
-            self.log(f"[DISCORD] Watching {len(self.inbox_paths)} inbox(es).")
-            while self.running:
-                for inbox in self.inbox_paths:
-                    if not os.path.exists(inbox):
-                        continue
-                    for file in os.listdir(inbox):
-                        if file.endswith(".msg"):
-                            fpath = os.path.join(inbox, file)
-                            self.log(f"[DISCORD] Detected message file: {file}")
-                            try:
-                                with open(fpath, "r") as f:
-                                    msg = json.load(f)
-                                if self.bot:
-                                    channel = self.bot.get_channel(self.channel_id)
-                                    if channel:
-                                        message = msg.get("msg") or msg.get("cause") or str(msg)
-                                        self.log(f"[DISCORD] Sending: {message}")
-                                        asyncio.run_coroutine_threadsafe(
-                                            channel.send(f"📣 {message}"), self.bot.loop
-                                        )
-                                    else:
-                                        self.log("[DISCORD] Channel not found.")
-                                else:
-                                    self.log("[DISCORD] Bot not yet ready.")
-                                os.remove(fpath)
-                                self.log(f"[DISCORD] Message dispatched + file removed.")
-                            except Exception as e:
-                                self.log(f"[DISCORD][ERROR] Failed to send .msg: {e}")
-                interruptible_sleep(self, 5)
+            message = self.format_message(content)
+            self.send_to_discord(message)
+            self.log("[DISCORD] Message relayed successfully.")
         except Exception as e:
-            self.log(f"[DISCORD][FATAL] Payload watcher crashed: {e}")
+            self.log(f"[DISCORD][ERROR] Failed to relay message: {e}")
+
+    def send_to_discord(self, message):
+        if not self.bot or not self.channel_id:
+            self.log("[DISCORD][ERROR] Bot not ready or channel ID missing.")
+            return
+        try:
+            channel = self.bot.get_channel(self.channel_id)
+            if channel:
+                asyncio.run_coroutine_threadsafe(channel.send(message), self.bot.loop)
+            else:
+                self.log("[DISCORD][ERROR] Channel not found.")
+        except Exception as e:
+            self.log(f"[DISCORD][ERROR] Discord delivery failed: {e}")
+
+    def format_message(self, data):
+        return data.get("formatted_msg") or data.get("msg") or "[SWARM] No content."
 
     def on_alarm(self, payload):
         msg = f"🚨 [{payload['level'].upper()}] {payload['universal_id']} — {payload['cause']}"

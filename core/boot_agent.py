@@ -36,6 +36,8 @@ class BootAgent():
 
         self.logger = Logger(self.path_resolution["comm_path_resolved"], "logs", "agent.log")
 
+        self.subordinates=[]
+
     def log(self, message):
         self.logger.log(message)
 
@@ -275,6 +277,32 @@ class BootAgent():
                 self.log(f"[REFLEX][LOOP-ERROR] {e}")
             time.sleep(1)
 
+    def save_to_trace_session(self, packet, msg_type="msg"):
+        tracer_id = packet.get("tracer_session_id")
+        packet_id = packet.get("packet_id")
+
+        if not tracer_id:
+            self.log(f"[TRACE][SKIP] Invalid trace packet: tracer={tracer_id}, packet_id={packet_id}")
+            return
+
+        comm_root = os.path.normpath(self.path_resolution["comm_path"])
+        parent_dir, last_component = os.path.split(comm_root)
+
+        if last_component != "comm":
+            self.log(f"[TRACE][ERROR] comm_path doesn't end in 'comm': {comm_root}")
+            return
+
+        base_dir = os.path.join(parent_dir, "boot_sessions", tracer_id)
+        os.makedirs(base_dir, exist_ok=True)
+
+        fname = f"{packet_id:03d}.{msg_type}"
+        full_path = os.path.join(base_dir, fname)
+
+        try:
+            with open(full_path, "w") as f:
+                json.dump(packet, f, indent=2)
+        except Exception as e:
+            self.log(f"[TRACE][ERROR] Failed to write trace packet {fname}: {e}")
 
     def _throttled_worker_wrapper(self):
         self.log("[BOOT] Throttled worker wrapper engaged.")
@@ -339,6 +367,106 @@ class BootAgent():
 
         self.can_proceed = False
         threading.Thread(target=dynamic_throttle_loop, daemon=True).start()
+
+    # Gets first level children of parent
+    def get_node_by_role(self, role):
+        """
+        Consults the agent's own agent_tree.json (if present).
+        Returns node dictionary for any direct subordinate matching given role.
+        Hardened against missing or malformed trees.
+        """
+        try:
+            tree_path = os.path.join(
+                self.path_resolution['comm_path'],
+                self.command_line_args['universal_id'],
+                'agent_tree.json'
+            )
+
+            if not hasattr(self, '_cached_tree'):
+                self._cached_tree = None
+                self._tree_mtime = 0
+
+            if os.path.exists(tree_path):
+                mtime = os.path.getmtime(tree_path)
+                if mtime != self._tree_mtime:
+                    with open(tree_path, 'r') as f:
+                        self._cached_tree = json.load(f)
+                    self._tree_mtime = mtime
+
+            if not self._cached_tree:
+                self.log("[INTEL] No cached agent_tree found.")
+                return None
+
+            children = self._cached_tree.get("children", [])
+            if not isinstance(children, list):
+                self.log("[INTEL][ERROR] agent_tree children malformed.")
+                return None
+
+            for child in children:
+                cfg = child.get("config", {})
+                if cfg.get("role") == role:
+                    return child
+
+            self.log(f"[INTEL] No direct child with role '{role}' found.")
+            return None
+
+        except Exception as e:
+            self.log(f"[INTEL][CRASH] get_node_by_role() failed: {e}")
+            return None
+
+    def get_nodes_by_role(self, role):
+        """
+        Returns a list of all direct children matching the given role.
+        """
+        try:
+            tree_path = os.path.join(
+                self.path_resolution['comm_path'],
+                self.command_line_args['universal_id'],
+                'agent_tree.json'
+            )
+
+            if not hasattr(self, '_cached_tree'):
+                self._cached_tree = None
+                self._tree_mtime = 0
+
+            if os.path.exists(tree_path):
+                mtime = os.path.getmtime(tree_path)
+                if mtime != self._tree_mtime:
+                    with open(tree_path, 'r') as f:
+                        self._cached_tree = json.load(f)
+                    self._tree_mtime = mtime
+
+            if not self._cached_tree:
+                self.log("[INTEL] No cached agent_tree found.")
+                return []
+
+            children = self._cached_tree.get("children", [])
+            if not isinstance(children, list):
+                self.log("[INTEL][ERROR] agent_tree children malformed.")
+                return []
+
+            matches = []
+            for child in children:
+                cfg = child.get("config", {})
+                if cfg.get("role") == role:
+                    matches.append(child)
+
+            if not matches:
+                self.log(f"[INTEL] No children with role '{role}' found.")
+            return matches
+
+        except Exception as e:
+            self.log(f"[INTEL][CRASH] get_nodes_by_role() failed: {e}")
+            return []
+
+    #orginizes level one children by role
+    def track_direct_subordinates(self):
+        for child in self.tree_node.get("children", []):
+            role = child.get("config", {}).get("role")
+            uid = child.get("universal_id")
+            if role and uid:
+                self.subordinates[role] = uid
+        self.log(f"[INTEL] Subordinate registry: {self.subordinates}")
 
     def spawn_manager(self):
 

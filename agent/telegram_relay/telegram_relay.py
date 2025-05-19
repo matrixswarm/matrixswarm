@@ -56,11 +56,16 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[TELEGRAM][ERROR] {e}")
 
+    def msg_send_packet_incoming(self, content, packet):
+        try:
+            message = self.format_message(content)
+            self.send_to_telegram(message)
+            self.log("[TELEGRAM] Message relayed successfully.")
+        except Exception as e:
+            self.log(f"[TELEGRAM][ERROR] Failed to relay message: {e}")
+
     def format_message(self, data):
-        lines = ["📣 Swarm Message"]
-        for key, value in data.items():
-            lines.append(f"{key}: {value}")
-        return "\n".join(lines)
+        return data.get("formatted_msg") or data.get("msg") or "[SWARM] No content."
 
     def send_to_telegram(self, message):
         if not self.token or not self.chat_id:
