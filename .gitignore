@@ -21,6 +21,8 @@ boot_payload/
 # 🛠 Dev files
 deploy_directive.py
 *.sh
+# Except this one
+!generate_certs.sh
 
 # Python system files
 __pycache__/
