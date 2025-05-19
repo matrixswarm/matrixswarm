@@ -21,8 +21,7 @@ boot_payload/
 # 🛠 Dev files
 deploy_directive.py
 *.sh
-# Except this one
-!generate_certs.sh
+
 
 # Python system files
 __pycache__/
@@ -88,3 +87,6 @@ agent.log
 deploy_directive.py
 # MatrixSwarm runtime data
 comm/
+
+# Except this one
+!generate_certs.sh
