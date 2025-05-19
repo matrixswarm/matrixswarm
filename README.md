@@ -208,8 +208,53 @@ Everything lives under `site_ops/`:
 
 #watch what agents are active
 python3 {root of files}/live_hive_watch.py
+---
+
+## 🔐 Certificate Generator: `generate_certs.sh`
+
+This script automates SSL certificate creation for both HTTPS and WebSocket layers of your MatrixSwarm deployment.
+
+### 📦 What It Does
+
+- Wipes any existing certs in `https_certs/` and `socket_certs/`
+- Creates a custom root CA
+- Issues new HTTPS certs
+- Issues WebSocket certs
+- Generates a GUI client certificate (used in secure UIs)
+
+### 🧠 Usage
+
+```bash
+./generate_certs.sh <server-ip-or-domain> [--name YourSwarmName]
+```
+
+#### Examples:
+
+```bash
+./generate_certs.sh 192.168.1.100
+./generate_certs.sh matrix.yourdomain.com --name SwarmAlpha
+```
+
+### 🧬 Output
+
+- `https_certs/` — Certs for HTTPS server
+- `socket_certs/` — Certs for secure WebSocket + GUI client
+  - Includes `client.crt` / `client.key` for GUI authentication
 
 ---
+
+### 🚨 Important Notes
+
+- You must pass a **domain name or IP address** as the first argument.
+- Certificates are valid for **500 days**.
+- Don’t forget to distribute your `rootCA.pem` to clients that need to trust your custom CA.
+
+
+
+
+
+
+
 
 
 ## Let's Spawn the Swarm!
@@ -294,7 +339,6 @@ shell
 ├── hello.moto/
 └── agent_tree.json
 ---
-
 ### 🧪 Tutorial: Build Your First Agent
 
 #### 1. Create the Agent Code
