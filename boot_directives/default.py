@@ -137,13 +137,13 @@ matrix_directive = {
                     ]
         },
         {
-            "universal_id": "oracle-1",
-            "name": "oracle",
-            "filesystem": {
-                "folders": [],
-                "files": {}
-            },
-            "children": []
+        "universal_id": "oracle-1",
+        "name": "oracle",
+        "filesystem": {
+            "folders": [],
+            "files": {}
+        },
+        "children": []
         },
         {
           "universal_id": "websocket-relay",

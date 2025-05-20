@@ -8,6 +8,7 @@ import threading
 import asyncio
 import websockets
 import json
+import os
 
 from core.boot_agent import BootAgent
 
@@ -30,24 +31,28 @@ class Agent(BootAgent):
         threading.Thread(target=self.start_socket_loop, daemon=True).start()
 
     def start_socket_loop(self):
-
-
-
         try:
-            self.log("[WS] Starting SECURE WebSocket loop (TLS enabled)...")
+            self.log("[WS] Booting WebSocket TLS thread...")
             time.sleep(1)
+
+            cert_path = os.path.join(self.cert_dir, "server.crt")
+            key_path = os.path.join(self.cert_dir, "server.key")
+
+            if not os.path.exists(cert_path) or not os.path.exists(key_path):
+                self.log(f"[WS][FATAL] Missing cert/key file at {cert_path} or {key_path}")
+                self.running = False
+                return
 
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             self.loop = loop
 
             async def launch():
+                self.log("[WS] Preparing SSL context...")
                 ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-                ssl_context.load_cert_chain(
-                    certfile="socket_certs/server.crt",
-                    keyfile="socket_certs/server.key"
-                )
+                ssl_context.load_cert_chain(certfile=cert_path, keyfile=key_path)
 
+                self.log(f"[WS] Attempting to bind WebSocket on port {self.port}...")
                 server = await websockets.serve(
                     self.websocket_handler,
                     "0.0.0.0",
@@ -56,18 +61,22 @@ class Agent(BootAgent):
                 )
 
                 self.websocket_ready = True
-                self.log(f"[WS] SECURE WebSocket listening on port {self.port} (TLS enabled)")
+                self.log(f"[WS] ✅ SECURE WebSocket bound on port {self.port} (TLS enabled)")
                 await server.wait_closed()
 
             loop.run_until_complete(launch())
             loop.run_forever()
 
-
         except Exception as e:
             self.log(f"[WS][FATAL] WebSocket startup failed: {e}")
             self.running = False
 
+    def msg_health_report(self, content, packet):
+        self.log(f"[RELAY] Received health report for {content.get('target_universal_id', '?')}")
+
     async def websocket_handler(self, websocket, path):
+
+        self.log("[WS][TRACE] >>> websocket_handler() CALLED <<<")
         self.log("[WS] HANDLER INIT - Client added")
         # Add the client securely to the clients set
         self.clients.add(websocket)

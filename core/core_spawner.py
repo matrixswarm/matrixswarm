@@ -277,31 +277,7 @@ class CoreSpawner:
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
 
-            # WRITE SPAWN LOG
-            # Log the spawn to /comm/{universal_id}/spawn/
-            try:
-                spawn_record = {
-                    "uuid": spawn_uuid,
-                    "universal_id": universal_id,
-                    "agent_name": agent_name,
-                    "parent": spawner,
-                    "timestamp": timestamp
-                }
 
-
-                spawn_dir = os.path.join(self.comm_path, universal_id, "spawn")
-                os.makedirs(spawn_dir, exist_ok=True)
-
-
-                filename = f"{timestamp}_{spawn_uuid}.spawn"
-                filepath = os.path.join(spawn_dir, filename)
-
-                with open(filepath, "w") as f:
-                    json.dump(spawn_record, f, indent=2)
-
-                logger.log(f"[SPAWN-LOG] Spawn recorded at {filepath}")
-            except Exception as e:
-                logger.log(f"[SPAWN-LOG-ERROR] Failed to log spawn for {universal_id}: {e}")
 
             #GO TIME
             logger.log(f"[SPAWN-MGR] Spawning: {universal_id} agent name {agent_name} from: {source_path}")
@@ -349,6 +325,34 @@ class CoreSpawner:
                 stdin=stdin,
                 preexec_fn=os.setsid
             )
+
+            pid = os.getpid()  # or from subprocess if it's remote
+            try:
+                spawn_record = {
+                    "uuid": spawn_uuid,
+                    "universal_id": universal_id,
+                    "agent_name": agent_name,
+                    "parent": spawner,
+                    "timestamp": timestamp,
+                    "pid": pid
+                }
+
+                spawn_dir = os.path.join(self.comm_path, universal_id, "spawn")
+                os.makedirs(spawn_dir, exist_ok=True)
+
+
+                filename = f"{timestamp}_{spawn_uuid}.spawn"
+                filepath = os.path.join(spawn_dir, filename)
+
+                with open(filepath, "w") as f:
+                    json.dump(spawn_record, f, indent=2)
+
+                logger.log(f"[SPAWN-LOG] Spawn recorded at {filepath}")
+            except Exception as e:
+                logger.log(f"[SPAWN-LOG-ERROR] Failed to log spawn for {universal_id}: {e}")
+
+
+
 
             install = {
                 "universal_id": universal_id,

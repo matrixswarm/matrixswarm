@@ -10,10 +10,14 @@ from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.core_spawner import CoreSpawner
 from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from core.path_manager import PathManager
+from core.path_manager import PathManager
+
 from string import Template
 from core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
 from core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
 from core.class_lib.logging.logger import Logger
+from core.boot_agent_thread_config import get_default_thread_registry
+
 
 
 class BootAgent():
@@ -37,6 +41,10 @@ class BootAgent():
         self.logger = Logger(self.path_resolution["comm_path_resolved"], "logs", "agent.log")
 
         self.subordinates=[]
+
+        # Injected timeout-aware thread registry
+        self.thread_registry = get_default_thread_registry()
+
 
     def log(self, message):
         self.logger.log(message)
@@ -100,16 +108,14 @@ class BootAgent():
 
             time.sleep(7)
 
-    def mailman_manager(self):
-
-        print('hi')
-
     def monitor_threads(self):
         while self.running:
-            if not self.worker_thread.is_alive():
-                self.log("[WATCHDOG] worker() thread has crashed. Shutting down agent.")
+            # Only monitor if worker_thread exists
+            if hasattr(self, "worker_thread") and self.worker_thread and not self.worker_thread.is_alive():
+                self.log("[WATCHDOG] worker() thread has crashed. Logging beacon death.")
+                self.emit_dead_poke("worker", "Worker thread crashed unexpectedly.")
                 self.running = False
-                os._exit(1)  # 🔥 Force kill (or use sys.exit if you want softer)
+                os._exit(1)
             time.sleep(3)
 
     def resolve_factory_injections(self):
@@ -134,6 +140,8 @@ class BootAgent():
             except Exception as e:
                 self.log(f"[FACTORY-ERROR] {dotted_path} → {e}")
 
+    def is_worker_overridden(self):
+        return self.__class__.worker != BootAgent.worker
 
     def boot(self):
         self.pre_boot()
@@ -149,22 +157,26 @@ class BootAgent():
 
         self.worker_thread = threading.Thread(target=self._throttled_worker_wrapper, name="worker", daemon=False)
         self.worker_thread.start()
+        self.thread_registry["worker"]["active"] = self.is_worker_overridden()
 
         threading.Thread(target=self.enforce_singleton, name="enforce_singleton", daemon=True).start()
+        self.thread_registry["enforce_singleton"]["active"] = True
         threading.Thread(target=self.heartbeat, name="heartbeat", daemon=True).start()
+        self.thread_registry["heartbeat"]["active"] = True
         threading.Thread(target=self.spawn_manager, name="spawn_manager", daemon=True).start()
+        self.thread_registry["spawn_manager"]["active"] = True
         threading.Thread(target=self.command_listener, name="cmd_listener", daemon=True).start()
+        self.thread_registry["cmd_listener"]["active"] = True
         threading.Thread(target=self.reflex_listener, name="reflex_listener", daemon=True).start()
+        self.thread_registry["reflex_listener"]["active"] = True
         self.start_dynamic_throttle()
         self.post_boot()
         self.monitor_threads()
-
 
     def worker(self):
         self.log("[BOOT] Default worker loop running. Override me.")
         while self.running:
             time.sleep(5)
-
 
     def pre_boot(self):
         self.log("[BOOT] Default pre_boot (override me if needed)")
@@ -183,7 +195,6 @@ class BootAgent():
                 for fname in os.listdir(incoming_path):
                     if not fname.endswith(".cmd"):
                         continue
-
                     fpath = os.path.join(incoming_path, fname)
                     with open(fpath, "r") as f:
                         try:
@@ -317,12 +328,25 @@ class BootAgent():
 
         while self.running:
             if getattr(self, "can_proceed", True):
-                self.can_proceed = False
-                self.log(f"[WORKER] Executing worker cycle...")
-                self.worker()
-                self.log(f"[WORKER] Cycle complete.")
-                emit_beacon()
+                try:
+                    self.can_proceed = False
+
+                    if self.is_worker_overridden():
+                        self.log(f"[WORKER] Executing worker cycle...")
+                        self.worker()
+                        self.log(f"[WORKER] Cycle complete.")
+                    else:
+                        if not hasattr(self, "_worker_skip_logged"):
+                            self.log("[BOOT] No worker() override detected — skipping worker loop.")
+                            self._worker_skip_logged = True
+
+                    emit_beacon()
+                except Exception as e:
+                    self.emit_dead_poke("worker", str(e))
+                    self.log(f"[WORKER][ERROR] {e}")
+
             else:
+
                 time.sleep(0.05)
 
         # 🔹 Optional post-hook (called ONCE after loop exits)
@@ -334,21 +358,33 @@ class BootAgent():
 
     #used to verify and map threads to verify consciousness
     def check_for_thread_poke(self, thread_token="worker", interval=5):
-        """
-        Emits a beacon by updating the mtime/content of a .poke.<thread> file,
-        once every `interval` seconds. Thread-safe, self-contained.
-        """
-        poke_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming", f"poke.{thread_token}")
-        last_emit = [0]  # mutable closure-safe
+        timeout = self.thread_registry.get(thread_token, {}).get("timeout", 8)
+        poke_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto", f"poke.{thread_token}")
+        last_emit = [0]
 
         def emit():
             now = time.time()
             if now - last_emit[0] >= interval:
                 with open(poke_path, "w") as f:
-                    f.write(str(now))
+                    json.dump({
+                        "status": "alive",
+                        "last_seen": now,
+                        "timeout": timeout,
+                        "comment": f"Thread beacon from {thread_token}"
+                    }, f, indent=2)
                 last_emit[0] = now
                 print(f"[BEACON] {thread_token} emitted at {now}")
+
         return emit
+
+    def emit_dead_poke(self, thread_name, error_msg):
+        path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto", f"poke.{thread_name}")
+        with open(path, "w") as f:
+            json.dump({
+                "status": "dead",
+                "last_seen": time.time(),
+                "error": error_msg
+            }, f, indent=2)
 
     def start_dynamic_throttle(self, min_delay=2, max_delay=10, max_load=2.0):
         def dynamic_throttle_loop():

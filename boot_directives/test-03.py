@@ -45,6 +45,15 @@ matrix_directive = {
                     ]
                 },
                 {
+                  "universal_id": "agent_doctor-1",
+                  "name": "agent_doctor",
+                  "config": {
+                    "scan_interval_sec": 20,
+                    "max_allowed_beacon_age": 10,
+                    "threads_to_check": ["worker", "cmd_listener"]
+                  }
+                },
+                {
                   "universal_id": "health-probe-oracle-1",
                   "name": "agent_health_probe",
                   "config": {
@@ -55,17 +64,17 @@ matrix_directive = {
                   "filesystem": {},
                   "delegated": []
                 },
-                {
-                  "universal_id": "websocket-relay",
-                  "name": "matrix_websocket",
-                  "config": {
+            {
+                "universal_id": "websocket-relay",
+                "name": "matrix_websocket",
+                "config": {
                     "port": 8765,
                     "factories": {
                         "reflex.health.status_report": {}
                     },
-                  },
-                  "filesystem": {},
-                  "delegated": []
-                }
+                },
+                "filesystem": {},
+                "delegated": []
+            }
         ]
     }
