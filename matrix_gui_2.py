@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QGroupBox, QSplitter, QFileDialog,
     QTextEdit, QStatusBar, QSizePolicy, QStackedLayout, QCheckBox, QComboBox
 )
+from PyQt5.QtWidgets import QDesktopWidget
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
@@ -77,6 +78,13 @@ class MatrixCommandBridge(QWidget):
 
         self.log_ready.connect(self._handle_logs_result)
 
+        self.resize(1400, 800)  # or whatever size fits your battle station
+
+        qr = self.frameGeometry()
+        cp = QDesktopWidget().availableGeometry().center()
+        qr.moveCenter(cp)
+        self.move(qr.topLeft())
+
     def setup_ui(self):
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
@@ -142,7 +150,11 @@ class MatrixCommandBridge(QWidget):
             async with websockets.connect(url, ssl=ssl_context, ping_interval=15, ping_timeout=10) as websocket:
                 self.status_label_ws.setText("🟢 WS: Connected")
                 print("[WS] WebSocket connection established.")
-
+                await websocket.send(json.dumps({
+                    "type": "diagnostic",
+                    "msg": "HiveMonitor is online.",
+                    "timestamp": time.time()
+                }))
                 while True:
                     try:
                         msg = await websocket.recv()
@@ -160,6 +172,7 @@ class MatrixCommandBridge(QWidget):
 
     def handle_websocket_message_safe(self, msg: str):
         try:
+            print(f"[WS] RAW MESSAGE: {msg}")
             data = json.loads(msg)
             msg_type = data.get("type")
 
@@ -221,6 +234,8 @@ class MatrixCommandBridge(QWidget):
             print(f"[CLICK] Tree node selected: {universal_id}")
             self.current_selected_uid = universal_id
 
+
+
             # 🧠 Lookup node data
             node = self.agent_tree_flat.get(universal_id)
             if not node:
@@ -255,16 +270,41 @@ class MatrixCommandBridge(QWidget):
                 f"⚙️ Config: {json.dumps(node.get('config', {}), indent=2)}"
             ]
 
-            #if node.get("confirmed"):
-            #    info_lines.append("✅ Status: CONFIRMED / ALIVE")
-            #else:
-            #    info_lines.append("⚠️ Status: UNCONFIRMED / DOWN")
+
 
             last_report = self.last_probe_report.get(universal_id)
             if last_report:
+
+                cpu = last_report.get("cpu_percent")
+                mem = last_report.get("memory_percent")
+
+                if cpu is not None:
+                    info_lines.append(f"🧬 CPU Usage: {cpu:.2f}%")
+                else:
+                    info_lines.append("🧬 CPU Usage: Unknown")
+
+                if mem is not None:
+                    info_lines.append(f"🧠 Memory Usage: {mem:.2f}%")
+                else:
+                    info_lines.append("🧠 Memory Usage: Unknown")
+
                 info_lines.append(f"🛰️ Confirmed by: {last_report.get('source_probe', 'unknown')}")
                 info_lines.append(f"⏱️ Heartbeat age: {last_report.get('last_heartbeat')} sec")
                 info_lines.append(f"📦 UUID: {last_report.get('spawn_uuid')}")
+                info_lines.append(f"🧬 CPU: {last_report.get('cpu_percent', '?')}%")
+                info_lines.append(f"🧠 Memory: {last_report.get('memory_percent', '?')}%")
+                info_lines.append(f"📡 Beacon: {last_report.get('beacon_status', 'unknown')}")
+                info_lines.append(f"💥 Threads: {', '.join(last_report.get('dead_threads', [])) or 'All alive'}")
+
+                # 🧩 Show thread beacon data
+                threads = last_report.get("thread_status", {})
+                if threads:
+                    info_lines.append("📡 Thread Beacons:")
+                    for thread, status in threads.items():
+                        info_lines.append(f"   └─ {thread}: {status}")
+
+
+
 
             self.agent_info_panel.setText("\n".join(info_lines))
 

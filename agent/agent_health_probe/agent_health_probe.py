@@ -3,6 +3,7 @@
 import os
 import time
 import json
+import psutil
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
@@ -38,7 +39,10 @@ class Agent(BootAgent):
             "last_heartbeat": None,
             "uptime": None,
             "pid": None,
-            "spawn_uuid": None
+            "spawn_uuid": None,
+            "cpu_percent": None,
+            "memory_percent": None,
+            "thread_status": {}
         }
 
         try:
@@ -60,17 +64,56 @@ class Agent(BootAgent):
                     if f.endswith(".spawn"):
                         with open(os.path.join(spawn_dir, f)) as sf:
                             data = json.load(sf)
-                            report["pid"] = data.get("pid")
                             report["spawn_uuid"] = data.get("uuid")
-                            if data.get("pid"):
+                            raw_pid = data.get("pid")
+
+                            if raw_pid is not None:
                                 try:
-                                    import psutil
-                                    proc = psutil.Process(data["pid"])
-                                    uptime = time.time() - proc.create_time()
-                                    report["uptime"] = int(uptime)
-                                except Exception:
+                                    pid = int(raw_pid)
+                                    report["pid"] = pid
+                                    proc = psutil.Process(pid)
+                                    report["uptime"] = int(time.time() - proc.create_time())
+
+                                    proc.cpu_percent(interval=0.0)  # prime
+                                    time.sleep(0.1)
+                                    report["cpu_percent"] = proc.cpu_percent(interval=None)
+                                    report["memory_percent"] = proc.memory_percent()
+
+                                    self.log(
+                                        f"[HEALTH][PSUTIL] PID {pid} CPU: {report['cpu_percent']}% MEM: {report['memory_percent']}%")
+                                except Exception as e:
+                                    self.log(f"[HEALTH][PSUTIL-ERROR] PID {raw_pid}: {e}")
                                     report["uptime"] = None
+                                    report["cpu_percent"] = None
+                                    report["memory_percent"] = None
+                            else:
+                                self.log(f"[HEALTH][PSUTIL] No PID found in spawn data")
+
                             break
+
+            # Thread beacons
+            thread_dir = os.path.join(comm_root, target_uid, "hello.moto")
+            if os.path.isdir(thread_dir):
+                now = time.time()
+                for fname in os.listdir(thread_dir):
+                    if fname.startswith("poke."):
+                        thread = fname.replace("poke.", "")
+                        try:
+                            with open(os.path.join(thread_dir, fname)) as f:
+                                data = json.load(f)
+                                age = round(now - data.get("last_seen", now), 2)
+                                status = data.get("status", "unknown")
+
+                                if status == "alive":
+                                    report["thread_status"][thread] = f"✅ {age}s"
+                                elif status == "dead":
+                                    report["thread_status"][thread] = f"💀 dead: {data.get('error')}"
+                                elif status == "unused":
+                                    report["thread_status"][thread] = f"🟦 unused"
+                                else:
+                                    report["thread_status"][thread] = f"❓ {status}"
+                        except Exception as e:
+                            report["thread_status"][thread] = f"❌ error: {e}"
 
         except Exception as e:
             self.log(f"[HEALTH][BUILD-ERR] {e}")

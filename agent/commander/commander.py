@@ -24,6 +24,7 @@ class Agent(BootAgent):
 
     def worker(self):
         self.track_agents()
+        self.thread_registry["worker"]["timeout"] = 15
         interruptible_sleep(self, 10)
 
     def track_agents(self):
