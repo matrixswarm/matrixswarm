@@ -186,7 +186,7 @@ class Agent(BootAgent):
         if message:
             msg = f"{message}"
         else:
-            msg = f"🚨 ORACLE REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
+            msg = f"🚨 MySQL REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
 
         comms = self.get_nodes_by_role('comm')
         if not comms:
@@ -195,8 +195,6 @@ class Agent(BootAgent):
             for comm in comms:
                 self.log(f"[REFLEX] Alert routed to comm agent: {comm['universal_id']}")
                 self.drop_reflex_alert(msg, comm['universal_id'], level="critical", cause="[PARSE ERROR]")
-
-
 
     def drop_reflex_alert(self, message, agent_dir, level="critical", cause=""):
         """
