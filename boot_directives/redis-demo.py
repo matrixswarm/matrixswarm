@@ -97,7 +97,7 @@ matrix_directive = {
                 "check_interval_sec": 10,
                 "restart_limit": 3,
                 "redis_port": 6379,
-                "always_alert": 1, # 1 = true 0 = false
+                "always_alert": 1,
                 "socket_path": "/var/run/redis/redis-server.sock",
                 "service_name": "redis"
             }
