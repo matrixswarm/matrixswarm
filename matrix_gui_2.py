@@ -48,6 +48,7 @@ MATRIX_WEBSOCKET_HOST = "wss://147.135.68.135:8765"
 
 import asyncio
 import websockets
+from PyQt5.QtGui import QFont
 
 #when tree click event
 class NodeSelectionEventBus(QObject):
@@ -61,6 +62,7 @@ class MatrixCommandBridge(QWidget):
     log_ready = pyqtSignal(dict, str)
     def __init__(self):
         super().__init__()
+
 
         self.setWindowTitle("MatrixSwarm V2: Command Bridge")
         self.setMinimumSize(1400, 800)
@@ -84,6 +86,8 @@ class MatrixCommandBridge(QWidget):
         cp = QDesktopWidget().availableGeometry().center()
         qr.moveCenter(cp)
         self.move(qr.topLeft())
+
+
 
     def setup_ui(self):
         self.main_layout = QVBoxLayout()
@@ -212,9 +216,20 @@ class MatrixCommandBridge(QWidget):
                         return
 
 
+
             else:
+
+                if self.user_requested_log_view:
+                    # user is viewing logs; do not inject unsolicited WebSocket logs
+
+                    print("[WS][SKIP] User is actively viewing logs, ignoring unsolicited update.")
+
+                    return
+
                 text = json.dumps(data, indent=2)
+
                 QTimer.singleShot(0, lambda: self.log_text.append(text))
+
 
         except Exception as e:
             print(f"[WS][ERROR] Could not parse WebSocket msg: {msg}\n{e}")
@@ -405,6 +420,9 @@ class MatrixCommandBridge(QWidget):
         splitter.setStretchFactor(0, 0)  # Left panel
         splitter.setStretchFactor(1, 1)  # Center panel grows/shrinks most
         splitter.setStretchFactor(2, 0)  # Right panel
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        splitter.setCollapsible(2, False)
         layout.addWidget(splitter)
         return container
 
@@ -642,6 +660,7 @@ class MatrixCommandBridge(QWidget):
         view_btn.setStyleSheet("background-color: #111; color: #33ff33; border: 1px solid #00ff66;")
 
         self.log_text = QTextEdit()
+        self.log_text.setLineWrapMode(QTextEdit.WidgetWidth)
         self.log_text.setReadOnly(True)
         self.log_text.setMinimumHeight(300)
         self.log_text.setStyleSheet("""

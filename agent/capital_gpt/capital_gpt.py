@@ -35,12 +35,6 @@ class Agent(BootAgent):
         os.makedirs(self.mission_root, exist_ok=True)
         os.makedirs(self.matrix_payload, exist_ok=True)
 
-        self.template = {
-            "summary": "..",
-            "actions": {"1": "...", "2": "...", "etc": "..."},
-            "exit_code": 1
-        }
-
         self.alert_fired = False
         self.trace_rounds = 0
         self.max_rounds = 5  # Failsafe to prevent infinite loops (Initialize here!)
@@ -55,25 +49,17 @@ class Agent(BootAgent):
 
         config = self.tree_node.get("config", {})
         mission_conf = config.get("mission", {})
-
+        self.mission=mission_conf
         #msg["tracer_session_id"] = tracer_id
         #msg["packet_id"] = packet_num
 
         mission_id = mission_conf.get("mission_id", "spin-a")
 
-        initial_prompt_text = mission_conf.get("initial_prompt", "")
+        initial_prompt_text = mission_conf['1'].get('prompt', "")
         self.system_constraints = mission_conf.get("system_constraints", "")
-        self.system_constraints = self.system_constraints + "- Please complete your assessment within " + str(self.max_rounds) + " rounds, you're currently at round "+str(self.trace_rounds+1)+"; summarize your findings at the last round or if you are forced to end early."
-
-        initial_prompt_str = (
-            f"{initial_prompt_text}\n\n"
-            f"Respond in this JSON format; exit_code (0=need more information; 1=follow-up; 2=complete):\n"
-            f"{json.dumps(self.template, indent=2)}"
-        )
-
 
         self.route_structured_prompt_to_oracle(
-            intent_text=initial_prompt_str,
+            intent_text=initial_prompt_text,
             mission_id=mission_id,
             role="oracle",
             history=[]
@@ -103,12 +89,6 @@ class Agent(BootAgent):
 
         self.log("[REROUTE] Waiting 3 seconds before sending Oracle a new prompt...")
 
-        intent_text = (
-                intent_text + "\n" +
-                self.system_constraints + "\n" +
-                "Respond in this JSON format:\n"
-                "{\n  \"summary\": \"...\",\n  \"actions\": {\"1\": \"...\", \"2\": \"...\"},\n  \"exit_code\": 1\n}"
-        )
 
         prompt_payload = {
             "type": "prompt",
@@ -175,6 +155,22 @@ class Agent(BootAgent):
 
         response = content.get("response")
 
+        oracle_response=response
+
+        try:
+
+            oracle_response = agent.extract_response_data(response)
+
+        except Exception as e:
+            self.log(f"[ORACLE][ERROR] Failed to parse response: {e}")
+            self.log(f"[ORACLE][DEBUG] Raw content was:\n{response}")
+
+
+        self.log(oracle_response.get('actions'))
+
+        return
+
+
         qid = packet.get("query_id")
 
         self.append_to_thread(qid, role="oracle", type="gpt_response", content=response)
@@ -191,7 +187,7 @@ class Agent(BootAgent):
         packet_id = content.get("packet_id", 1)
 
         try:
-            # Extract relevant information
+            # Parse the Oracle response
             if isinstance(response, str):
                 try:
                     response_data = json.loads(response)
@@ -202,51 +198,57 @@ class Agent(BootAgent):
             else:
                 response_data = response
 
+            # Extract and flatten actions
             actions = response_data.get("actions", {})
-
-            command_output = {}
-
             flat_actions = {}
             if isinstance(actions, dict):
                 count = 1
-                for key, value in actions.items():
+                for value in actions.values():
                     if isinstance(value, dict) and "command" in value:
                         flat_actions[str(count)] = value["command"]
-                        count += 1
                     elif isinstance(value, str):
                         flat_actions[str(count)] = value
-                        count += 1
                     elif isinstance(value, list):
                         for cmd in value:
                             flat_actions[str(count)] = cmd
                             count += 1
                     else:
                         self.log(f"[CAPITAL][WARN] Unrecognized action format: {value}")
+                    count += 1
+            # Execute commands from actions
+            command_output = {}
+            for step, command in flat_actions.items():
+                self.log(f"[EXECUTE] Running step {step}: {command}")
+                output, error = self.run_check(command)
+                command_output[step] = {
+                    "command": command,
+                    "output": output or "No output",
+                    "error": error or "No error"
+                }
 
-            # 🔓 Parse and assign
+            # Handle exit codes
             summary = response_data.get("summary", "")
-            actions = response_data.get("actions", {})
             exit_code = response_data.get("exit_code", 0)
 
-
-            # 🔒 These are your final-stop conditions
-            if exit_code == 0:
+            if exit_code == 0:  # Mission complete
                 if not self.alert_fired:
-                    self.alert_operator(qid, message=f"🧹 Mission complete: {summary}")
+                    self.alert_operator(qid, message=f"🧹 Mission complete: {summary or 'No summary available.'}")
                 return
 
-            elif exit_code == 2:
+            elif exit_code == 2:  # Oracle signals complete analysis
                 self.log(f"[REFLEX] Oracle signaled complete analysis.")
                 if not self.alert_fired:
-                    self.alert_operator(qid, message=f"✅ Oracle signaled complete analysis: {summary}")
+                    self.alert_operator(qid,
+                                        message=f"✅ Oracle received final analysis: {summary or 'No summary provided.'}")
                 return
 
-            elif exit_code == 3:
+            elif exit_code == 3:  # Forced mission complete
                 if not self.alert_fired:
-                    self.alert_operator(qid, message=f"❌ Oracle signaled forced complete analysis: {summary}")
+                    self.alert_operator(qid,
+                                        message=f"❌ Oracle forced mission completion: {summary or 'No summary provided.'}")
                 return
 
-            elif exit_code == -1:
+            elif exit_code == -1:  # Retry once if Oracle failed
                 if not content.get("already_retried"):
                     self.log("[REFLEX] Oracle returned exit_code -1. Retrying once...")
                     content["already_retried"] = True
@@ -261,21 +263,24 @@ class Agent(BootAgent):
                         self.alert_operator(qid, message="Oracle parse failed again. Alerting operator.")
                     return
 
-            if exit_code == 1:
+            elif exit_code == 1:  # Continue Reflex loop
                 self.trace_rounds += 1
                 self.log(f"[REFLEX] Trace round: {self.trace_rounds} of {self.max_rounds}")
 
+                # Check if we've hit the maximum rounds
                 if self.trace_rounds >= self.max_rounds:
-                    if not self.alert_fired:
-                        self.alert_operator(qid, message="🔚 Reflex loop reached max rounds.")
-                        self.alert_fired = True
+                    self.log("[REFLEX] Max rounds reached. Checking for final summary.")
+
+                    # Either provide the summary or notify no summary is available
+                    if summary:
+                        self.alert_operator(qid, message=f"🔚 Reflex loop complete. Final summary: {summary}")
+                    else:
+                        self.alert_operator(qid, message="🔚 Reflex loop complete. No summary available.")
+
+                    self.alert_fired = True
                     return
 
-                if actions:
-                    for key, command in flat_actions.items():
-                        self.log(command)
-                        command_output[key] = self.run_check(command)
-
+                # Continue Reflex loop: generate next prompt and analyze
                 self.route_structured_prompt_to_oracle(
                     intent_text=self.build_next_prompt(response, command_output),
                     mission_id=content.get("mission_id"),
@@ -286,7 +291,7 @@ class Agent(BootAgent):
             error_details = traceback.format_exc()
             self.log(f"[CAPITAL][ERROR] Error processing Oracle response: {e} -> {error_details}")
 
-            #self.fail_safe_stop(qid, tracer_session_id, reason=f"Invalid GPT response format: {e}")
+
 
     def alert_operator(self, qid, message=None):
 
@@ -344,7 +349,60 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[REFLEX][ERROR] Failed to write alert msg: {e}")
 
+    @staticmethod
+    def extract_response_data(response):
+        """
+        Extracts 'summary', 'commands', and 'exit_code' from the OpenAI response.
+        Args:
+            response (str): The raw OpenAI response text.
+        Returns:
+            dict: A dictionary containing 'summary', 'actions', and 'exit_code'.
+        """
+        # Default output in case of any issues with parsing
+        parsed_response = {
+            "summary": "[PARSE ERROR — No summary provided]",  # Default summary
+            "actions": {},  # Default (empty) actions
+            "exit_code": 3  # Default error code
+        }
 
+        try:
+            # Check if it's properly JSON formatted, if yes, attempt parsing
+            if isinstance(response, str) and response.strip().startswith("{"):
+                response_data = json.loads(response)
+                # Use parsed JSON (if valid)
+                if "summary" in response_data:
+                    parsed_response["summary"] = response_data["summary"]
+                if "actions" in response_data:
+                    parsed_response["actions"] = response_data["actions"]
+                if "exit_code" in response_data:
+                    parsed_response["exit_code"] = response_data["exit_code"]
+            else:
+                # Parse plain text response
+                lines = response.splitlines()
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("Classification:"):
+                        # Extract summary
+                        parsed_response["summary"] = line.split("Classification:")[1].strip()
+                    elif line.startswith("Exit_Code:"):
+                        # Extract exit code
+                        try:
+                            parsed_response["exit_code"] = int(line.split("Exit_Code:")[1].strip())
+                        except ValueError:
+                            pass  # Keep default exit_code in case of parsing errors
+                    elif line and line[0].isdigit():  # Lines starting with numbers (commands)
+                        # Extract command number and text
+                        parts = line.split(".", 1)
+                        if len(parts) == 2:
+                            command_number = parts[0].strip()
+                            command_text = parts[1].strip()
+                            parsed_response["actions"][command_number] = command_text
+
+        except Exception as e:
+            # Log error if parsing failed (for debugging)
+            print(f"[ERROR] Unable to parse response. Exception: {e}")
+
+        return parsed_response
 
     def summarize_reflex_history(self, qid, limit=6):
 
@@ -386,7 +444,7 @@ class Agent(BootAgent):
         build the next prompt to send back to Oracle.
 
         Parameters:
-            last_response_json (str): The raw JSON string returned by Oracle.
+            response (dict): The parsed JSON dictionary returned by Oracle.
             command_output (dict): A dictionary of command outputs,
                                    where key = "1", "2", etc. and value = (stdout, stderr)
 
@@ -394,12 +452,21 @@ class Agent(BootAgent):
             str: The next prompt to send to Oracle.
         """
         try:
+            # Retrieve summary and actions from the response
             summary = response.get("summary", "")
             actions = response.get("actions", {})
 
             # Flatten the command output into a readable format
             shell_output_lines = []
-            for key, (stdout, stderr) in command_output.items():
+            for key, output in command_output.items():
+                # Validate and extract stdout and stderr
+                if isinstance(output, tuple) and len(output) == 2:
+                    stdout, stderr = output
+                else:
+                    self.log(f"[WARN] Invalid command output format for key {key}: {output}")
+                    stdout, stderr = "No output", "No error"
+
+                # Include the command details and results
                 shell_output_lines.append(f"[Command {key}: {actions.get(key, '<unknown command>')}]")
                 if stdout:
                     shell_output_lines.append(f"Output:\n{stdout}")
@@ -407,21 +474,30 @@ class Agent(BootAgent):
                     shell_output_lines.append(f"Error:\n{stderr}")
                 shell_output_lines.append("-" * 40)
 
+            # Join all shell output lines into a single string
             shell_output_str = "\n".join(shell_output_lines)
 
-            # Build the prompt
+            # Build the next prompt
             next_prompt = (
                 f"Summary of previous analysis:\n{summary}\n\n"
                 f"Shell Command Results:\n{shell_output_str}\n\n"
-                f"Instructions: Based on the output above, what Linux command(s) should I run next?\n"
-                f"Return ONLY executable Linux shell commands in the `actions` block. Do not explain them. "
-                f"Format response in this JSON schema:\n"
-                f'{{\n  "summary": "Your updated analysis",\n  "actions": {{"1": "..."}}\n  "exit_code": 1\n}}'
+                f"Instructions: Based on the output above, what Linux command(s) should I run next?\n\n"
+                f"⚠️ Return ONLY the following format:\n"
+                f"Classification: [Suggestion | Concern | Critical]\n"
+                f"1. command\n"
+                f"2. command\n"
+                f"Exit_Code: [1 | 2 | 3]\n\n"
+                f"Do NOT use markdown. Do NOT return JSON. Do NOT explain anything."
             )
+
+            # Log the constructed prompt for debugging
+            self.log(f"#################{next_prompt}")
 
             return next_prompt
 
         except Exception as e:
+            # Log the error and return a failure message as the prompt
+            self.log(f"[ERROR] Exception in build_next_prompt: {e}")
             return f"[ERROR] Failed to build next prompt: {e}"
 
     def get_dialogue_history(self, qid):
@@ -455,13 +531,6 @@ class Agent(BootAgent):
 
             return history
 
-    def should_continue(self, history):
-        #  Implement logic to prevent flooding
-        #  For example, check the length of the history,
-        #  or implement a more sophisticated rate-limiting mechanism.
-        #  For now, a simple length check:
-        return len(history) < self.max_rounds
-
     #Runs linux commands
     def run_check(self, command):
         try:
@@ -483,26 +552,81 @@ class Agent(BootAgent):
     def fail_safe_stop(self, query_id, tracer_session_id, reason="no reason given"):
         self.log(f"[FAILSAFE] Mission aborted for {query_id}. Reason: {reason}")
 
+    def validate_oracle_response(self, response):
+        """
+        Validates Oracle's response format.
+        """
+        if not isinstance(response, dict):
+            return False
 
-    def mark_mission_state(self, state, query_id=None):
-        if not os.path.exists(self.state_path):
-            self.log("[CAPITAL] Cannot mark mission state: state.json missing.")
-            return
+        required_keys = {"summary", "actions", "exit_code"}
+        if not required_keys.issubset(response.keys()):
+            return False
 
-        try:
-            with open(self.state_path, "r") as f:
-                state_data = json.load(f)
+        if not isinstance(response["exit_code"], int) or response["exit_code"] not in {1, 2, 3}:
+            return False
 
-            state_data["status"] = state
-            if query_id:
-                state_data["last_query"] = query_id
+        return True
 
-            with open(self.state_path, "w") as f:
-                json.dump(state_data, f, indent=2)
+    def reflex_loop(self):
+        """
+        Core Reflex loop. Interacts with Oracle in iterative steps until max_rounds is reached
+        or until reflex completion is signaled by Exit_Code: 2.
 
-            self.log(f"[CAPITAL] Mission state updated to: {state}")
-        except Exception as e:
-            self.log(f"[CAPITAL][ERROR] Failed to update mission state: {e}")
+        Uses `end_prompt` in the final round.
+        """
+        self.current_round = 0
+
+        while self.current_round < self.max_rounds:
+            self.current_round += 1
+
+            # Check if it's the final round
+            if self.current_round == self.max_rounds:
+                self.log(f"Final round {self.current_round}/{self.max_rounds} reached. Sending end_prompt.")
+                prompt = self.mission["end_prompt"]
+            else:
+                # Use the current prompt for intermediate rounds
+                prompt = self.current_prompt
+
+            # Send the prompt to Oracle
+            oracle_response = self.route_structured_prompt_to_oracle(prompt)
+
+            # Validate the Oracle response
+            if not self.validate_oracle_response(oracle_response):
+                self.log(f"[ERROR] Invalid Oracle response in round {self.current_round}: {oracle_response}")
+                return {
+                    "classification": "Critical",
+                    "summary": f"Invalid Oracle response in round {self.current_round}.",
+                    "exit_code": 3,
+                }
+
+            # Log the processed response
+            self.log(f"Round {self.current_round}/{self.max_rounds} Oracle Response: {oracle_response}")
+
+            # Check exit_code to determine next steps
+            exit_code = oracle_response.get("exit_code", 1)
+
+            if exit_code == 2:
+                self.log(f"Reflex loop complete. Oracle signaled Exit_Code: {exit_code}.")
+                break
+            elif exit_code == 3:
+                self.log(f"Human intervention required. Oracle signaled Exit_Code: {exit_code}.")
+                return oracle_response
+
+            # If continuing, prepare the next prompt
+            next_actions = oracle_response.get("actions", {})
+            self.current_prompt = self.build_next_prompt(
+                oracle_response,
+                command_output=self.get_shell_outputs(next_actions)
+            )
+
+        # Reflex loop has exited; return completion signal
+        return {
+            "classification": "Suggestion",
+            "summary": "Reflex loop completed. Review final response for details.",
+            "exit_code": 2,
+        }
+
     #todo dispatch to linux_scout or another os scout to handle the query
     #linux_scout; Bash - native, fast; windows_scout ; PowerShell; logic + WMI; container_scout; Docker - only; recon
     #gpu_scout NVIDIA driver / usage stats; k8s_scout; Cluster & pod; telemetry; db_scout SQL - aware schema scanner
