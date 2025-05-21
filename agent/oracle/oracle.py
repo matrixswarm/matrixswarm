@@ -40,7 +40,6 @@ class Agent(BootAgent):
         self.log("[ORACLE] Oracle shutting down. No more prophecies today.")
 
     def msg_prompt(self, content, packet):
-
         self.log("[ORACLE] Reflex prompt received.")
 
         if isinstance(content, dict):
@@ -49,7 +48,6 @@ class Agent(BootAgent):
             target_uid = content.get("target_universal_id") or packet.get("target_universal_id")
             role = packet.get("role", "oracle")
             tracer_session_id = packet.get("tracer_session_id")
-            mission_id = content.get("mission_id", "unknown")
             report_to = packet.get("report_final_packet_to")
             response_mode = (content.get("response_mode") or "terse").lower()
         else:
@@ -57,14 +55,12 @@ class Agent(BootAgent):
             history = []
             role = "oracle"
             tracer_session_id = packet.get("tracer_session_id", "unknown")
-            mission_id = packet.get("mission_id", "unknown")
             target_uid = packet.get("target_universal_id", "capital_gpt")
             report_to = packet.get("report_final_packet_to", "capital_gpt")
             response_mode = "terse"
 
 
         try:
-
             if report_to is not None:
                 self.report_final_packet_to = report_to
 
@@ -78,79 +74,50 @@ class Agent(BootAgent):
                 self.log(f"[ORACLE][WARN] Refusing to reflex to self: {target_uid}")
                 return
 
+
             try:
 
                 self.log(f"[ORACLE] Response mode: {response_mode}")
 
-                system_prompt = {
-                    "terse": "Return ONLY a flat dictionary of shell commands with numeric keys...",
-                    "verbose": "Return JSON with each command and a short explanation...",
-                    "script": "Return a bash script with echo statements...",
-                    "table": "Return a markdown table, then the actions block..."
-                }.get(response_mode, "Return ONLY a flat dictionary of shell commands with numeric keys...")
-
-                messages = prompt_text if isinstance(prompt_text, list) else [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt_text}
-                ]
-
-                #self.log(f"[ORACLE] Final messages to GPT:\n{json.dumps(messages, indent=2)}")
+                messages = [{"role": "user", "content": prompt_text}]
 
                 response = self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",  # or gpt-3.5-turbo
+                    model="gpt-3.5-turbo",
                     messages=messages,
-                    temperature=0.7
+                    temperature=0,
                 ).choices[0].message.content.strip()
-
-                mission_status = 1
-
             except Exception as e:
-                response = f"[ORACLE][ERROR] GPT failed: {e}"
-                mission_status = -1
+                self.log(f"[ERROR] Failed to fetch response: {str(e)}")
+                return None
 
-            # 📦 Package response as .msg
-            outbox = os.path.join(self.path_resolution["comm_path"], target_uid, "incoming")
 
+            # 🎯 Final payload construction
+            mission_status = 1
             query_id = f"q_{int(time.time())}"
+            outbox = os.path.join(self.path_resolution["comm_path"], target_uid, "incoming")
             out_path = os.path.join(outbox, f"oracle_reply_{query_id}.msg")
 
-            # Fix weird escape sequences before trying to parse
-            try:
-                clean = Agent.extract_first_json_block(response)
-                response_data = json.loads(clean)
-            except Exception as e:
-                self.log(f"[ORACLE][ERROR] Failed to parse response: {e}")
-                self.log(f"[ORACLE][DEBUG] Raw content was:\n{response}")
-                response_data = {"summary": "[PARSE ERROR]", "actions": {}, "exit_code": -1}
-
-            if Agent.contains_dangerous_commands(response_data.get("actions", {})):
-                self.log("[ORACLE][FIREWALL] Detected a dangerous command in actions. Blocking response.")
-                response_data = {
-                    "summary": "[COMMAND BLOCKED: Unsafe reflex]",
-                    "actions": {},
-                    "exit_code": -1
-                }
+            self.log(response)
 
             packet = {
                 "type": "gpt_analysis",
                 "query_id": query_id,
-                "tracer_session_id": tracer_session_id,  # ✅ Required at top level for trace log
-                "packet_id": int(time.time()),  # ✅ Required at top level for trace log
-                "target_universal_id": "sgt-in-arms",  # ✅ Who it’s going back to
-                "role": "oracle",  # Optional but good for log clarity
+                "tracer_session_id": tracer_session_id,
+                "packet_id": int(time.time()),
+                "target_universal_id": "sgt-in-arms",
+                "role": "oracle",
                 "content": {
-                    "response": response_data,  # ← raw GPT string (json.loads() downstream)
+                    "response": response,
                     "origin": self.command_line_args.get("universal_id", "oracle"),
                     "role": role,
-                    "mission_id": mission_id,
-                    "mission_status": mission_status,  # ← 1, 0, -1 etc.
+                    "mission_status": mission_status,
                     "history": history
                 }
             }
 
-            #self.log(f"[TRACE] Oracle saving packet #{packet_id} to session {tracer_session_id}")
             self.save_to_trace_session(packet, msg_type="msg")
 
+            os.makedirs(outbox, exist_ok=True)
             with open(out_path, "w") as f:
                 json.dump(packet, f, indent=2)
 
@@ -158,6 +125,8 @@ class Agent(BootAgent):
 
         except Exception as e:
             self.log(f"[ORACLE][CRITICAL] Failed during msg_prompt(): {e}")
+
+
 
     @staticmethod
     def contains_dangerous_commands(actions):
@@ -169,8 +138,15 @@ class Agent(BootAgent):
 
     @staticmethod
     def extract_first_json_block(text):
-        match = re.search(r'(\{.*\})', text, re.DOTALL)
-        return match.group(1) if match else "{}"
+        try:
+            blocks = re.findall(r'\{(?:[^{}]|(?R))*\}', text, re.DOTALL)
+            for b in blocks:
+                json.loads(b)  # only return if it's valid
+                return b
+        except Exception:
+            pass
+        return "{}"
+
 
     def send_oracle_reply(self, query, response):
         recipient = query.get("response_to")

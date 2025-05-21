@@ -123,7 +123,6 @@ class Agent(BootAgent):
                 age = round(now - beacon.get("last_seen", 0), 2)
                 if age > timeout * 2:
                     status_report[thread] = f"💥 reflex expired ({age}s > {timeout}s)"
-                    self.deploy_reaper_for(agent_id)
                 elif age > timeout:
                     status_report[thread] = f"⚠️ stale ({age}s)"
                 else:
