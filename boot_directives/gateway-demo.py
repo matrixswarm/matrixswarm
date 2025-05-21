@@ -97,7 +97,7 @@ matrix_directive = {
                 "check_interval_sec": 10,
                 "restart_limit": 3,
                 "redis_port": 6379,
-                "always_alert": 1, # 1 = true 0 = false
+                "always_alert": 1,
                 "socket_path": "/var/run/redis/redis-server.sock",
                 "service_name": "redis"
             }
@@ -147,6 +147,51 @@ matrix_directive = {
                     }
 
                 },
+
+            ]
+        },
+        {
+            "universal_id": "gatekeeper",
+            "name": "ssh_guardian",
+            "app": "swarm-core",
+            "config": {
+                "log_path": "/var/log/auth.log",
+                "maxmind_db": "GeoLite2-City.mmdb",
+                "geoip_enabled": 1,
+                "always_alert": 1,
+            }
+            ,
+            "children": [
+
+                {
+                    "universal_id": "discord-delta-8",
+                    "name": "discord",
+                    "app": "mysql-demo",
+                    "filesystem": {
+                        "folders": []
+                    },
+                    "config": {
+                        "bot_token": os.getenv("DISCORD_TOKEN"),
+                        "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
+                        "role": "comm",
+
+                    }
+                },
+                {
+                    "universal_id": "telegram-bot-father-9",
+                    "name": "telegram_relay",
+                    "app": "mysql-demo",
+                    "filesystem": {
+                        "folders": []
+                    },
+                    "config": {
+                        "bot_token": os.getenv("TELEGRAM_API_KEY"),
+                        "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+                        "role": "comm",
+
+                    }
+                },
+
 
             ]
         },
@@ -224,52 +269,7 @@ matrix_directive = {
             },
             "filesystem": {},
             "delegated": []
-        },
-        {
-          "universal_id": "nginx-sentinel",
-          "name": "nginx_watchdog",
-          "app": "swarm-edge",
-          "config": {
-            "check_interval_sec": 10,
-            "always_alert": 1,
-            "restart_limit": 3,
-            "service_name": "nginx",
-            "ports": [86],
-            "alert_cooldown": 300
-          }
-            ,
-            "children": [
-
-                {
-                    "universal_id": "discord-delta-6",
-                    "name": "discord",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("DISCORD_TOKEN"),
-                        "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
-                        "role": "comm",
-
-                    }
-                },
-                {
-                    "universal_id": "telegram-bot-father-3",
-                    "name": "telegram_relay",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("TELEGRAM_API_KEY"),
-                        "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-                        "role": "comm",
-
-                    }
-                },
-
-            ]
         }
+
     ]
 }

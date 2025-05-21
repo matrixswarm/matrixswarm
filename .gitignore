@@ -23,6 +23,11 @@ deploy_directive.py
 *.sh
 
 
+# MaxMind DB (non-distributable)
+maxmind/
+maxmind/*.mmdb
+
+
 # Python system files
 __pycache__/
 *.py[cod]
