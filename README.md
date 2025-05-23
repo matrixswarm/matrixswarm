@@ -514,6 +514,18 @@ python3 bootloader.py
 ```
 
 ---
+## Licensing Information
+
+MatrixSwarm is released under the **MatrixSwarm Community License v1.1 (Modified MIT)**.
+
+This license allows you to use, modify, and distribute MatrixSwarm for **personal, academic, research, and non-commercial development purposes.**
+
+**For any commercial use, including embedding in commercial products, offering SaaS, or providing services derived from MatrixSwarm, a separate commercial license is required.**
+
+For commercial licensing inquiries, please contact **swarm@matrixswarm.com**.
+
+Please read the full license text in the `LICENSE.md` file for complete details.
+
 
 ## 📖 Dev.to Series
 

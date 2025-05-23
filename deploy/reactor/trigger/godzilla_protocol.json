@@ -1,0 +1,16 @@
+{
+  "type": "spawn",
+  "timestamp": "AUTO",
+  "content": {
+    "universal_id": "kaiju-alpha",
+    "agent_name": "reactor",
+    "delegated": ["reactor-node", "siren-beacon", "orbital-scan"],
+    "directives": {
+      "protocol": "GODZILLA",
+      "zone_lockdown": true,
+      "trigger_code": 1954,
+      "codex_entry": "King of the Monsters",
+      "response_level": "OMEGA"
+    }
+  }
+}

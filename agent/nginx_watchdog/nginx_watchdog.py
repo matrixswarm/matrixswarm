@@ -114,7 +114,6 @@ class Agent(BootAgent):
         Drop a reflex alert .msg file into /incoming/<agent_dir>/ for comm relays to pick up.
         Respects factory-injected Discord/Telegram agents already listening.
         """
-
         msg_body = message if message else "[REFLEX] No message provided."
         formatted_msg = f"📣 Swarm Message\n{msg_body}"
         payload = {
