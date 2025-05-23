@@ -41,12 +41,32 @@ class Agent(BootAgent, ReflexAlertMixin):
 
     def worker_pre(self):
         self.log("[GHOSTWIRE] Shadow tracker engaged.")
+        self.enforce_prompt_command_once()
         threading.Thread(target=self.watch_file_changes, daemon=True).start()
 
     def worker(self):
         self.track_active_users()
         self.poll_shell_history()
         interruptible_sleep(self, self.tick_rate)
+
+    def enforce_prompt_command_once(self):
+        paths = ["/etc/bash.bashrc", os.path.expanduser("~/.bashrc")]
+        for path in paths:
+            try:
+                if not os.path.exists(path):
+                    continue
+                with open(path, "r") as f:
+                    content = f.read()
+                    if "PROMPT_COMMAND" in content and "history -a" in content:
+                        self.log(f"[GHOSTWIRE][PROMPT] Already present in {path}")
+                        continue
+                with open(path, "a") as f:
+                    f.write("\n# Added by GhostWire for real-time history logging\n")
+                    f.write("export PROMPT_COMMAND='history -a'\n")
+                self.log(f"[GHOSTWIRE][PROMPT] Injected PROMPT_COMMAND into {path}")
+            except Exception as e:
+                self.log(f"[GHOSTWIRE][PROMPT][ERROR] {path}: {e}")
+
 
     def track_active_users(self):
         try:
@@ -151,6 +171,10 @@ class Agent(BootAgent, ReflexAlertMixin):
                 history_path = "/root/.bash_history"
             else:
                 history_path = f"/home/{user}/.bash_history"
+            last_seen_cmd = session.get("last_command_timestamp", 0)
+            if time.time() - last_seen_cmd > 120:
+                self.log(f"[GHOSTWIRE][{user}] 🕒 Warning: Shell history appears stale. PROMPT_COMMAND may be missing.")
+
             if os.path.exists(history_path):
                 try:
                     with open(history_path, "r") as f:
@@ -158,6 +182,8 @@ class Agent(BootAgent, ReflexAlertMixin):
                     new_commands = [cmd for cmd in lines if cmd not in session["commands"]]
                     for cmd in new_commands:
                         session["commands"].append(cmd)
+                        session["last_command_timestamp"] = time.time()
+
                         self.log(f"[GHOSTWIRE][{user}] {cmd}")
                         cmd_hash = self.hash_command(cmd)
                         if cmd_hash not in self.command_hashes:
