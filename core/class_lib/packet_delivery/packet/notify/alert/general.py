@@ -18,13 +18,21 @@ class Packet(BasePacket):
         self._packet = packet
 
     def set_data(self, data: dict):
+
         try:
+            if not data.get("msg"):
+                self._valid = False
+                self._error_code = 1
+                self._error_msg = "Missing required field: 'msg'"
+                print(f"[SET_DATA] ERROR: {self._error_msg}")
+                return
+
             self._payload = {
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "universal_id": data.get("universal_id", "unknown"),
                 "level": data.get("level", "info"),
-                "msg": data.get("msg", ""),
-                "formatted_msg": f"📣 Swarm Message\n{data.get('msg', '')}",
+                "msg": data["msg"],
+                "formatted_msg": f"📣 Swarm Message\n{data['msg']}",
                 "cause": data.get("cause", "unspecified"),
                 "origin": data.get("origin", data.get("universal_id", "unknown"))
             }
@@ -34,13 +42,17 @@ class Packet(BasePacket):
             self._valid = False
             self._error_code = 1
             self._error_msg = str(e)
+            print(f"[SET_DATA][EXCEPTION] {e}")
+
 
     def get_packet(self) -> dict:
-        def get_packet(self) -> dict:
-            base = self._payload
-            if self._packet and self._packet.is_valid():
-                base["embedded"] = self._packet.get_packet()
-            return base
+        base = self._payload
+        if self._packet and self._packet.is_valid():
+            base["embedded"] = self._packet.get_packet()
+        return {
+            "type": "send_packet_incoming",
+            "content": base
+        }
 
     def get_error_success(self) -> int:
         return self._error_code
