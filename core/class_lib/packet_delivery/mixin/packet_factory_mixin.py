@@ -1,5 +1,6 @@
 import importlib
 import traceback
+from core.class_lib.packet_delivery.packet.error.packet_not_found import Packet as ErrorPacket
 
 class PacketFactoryMixin:
     def __init__(self):
@@ -11,7 +12,7 @@ class PacketFactoryMixin:
         Falls back to packet/error/packet_not_found.py
         """
         try:
-            full_path = f"core.class_lib.packet_delivery.packet.{dotted_path}.packet"
+            full_path = f"core.class_lib.packet_delivery.packet.{dotted_path}"
             mod = importlib.import_module(full_path)
             packet = mod.Packet()
             if new:
@@ -23,7 +24,6 @@ class PacketFactoryMixin:
             print(f"[PACKET][ERROR] Could not import {dotted_path}: {e}")
             traceback.print_exc()
             try:
-                from core.class_lib.packet_delivery.packet.error.packet_not_found import Packet as ErrorPacket
                 return ErrorPacket(reason=f"Packet '{dotted_path}' not found.")
             except Exception as fallback_err:
                 print(f"[PACKET][FAILSAFE] Failed to load error packet: {fallback_err}")

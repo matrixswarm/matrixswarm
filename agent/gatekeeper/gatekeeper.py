@@ -66,7 +66,11 @@ class Agent(BootAgent):
             return {"ip": ip}
 
     def drop_alert(self, info):
-        msg = (
+
+        pk = self.get_delivery_packet("notify.alert.general", new=True)
+
+        # Force inject message
+        msg_text = (
             f"🛡️ SSH Login Detected\n\n"
             f"• User: {info.get('user')}\n"
             f"• IP: {info.get('ip')}\n"
@@ -76,51 +80,33 @@ class Agent(BootAgent):
             f"• Terminal: {info.get('tty')}"
         )
 
-        self.alert_operator('', msg)
+        pk.set_data({
+            "msg": msg_text,
+            "universal_id": self.command_line_args.get("universal_id", "unknown"),
+            "level": "info",
+            "cause": "SSH Login Detected",
+            "origin": self.command_line_args.get("universal_id", "unknown")
+        })
 
-    def alert_operator(self, qid, message=None):
+        #self.log("[DEBUG] Packet preview (post-set_data):")
+        #self.log(json.dumps(pk.get_packet(), indent=2))
 
-        if message:
-            msg = f"{message}"
-        else:
-            msg = f"🚨 GATEKEEPER REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
+        # Send packet to all comm agents
+        comms = self.get_nodes_by_role("comm")
 
-        comms = self.get_nodes_by_role('comm')
-        if not comms:
-            self.log("[REFLEX][ALERT] No comm nodes found. Alert not dispatched.")
-        else:
-            for comm in comms:
-                self.log(f"[REFLEX] Alert routed to comm agent: {comm['universal_id']}")
-                self.drop_reflex_alert(msg, comm['universal_id'], level="critical", cause="[PARSE ERROR]")
+        for comm in comms:
+            da = self.get_delivery_agent("file.json_file", new=True)
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([comm["universal_id"]]) \
+                .set_drop_zone({"drop": "incoming"}) \
+                .set_packet(pk) \
+                .deliver()
 
-    def drop_reflex_alert(self, message, agent_dir, level="critical", cause=""):
-        """
-        Drop a reflex alert .msg file into /incoming/<agent_dir>/ for comm relays to pick up.
-        Respects factory-injected Discord/Telegram agents already listening.
-        """
+            if da.get_error_success() != 0:
+                self.log(f"[GATEKEEPER][DELIVERY-FAIL] {da.get_error_success_msg()}")
+            else:
+                self.log(f"[GATEKEEPER][DELIVERED] Alert sent to {comm['universal_id']}")
 
-        msg_body = message if message else "[REFLEX] No message provided."
-        formatted_msg = f"📣 Swarm Message\n{msg_body}"
-        payload = {
-            "type": "send_packet_incoming",
-            "content": {
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "universal_id": self.command_line_args.get("universal_id", "unknown"),
-                "level": level,
-                "msg": msg_body,
-                "formatted_msg": formatted_msg,
-                "cause": cause or msg_body,
-                "origin": self.command_line_args.get("universal_id", "unknown")
-            }
-        }
-        try:
-            inbox = os.path.join(self.path_resolution["comm_path"], agent_dir, "incoming")
-            os.makedirs(inbox, exist_ok=True)
-            path = os.path.join(inbox, f"redis_alert_{int(time.time())}.msg")
-            with open(path, "w") as f:
-                json.dump(payload, f)
-        except Exception as e:
-            self.log(f"[HAMMER][ALERT][FAIL] Could not drop alert: {e}")
 
     def tail_log(self):
         self.log(f"[GATEKEEPER] Tailing: {self.log_path}")

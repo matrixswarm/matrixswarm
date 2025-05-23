@@ -72,7 +72,7 @@ class Agent(BootAgent):
             self.log(f"[WATCHDOG][FAIL] Restart failed: {e}")
             if self.failed_restart_count >= self.failed_restart_limit:
                 self.disabled = True
-                self.alert_operator("mysql-restart-limit", "🛑 MySQL watchdog disabled after repeated restart failures.")
+                self.alert_operator("🛑 MySQL watchdog disabled after repeated restart failures.")
                 self.log("[WATCHDOG][DISABLED] Max restart attempts reached. Watchdog disabled.")
 
     def update_status_metrics(self, is_running):
@@ -91,7 +91,7 @@ class Agent(BootAgent):
             self.log(f"[WATCHDOG] MySQL status changed → {'UP' if is_running else 'DOWN'}")
 
             if is_running and self.last_alerted_status == "DOWN":
-                self.alert_operator("mysql-recovered", "✅ MySQL has recovered and is now online.")
+                self.alert_operator("✅ MySQL has recovered and is now online.")
                 self.last_alerted_status = "UP"
 
             elif not is_running:
@@ -137,7 +137,7 @@ class Agent(BootAgent):
         total = uptime + downtime
 
         if total > 0 and (uptime / total) < 0.9:
-            self.alert_operator("uptime-drop", f"⚠️ MySQL uptime dropped to {uptime / total:.2%} today.")
+            self.alert_operator(f"⚠️ MySQL uptime dropped to {uptime / total:.2%} today.")
 
 
 
@@ -152,7 +152,7 @@ class Agent(BootAgent):
 
         if running and not self.is_mysql_listening() and not self.is_socket_accessible():
             self.log("[WATCHDOG][WARN] MySQL is running but not accessible on port or socket.")
-            self.alert_operator("mysql-unreachable",f"⚠️ MySQL is running but neither port {self.mysql_port} nor socket {self.socket_path} is open.")
+            self.alert_operator(f"⚠️ MySQL is running but neither port {self.mysql_port} nor socket {self.socket_path} is open.")
 
         if running:
             self.log("[WATCHDOG] ✅ MySQL is running.")
@@ -161,7 +161,7 @@ class Agent(BootAgent):
 
             # Fire alert immediately even if it might recover quickly
             if self.should_alert("mysql-down"):
-                self.alert_operator("mysql-down", "❌ MySQL appears to be down. Attempting restart...")
+                self.alert_operator( "❌ MySQL appears to be down. Attempting restart...")
 
             self.last_alerted_status = "DOWN"
             self.restart_mysql()
@@ -179,58 +179,44 @@ class Agent(BootAgent):
         time.sleep(5)
         if not self.is_mysql_listening():
             self.log(f"[WATCHDOG][CRIT] MySQL restarted but port {self.mysql_port} is still not listening.")
-            self.alert_operator(f"mysql-post-restart", "🚨 MySQL restarted but never began listening on port {self.mysql_port}.")
+            self.alert_operator("🚨 MySQL restarted but never began listening on port {self.mysql_port}.")
 
-    def alert_operator(self, qid, message=None):
-
-        if message:
-            msg = f"{message}"
-        else:
-            msg = f"🚨 MySQL REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
-
-        comms = self.get_nodes_by_role('comm')
-        if not comms:
-            self.log("[REFLEX][ALERT] No comm nodes found. Alert not dispatched.")
-        else:
-            for comm in comms:
-                self.log(f"[REFLEX] Alert routed to comm agent: {comm['universal_id']}")
-                self.drop_reflex_alert(msg, comm['universal_id'], level="critical", cause="[PARSE ERROR]")
-
-    def drop_reflex_alert(self, message, agent_dir, level="critical", cause=""):
+    def alert_operator(self, message=None):
         """
-        Drop a reflex alert .msg file into /incoming/<agent_dir>/ for comm relays to pick up.
-        Respects factory-injected Discord/Telegram agents already listening.
+        Uses Swarm packet + delivery agent pipeline to send structured alerts.
         """
+        if not message:
+            message = "🚨 MySQL REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
 
-        msg_body = message if message else "[REFLEX] No message provided."
-        formatted_msg = f"📣 Swarm Message\n{msg_body}"
-        payload = {
-            "type": "send_packet_incoming",
-            "content": {
+        pk = self.get_delivery_packet("notify.alert.general", new=True)
+        pk.set_data({
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "universal_id": self.command_line_args.get("universal_id", "unknown"),
-                "level": level,
-                "msg": msg_body,
-                "formatted_msg": formatted_msg,
-                "cause": cause or msg_body,
+                "level": "critical",
+                "msg": message,
+                "formatted_msg": f"📣 Swarm Message\n{message}",
+                "cause": "MySQL Watchdog Alert",
                 "origin": self.command_line_args.get("universal_id", "unknown")
-            }
-        }
 
-        inbox_path = os.path.join(self.path_resolution["comm_path"], agent_dir, "incoming")
-        os.makedirs(inbox_path, exist_ok=True)
+        })
 
-        try:
-            fname = f"reflex_alert_{int(time.time())}.msg"
-            fullpath = os.path.join(inbox_path, fname)
+        comms = self.get_nodes_by_role("comm")
+        if not comms:
+            self.log("[ALERT] No comm nodes found. Alert not dispatched.")
+            return
 
-            with open(fullpath, "w") as f:
-                json.dump(payload, f)
+        for comm in comms:
+            da = self.get_delivery_agent("file.json_file", new=True)
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([comm["universal_id"]]) \
+                .set_drop_zone({"drop": "incoming"}) \
+                .set_packet(pk) \
+                .deliver()
 
-            self.log(f"[REFLEX] Alert dropped to: {fullpath}")
-
-        except Exception as e:
-            self.log(f"[REFLEX][ERROR] Failed to write alert msg: {e}")
+            if da.get_error_success() != 0:
+                self.log(f"[ALERT][DELIVERY-FAIL] {comm['universal_id']}: {da.get_error_success_msg()}")
+            else:
+                self.log(f"[ALERT][DELIVERED] Alert sent to {comm['universal_id']}")
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ class Agent(BootAgent):
             self.log(f"[SENTINEL][FAIL] Restart failed: {e}")
             if self.failed_restarts >= self.restart_limit:
                 self.disabled = True
-                self.alert_operator("nginx-failout", "💀 Nginx sentinel disabled after repeated restart failures.")
+                self.alert_operator("💀 Nginx sentinel disabled after repeated restart failures.")
 
     def update_stats(self, running):
         now = time.time()
@@ -94,20 +94,41 @@ class Agent(BootAgent):
             return True
         return False
 
-    def alert_operator(self, qid, message=None):
+    def alert_operator(self, message=None):
+        """
+        Uses packet + delivery agent system to send alert to all comms.
+        """
+        if not message:
+            message = "🚨 NGINX REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
 
-        if message:
-            msg = f"{message}"
-        else:
-            msg = f"🚨 NGINX REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
+        pk = self.get_delivery_packet("notify.alert.general", new=True)
+        pk.set_data({
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "universal_id": self.command_line_args.get("universal_id", "unknown"),
+                "level": "critical",
+                "msg": message,
+                "formatted_msg": f"📣 Swarm Message\n{message}",
+                "cause": "Nginx Sentinel Alert",
+                "origin": self.command_line_args.get("universal_id", "unknown")
+        })
 
-        comms = self.get_nodes_by_role('comm')
+        comms = self.get_nodes_by_role("comm")
         if not comms:
-            self.log("[REFLEX][ALERT] No comm nodes found. Alert not dispatched.")
-        else:
-            for comm in comms:
-                self.log(f"[REFLEX] Alert routed to comm agent: {comm['universal_id']}")
-                self.drop_reflex_alert(msg, comm['universal_id'], level="critical", cause="[PARSE ERROR]")
+            self.log("[ALERT] No comm nodes found. Alert not dispatched.")
+            return
+
+        for comm in comms:
+            da = self.get_delivery_agent("file.json_file", new=True)
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([comm["universal_id"]]) \
+                .set_drop_zone({"drop": "incoming"}) \
+                .set_packet(pk) \
+                .deliver()
+
+            if da.get_error_success() != 0:
+                self.log(f"[ALERT][DELIVERY-FAIL] {comm['universal_id']}: {da.get_error_success_msg()}")
+            else:
+                self.log(f"[ALERT][DELIVERED] Alert sent to {comm['universal_id']}")
 
     def drop_reflex_alert(self, message, agent_dir, level="critical", cause=""):
         """
@@ -166,11 +187,11 @@ class Agent(BootAgent):
 
         if running and ports_open:
             if last_state is False:
-                self.alert_operator("nginx-recovered", "✅ Nginx has recovered and is now online.")
+                self.alert_operator("✅ Nginx has recovered and is now online.")
             self.log("[SENTINEL] ✅ Nginx is running.")
         else:
             if self.should_alert("nginx-down"):
-                self.alert_operator("nginx-down", "❌ Nginx is DOWN or not binding required ports.")
+                self.alert_operator("❌ Nginx is DOWN or not binding required ports.")
             self.log("[SENTINEL] ❌ Nginx is NOT healthy. Restarting.")
             self.restart_nginx()
 
