@@ -74,6 +74,32 @@ matrix_directive = {
             }
         },
         {
+            "universal_id": "invisible-man",
+            "name": "ghost_wire",
+            "config": {
+                "tick_rate": 5,
+                "watch_paths": [
+                    "/etc/passwd",
+                    "/etc/shadow",
+                    "/root/.ssh",
+                    "/var/www",
+                    "/home"
+                ],
+                "command_patterns": [
+                    "rm -rf",
+                    "scp",
+                    "curl",
+                    "wget",
+                    "nano /etc",
+                    "vi /etc",
+                    "vim /etc",
+                    "sudo",
+                    "su",
+                    "chmod 777"
+                ]
+            }
+        },
+        {
             "universal_id": "scavenger-strike",
             "name": "scavenger",
             "app": "matrix-core",
@@ -82,7 +108,55 @@ matrix_directive = {
             },
             "config": {}
         },
+        {
+            "universal_id": "apache_watchdog-1",
+            "name": "apache_watchdog",
+            "app": "matrix-core",
+            "config": {
+                "check_interval_sec": 10,
+                "service_name": "httpd",  # change to "httpd" for RHEL/CentOS
+                "ports": [80, 443],
+                "restart_limit": 3,
+                "always_alert": 1,
+                "alert_cooldown": 300
+            },
+            "children": [
 
+                {
+                    "universal_id": "discord-delta-12",
+                    "name": "discord",
+                    "app": "mysql-demo",
+                    "filesystem": {
+                        "folders": []
+                    },
+                    "config": {
+                        "bot_token": os.getenv("DISCORD_TOKEN"),
+                        "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
+                        "role": "comm",
+
+                    }
+                },
+                {
+                    "universal_id": "telegram-bot-father-12",
+                    "name": "telegram_relay",
+                    "app": "mysql-demo",
+                    "filesystem": {
+                        "folders": []
+                    },
+                    "config": {
+                        "bot_token": os.getenv("TELEGRAM_API_KEY"),
+                        "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+                        "role": "comm",
+
+                    }
+                },
+
+
+            ],
+            "filesystem": {},
+            "delegated": [],
+        }
+        ,
         {
             "universal_id": "commander-1",
             "name": "commander",
