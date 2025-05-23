@@ -1,4 +1,5 @@
 import os
+import pwd
 import time
 import json
 import hashlib
@@ -165,12 +166,29 @@ class Agent(BootAgent, ReflexAlertMixin):
             return True
         return False
 
+    def resolve_history_path(self, user):
+        try:
+            user_info = pwd.getpwnam(user)
+            home = user_info.pw_dir
+            shell = user_info.pw_shell
+            if "bash" in shell:
+                return os.path.join(home, ".bash_history")
+            elif "zsh" in shell:
+                return os.path.join(home, ".zsh_history")
+            elif "fish" in shell:
+                return os.path.join(home, ".config", "fish", "fish_history")
+            else:
+                self.log(f"[GHOSTWIRE][HISTORY] Unsupported shell for user {user}: {shell}")
+                return None
+        except Exception as e:
+            self.log(f"[GHOSTWIRE] Failed to resolve history path for {user}: {e}")
+            return None
+
     def poll_shell_history(self):
         for user, session in self.sessions.items():
-            if user == "root":
-                history_path = "/root/.bash_history"
-            else:
-                history_path = f"/home/{user}/.bash_history"
+            history_path = self.resolve_history_path(user)
+            if not history_path or not os.path.exists(history_path):
+                continue
             last_seen_cmd = session.get("last_command_timestamp", 0)
             if time.time() - last_seen_cmd > 120:
                 self.log(f"[GHOSTWIRE][{user}] 🕒 Warning: Shell history appears stale. PROMPT_COMMAND may be missing.")
