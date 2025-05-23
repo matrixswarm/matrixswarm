@@ -320,7 +320,19 @@ matrix_directive = {
 
             ]
         },
-
+        {
+          "universal_id": "shadowgeist",
+          "name": "ghost_wire",
+          "app": "swarm-intel",
+          "config": {
+            "role": "enforcer",
+            "tick_rate": 5,
+            "command_patterns": ["rm -rf","scp", "curl", "wget", "nano /etc", "vim /etc", "vi /etc", "sudo", "su", "chmod 777"],
+            "target_users": ["root", "matrixswarm"],
+            "whitelist": ["ubuntu", "jenkins"],
+            "alert_cooldown": 300
+          }
+        },
         {
             "universal_id": "health-probe-oracle-1",
             "name": "agent_health_probe",
