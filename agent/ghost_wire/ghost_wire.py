@@ -92,6 +92,7 @@ class Agent(BootAgent, ReflexAlertMixin):
                         #self.alert_operator(message=msg)
                         self.log(f"[GHOSTWIRE][SIGNIN] {msg}")
                         session_path = os.path.join(self.session_dir, user, f"{self.today()}.log")
+                        os.makedirs(os.path.dirname(session_path), exist_ok=True)
                         if os.path.exists(session_path):
                             try:
                                 with open(session_path, "r") as f:
@@ -188,6 +189,8 @@ class Agent(BootAgent, ReflexAlertMixin):
         for user, session in self.sessions.items():
             history_path = self.resolve_history_path(user)
             if not history_path or not os.path.exists(history_path):
+                self.log(f"[GHOSTWIRE] No shell history found for {user} — logging login only.")
+                self.persist(user, self.sessions[user])  # Still persist session
                 continue
             last_seen_cmd = session.get("last_command_timestamp", 0)
             if time.time() - last_seen_cmd > 120:
