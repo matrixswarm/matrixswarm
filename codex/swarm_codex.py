@@ -107,7 +107,23 @@ SWARM_CODEX = [
       "capabilities": ["prompt_oracle", "parse_cmd", "purge_folder"],
       "description": "Queries Oracle, obeys her response. Executes safe file-level actions."
     },
-
+    {
+      "universal_id": "ghostwire",
+      "title": "GhostWire — Shadow Auditor Online",
+      "summary": "Tracks active user sessions, watches for suspicious shell commands, and logs reflex-level alerts. GhostWire operates silently, auditing the swarm from the inside.",
+      "details": [
+        "✅ Monitors all active shell sessions (`who`)",
+        "✅ Polls `.bash_history` and deduplicates",
+        "✅ Detects reflex-triggering commands (`rm -rf`, `wget`, `chmod 777`, etc.)",
+        "✅ Triggers alert_operator with protocol-formatted packets",
+        "✅ Stores session logs in /comm/shadow-tracker/sessions/{user}/{date}.log"
+      ],
+      "reflex_trigger": "🕶️ Suspicious Command Detected",
+      "example_msg": "📣 Swarm Message\n🕶️ Suspicious Command Detected\n• User: root\n• Command: chmod 777 /etc/shadow\n• Time: 2025-05-23 04:12:00",
+      "agent_type": "reflex_auditor",
+      "created_by": "General & GPT",
+      "codex_verified": true
+    }
 
     # Future agents will be registered here
 ]

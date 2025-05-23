@@ -338,7 +338,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin):
                     if self.is_worker_overridden():
                         self.log(f"[WORKER] Executing worker cycle...")
                         self.worker()
-                        self.log(f"[WORKER] Cycle complete.")
+
                     else:
                         if not hasattr(self, "_worker_skip_logged"):
                             self.log("[BOOT] No worker() override detected — skipping worker loop.")
