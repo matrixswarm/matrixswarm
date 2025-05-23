@@ -6,21 +6,23 @@ import threading
 import json
 import importlib
 import inspect
+
+
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.core_spawner import CoreSpawner
 from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
-from core.path_manager import PathManager
 from core.path_manager import PathManager
 
 from string import Template
 from core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
 from core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
 from core.class_lib.logging.logger import Logger
+from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
+from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
+
 from core.boot_agent_thread_config import get_default_thread_registry
 
-
-
-class BootAgent():
+class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin):
 
     if __name__ == "__main__":
 
@@ -139,6 +141,8 @@ class BootAgent():
                 self.log(f"[FACTORY] Loaded: {full_module_path}")
             except Exception as e:
                 self.log(f"[FACTORY-ERROR] {dotted_path} → {e}")
+
+
 
     def is_worker_overridden(self):
         return self.__class__.worker != BootAgent.worker

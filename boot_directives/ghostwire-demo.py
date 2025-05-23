@@ -132,28 +132,13 @@ matrix_directive = {
 
                     }
                 },
-                {
-                    "universal_id": "golden-child-4",
-                    "name": "oracle",
-                    "app": "blackhole-cometh",
-                    "filesystem": {
-                        "folders": [],
-                        "files": {}
-                    },
-                    "children": [],
-                    "config": {
-                        "role": "oracle",
-                        "api_key": os.getenv("OPENAI_API_KEY_2"),
-                    }
-
-                },
 
             ]
         },
         {
             "universal_id": "gatekeeper",
-            "name": "ssh_guardian",
-            "app": "swarm-core",
+            "name": "gatekeeper",
+            "app": "swarm-intel",
             "config": {
                 "log_path": "/var/log/auth.log",
                 "maxmind_db": "GeoLite2-City.mmdb",
@@ -164,9 +149,23 @@ matrix_directive = {
             "children": [
 
                 {
+                      "universal_id": "shadowgeist",
+                      "name": "ghost_wire",
+                      "app": "swarm-intel",
+                      "config": {
+                        "role": "enforcer",
+                        "tick_rate": 5,
+                        "command_patterns": ["rm -rf","scp", "curl", "wget", "nano /etc", "vim /etc", "vi /etc", "sudo", "su", "chmod 777"],
+                        "target_users": ["root", "matrixswarm"],
+                        "whitelist": ["ubuntu", "jenkins"],
+                        "alert_cooldown": 300
+                      }
+                },
+
+                {
                     "universal_id": "discord-delta-8",
                     "name": "discord",
-                    "app": "mysql-demo",
+                    "app": "swarm-intel",
                     "filesystem": {
                         "folders": []
                     },
@@ -180,7 +179,7 @@ matrix_directive = {
                 {
                     "universal_id": "telegram-bot-father-9",
                     "name": "telegram_relay",
-                    "app": "mysql-demo",
+                    "app": "swarm-intel",
                     "filesystem": {
                         "folders": []
                     },

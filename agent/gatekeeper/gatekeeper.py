@@ -12,7 +12,6 @@ from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 import geoip2.database
 
-
 class Agent(BootAgent):
     def __init__(self, path_resolution, command_line_args, tree_node):
         super().__init__(path_resolution, command_line_args, tree_node)
