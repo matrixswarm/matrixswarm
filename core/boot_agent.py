@@ -34,15 +34,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin):
         self.secure_keys = None
 
         # Detect keypipe path or direct key blob
-        key_blob = None
-        if "keypipe" in self.command_line_args:
-            pipe_path = self.command_line_args["keypipe"]
-            try:
-                with open(pipe_path, 'r') as f:
-                    key_blob = f.read()
-                os.remove(pipe_path)  # 🔥 Self-destruct after read
-            except Exception as e:
-                self.log(f"[SECURE-KEYPIPE][ERROR] Failed to read pipe {pipe_path}: {e}")
+
 
         self.running = False
 
