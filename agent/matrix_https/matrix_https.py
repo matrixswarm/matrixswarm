@@ -1,11 +1,13 @@
 #Authored by Daniel F MacDonald and ChatGPT
 
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
+import sys
+import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+
 
 from flask import Flask, request, jsonify
 import ssl
-import os
 import json
 import threading
 import time
@@ -13,15 +15,15 @@ import time
 from core.boot_agent import BootAgent
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
         self.app = Flask(__name__)
         self.port = 65431
-        self.payload_dir = os.path.join(path_resolution['comm_path'], "matrix", "payload")
-        self.cert_path = os.path.join(path_resolution['root_path'], "certs", "server.crt")
-        self.key_path = os.path.join(path_resolution['root_path'], "certs", "server.key")
-        self.client_ca = os.path.join(path_resolution['root_path'], "certs", "client.crt")
+        self.payload_dir = os.path.join(self.path_resolution['comm_path'], "matrix", "payload")
+        self.cert_path = os.path.join(self.path_resolution['root_path'], "certs", "server.crt")
+        self.key_path = os.path.join(self.path_resolution['root_path'], "certs", "server.key")
+        self.client_ca = os.path.join(self.path_resolution['root_path'], "certs", "client.crt")
         self.configure_routes()
 
     def pre_boot(self):
@@ -423,5 +425,5 @@ class Agent(BootAgent):
         self.app.run(host="0.0.0.0", port=self.port, ssl_context=context)
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

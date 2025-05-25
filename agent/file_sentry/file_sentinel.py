@@ -6,11 +6,10 @@
 # ║   Forged in the signal of Hive Zero | v2.1 Directive   ║
 # ║ Accepts: scan / detect / respawn / delay / confirm     ║
 # ╚════════════════════════════════════════════════════════╝
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 import time
 import json
 import uuid
@@ -20,9 +19,9 @@ from core.utils.swarm_sleep import interruptible_sleep
 from core.boot_agent import BootAgent
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
-        config = command_line_args.get("config", {})
+    def __init__(self):
+        super().__init__()
+        config = self.command_line_args.get("config", {})
         self.scan_path = config.get("scan_path", "/tmp")
         self.age_threshold_days = config.get("age_threshold_days", 90)
         self.oracle_payload = os.path.join(self.path_resolution["comm_path"], "oracle-1", "payload")
@@ -117,5 +116,5 @@ class Agent(BootAgent):
             self.log(f"[SENTINEL] Unknown or malformed action: {action}")
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

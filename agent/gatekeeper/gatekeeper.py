@@ -1,8 +1,7 @@
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 import json
 import time
 import subprocess
@@ -13,8 +12,8 @@ from core.utils.swarm_sleep import interruptible_sleep
 import geoip2.database
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
         self.name = "Gatekeeper"
 
         cfg = self.tree_node.get("config", {})
@@ -164,5 +163,5 @@ class Agent(BootAgent):
         interruptible_sleep(self, 10)
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

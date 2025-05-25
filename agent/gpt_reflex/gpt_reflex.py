@@ -1,8 +1,8 @@
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+
 import json
 import time
 from openai import OpenAI
@@ -11,13 +11,13 @@ from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
         config = self.tree_node.get("config", {})
         self.api_key = config.get("api_key", os.getenv("OPENAI_API_KEY"))
         self.model = config.get("model", "gpt-4")
-        self.universal_id = command_line_args.get("universal_id", "gpt-reflex")
+        self.universal_id = self.command_line_args.get("universal_id", "gpt-reflex")
         self.inbox = Template(self.path_resolution["incoming_path_template"]).substitute(universal_id=self.universal_id)
         self.outbox = os.path.join(self.path_resolution["comm_path"], self.universal_id, "outbox")
         self.replies = os.path.join(self.path_resolution["comm_path"], self.universal_id, "replies")
@@ -141,5 +141,5 @@ class Agent(BootAgent):
 
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

@@ -2,11 +2,11 @@
 # ║            📅 GOOGLE CALENDAR AGENT (v1) — SCOUT           ║
 # ║   Scans calendar events and relays to swarm in real time  ║
 # ╚════════════════════════════════════════════════════════════╝
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+
 import json
 import time
 import datetime
@@ -18,10 +18,10 @@ from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
-        config = tree_node.get("config", {}) if 'tree_node' in globals() else {}
+        config = self.tree_node.get("config", {}) if 'tree_node' in globals() else {}
         self.calendar_id = config.get("calendar_id", "primary")
         self.interval = int(config.get("interval", 300))
         self.ahead_minutes = int(config.get("watch_ahead_minutes", 15))
@@ -85,5 +85,5 @@ class Agent(BootAgent):
             self.log(f"[CALENDAR][ERROR] Failed to fetch events: {e}")
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

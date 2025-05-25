@@ -1,8 +1,8 @@
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+
 import pwd
 import time
 import json
@@ -17,8 +17,8 @@ from core.utils.swarm_sleep import interruptible_sleep
 from core.mixin.reflex_alert import ReflexAlertMixin
 
 class Agent(BootAgent, ReflexAlertMixin):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
         self.name = "GhostWire"
         self.sessions = {}
         self.file_alerts = {}  # (path -> timestamp)
@@ -255,5 +255,5 @@ class Agent(BootAgent, ReflexAlertMixin):
         return datetime.now().strftime("%Y-%m-%d")
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

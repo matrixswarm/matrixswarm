@@ -55,15 +55,6 @@ matrix_directive = {
             ]
         },
         {
-            "universal_id": "agent_doctor-1",
-            "name": "agent_doctor",
-            "config": {
-                "scan_interval_sec": 20,
-                "max_allowed_beacon_age": 10,
-                "threads_to_check": ["worker", "cmd_listener"]
-            }
-        },
-        {
             "universal_id": "matrix-https",
             "name": "matrix_https",
             "delegated": [],
@@ -71,6 +62,15 @@ matrix_directive = {
             "filesystem": {
                 "folders": [],
                 "files": {}
+            }
+        },
+{
+            "universal_id": "agent_doctor-1",
+            "name": "agent_doctor",
+            "config": {
+                "scan_interval_sec": 20,
+                "max_allowed_beacon_age": 10,
+                "threads_to_check": ["worker", "cmd_listener"]
             }
         },
         {

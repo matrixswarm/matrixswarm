@@ -1,9 +1,8 @@
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
-import subprocess
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+import subprocess
 import time
 import json
 from core.boot_agent import BootAgent
@@ -12,8 +11,8 @@ from datetime import datetime
 
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
         self.name = "RedisHammer"
         cfg = self.tree_node.get("config", {})
         self.interval = cfg.get("check_interval_sec", 10)
@@ -180,5 +179,5 @@ class Agent(BootAgent):
 
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

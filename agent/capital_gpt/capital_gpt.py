@@ -1,8 +1,10 @@
 # ======== 🧠 CAPITAL_GPT: MISSION STRATEGIST ========
 # One mission. One mind. No mercy.
 
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
+import sys
+import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 # ┌────────────────────────────────────────────┐
 # │ General’s Comment Markup & Strategic Notes │
@@ -16,7 +18,6 @@
 # ▪ PROMPT: Inject blank agents live via reflex with msg_spawn_blank()
 # ▪ PROMPT: Boot mission via reflex or .msg drop, like a warlord
 
-import os
 import json
 import time
 import subprocess
@@ -25,8 +26,8 @@ from datetime import datetime
 from core.boot_agent import BootAgent
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
         self.mission_root = os.path.join(self.path_resolution["comm_path_resolved"], "queue")
         self.inbox = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         self.state_path = os.path.join(self.path_resolution["comm_path_resolved"], "state.json")
@@ -696,5 +697,5 @@ class Agent(BootAgent):
 
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

@@ -4,9 +4,8 @@ import time
 import traceback
 import threading
 import json
-import importlib
-import inspect
 
+from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.core_spawner import CoreSpawner
@@ -19,40 +18,56 @@ from core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
 from core.class_lib.logging.logger import Logger
 from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
+from core.mixin.ghost_vault import decrypt_vault
+from core.utils.trust_log import log_trust_banner
+from core.mixin.ghost_vault import generate_agent_keypair
 
 from core.boot_agent_thread_config import get_default_thread_registry
 
-class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin):
+class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraMixin):
 
     if __name__ == "__main__":
 
         raise RuntimeError("Direct execution of agents is forbidden. Only Matrix may be launched via bootloader.")
 
-    def __init__(self, path_resolution, command_line_args, tree_node=None):
+    def __init__(self):
 
-        # 🔐 Secure Key Injection (Ghost State)
-        self.secure_keys = None
+        print("[BOOT] Matrix waking up...")
 
-        # Detect keypipe path or direct key blob
+        try:
+            payload = decrypt_vault()
+            print("[VAULT] Decryption succeeded")
+        except Exception as e:
+            print(f"[FATAL] Vault decryption failed: {e}")
+            raise
 
-
-        self.running = False
-
-        self.path_resolution = path_resolution
-
-        self.command_line_args = command_line_args
-
-        self.tree_node = tree_node or {}
-
-        self.boot_time = time.time()
-
+        self.path_resolution = payload["path_resolution"]
+        self.command_line_args = payload["args"]
+        self.tree_node = payload["tree_node"]
+        self.private_key_obj = payload["private_key_obj"]
+        self.public_key_obj = payload["public_key_obj"]
+        self.pub_fingerprint = payload["pub_fingerprint"]
+        self.secure_keys = payload.get("secure_keys", {})
         self.logger = Logger(self.path_resolution["comm_path_resolved"], "logs", "agent.log")
 
-        self.subordinates=[]
 
-        # Injected timeout-aware thread registry
+        # 🧬 Chain-of-trust determination
+        uid = self.command_line_args.get("universal_id", "")
+
+
+        log_trust_banner(
+            agent_name=uid,
+            logger=self.logger,
+            pub=self.secure_keys.get("pub"),
+
+        )
+
+
+        self.boot_time = time.time()
+        self.running = False
+        self.subordinates = []
         self.thread_registry = get_default_thread_registry()
-
+        self.running = False
 
     def log(self, message):
         self.logger.log(message)
@@ -562,6 +577,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin):
                     if time_delta is not None and time_delta < time_delta_timeout:
                         continue
 
+                    keys = generate_agent_keypair()
+
+                    node["secure_keys"] = keys  # already PEM
+
                     # Call new tactical spawn function
                     self.spawn_agent_direct(
                         universal_id=node.get("universal_id"),
@@ -578,18 +597,16 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin):
 
     def spawn_agent_direct(self, universal_id, agent_name, tree_node):
 
-
-        spawner = CoreSpawner(site_root_path=self.path_resolution["site_root_path"], python_site=self.path_resolution["python_site"], detected_python=self.path_resolution["python_exec"])
+        spawner = CoreSpawner(
+            site_root_path=self.path_resolution["site_root_path"],
+            python_site=self.path_resolution["python_site"],
+            detected_python=self.path_resolution["python_exec"]
+        )
 
         comm_file_spec = []
-
-        # Ensure comm channel (basic folders)
         spawner.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))
-
-        # Create pod runtime
         new_uuid, pod_path = spawner.create_runtime(universal_id)
 
-        # Spawn the agent
         result = spawner.spawn_agent(
             spawn_uuid=new_uuid,
             agent_name=agent_name,

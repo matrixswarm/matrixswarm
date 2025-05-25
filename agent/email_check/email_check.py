@@ -1,21 +1,19 @@
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 import socket
 socket.setdefaulttimeout(10)  # Set a 10-second global timeout for sockets
 from dotenv import load_dotenv
 load_dotenv()
 from core.boot_agent import BootAgent
 
-
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
 
-        config = tree_node.get("config", {})
+        config = self.tree_node.get("config", {})
 
         self.interval = config.get("interval", int(os.getenv("EMAILCHECKAGENT_INTERVAL", 60)))
         self.mail_host = config.get("imap_host") or os.getenv("EMAILCHECKAGENT_IMAP_HOST")
@@ -91,5 +89,5 @@ class Agent(BootAgent):
         return "[no text]"
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

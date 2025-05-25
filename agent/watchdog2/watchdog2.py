@@ -1,10 +1,10 @@
 
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
+import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 import time
 import json
-import os
 
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.mixin.delegation import DelegationMixin
@@ -12,8 +12,8 @@ from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent, DelegationMixin):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
     def __init__(self, path_resolution, command_line_args):
         super().__init__(path_resolution, command_line_args)
@@ -108,5 +108,5 @@ class Agent(BootAgent, DelegationMixin):
             self.log(f"[CMD-ERROR] {e}")
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

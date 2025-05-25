@@ -13,23 +13,19 @@ Run with:
   python site_boot.py --universe ai --python-site /custom/site-packages
   python site_boot.py --universe ai --python-bin /custom/bin/python3
 """
-import os
-import sys
-import argparse
-import time
 
-verbose_mode=False
-
-# Path prep
-SITE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if SITE_ROOT not in sys.path:
-    sys.path.insert(0, SITE_ROOT)
 import os
 import sys
 import time
 import argparse
 import site
+import hashlib
 from pathlib import Path
+# Path prep
+SITE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if SITE_ROOT not in sys.path:
+    sys.path.insert(0, SITE_ROOT)
+
 
 from core.core_spawner import CoreSpawner
 from core.tree_parser import TreeParser
@@ -119,6 +115,7 @@ cp = CoreSpawner(path_manager=pm, site_root_path=SITE_ROOT, python_site=python_s
 if verbose:
     cp.set_verbose(True)
 
+# === Set up Matrix comm channel and trust ===
 cp.ensure_comm_channel(MATRIX_UUID, [{
     'name': 'agent_tree_master.json',
     'type': 'f',
@@ -126,8 +123,31 @@ cp.ensure_comm_channel(MATRIX_UUID, [{
     'content': tp.root
 }], matrix_directive)
 
+from core.mixin.ghost_vault import generate_agent_keypair
+from cryptography.hazmat.primitives import serialization
+import hashlib
+
+# 🔐 Generate Matrix's keypair and fingerprint
+matrix_keys = generate_agent_keypair()
+matrix_pub_obj = serialization.load_pem_public_key(matrix_keys["pub"].encode())
+fp = hashlib.sha256(matrix_keys["pub"].encode()).hexdigest()[:12]
+print(f"[TRUST] Matrix pubkey fingerprint: {fp}")
+
+# 🧠 Inject trust tree for internal spawn operations
+cp._trust_tree = {
+    "parent": matrix_pub_obj,
+    "matrix": matrix_pub_obj
+}
+
+# 🧱 Inject Matrix's own secure_keys and identity into her directive
+matrix_without_children["secure_keys"] = matrix_keys
+matrix_without_children["parent_pub"] = matrix_keys["pub"]
+matrix_without_children["matrix_pub"] = matrix_keys["pub"]
+
+# 🚀 Create pod and deploy Matrix
 new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)
 cp.spawn_agent(new_uuid, MATRIX_UUID, MATRIX_UUID, "site_boot", matrix_without_children, universe_id=universe_id)
 
-print(f"[✅] Matrix deployed at: {pod_path}")
+print("[✅] Matrix deployed at:", pod_path)
+print("[🔐] Matrix public key fingerprint:", fp)
 print("[🧠] The swarm is online.")

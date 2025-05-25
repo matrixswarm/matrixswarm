@@ -1,16 +1,15 @@
-# AppContextAgent — deploys a swarm application based on codex apps/*.json definitions
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+
 import json
 import time
 from core.boot_agent import BootAgent
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self, ):
+        super().__init__()
 
         self.codex_dir = os.path.join(self.path_resolution["comm_path"], "matrix", "codex", "apps")
 
@@ -59,5 +58,5 @@ class Agent(BootAgent):
                 self.log(f"[CONTEXT] Spawned: {universal_id}")
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

@@ -3,13 +3,15 @@
 # ║     Matrix-Compatible · Swarm Speaker · Relay-Class     ║
 # ╚══════════════════════════════════════════════════════════╝
 
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-import os
 import sys
-sys.path.insert(0, "/root/miniconda3/lib/python3.12/site-packages")
+import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+
+# ✅ Ghost-compliant way to add Python site-packages
+if "PYTHON_SITE" in os.environ:
+    sys.path.insert(0, os.getenv("PYTHON_SITE"))
 import threading
-import json
 import discord as discord_real
 from discord.ext import commands
 import asyncio
@@ -18,8 +20,8 @@ from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
         self.discord_client = None
         self.bot = None
@@ -124,5 +126,5 @@ class Agent(BootAgent):
     #    self.send_message_to_platform(msg)
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

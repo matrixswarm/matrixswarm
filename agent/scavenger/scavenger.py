@@ -8,10 +8,10 @@
 # 🧹 FINAL FULL HIVE-CORRECTED SCAVENGERAGENT v3.1 🧹
 # Using ONLY post_boot(), NEVER manual boot()
 
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 import time
 import json
 import shutil
@@ -23,11 +23,8 @@ from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
-
-        self.path_resolution = path_resolution
-        self.command_line_args = command_line_args
+    def __init__(self):
+        super().__init__()
 
         self.orbits = {}
         self.watch_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args['universal_id'], "payload")
@@ -190,5 +187,5 @@ class Agent(BootAgent):
         self.log(f"[SCAVENGER] Verification request sent for: {universal_id}")
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()
