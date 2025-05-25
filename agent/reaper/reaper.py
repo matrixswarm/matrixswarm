@@ -6,11 +6,12 @@
 # ║  Accepts: .cmd / .json  |  Modes: soft/full   ║
 # ╚═══════════════════════════════════════════════╝
 
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
-# DisposableReaperAgent.py
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+# DisposableReaperAgent.py
+
 import json
 import time
 import threading
@@ -20,16 +21,16 @@ from core.boot_agent import BootAgent
 from core.class_lib.processes.reaper_universal_id_handler import ReaperUniversalHandler  # PID Handler
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
 
         # Load targets, kill ID, and initialize paths
         config = self.tree_node.get("config", {})
 
-        self.targets = command_line_args.get("targets") or config.get("kill_list", [])
-        self.universal_ids = command_line_args.get("universal_ids") or config.get("universal_ids", {})
-        self.kill_id = command_line_args.get("kill_id") or config.get("kill_id") or f"reap-{int(time.time())}"
+        self.targets = self.command_line_args.get("targets") or config.get("kill_list", [])
+        self.universal_ids = self.command_line_args.get("universal_ids") or config.get("universal_ids", {})
+        self.kill_id = self.command_line_args.get("kill_id") or config.get("kill_id") or f"reap-{int(time.time())}"
         self.strike_delay = config.get("delay", 0)
         self.tombstone_comm = config.get("tombstone_comm", True)
         self.tombstone_pod = config.get("tombstone_pod", True)
@@ -197,5 +198,5 @@ class Agent(BootAgent):
         self.log(f"[DISPOSABLE-REAPER] Mission report written: {report_path}")
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

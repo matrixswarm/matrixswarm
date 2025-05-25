@@ -1,6 +1,7 @@
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
+import sys
+import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
 # ╔════════════════════════════════════════════════════════╗
@@ -45,16 +46,12 @@ from core.utils.tree_backup import backup_agent_tree
 from core.tree_parser import TreeParser
 
 class Agent(BootAgent, DelegationMixin):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
-
-        self.path_resolution=path_resolution
-
-        self.command_line_args=command_line_args
+    def __init__(self):
+        super().__init__()
 
         self.orbits = {}
 
-        self.swarm = SwarmManager(path_resolution)
+        self.swarm = SwarmManager(self.path_resolution)
 
         matrix_id = self.command_line_args.get("matrix", "matrix")
         self.tree_path = os.path.join(
@@ -1038,5 +1035,5 @@ class Agent(BootAgent, DelegationMixin):
         return False
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

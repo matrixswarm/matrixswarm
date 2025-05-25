@@ -5,10 +5,10 @@
 # ║     Forged in the core of Hive Zero | v3.0 Directive   ║
 # ║   ║
 # ╚════════════════════════════════════════════════════════╝
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
+import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 import time
 import requests
 import json
@@ -17,8 +17,8 @@ from core.utils.swarm_sleep import interruptible_sleep
 from core.boot_agent import BootAgent
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
         self.failure_count = 0
 
@@ -73,5 +73,5 @@ class Agent(BootAgent):
             self.log(f"[WATCHDOG][ALERT] (log_only): {json.dumps(alert)}")
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

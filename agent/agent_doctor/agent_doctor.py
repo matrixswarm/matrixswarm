@@ -1,17 +1,17 @@
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+
 import time
 import json
+
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
-from agent.reaper.reaper_factory import make_reaper_node
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
         self.name = "AgentDoctor"
         self.max_allowed_beacon_age = 8  # seconds
 
@@ -35,6 +35,7 @@ class Agent(BootAgent):
         return True
 
     def deploy_reaper_for(self, agent_id):
+        from agent.reaper.reaper_factory import make_reaper_node
         pod_root = self.path_resolution["pod_path"]
         run_paths = []
 
@@ -195,5 +196,5 @@ class Agent(BootAgent):
         return False
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

@@ -1,8 +1,8 @@
 
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 import json
 import time
 import threading
@@ -12,8 +12,8 @@ from watchdog.events import FileSystemEventHandler
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
         self.directory = {}
         self.tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
@@ -135,6 +135,6 @@ class Agent(BootAgent):
         observer.join()
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()
 

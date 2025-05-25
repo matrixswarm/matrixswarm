@@ -1,8 +1,7 @@
-
-# ======== 🛬 LANDING ZONE BEGIN 🛬 ========"
-# ======== 🛬 LANDING ZONE END 🛬 ========"
-
+import sys
 import os
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
 import json
 from dotenv import load_dotenv
 from core.boot_agent import BootAgent
@@ -10,13 +9,13 @@ from core.utils.swarm_sleep import interruptible_sleep
 load_dotenv()
 
 class Agent(BootAgent):
-    def __init__(self, path_resolution, command_line_args, tree_node):
-        super().__init__(path_resolution, command_line_args, tree_node)
+    def __init__(self):
+        super().__init__()
 
         self.watch_path = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
         os.makedirs(self.watch_path, exist_ok=True)
 
-        config = tree_node.get("config", {})
+        config = self.tree_node.get("config", {})
         self.smtp_host = config.get("smtp_host") or os.getenv("EMAILSENDAGENT_SMTP_HOST")
         self.smtp_port = config.get("smtp_port") or os.getenv("EMAILSENDAGENT_SMTP_PORT")
         self.email_addr = config.get("email") or os.getenv("EMAILSENDAGENT_SMTP_EMAIL")
@@ -70,5 +69,5 @@ class Agent(BootAgent):
 
 
 if __name__ == "__main__":
-    agent = Agent(path_resolution, command_line_args, tree_node)
+    agent = Agent()
     agent.boot()

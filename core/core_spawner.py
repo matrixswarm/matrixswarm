@@ -1,7 +1,9 @@
 # At the top of your script
 import sys
 import os
-import textwrap
+import site
+import hashlib
+
 
 # Add the directory containing this script to the PYTHONPATH
 current_directory = os.path.dirname(os.path.abspath(__file__))  # Directory of the current script
@@ -17,10 +19,14 @@ from datetime import datetime
 from class_lib.file_system.file_system_builder import FileSystemBuilder
 from path_manager import PathManager
 from core.class_lib.logging.logger import Logger
-from core.utils.spawn_injection import inject_spawn_landing_zone
+from core.mixin.core_spawn_secure import CoreSpawnerSecureMixin
+from core.mixin.ghost_vault import build_encrypted_spawn_env, generate_agent_keypair
+from cryptography.hazmat.primitives import serialization
 
-class CoreSpawner:
+
+class CoreSpawner(CoreSpawnerSecureMixin):
     def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path', python_site=None, detected_python=None):
+        super().__init__()
 
         pm = path_manager or PathManager(use_session_root=True, site_root_path=site_root_path)
 
@@ -182,6 +188,7 @@ class CoreSpawner:
 
         try:
 
+            logger = Logger(os.path.join(self.comm_path, universal_id))
 
             with open("/matrix/spawn.log", "a") as f:
                 f.write(f"{datetime.now().isoformat()} :: {universal_id} → {agent_name}\n")
@@ -202,6 +209,7 @@ class CoreSpawner:
                 "comm_path_resolved": os.path.join(self.comm_path, universal_id),
                 "session_path": os.path.dirname(self.pod_path.rstrip("/"))
             }
+
 
             if "_bp_" in agent_name:
                 base_name = agent_name.split("_bp_")[0]
@@ -226,40 +234,14 @@ class CoreSpawner:
 
 
             run_path = os.path.join(spawn_path, "run")
+            vault_path = os.path.join(spawn_path, "vault")
 
             if not source_path or not os.path.exists(source_path):
                 logger.log(f"[SPAWN-ERROR] Source path not resolved or file missing. Cannot boot agent: {agent_name}")
                 return
 
-            # 🔥 Load the agent source file
-            with open(source_path, "r") as f:
-                file_content = f.read()
-
             #when the process is spawned it has no way to find the root and the lib path
             #so prepend it with these facts
-            path_dict = {
-                "root_path": self.root_path,
-                "pod_path": self.pod_path,
-                "comm_path": self.comm_path,
-                "agent_path": self.agent_path,  # still here
-                "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
-                "comm_path_resolved": os.path.join(self.comm_path, universal_id),
-                "site_root_path": self.site_root_path,
-                "python_site": self.python_site,
-                "python_exec": self.python_exec or "python3"
-            }
-            path_resolution = 'path_resolution=' + json.dumps(path_dict, indent=4) + '\n'
-
-            cmd_args = {
-                "install_name": spawn_uuid,
-                "matrix": "matrix",
-                "spawner": spawner,
-                "universal_id": universal_id,
-                "agent_name": agent_name,
-                "universe": universe_id,
-                "site_root_path": self.site_root_path
-            }
-            command_line_args = """ + json.dumps(command_line_args, indent=4) + """
 
             tree_node_blob = ""
             if tree_node:
@@ -268,16 +250,17 @@ class CoreSpawner:
                 except Exception as e:
                     print(f"[SPAWN-ERROR] Could not encode tree_node for {universal_id}: {e}")
 
-            data = inject_spawn_landing_zone(file_content, path_dict, cmd_args, tree_node)
+            #data = inject_spawn_landing_zone(file_content, path_dict, cmd_args, tree_node)
+
+            with open(source_path, "r") as f:
+                file_content = f.read()
 
             with open(run_path, "w") as f:
-                f.write(data)
+                f.write(file_content)
 
-            logger = Logger(os.path.join(self.comm_path, universal_id))
+
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
-
-
 
             #GO TIME
             logger.log(f"[SPAWN-MGR] Spawning: {universal_id} agent name {agent_name} from: {source_path}")
@@ -301,7 +284,6 @@ class CoreSpawner:
             except Exception as e:
                 logger.log(f"[CODEX][ERROR] Failed to write entry for {universal_id}: {e}")
 
-
             cmd = [
                 self.python_exec or "python3",
                 run_path,
@@ -318,15 +300,58 @@ class CoreSpawner:
                 stderr = subprocess.DEVNULL
                 stdin = subprocess.DEVNULL
 
+            if not tree_node or "secure_keys" not in tree_node:
+                raise RuntimeError(f"[SPAWN] secure_keys missing in tree_node for {universal_id}")
+
+            payload = {
+                "path_resolution": {
+                    "root_path": self.root_path,
+                    "pod_path": self.pod_path,
+                    "comm_path": self.comm_path,
+                    "agent_path": self.agent_path,
+                    "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
+                    "comm_path_resolved": os.path.join(self.comm_path, universal_id),
+                    "pod_path_resolved": os.path.join(self.pod_path, spawn_uuid),
+                    "site_root_path": self.site_root_path,
+                    "python_site": self.python_site,
+                    "python_exec": self.python_exec or "python3"
+                },
+                "args": {
+                    "install_name": spawn_uuid,
+                    "matrix": "matrix",
+                    "spawner": self._trust_tree.get("spawner_id", "matrix"),
+                    "universal_id": universal_id,
+                    "agent_name": agent_name,
+                    "universe": universe_id,
+                    "site_root_path": self.site_root_path
+                },
+                "tree_node": tree_node,
+                "secure_keys": tree_node["secure_keys"]
+            }
+
+            python_site_path = site.getsitepackages()[0]
+            env = build_encrypted_spawn_env(payload, vault_path)
+
+            env.update({
+                "SITE_ROOT": self.site_root_path,
+                "AGENT_PATH": self.agent_path,
+                "PYTHON_SITE": python_site_path
+            })
+
+            pubkey = tree_node["secure_keys"]["pub"]
+            fp = hashlib.sha256(pubkey.encode()).hexdigest()[:12]
+            logger.log(f"[SPAWN] Using injected pubkey: {fp}")
+
             process = subprocess.Popen(
                 cmd,
                 stdout=stdout,
                 stderr=stderr,
                 stdin=stdin,
-                preexec_fn=os.setsid
+                preexec_fn=os.setsid,
+                env=env
             )
 
-            pid = os.getpid()  # or from subprocess if it's remote
+            pid = process.pid
             try:
                 spawn_record = {
                     "uuid": spawn_uuid,
@@ -340,7 +365,6 @@ class CoreSpawner:
                 spawn_dir = os.path.join(self.comm_path, universal_id, "spawn")
                 os.makedirs(spawn_dir, exist_ok=True)
 
-
                 filename = f"{timestamp}_{spawn_uuid}.spawn"
                 filepath = os.path.join(spawn_dir, filename)
 
@@ -350,9 +374,6 @@ class CoreSpawner:
                 logger.log(f"[SPAWN-LOG] Spawn recorded at {filepath}")
             except Exception as e:
                 logger.log(f"[SPAWN-LOG-ERROR] Failed to log spawn for {universal_id}: {e}")
-
-
-
 
             install = {
                 "universal_id": universal_id,
@@ -366,7 +387,9 @@ class CoreSpawner:
 
 
         except Exception as e:
-            print(f"[SPAWN-ERROR] Failed to spawn {agent_name}: {e}\n{traceback.format_exc()}")
-            return None
+            logger.log(f"[SPAWN-ERROR] Source path not resolved or file missing. Cannot boot agent: {agent_name}")
+            logger.log(f"[SPAWN-TRACEBACK] {traceback.format_exc()}")
+
+            raise RuntimeError(f"[SPAWN-FAIL] Missing source for agent {agent_name} at {source_path}")
 
         return process.pid, cmd
