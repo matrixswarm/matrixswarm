@@ -76,12 +76,14 @@ class Agent(BootAgent):
         @self.app.route("/matrix", methods=["POST"])
         def receive_command():
             try:
+                ip = request.remote_addr or "unknown"
+                self.log(f"[MATRIX-HTTPS][SOURCE-IP] Packet received from {ip}")
                 payload = request.get_json()
                 ctype = payload.get("type")
                 content = payload.get("content", {})
                 timestamp = payload.get("timestamp", time.time())
 
-                self.log(f"[MATRIX-HTTPS][RECEIVED] {ctype} → {content}")
+                self.log(f"[MATRIX-HTTPS][RECEIVED] {ctype} from {ip} → {content}")
 
                 # === 1. Matrix-HTTPS native commands ===
                 if ctype == "get_log":
@@ -132,6 +134,7 @@ class Agent(BootAgent):
 
             try:
                 payload = request.get_json()
+                payload["source_ip"] = request.remote_addr
                 self.log(f"[CMD] Received HTTPS command: {payload}")
                 ctype = payload.get("type")
                 content = payload.get("content", {})

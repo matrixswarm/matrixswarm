@@ -43,6 +43,8 @@ parser.add_argument("--reboot", action="store_true", help="Soft reboot — skip 
 parser.add_argument("--verbose", action="store_true", help="Enable verbose terminal output")
 parser.add_argument("--python-site", help="Override Python site-packages path to inject")
 parser.add_argument("--python-bin", help="Override Python interpreter to use for agent spawns")
+parser.add_argument("--encrypted_directive", help="Path to AES-GCM encrypted directive JSON")
+parser.add_argument("--swarm_key", help="Base64-encoded swarm key used to decrypt directive")
 
 args = parser.parse_args()
 
@@ -131,18 +133,57 @@ import hashlib
 matrix_keys = generate_agent_keypair()
 matrix_pub_obj = serialization.load_pem_public_key(matrix_keys["pub"].encode())
 fp = hashlib.sha256(matrix_keys["pub"].encode()).hexdigest()[:12]
+
 print(f"[TRUST] Matrix pubkey fingerprint: {fp}")
 
-# 🧠 Inject trust tree for internal spawn operations
-cp._trust_tree = {
-    "parent": matrix_pub_obj,
-    "matrix": matrix_pub_obj
+
+from Crypto.Random import get_random_bytes
+import base64
+
+def decrypt_directive(encrypted_path, swarm_key_b64):
+    from Crypto.Cipher import AES
+    import base64, json
+
+    with open(encrypted_path, "r") as f:
+        bubble = json.load(f)
+
+    key = base64.b64decode(swarm_key_b64)
+    nonce = base64.b64decode(bubble["nonce"])
+    tag = base64.b64decode(bubble["tag"])
+    ciphertext = base64.b64decode(bubble["ciphertext"])
+
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    decrypted = cipher.decrypt_and_verify(ciphertext, tag)
+    return json.loads(decrypted.decode())
+
+
+swarm_symkey = get_random_bytes(32)  # AES-256
+swarm_symkey_b64 = base64.b64encode(swarm_symkey).decode()
+
+matrix_keys = generate_agent_keypair()
+matrix_pub = matrix_keys["pub"]
+matrix_priv = matrix_keys["priv"]
+
+if args.encrypted_directive and args.swarm_key:
+    print(f"[BOOT] 🔐 Decrypting encrypted directive from {args.encrypted_directive}")
+    matrix_directive = decrypt_directive(args.encrypted_directive, args.swarm_key)
+else:
+    print(f"[BOOT] 📦 Loading plaintext directive: {boot_name}")
+    matrix_directive = load_boot_directive(boot_name)
+
+
+swarm_key_bytes = get_random_bytes(32)
+swarm_key_b64 = base64.b64encode(swarm_key_bytes).decode()
+
+trust_payload = {
+    "pub": matrix_pub,
+    "priv": matrix_priv,
+    "swarm_key": swarm_key_b64,
+    "matrix_pub": matrix_pub,
+    "matrix_priv": matrix_priv
 }
 
-# 🧱 Inject Matrix's own secure_keys and identity into her directive
-matrix_without_children["secure_keys"] = matrix_keys
-matrix_without_children["parent_pub"] = matrix_keys["pub"]
-matrix_without_children["matrix_pub"] = matrix_keys["pub"]
+cp.set_keys(trust_payload)
 
 # 🚀 Create pod and deploy Matrix
 new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)

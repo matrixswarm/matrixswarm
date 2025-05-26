@@ -21,8 +21,6 @@ from path_manager import PathManager
 from core.class_lib.logging.logger import Logger
 from core.mixin.core_spawn_secure import CoreSpawnerSecureMixin
 from core.mixin.ghost_vault import build_encrypted_spawn_env, generate_agent_keypair
-from cryptography.hazmat.primitives import serialization
-
 
 class CoreSpawner(CoreSpawnerSecureMixin):
     def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path', python_site=None, detected_python=None):
@@ -55,6 +53,17 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
         os.makedirs(self.pod_path, exist_ok=True)
 
+        self._keychain={}
+
+    def set_keys(self, key_dict: dict):
+        """Inject multiple trust assets at once (e.g., matrix pub, swarm AES, secure_keys)."""
+        self._keychain = key_dict
+
+    def set_key(self, name: str, key):
+        """Set a single key by name (e.g., 'swarm_key', 'matrix_pub')."""
+        if not hasattr(self, "_keychain"):
+            self._keychain = {}
+        self._keychain[name] = key
 
     def set_verbose(self, verbose):
 
@@ -300,8 +309,15 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 stderr = subprocess.DEVNULL
                 stdin = subprocess.DEVNULL
 
-            if not tree_node or "secure_keys" not in tree_node:
-                raise RuntimeError(f"[SPAWN] secure_keys missing in tree_node for {universal_id}")
+            required_keys = ["pub", "priv", "swarm_key", "matrix_pub", "matrix_priv"]
+            missing = [k for k in required_keys if k not in self._keychain]
+
+            if missing:
+                logger.log(f"[SPAWN-FAIL] Missing keys: {', '.join(missing)} in self._keychain")
+
+                exit(self._keychain)
+
+                raise RuntimeError(f"[SPAWN] Cannot spawn {universal_id} — incomplete keychain.")
 
             payload = {
                 "path_resolution": {
@@ -326,7 +342,13 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "site_root_path": self.site_root_path
                 },
                 "tree_node": tree_node,
-                "secure_keys": tree_node["secure_keys"]
+                "secure_keys": {
+                    "pub": self._keychain["pub"],
+                    "priv": self._keychain["priv"]
+                },
+                "swarm_key": self._keychain["swarm_key"],
+                "matrix_pub": self._keychain["matrix_pub"],
+                "matrix_priv": self._keychain["matrix_priv"],
             }
 
             python_site_path = site.getsitepackages()[0]
@@ -337,10 +359,6 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 "AGENT_PATH": self.agent_path,
                 "PYTHON_SITE": python_site_path
             })
-
-            pubkey = tree_node["secure_keys"]["pub"]
-            fp = hashlib.sha256(pubkey.encode()).hexdigest()[:12]
-            logger.log(f"[SPAWN] Using injected pubkey: {fp}")
 
             process = subprocess.Popen(
                 cmd,

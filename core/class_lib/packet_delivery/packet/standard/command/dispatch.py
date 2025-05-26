@@ -1,5 +1,3 @@
-# core/class_lib/packet_delivery/packet/notify/alert/general.py
-
 import time
 from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 
@@ -9,8 +7,8 @@ class Packet(BasePacket):
         self._payload = {}
         self._error_code = 0
         self._error_msg = ""
-        self._packet_field_name="embeded"
         self._packet = None
+        self._packet_field_name = "embeded"
 
     def is_valid(self) -> bool:
         return self._valid
@@ -20,41 +18,41 @@ class Packet(BasePacket):
             self._packet_field_name = field_name
 
         self._packet = packet
+        return self
 
     def set_data(self, data: dict):
-
         try:
-            if not data.get("msg"):
-                self._valid = False
-                self._error_code = 1
-                self._error_msg = "Missing required field: 'msg'"
-                print(f"[SET_DATA] ERROR: {self._error_msg}")
-                return
+            required = ["target_universal_id", "command"]
+            for r in required:
+                if r not in data:
+                    raise ValueError(f"Missing required field: {r}")
+
+            cmd = data["command"]
+            if not isinstance(cmd, dict) or "type" not in cmd:
+                raise ValueError("Command must be a dict with a 'type' field")
 
             self._payload = {
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "universal_id": data.get("universal_id", "unknown"),
-                "level": data.get("level", "info"),
-                "msg": data["msg"],
-                "formatted_msg": f"📣 Swarm Message\n{data['msg']}",
-                "cause": data.get("cause", "unspecified"),
-                "origin": data.get("origin", data.get("universal_id", "unknown"))
+                "target_universal_id": data["target_universal_id"],
+                "command": cmd,
+                "drop_zone": data.get("drop_zone", "incoming"),
+                "delivery": data.get("delivery", "file.json_file"),
+                "origin": data.get("origin", "unknown")
             }
+
             self._error_code = 0
             self._error_msg = ""
         except Exception as e:
             self._valid = False
             self._error_code = 1
             self._error_msg = str(e)
-            print(f"[SET_DATA][EXCEPTION] {e}")
-
 
     def get_packet(self) -> dict:
         base = self._payload
         if self._packet and self._packet.is_valid():
             base[self._packet_field_name] = self._packet.get_packet()
         return {
-            "type": "send_packet_incoming",
+            "type": "register_identity",
             "content": base
         }
 

@@ -1,22 +1,33 @@
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes, serialization
 import hashlib
-from cryptography.hazmat.primitives import serialization
-def log_trust_banner(agent_name, logger, pub, parent_pub=None, matrix_pub=None):
-    def get_fp(k):
-        try:
-            b = k.encode() if isinstance(k, str) else k.public_bytes(
-                serialization.Encoding.PEM,
-                serialization.PublicFormat.SubjectPublicKeyInfo
-            )
-            return hashlib.sha256(b).hexdigest()[:12]
-        except Exception:
-            return "❌ Invalid"
+import base64
 
-    lines = [
+def get_fp(key):
+    if not key:
+        return "N/A"
+    try:
+        raw = base64.b64decode(key) if "BEGIN" not in key else key.encode()
+        return hashlib.sha256(raw).hexdigest()[:12]
+    except Exception:
+        return "ERR"
+
+def log_trust_banner(agent_name, logger, pub, matrix_pub=None, swarm_key=None, matrix_priv=None):
+    self_fp     = get_fp(pub)
+    matrix_fp   = get_fp(matrix_pub)
+    swarm_fp    = get_fp(swarm_key)
+    matrix_pvfp = get_fp(matrix_priv)
+
+    box = [
         "╔═══════════════════════════════════════╗",
         f"║ 🔐 TRUST LINEAGE - {agent_name:<21}║",
-        f"║ 🧬 SELF:   {get_fp(pub):<12}              ║",
-
+        f"║ 🧬 SELF:   {self_fp:<12}              ║",
+        f"║ 🧠 MATRIX: {matrix_fp:<12}              ║",
+        f"║ 🔑 M-PRIV: {matrix_pvfp:<12}              ║",
+        f"║ 🧊 SWARM:  {swarm_fp:<12}              ║",
         "╚═══════════════════════════════════════╝"
     ]
-    for line in lines:
+
+    for line in box:
         logger.log(line)
+        print(line)  # Optional: always echo to stdout

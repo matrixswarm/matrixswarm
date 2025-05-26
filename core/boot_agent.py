@@ -4,13 +4,15 @@ import time
 import traceback
 import threading
 import json
-
+import hashlib
+from datetime import datetime
 from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.core_spawner import CoreSpawner
 from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from core.path_manager import PathManager
+from core.mixin.identity_registry import IdentityRegistryMixin
 
 from string import Template
 from core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
@@ -21,10 +23,10 @@ from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import P
 from core.mixin.ghost_vault import decrypt_vault
 from core.utils.trust_log import log_trust_banner
 from core.mixin.ghost_vault import generate_agent_keypair
-
 from core.boot_agent_thread_config import get_default_thread_registry
+from core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
 
-class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraMixin):
+class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraMixin, IdentityRegistryMixin):
 
     if __name__ == "__main__":
 
@@ -39,29 +41,61 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
             print("[VAULT] Decryption succeeded")
         except Exception as e:
             print(f"[FATAL] Vault decryption failed: {e}")
-            raise
+            exit()
 
         self.path_resolution = payload["path_resolution"]
         self.command_line_args = payload["args"]
         self.tree_node = payload["tree_node"]
-        self.private_key_obj = payload["private_key_obj"]
+
+        self.swarm_key = payload.get("swarm_key")
+        self.matrix_pub = payload.get("matrix_pub")
+        self.matrix_priv = payload.get("matrix_priv")  # Fallback already handled by decrypt_vault()
+
+        self.matrix_pub_obj = None
+        self.matrix_priv_obj = None
+
         self.public_key_obj = payload["public_key_obj"]
+        self.private_key_obj = payload["private_key_obj"]
         self.pub_fingerprint = payload["pub_fingerprint"]
         self.secure_keys = payload.get("secure_keys", {})
+        self.cached_pem = payload.get("cached_pem", {})
         self.logger = Logger(self.path_resolution["comm_path_resolved"], "logs", "agent.log")
 
+        # Optional fingerprint of Matrix public key
+        try:
+            self.matrix_fingerprint = hashlib.sha256(self.matrix_pub.encode()).hexdigest()[:12]
+        except Exception as e:
+            self.log(f"[BOOT] matrix_pub is missing. Trust cannot be verified. {e}")
+
+
+        # Convert to objects
+        from cryptography.hazmat.primitives import serialization
+
+        try:
+            self.matrix_pub_obj = serialization.load_pem_public_key(self.matrix_pub.encode())
+        except Exception as e:
+            self.matrix_pub_obj = None
+            self.logger.log(f"[BOOT] matrix_pub is missing. Trust cannot be verified. {e}")
+
+            exit()
+
+        try:
+            self.matrix_priv_obj = serialization.load_pem_private_key(self.matrix_priv.encode(), password=None)
+        except Exception as e:
+            self.matrix_priv_obj = None
+            self.log(f"[TRUST][WARN] Matrix private key invalid or placeholder: {e}")
+            exit()
 
         # 🧬 Chain-of-trust determination
         uid = self.command_line_args.get("universal_id", "")
-
-
         log_trust_banner(
             agent_name=uid,
             logger=self.logger,
             pub=self.secure_keys.get("pub"),
-
+            matrix_pub=self.matrix_pub,
+            matrix_priv=self.matrix_priv,
+            swarm_key=self.swarm_key,
         )
-
 
         self.boot_time = time.time()
         self.running = False
@@ -577,15 +611,24 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
                     if time_delta is not None and time_delta < time_delta_timeout:
                         continue
 
-                    keys = generate_agent_keypair()
+                    keychain = generate_agent_keypair()
+                    keychain["swarm_key"] = self.swarm_key
+                    keychain["matrix_pub"] = self.matrix_pub
+                    keychain["matrix_priv"]=DUMMY_MATRIX_PRIV
+                    if node.get("universal_id") == 'matrix':
+                        keychain["matrix_priv"] = self.matrix_priv
 
-                    node["secure_keys"] = keys  # already PEM
+                    cfg = node.get("config", {})
+                    if bool(cfg.get("matrix_secure_verified")) is True:
+                        self.logger.log("[TRUST] matrix_secure_verified: TRUE → injecting real Matrix private key.")
+                        keychain["matrix_priv"] = self.matrix_priv
 
-                    # Call new tactical spawn function
+                        # Call new tactical spawn function
                     self.spawn_agent_direct(
                         universal_id=node.get("universal_id"),
                         agent_name=node.get("name"),
-                        tree_node=node
+                        tree_node=node,
+                        keychain=keychain
                     )
 
             except Exception as e:
@@ -595,13 +638,16 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
 
             time.sleep(10)
 
-    def spawn_agent_direct(self, universal_id, agent_name, tree_node):
+    def spawn_agent_direct(self, universal_id, agent_name, tree_node, keychain=None):
 
         spawner = CoreSpawner(
             site_root_path=self.path_resolution["site_root_path"],
             python_site=self.path_resolution["python_site"],
             detected_python=self.path_resolution["python_exec"]
         )
+
+        if keychain and len(keychain)>0:
+            spawner.set_keys(keychain)
 
         comm_file_spec = []
         spawner.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))

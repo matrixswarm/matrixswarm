@@ -76,10 +76,19 @@ class Agent(BootAgent):
                         interruptible_sleep(self, 10)
                         continue
 
+                    keychain={}
+
+                    keychain["priv"] = self.matrix_priv
+                    keychain["pub"] = self.matrix_pub
+                    keychain["swarm_key"] = self.swarm_key
+                    keychain["matrix_pub"] = self.matrix_pub
+                    keychain["matrix_priv"] = self.matrix_priv
+
                     self.spawn_agent_direct(
                         universal_id=universal_id,
                         agent_name=self.target_node.get("name"),
-                        tree_node=self.target_node
+                        tree_node=self.target_node,
+                        keychain=keychain,
                     )
                     self.log(f"[SENTINEL][SPAWNED] {universal_id} respawned successfully.")
 
