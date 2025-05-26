@@ -20,6 +20,8 @@ class Agent(BootAgent):
 
     def post_boot(self):
         self.log("[DOCTOR] Monitoring active threads via intelligent beacon protocol.")
+        self.log("[IDENTITY] Registering with Matrix...")
+        self.dispatch_identity_command()
 
     def is_phantom(self, agent_id):
         pod_root = self.path_resolution["pod_path"]

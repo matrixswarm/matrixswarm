@@ -75,6 +75,8 @@ class Agent(BootAgent):
 
     async def websocket_handler(self, websocket, path):
 
+        ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
+        self.log(f"[WS][CONNECT] Client connected from IP: {ip}")
         self.log("[WS][TRACE] >>> websocket_handler() CALLED <<<")
         self.log("[WS] HANDLER INIT - Client added")
         # Add the client securely to the clients set

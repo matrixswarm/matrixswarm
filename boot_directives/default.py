@@ -21,20 +21,21 @@ matrix_directive = {
             "name": "sentinel",
             "app": "matrix-core",
             "filesystem": {},
-            "config": {},
+            "config": {"matrix_secure_verified": 1},
             "children": [
                 {
                     "universal_id": "guardian-2",
                     "name": "sentinel",
                     "app": "matrix-core",
                     "filesystem": {},
+                    "config": {"matrix_secure_verified": 1},
                     "children": [
                         {
                             "universal_id": "guardian-3",
                             "name": "sentinel",
                             "app": "matrix-core",
                             "filesystem": {},
-                            "config": {},
+                            "config": {"matrix_secure_verified": 1},
                             "children": [
                                 {
                                     "universal_id": "guardian-4",
@@ -42,14 +43,14 @@ matrix_directive = {
                                     "app": "matrix-core",
                                     "filesystem": {},
                                     "config": {
+                                        "matrix_secure_verified": 1,
                                         "watching": "the Queen",
                                         "universal_id": "matrix"
                                     }
                                 }
                             ]
                         }
-                    ],
-                    "config": {}
+                    ]
                 }
             ]
         },

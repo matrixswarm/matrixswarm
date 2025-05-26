@@ -13,28 +13,29 @@ matrix_directive = {
 
     "children": [
 
-        #MATRIX PROTECTION LAYER 4 SENTINELS
-        #4th SENTINEL WATCHES MATRIX, REST WATCH SENTINEL IN FRONT
-        #ONLY WAY TO KILL MATRIX WOULD BE TO KILL THEM ALL, TAKING ANY COMBO OF 4 OUT DOES NOTHING
+        # MATRIX PROTECTION LAYER 4 SENTINELS
+        # 4th SENTINEL WATCHES MATRIX, REST WATCH SENTINEL IN FRONT
+        # ONLY WAY TO KILL MATRIX WOULD BE TO KILL THEM ALL, TAKING ANY COMBO OF 4 OUT DOES NOTHING
         {
             "universal_id": "guardian-1",
             "name": "sentinel",
             "app": "matrix-core",
             "filesystem": {},
-            "config": {},
+            "config": {"matrix_secure_verified": 1},
             "children": [
                 {
                     "universal_id": "guardian-2",
                     "name": "sentinel",
                     "app": "matrix-core",
                     "filesystem": {},
+                    "config": {"matrix_secure_verified": 1},
                     "children": [
                         {
                             "universal_id": "guardian-3",
                             "name": "sentinel",
                             "app": "matrix-core",
                             "filesystem": {},
-                            "config": {},
+                            "config": {"matrix_secure_verified": 1},
                             "children": [
                                 {
                                     "universal_id": "guardian-4",
@@ -42,14 +43,14 @@ matrix_directive = {
                                     "app": "matrix-core",
                                     "filesystem": {},
                                     "config": {
+                                        "matrix_secure_verified": 1,
                                         "watching": "the Queen",
                                         "universal_id": "matrix"
                                     }
                                 }
                             ]
                         }
-                    ],
-                    "config": {}
+                    ]
                 }
             ]
         },

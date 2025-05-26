@@ -10,7 +10,7 @@ class BasePacket(ABC):
         pass
 
     @abstractmethod
-    def set_packet(self, packet):
+    def set_packet(self, packet, name="embeded"):
         pass
 
     @abstractmethod

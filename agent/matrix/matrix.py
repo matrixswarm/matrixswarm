@@ -32,18 +32,16 @@ import hashlib
 import json
 import copy
 import base64
-import shutil
-from string import Template
 from core.boot_agent import BootAgent
 from core.mixin.delegation import DelegationMixin
 from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
-from core.class_lib.file_system.util.ensure_trailing_slash import EnsureTrailingSlash
 from core.swarm_manager import SwarmManager  # adjust path to match
 from agent.reaper.reaper_factory import make_reaper_node
 from core.class_lib.hive.kill_chain_lock_manager import KillChainLockManager
-from core.utils.swarm_sleep import interruptible_sleep
 from core.utils.tree_backup import backup_agent_tree
 from core.tree_parser import TreeParser
+from core.mixin.ghost_vault import sign_pubkey_registry, verify_pubkey_registry
+
 
 class Agent(BootAgent, DelegationMixin):
     def __init__(self):
@@ -91,6 +89,8 @@ class Agent(BootAgent, DelegationMixin):
         universal_id = self.command_line_args.get("universal_id", "matrix")
         self.delegate_tree_to_agent(self.command_line_args.get("universal_id", universal_id))
         self.broadcast(f"Delivered agent_tree slice to self ({universal_id})", severity="info")
+        verify_pubkey_registry(self)
+
         #
         threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
@@ -193,114 +193,6 @@ class Agent(BootAgent, DelegationMixin):
         except Exception as e:
             print(f"[MATRIX:HTTPS-ERROR] Failed to dispatch command: {e}")
 
-    #executing commands
-    def command_listenerffffffffff(self):
-        path = Template(self.path_resolution["incoming_path_template"])
-        incoming_path = EnsureTrailingSlash.ensure_trailing_slash(
-            path.substitute(universal_id=self.command_line_args["matrix"]))
-
-        payload_dir = self.path_resolution.get("payload_path") or os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
-        os.makedirs(payload_dir, exist_ok=True)
-        archive_dir = os.path.join(os.path.dirname(payload_dir), "processed")
-        os.makedirs(archive_dir, exist_ok=True)
-
-        self.log(f"[CMD-LISTENER] Listening for commands in {incoming_path} and payloads...")
-
-        while self.running:
-            try:
-                # TREE SLICE REQUEST HANDLING
-                for filename in glob.glob(incoming_path + '*:_tree_slice_request.cmd'):
-                    try:
-                        os.remove(filename)
-                        universal_id = os.path.basename(filename).split(':')[0].strip()
-                        if not universal_id:
-                            raise ValueError(f"[TREE-REFRESH][ERROR] No universal_id in filename {filename}")
-                        tp = TreeParser.load_tree(self.tree_path)
-                        if not tp:
-                            self.log("[TREE-REFRESH][ERROR] Failed to load tree.")
-                            continue
-                        subtree = tp.extract_subtree_by_id(universal_id) or {}
-                        out_path = os.path.join(self.path_resolution["comm_path"], universal_id, "agent_tree.json")
-                        JsonSafeWrite.safe_write(out_path, subtree)
-                        self.log(f"[TREE-REFRESH] Tree slice sent to {universal_id}")
-                    except Exception as e:
-                        self.log(f"[TREE-REFRESH][ERROR] {e}")
-
-                # PAYLOAD COMMAND HANDLING
-                for fname in sorted(os.listdir(payload_dir)):
-                    fpath = os.path.join(payload_dir, fname)
-                    if not fname.endswith(".json"):
-                        continue
-
-                    try:
-                        with open(fpath) as f:
-                            payload = json.load(f)
-                    except Exception as e:
-                        self.log(f"[PAYLOAD][ERROR] Failed to parse {fname}: {e}")
-                        os.remove(fpath)
-                        continue
-
-                    archived_path = os.path.join(archive_dir, fname)
-                    try:
-                        shutil.move(fpath, archived_path)
-                        self.log(f"[PAYLOAD] Archived: {fname} → {archived_path}")
-                    except Exception as e:
-                        self.log(f"[PAYLOAD][ERROR] Could not archive {fname}: {e}")
-                        continue
-
-                    try:
-
-                        if "type" not in payload or "content" not in payload:
-                            self.log("[PAYLOAD][REJECTED] Non-standard payload structure.")
-                            continue
-
-                        ctype = payload.get("type")
-                        content = payload.get("content", {})
-
-                        if not ctype:
-                            self.log("[PAYLOAD][ERROR] Payload missing 'type'. Skipping.")
-                            continue
-
-                        if ctype == "spawn_agent":
-                            self.swarm.handle_injection(content)
-
-                        elif ctype == "inject":
-                            self.swarm.handle_injection(content)
-
-                        elif ctype == "inject_team":
-                            self.swarm.handle_team_injection(content.get("subtree"), content.get("target_universal_id"))
-
-                        elif ctype == "route_payload":
-
-                            return self.route_payload_to_target(payload.get("content", {}))
-
-                        elif ctype == "forward":
-                            self.handle_forward_payload(payload)
-
-                        elif ctype == "node_query":
-                            self.handle_node_query(content)
-
-                        elif ctype == "replace_agent":
-
-                            new_agent = content.get("new_agent", {})
-
-                            self.log(f"[DEBUG] validate_or_prepare_agent() received: {json.dumps(new_agent, indent=2)}")
-
-                            self.handle_replace_payload(content)
-
-                        else:
-                            self.log(f"[PAYLOAD][UNKNOWN] Unrecognized payload type: {ctype}")
-
-                    except Exception as e:
-                        self.log(f"[PAYLOAD][ERROR] Failed to execute {fname}: {e}")
-
-                # Tree sanity check every cycle
-                self.perform_tree_master_validation()
-                interruptible_sleep(self, 2)
-
-            except Exception as e:
-                self.log(f"[COMMAND-LISTENER][CRASH] {e}")
-                interruptible_sleep(self, 3)
 
     def route_payload_to_target(self, content):
         from core.tree_parser import TreeParser
@@ -430,6 +322,49 @@ class Agent(BootAgent, DelegationMixin):
         self.log(
             f"[REPLACE] 🧨 Reaper dispatched for {kill_list} with pod={tombstone_pod}, comm={tombstone_comm}, cleanup_die={cleanup_die}")
 
+    def cmd_register_identity(self, content, packet):
+        """
+        Direct command for identity registration via bootsig.
+        Used when sent through .cmd files instead of routed packets.
+        """
+
+        embedded = content.get("command", {})
+        inner = embedded.get("content", {})
+
+        pubkey = inner.get("pubkey")
+        bootsig = inner.get("bootsig")
+        uid = inner.get("universal_id", "unknown")
+
+
+        if not uid or not pubkey or not bootsig:
+            self.log("[CMD-IDENTITY][REJECTED] Missing pubkey or bootsig.")
+            return
+
+        from core.utils.verify_identity import verify_bootsig
+        if not verify_bootsig(pubkey, bootsig):
+            self.log(f"[CMD-IDENTITY][FAIL] Invalid bootsig from {uid}")
+            return
+
+        path = os.path.join(self.path_resolution["comm_path"], "matrix", "pubkeys.json")
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                pubkeys = json.load(f)
+        else:
+            pubkeys = {}
+
+        pubkeys[uid] = {
+            "pubkey": pubkey,
+            "bootsig": bootsig,
+            "fingerprint": hashlib.sha256(pubkey.encode()).hexdigest()[:12],
+            "timestamp": int(time.time())
+        }
+
+        with open(path, "w") as f:
+            json.dump(pubkeys, f, indent=2)
+            sign_pubkey_registry(self, path)
+
+        self.log(f"[CMD-IDENTITY][REGISTERED] {uid} added to pubkey registry.")
+
     def cmd_delete_agent(self, content, packet):
 
         target = content.get("target_universal_id")
@@ -527,7 +462,6 @@ class Agent(BootAgent, DelegationMixin):
         except Exception as e:
             self.log(f"[STATUS][SPAWN-ERR] {e}")
 
-        # 🧬 Delegates
         try:
             from core.live_tree import LiveTree
             tree = LiveTree()
@@ -536,7 +470,6 @@ class Agent(BootAgent, DelegationMixin):
         except Exception as e:
             self.log(f"[STATUS][TREE-ERR] {e}")
 
-        # 📤 Write .msg response
         try:
             inbox = os.path.join(comm_root, reply_to, "incoming")
             os.makedirs(inbox, exist_ok=True)

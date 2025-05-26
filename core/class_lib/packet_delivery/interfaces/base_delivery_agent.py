@@ -4,6 +4,11 @@ class BaseDeliveryAgent(ABC):
     """Interface for all delivery agent implementations (filesystem, redis, etc)."""
 
     @abstractmethod
+    def set_metadata(self, metadata: dict):
+        """Sets optional delivery parameters (e.g. file_ext, TTL, stream name). Returns self."""
+        pass
+
+    @abstractmethod
     def set_location(self, loc: dict):
         """Sets the base location (e.g., file path or Redis structure). Returns self."""
         pass

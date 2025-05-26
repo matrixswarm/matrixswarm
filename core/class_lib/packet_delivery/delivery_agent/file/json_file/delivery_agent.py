@@ -10,6 +10,15 @@ class DeliveryAgent(BaseDeliveryAgent):
         self._packet = None
         self._drop_zone = None
         self._error = None
+        self._file_ext = ".msg"
+        self._filename_prefix = "packet"
+        self._custom_metadata = {}
+
+    def set_metadata(self, metadata: dict):
+        self._file_ext = metadata.get("file_ext", self._file_ext)
+        self._filename_prefix = metadata.get("prefix", self._filename_prefix)
+        self._custom_metadata = metadata
+        return self
 
     def set_location(self, loc):
         self._location = loc.get("path")
@@ -74,7 +83,8 @@ class DeliveryAgent(BaseDeliveryAgent):
                     drop_path = os.path.join(drop_path, self._drop_zone)
                 os.makedirs(drop_path, exist_ok=True)
 
-                fname = f"alert_{int(time.time())}.msg"
+                timestamp = int(time.time())
+                fname = f"{self._filename_prefix}_{timestamp}{self._file_ext}"
                 full_path = os.path.join(drop_path, fname)
 
                 with open(full_path, "w") as f:
