@@ -1,8 +1,20 @@
-from core.class_lib.packet_delivery.interfaces.base_delivery_agent import BaseDeliveryAgent
+from abc import ABC
 
-class DeliveryAgent(BaseDeliveryAgent):
+from core.class_lib.packet_delivery.interfaces.base_delivery_agent import BaseDeliveryAgent
+from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
+
+class DeliveryAgent(BaseDeliveryAgent, ABC):
     def __init__(self, reason="Delivery agent type not found."):
         self._error = reason
+
+    def set_metadata(self, metadata: dict):
+        return self
+
+    def set_crypto_handler(self, crypto_handler: PacketProcessorBase):
+        return self
+
+    def set_identifier(self, name: str):
+        return self
 
     def set_location(self, loc):
         return self

@@ -27,7 +27,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log(f"[MIRROR] Mission start. Watching {self.watch_path} [mode: {self.mode}]")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         if self.mode != "cycle" and self.cycle_index > 0:
             interruptible_sleep(self, 10)
             return

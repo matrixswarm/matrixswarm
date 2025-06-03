@@ -355,20 +355,47 @@ class TreeParser:
                     self.rejected_subtrees.append(uid)
 
     @classmethod
+    def load_tree(cls, input_path):
+        try:
+            # Load JSON data
+            with open(input_path, "r") as f:
+                data = json.load(f)
+
+            #    print("Successfully loaded JSON data:", data)
+
+            # Create TreeParser instance and parse root node
+            instance = cls(data)  # Root node initialized
+            #   print("Calling _parse_nodes once...")
+            instance._parse_nodes(instance.root)  # Parse the tree
+            return instance  # Correctly return the instance
+
+        except Exception as e:  # Catch exceptions like FileNotFoundError or JSONDecodeError
+            #  print(f"Error occurred while loading tree: {e}")
+            return None  # Handle failure to load data gracefully
+
+    @classmethod
     def load_tree_direct(cls, data):
+
         """
-        Load tree from raw dictionary, cleanse it, parse nodes, and remove duplicates preemptively.
+        Load tree from raw directive dict with agent_tree and services.
         """
-        instance = cls(data)
+
+
+        if isinstance(data, dict) and "agent_tree" in data:
+            root_tree = data["agent_tree"]
+            services = data.get("services", [])
+        else:
+            root_tree = data
+            services = []
+
+
+        instance = cls(root_tree)
+        instance._service_manager_services = services  # inject globally scoped services
         instance.cleanse()
-        instance.pre_scan_for_duplicates(instance.root)  # Strike before parsing
+        instance.pre_scan_for_duplicates(instance.root)
         instance._parse_nodes(instance.root)
-
-        #if instance.rejected_subtrees:
-        #    for uid in instance.rejected_subtrees:
-        #        instance._remove_node_and_children(uid)
-
         return instance
+
 
     def _remove_node_and_children(self, target_uid):
         """
@@ -386,24 +413,6 @@ class TreeParser:
             print(f"[TREE-REMOVE] 🌪 Root node is duplicate '{target_uid}', clearing root.")
             self.root = {self.UNIVERSAL_ID_KEY: "root", self.CHILDREN_KEY: []}
 
-    @classmethod
-    def load_tree(cls, input_path):
-        try:
-            # Load JSON data
-            with open(input_path, "r") as f:
-                data = json.load(f)
-
-        #    print("Successfully loaded JSON data:", data)
-
-            # Create TreeParser instance and parse root node
-            instance = cls(data)  # Root node initialized
-         #   print("Calling _parse_nodes once...")
-            instance._parse_nodes(instance.root)  # Parse the tree
-            return instance  # Correctly return the instance
-
-        except Exception as e:  # Catch exceptions like FileNotFoundError or JSONDecodeError
-          #  print(f"Error occurred while loading tree: {e}")
-            return None  # Handle failure to load data gracefully
 
     @staticmethod
     def flatten_tree(subtree):
@@ -528,7 +537,6 @@ class TreeParser:
         print(f"[FIND_PARENT] Starting parent search for {child_universal_id}")
         return recurse(self.root)
 
-
     def get_subtree_nodes(self, universal_id):
         """
         Get all nodes under and including the given universal_id.
@@ -563,3 +571,41 @@ class TreeParser:
 
     def has_node(self, universal_id):
         return self.get_node(universal_id) is not None
+
+    def get_service_managers(self, caller_universal_id=None):
+        """
+        Returns a flat list of all nodes that have a non-empty 'service-manager' field
+        under their config.
+        If caller_universal_id is provided, it annotates each service with:
+            - _is_child: True if the caller is an ancestor of the service node
+            - _level: depth from caller to service node (0 if same, 1 if direct child, etc)
+        """
+        service_nodes = []
+
+        def recurse(node, path_stack):
+            if not isinstance(node, dict):
+                return
+
+            config = node.get("config", {})
+            universal_id = node.get("universal_id")
+            full_path = path_stack + [universal_id] if universal_id else path_stack
+
+            if config.get("service-manager") and (universal_id != caller_universal_id):
+                annotated_node = dict(node)  # shallow copy
+
+                if caller_universal_id and caller_universal_id in full_path:
+                    idx = full_path.index(caller_universal_id)
+                    annotated_node["_is_child"] = True
+                    annotated_node["_level"] = len(full_path) - idx - 1
+                else:
+                    annotated_node["_is_child"] = False
+                    annotated_node["_level"] = None
+
+                service_nodes.append(annotated_node)
+
+            for child in node.get("children", []):
+                recurse(child, full_path)
+
+        recurse(self.root, [])
+        return service_nodes
+

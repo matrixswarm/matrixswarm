@@ -24,7 +24,7 @@ class Agent(BootAgent, DelegationMixin):
     def worker_pre(self):
         self.log("[WATCHDOG-2] Agent initialized. Resurrection monitoring engaged.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.scan_once()
         interruptible_sleep(self, 5)
 

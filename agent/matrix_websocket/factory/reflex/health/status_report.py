@@ -7,7 +7,7 @@ def attach(agent, config):
     Sends them to all connected WebSocket clients.
     """
 
-    def msg_health_report(self, content, packet):
+    def cmd_health_report(self, content, packet):
         self.log(f"[WS][HEALTH] Received health_report:\n{json.dumps(content, indent=2)}")
         self.forward_to_clients(packet)
 
@@ -17,6 +17,7 @@ def attach(agent, config):
             return
         try:
             data = json.dumps(packet)
+
             dead = []
             for client in self.clients:
                 try:
@@ -32,7 +33,7 @@ def attach(agent, config):
 
     agent.log("[FACTORY] Reflex handler msg_health_report loaded.")
 
-    def msg_force_test(self, content, packet):
+    def cmd_force_test(self, content, packet):
         self.log("[WS][FORCE] Reflex test triggered — sending fake ping to all clients.")
 
         self.log(f"[WS][FORCE] Connected clients: {len(self.clients)}")
@@ -56,8 +57,8 @@ def attach(agent, config):
                 self.log(f"[WS][FORCE-ERROR] {e}")
 
     # Attach methods to the agent
-    agent.msg_health_report = msg_health_report.__get__(agent)
+    agent.cmd_health_report = cmd_health_report.__get__(agent)
 
     agent.forward_to_clients = forward_to_clients.__get__(agent)
 
-    agent.msg_force_test = msg_force_test.__get__(agent)
+    agent.cmd_force_test = cmd_force_test.__get__(agent)

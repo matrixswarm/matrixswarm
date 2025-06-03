@@ -32,7 +32,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[CALENDAR] Calendar scout initialized.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.check_upcoming_events()
         interruptible_sleep(self, self.interval)
 

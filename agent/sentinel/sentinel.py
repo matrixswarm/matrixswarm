@@ -19,17 +19,18 @@ import traceback
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.utils.swarm_sleep import interruptible_sleep
 from core.boot_agent import BootAgent
+from core.mixin.ghost_vault import generate_agent_keypair
 
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
 
         config = self.tree_node.get("config", {})
+        self.matrix_secure_verified=bool(config.get("matrix_secure_verified",0))
         self.watching = config.get("watching", "the Matrix")
         self.universal_id = config.get("universal_id", None)
         self.target_node = None
         self.time_delta_timeout = config.get("timeout", 30)  # Default 5 min if not set
-
 
     def post_boot(self):
         self.log(f"[SENTINEL] Sentinel booted. Monitoring: {self.watching}")
@@ -80,6 +81,10 @@ class Agent(BootAgent):
 
                     keychain["priv"] = self.matrix_priv
                     keychain["pub"] = self.matrix_pub
+                    if not self.matrix_secure_verified:
+                        keychain = generate_agent_keypair()
+
+                    keychain["encryption_enabled"] = int(self.encryption_enabled)
                     keychain["swarm_key"] = self.swarm_key
                     keychain["matrix_pub"] = self.matrix_pub
                     keychain["matrix_priv"] = self.matrix_priv

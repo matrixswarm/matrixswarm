@@ -43,7 +43,7 @@ class Agent(BootAgent):
         self.log("[REBOOT] Self-termination complete.")
         self.running = False
 
-    def worker(self):
+    def worker(self, config:dict = None):
         # Keep this light since pre handled everything
         time.sleep(2)
 

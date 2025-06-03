@@ -9,8 +9,8 @@ from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 from datetime import datetime
 
-
-class Agent(BootAgent):
+from core.mixin.agent_summary_mixin import AgentSummaryMixin
+class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
         super().__init__()
         self.name = "RedisHammer"
@@ -34,6 +34,9 @@ class Agent(BootAgent):
             "last_state": None,
             "last_change": time.time()
         }
+
+        # test writing summary
+        #self.stats["date"] = "1900-01-01"
 
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
@@ -96,64 +99,46 @@ class Agent(BootAgent):
         return False
 
     def alert_operator(self, message=None):
-        """
-        Uses packet + delivery agent system to send alert to all comm agents.
-        """
+
         if not message:
             message = "🚨 REDIS REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
 
-        pk = self.get_delivery_packet("notify.alert.general", new=True)
-        pk.set_data({
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "universal_id": self.command_line_args.get("universal_id", "unknown"),
-                "level": "critical",
-                "msg": message,
-                "formatted_msg": f"📣 Swarm Message\n{message}",
-                "cause": "Redis Sentinel Alert",
-                "origin": self.command_line_args.get("universal_id", "unknown")
+        pk1 = self.get_delivery_packet("standard.command.packet")
+        pk1.set_data({"handler": "cmd_send_alert_msg"})
 
+        pk2 = self.get_delivery_packet("notify.alert.general")
+        pk2.set_data({
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "universal_id": self.command_line_args.get("universal_id", "unknown"),
+            "level": "critical",
+            "msg": message,
+            "formatted_msg": f"📣 Redis Watchdog\n{message}",
+            "cause": "Apache Sentinel Alert",
+            "origin": self.command_line_args.get("universal_id", "unknown")
         })
 
-        comms = self.get_nodes_by_role("comm")
-        if not comms:
-            self.log("[ALERT] No comm nodes found. Alert not dispatched.")
+        pk1.set_packet(pk2,"content")
+
+        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
+        if not alert_nodes:
+            self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
             return
 
-        for comm in comms:
+        for node in alert_nodes:
             da = self.get_delivery_agent("file.json_file", new=True)
             da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([comm["universal_id"]]) \
-                .set_drop_zone({"drop": "incoming"}) \
-                .set_packet(pk) \
-                .deliver()
+              .set_address([node["universal_id"]]) \
+              .set_drop_zone({"drop": "incoming"}) \
+              .set_packet(pk1) \
+              .deliver()
 
             if da.get_error_success() != 0:
-                self.log(f"[ALERT][DELIVERY-FAIL] {comm['universal_id']}: {da.get_error_success_msg()}")
+                self.log(f"[ALERT][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
             else:
-                self.log(f"[ALERT][DELIVERED] Alert sent to {comm['universal_id']}")
+                self.log(f"[ALERT] Delivered to {node['universal_id']}")
 
-    def persist_log(self):
-        dir = os.path.join(self.path_resolution["comm_path"], "redis-hammer")
-        os.makedirs(dir, exist_ok=True)
-        path = os.path.join(dir, f"uptime_{self.stats['date']}.log")
-        with open(path, "w") as f:
-            json.dump(self.stats, f, indent=2)
-        self.log(f"[HAMMER] 📊 Daily log written: {path}")
-
-    def maybe_roll_day(self):
-        if self.stats["date"] != self.today():
-            self.persist_log()
-            self.stats = {
-                "date": self.today(),
-                "uptime_sec": 0,
-                "downtime_sec": 0,
-                "restarts": 0,
-                "last_state": None,
-                "last_change": time.time()
-            }
-
-    def worker(self):
-        self.maybe_roll_day()
+    def worker(self, config:dict = None):
+        self.maybe_roll_day('redis')
         running = self.is_redis_running()
         accessible = self.is_port_open() or self.is_socket_up()
         last_state = self.stats["last_state"]  # snapshot before update

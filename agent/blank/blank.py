@@ -17,7 +17,7 @@ class Agent(BootAgent):
     def post_boot(self):
         self.log("[BLANK] Post-boot ready. Standing by.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.log("[BLANK] Worker loop alive.")
         print("Guess what time it is?")
         interruptible_sleep(self, 10)

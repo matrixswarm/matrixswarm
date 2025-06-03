@@ -4,22 +4,6 @@ import time
 from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 
 class Packet(BasePacket):
-    def __init__(self):
-        self._valid = True
-        self._payload = {}
-        self._error_code = 0
-        self._error_msg = ""
-        self._packet_field_name="embeded"
-        self._packet = None
-
-    def is_valid(self) -> bool:
-        return self._valid
-
-    def set_packet(self, packet, field_name="embeded"):
-        if field_name:
-            self._packet_field_name = field_name
-
-        self._packet = packet
 
     def set_data(self, data: dict):
 
@@ -47,19 +31,3 @@ class Packet(BasePacket):
             self._error_code = 1
             self._error_msg = str(e)
             print(f"[SET_DATA][EXCEPTION] {e}")
-
-
-    def get_packet(self) -> dict:
-        base = self._payload
-        if self._packet and self._packet.is_valid():
-            base[self._packet_field_name] = self._packet.get_packet()
-        return {
-            "type": "send_packet_incoming",
-            "content": base
-        }
-
-    def get_error_success(self) -> int:
-        return self._error_code
-
-    def get_error_success_msg(self) -> str:
-        return self._error_msg

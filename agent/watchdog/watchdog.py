@@ -33,7 +33,7 @@ class Agent(BootAgent):
         self.log(f"[WATCHDOG][CONFIG] Loaded: ping={self.ping_url}, interval={self.check_interval}s, timeout={self.timeout}s, max_failures={self.max_failures}, action={self.alert_action}")
         self.log("[WATCHDOG] WatchdogAgent initialized and watching.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.check_ping_once()
         interruptible_sleep(self, self.check_interval)
 

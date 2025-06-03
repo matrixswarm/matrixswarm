@@ -33,7 +33,7 @@ class Agent:
     #sends a heartbeat to comm/{universal_id}/hello.moto of self
     def heartbeat(self):
         hello_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto")
-        ping_file = os.path.join(hello_path, "last.ping")
+        ping_file = os.path.join(hello_path, "poke.heartbeat")
 
         os.makedirs(hello_path, exist_ok=True)
 
@@ -41,7 +41,7 @@ class Agent:
             try:
                 with open(ping_file, "w") as f:
                     f.write(self.command_line_args["install_name"])
-                # self.log(f"[HEARTBEAT] Touched last.ping for {self.command_line_args['install_name']}")
+                # self.log(f"[HEARTBEAT] Touched poke.heartbeat for {self.command_line_args['install_name']}")
             except Exception as e:
                 self.log(f"[HEARTBEAT][ERROR] Failed to write ping: {e}")
             time.sleep(10)

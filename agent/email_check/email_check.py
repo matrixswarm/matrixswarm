@@ -38,7 +38,7 @@ class Agent(BootAgent):
             self.log(f"[EMAIL][ERROR][LOGIN] {e}")
             self.mail = None
 
-    def worker(self):
+    def worker(self, config:dict = None):
         import email
         from email.header import decode_header
 

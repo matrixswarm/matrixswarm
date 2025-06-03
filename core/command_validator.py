@@ -27,7 +27,7 @@ class CommandValidator:
             try:
                 self.tree.insert_node(command["node"], parent)
                 self.tree.mark_confirmed(target)
-                self.tree.dump_tree(self.tree_path)
+                self.tree.save_tree(self.tree_path)
                 self.history.append(command)
             except ValueError as e:
                 log_to_mailman(target, "error", f"[TREE-CONFLICT] {e}")
@@ -35,14 +35,14 @@ class CommandValidator:
         elif cmd_type == "delete_node":
             if target in self.tree.nodes:
                 del self.tree.nodes[target]
-                self.tree.dump_tree(self.tree_path)
+                self.tree.save_tree(self.tree_path)
                 self.history.append(command)
             else:
                 log_to_mailman(target, "warn", f"[TREE-WARNING] Tried to delete nonexistent node: {target}")
 
         elif cmd_type == "confirm_node":
             if self.tree.mark_confirmed(target):
-                self.tree.dump_tree(self.tree_path)
+                self.tree.save_tree(self.tree_path)
                 self.history.append(command)
             else:
                 log_to_mailman(target, "warn", f"[TREE-WARNING] Tried to confirm unknown node: {target}")

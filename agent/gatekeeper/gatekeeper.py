@@ -66,7 +66,10 @@ class Agent(BootAgent):
 
     def drop_alert(self, info):
 
-        pk = self.get_delivery_packet("notify.alert.general", new=True)
+        pk1 = self.get_delivery_packet("standard.command.packet")
+        pk1.set_data({"handler": "cmd_send_alert_msg"})
+
+        pk2 = self.get_delivery_packet("notify.alert.general")
 
         # Force inject message
         msg_text = (
@@ -79,33 +82,33 @@ class Agent(BootAgent):
             f"• Terminal: {info.get('tty')}"
         )
 
-        pk.set_data({
+        pk2.set_data({
             "msg": msg_text,
             "universal_id": self.command_line_args.get("universal_id", "unknown"),
-            "level": "info",
+            "level": "critical",
             "cause": "SSH Login Detected",
             "origin": self.command_line_args.get("universal_id", "unknown")
         })
 
-        #self.log("[DEBUG] Packet preview (post-set_data):")
-        #self.log(json.dumps(pk.get_packet(), indent=2))
+        pk1.set_packet(pk2, "content")
 
-        # Send packet to all comm agents
-        comms = self.get_nodes_by_role("comm")
+        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
+        if not alert_nodes:
+            self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
+            return
 
-        for comm in comms:
-            da = self.get_delivery_agent("file.json_file", new=True)
+        for node in alert_nodes:
+            da = self.get_delivery_agent("file.json_file")
             da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([comm["universal_id"]]) \
+                .set_address([node["universal_id"]]) \
                 .set_drop_zone({"drop": "incoming"}) \
-                .set_packet(pk) \
+                .set_packet(pk1) \
                 .deliver()
 
             if da.get_error_success() != 0:
-                self.log(f"[GATEKEEPER][DELIVERY-FAIL] {da.get_error_success_msg()}")
+                self.log(f"[ALERT][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
             else:
-                self.log(f"[GATEKEEPER][DELIVERED] Alert sent to {comm['universal_id']}")
-
+                self.log(f"[ALERT] Delivered to {node['universal_id']}")
 
     def tail_log(self):
         self.log(f"[GATEKEEPER] Tailing: {self.log_path}")
@@ -158,7 +161,7 @@ class Agent(BootAgent):
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.tail_log()
         interruptible_sleep(self, 10)
 

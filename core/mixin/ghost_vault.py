@@ -146,6 +146,8 @@ def decrypt_vault(log=None):
         # 🧬 Swarm AES Key
         payload_dict["swarm_key"] = payload_dict.get("swarm_key")
 
+        payload_dict["encryption_enabled"] = payload_dict.get("encryption_enabled")
+
         # 🧠 Matrix-level keys
         matrix_pub = payload_dict.get("matrix_pub")
 

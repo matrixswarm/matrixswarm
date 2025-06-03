@@ -22,7 +22,7 @@ class Agent(BootAgent):
         print(msg)
         self.broadcast(msg)
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.check_oracle_triggers_once()
         interruptible_sleep(self, 2)
 

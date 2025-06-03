@@ -49,7 +49,7 @@ class Agent(BootAgent, ReflexAlertMixin):
         self.enforce_prompt_command_once()
         threading.Thread(target=self.watch_file_changes, daemon=True).start()
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.track_active_users()
         self.poll_shell_history()
         interruptible_sleep(self, self.tick_rate)

@@ -25,7 +25,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[SCRAPER] Cold metal online. Awaiting targets...")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.check_jobs_once()
         interruptible_sleep(self, 2)
 

@@ -9,6 +9,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt5.QtGui import QColor, QFont, QPalette
+from PyQt5.QtMultimedia import QSound
 import sys
 import requests
 import os
@@ -19,9 +20,27 @@ import random
 import ssl
 import hashlib
 import base64
-
+import re
 import threading
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtWidgets import QListWidget
+
+from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
+from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
+from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
+
+class AutoScrollList(QListWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.autoscroll_enabled = True
+
+    def enterEvent(self, event):
+        self.autoscroll_enabled = False
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.autoscroll_enabled = True
+        super().leaveEvent(event)
 
 
 def run_in_thread(callback=None, error_callback=None):
@@ -56,7 +75,7 @@ class NodeSelectionEventBus(QObject):
 node_event_bus = NodeSelectionEventBus()
 
 
-class MatrixCommandBridge(QWidget):
+class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin):
 
     message_received = pyqtSignal(str)
     log_ready = pyqtSignal(dict, str)
@@ -87,7 +106,18 @@ class MatrixCommandBridge(QWidget):
         qr.moveCenter(cp)
         self.move(qr.topLeft())
 
+        self.log_scroll_timer = QTimer()
+        self.log_scroll_timer.timeout.connect(self.slow_scroll_log)
+        self.log_scroll_timer.start(100)  # Scroll every 100ms (adjust as needed)
 
+    def slow_scroll_log(self):
+        if self.auto_scroll_checkbox.isChecked() and self.log_text.isVisible():
+            scrollbar = self.log_text.verticalScrollBar()
+            max_scroll = scrollbar.maximum()
+            current = scrollbar.value()
+
+            if current < max_scroll:
+                scrollbar.setValue(current + 1)
 
     def setup_ui(self):
         self.main_layout = QVBoxLayout()
@@ -121,18 +151,34 @@ class MatrixCommandBridge(QWidget):
         self.pulse_timer.start(1000)
 
         self.start_tree_autorefresh(interval=25)
+        self.log_poll_timer = QTimer()
+        self.log_poll_timer.timeout.connect(self.poll_live_log)
+        self.log_poll_timer.start(2000)  # Poll every 2 seconds (adjust as needed)
+
+    def poll_live_log(self):
+        if self.auto_scroll_checkbox.isChecked():
+            uid = self.log_input.text().strip()
+
+            if hasattr(self, "_log_poll_busy") and self._log_poll_busy:
+                return
+
+            self._log_poll_busy = True
+
+            if uid:
+                self.view_logs()  # safely handles async fetch and appending
 
     def start_websocket_listener(self, url=MATRIX_WEBSOCKET_HOST):
-        """
-        Launch the WebSocket client on a separate thread using asyncio.
-        """
+        def run_ws_loop():
+            while True:
+                try:
+                    asyncio.set_event_loop(asyncio.new_event_loop())
+                    loop = asyncio.get_event_loop()
+                    loop.run_until_complete(self.websocket_main_loop(url))
+                except Exception as e:
+                    print(f"[WS][RETRY] Reconnect in 5s: {e}")
+                time.sleep(5)  # Retry delay
 
-        def run_ws():
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(self.websocket_main_loop(url))
-
-        threading.Thread(target=run_ws, daemon=True).start()
+        threading.Thread(target=run_ws_loop, daemon=True).start()
 
     async def websocket_main_loop(self, url):
         """
@@ -153,6 +199,16 @@ class MatrixCommandBridge(QWidget):
 
             async with websockets.connect(url, ssl=ssl_context, ping_interval=15, ping_timeout=10) as websocket:
                 self.status_label_ws.setText("🟢 WS: Connected")
+                self.ws_connected = True
+                if not hasattr(self, "_ws_flare_triggered"):
+                    self._ws_flare_triggered = False
+
+                if not self._ws_flare_triggered:
+                    self.status_label_ws.setStyleSheet("color: #33ff33; font-weight: bold; background-color: #003300;")
+                    QTimer.singleShot(3000, lambda: self.status_label_ws.setStyleSheet(
+                        "color: #33ff33; background-color: transparent;"))
+                    self._ws_flare_triggered = True
+
                 print("[WS] WebSocket connection established.")
                 await websocket.send(json.dumps({
                     "type": "diagnostic",
@@ -172,13 +228,15 @@ class MatrixCommandBridge(QWidget):
             traceback.print_exc()
             print(f"[WS][ERROR] Failed to connect to WebSocket: {e}")
             self.status_label_ws.setText("🔴 WS: Disconnected")
+            self.ws_connected = False
 
 
     def handle_websocket_message_safe(self, msg: str):
         try:
             print(f"[WS] RAW MESSAGE: {msg}")
             data = json.loads(msg)
-            msg_type = data.get("type")
+            # Use 'type' if it exists, otherwise fall back to 'handler'
+            msg_type = data.get("type") or data.get("handler", "unknown")
 
             if msg_type == "health_report":
                 report = data.get("content", {})
@@ -216,12 +274,38 @@ class MatrixCommandBridge(QWidget):
                         return
 
 
+                else:
+                    summary = f"[{msg_type.upper()}] {json.dumps(data.get('content', data), indent=2)[:200]}"
+                    QTimer.singleShot(0, lambda: self.append_ws_feed_message(summary))
+
+            if msg_type in ("alert", "cmd_alert_to_gui"):
+                content = data.get("content", {})
+                msg_text = content.get("msg", "[No message]")
+                origin = content.get("origin", "?")
+                level = content.get("level", "info").lower()
+
+                summary = f"[ALERT] {msg_text} ← {origin}"
+
+                # 🔊 Play sound if needed
+                if level in ["critical", "warning"]:
+                    try:
+                        QSound.play("sounds/siren.wav")
+                    except Exception as e:
+                        print(f"[SIREN][ERROR] {e}")
+
+                self.append_ws_feed_message(summary, level=level)
+
+                if self.ws_feed_display.autoscroll_enabled:
+                    self.ws_feed_display.scrollToBottom()
+
+                return
+
 
             else:
 
-                if self.user_requested_log_view:
-                    # user is viewing logs; do not inject unsolicited WebSocket logs
+                # all other message types
 
+                if self.user_requested_log_view:
                     print("[WS][SKIP] User is actively viewing logs, ignoring unsolicited update.")
 
                     return
@@ -230,13 +314,38 @@ class MatrixCommandBridge(QWidget):
 
                 QTimer.singleShot(0, lambda: self.log_text.append(text))
 
+            summary = f"[{msg_type.upper()}] {data.get('content', str(data))[:100]}"
+            QTimer.singleShot(0, lambda: self.append_ws_feed_message(summary))
+
 
         except Exception as e:
             print(f"[WS][ERROR] Could not parse WebSocket msg: {msg}\n{e}")
 
+    def append_ws_feed_message(self, text, level="info"):
+
+
+        item = QListWidgetItem(text)
+
+        # Apply color based on level
+        if level == "critical":
+            item.setForeground(QColor("#ff3333"))  # red
+            QSound.play("sounds/siren.wav")
+        elif level == "warning":
+            item.setForeground(QColor("#ffcc00"))  # yellow
+            QSound.play("sounds/ping.wav")
+        elif level == "info":
+            item.setForeground(QColor("#33ff33"))  # green
+        else:
+            item.setForeground(QColor("#aaaaaa"))  # gray/fallback
+
+        self.ws_feed_display.addItem(item)
+
+        if self.ws_feed_display.autoscroll_enabled:
+            self.ws_feed_display.scrollToBottom()
+
     def _safe_log_append(self, text):
-        if self.log_text.document().blockCount() > 500:
-            self.log_text.setPlainText("")
+        #if self.log_text.document().blockCount() > 500:
+        #    self.log_text.setPlainText("")
         self.log_text.append(text)
 
     def handle_tree_click(self, item):
@@ -319,8 +428,6 @@ class MatrixCommandBridge(QWidget):
                         info_lines.append(f"   └─ {thread}: {status}")
 
 
-
-
             self.agent_info_panel.setText("\n".join(info_lines))
 
             # 📜 Update log view
@@ -329,7 +436,7 @@ class MatrixCommandBridge(QWidget):
 
             # 📡 Send fresh status ping to Matrix
             status_payload = {
-                "type": "agent_status_report",
+                "handler": "cmd_agent_status_report",
                 "timestamp": time.time(),
                 "content": {
                     "target_universal_id": universal_id,
@@ -352,7 +459,7 @@ class MatrixCommandBridge(QWidget):
                     timeout=REQUEST_TIMEOUT
                 )
 
-            task()
+            #task()
 
         except Exception as e:
             import traceback
@@ -372,7 +479,7 @@ class MatrixCommandBridge(QWidget):
 
     def send_status_request(self, uid):
         status_payload = {
-            "type": "agent_status_report",
+            "handler": "cmd_agent_status_report",
             "timestamp": time.time(),
             "content": {
                 "target_universal_id": uid,
@@ -408,9 +515,15 @@ class MatrixCommandBridge(QWidget):
         container = QWidget()
         layout = QHBoxLayout(container)
 
-        self.left_panel = self.build_command_panel()
+        self.left_panel = QWidget()
+        left_layout = QVBoxLayout(self.left_panel)
+        left_layout.addWidget(self.build_command_panel())
+        left_layout.addWidget(self.build_autoscroll_left_panel())
         self.center_panel = self.build_tree_panel()
         self.right_panel = self.build_log_panel()
+
+
+
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.left_panel)
@@ -475,13 +588,13 @@ class MatrixCommandBridge(QWidget):
         probe_uid = "health-probe-oracle-1"  # ✅ always send to probe
 
         payload = {
-            "type": "forward_command",
+            "handler": "cmd_forward_command",
             "timestamp": time.time(),
             "content": {
                 "target_universal_id": probe_uid,
                 "folder": "incoming",
                 "command": {
-                    "type": "agent_status_report",
+                    "handler": "agent_status_report",
                     "filetype": "msg",
                     "content": {
                         "target_universal_id": target_uid
@@ -489,6 +602,10 @@ class MatrixCommandBridge(QWidget):
                 }
             }
         }
+
+
+        return
+
 
         try:
             response = requests.post(
@@ -512,44 +629,54 @@ class MatrixCommandBridge(QWidget):
             return
 
         try:
-            raw_cmd = json.loads(payload_text)
+            raw_input = self.payload_editor.toPlainText().strip()
+            parsed = json.loads(raw_input)
 
-            # 🧠 Automatically set filetype if reflex-based
-            reflex_keywords = ["report", "status", "ping", "update", "heartbeat"]
-            cmd_type = raw_cmd.get("type", "").lower()
+            if not isinstance(parsed, dict):
+                raise ValueError("Payload must be a JSON object.")
 
-            if not raw_cmd.get("filetype"):
-                if any(keyword in cmd_type for keyword in reflex_keywords) or cmd_type.startswith("agent_"):
-                    raw_cmd["filetype"] = "msg"  # Reflex-safe routing
-                else:
-                    raw_cmd["filetype"] = "cmd"  # Default fallback
+            if "handler" not in parsed:
+                raise ValueError("Missing required field: 'handler'")
 
         except json.JSONDecodeError as e:
-
             self.status_label.setText(f"⚠️ Invalid JSON: {e}")
-
+            return
+        except ValueError as e:
+            self.status_label.setText(f"⚠️ {e}")
             return
 
-        target = self.input_universal_id.text().strip()
+
+        target = self.dropdown_target_uid.currentText().strip()
         if not target:
             self.status_label.setText("⚠️ No target selected.")
             return
 
-        # Build forward_command payload
-        fwd_payload = {
-            "type": "forward_command",
-            "timestamp": time.time(),
-            "content": {
-                "target_universal_id": target,
-                "command": raw_cmd,
-                "folder": self.folder_selector.currentText()
-            }
-        }
+        pk1 = self.get_delivery_packet("standard.command.packet")
+        pk1.set_data({
+            "handler": "cmd_forward_command"
+        })
+
+        pk2 = self.get_delivery_packet("standard.general.json.packet")
+        pk2.set_data({
+            "target_universal_id": target,
+            "folder": self.folder_selector.currentText()
+        })
+
+        pk3 = self.get_delivery_packet("standard.general.json.packet")
+        pk3.set_data(parsed)  # validate + prep internal metadata
+
+        pk2.set_auto_fill_sub_packet(False) \
+           .set_packet(pk3, "command")
+
+        pk1.set_auto_fill_sub_packet(False) \
+            .set_packet(pk2, "content")
+
+        print(pk1.get_packet())
 
         try:
             response = requests.post(
                 url=MATRIX_HOST,
-                json=fwd_payload,
+                json = pk1.get_packet(),
                 cert=CLIENT_CERT,
                 verify=False,
                 timeout=REQUEST_TIMEOUT
@@ -567,7 +694,9 @@ class MatrixCommandBridge(QWidget):
         self.status_label.setText(f"🚨 {alarm.get('universal_id')} ALERT: {alarm.get('cause')}")
 
     def view_logs(self):
+
         universal_id = self.log_input.text().strip().split(" ")[0]
+
         if not universal_id:
             print("[LOG] ❌ No universal_id set for log fetch.")
             return
@@ -576,7 +705,7 @@ class MatrixCommandBridge(QWidget):
         print(f"[LOG] View Logs requested for: {universal_id}")
 
         payload = {
-            "type": "get_log",
+            "handler": "cmd_get_log",
             "timestamp": time.time(),
             "content": {"universal_id": universal_id}
         }
@@ -614,9 +743,10 @@ class MatrixCommandBridge(QWidget):
         threading.Thread(target=threaded_log_fetch, daemon=True).start()
 
     def _handle_logs_result(self, result, uid):
-        print(f"[LOG] 🔄 _handle_logs_result called for {uid}")
+        print(f"[UI] Handling log result for {uid}")
 
-        log_data = result.get("json", {}).get("log")
+        log_data = result.get("json", {}).get("log", "")
+
         if not log_data:
             log_data = result.get("text", "")
             print(f"[WARN] Fallback to raw text for {uid}")
@@ -626,25 +756,25 @@ class MatrixCommandBridge(QWidget):
             self.log_text.setPlainText(f"[NO LOG DATA FOUND] for {uid}")
             return
 
-        if isinstance(log_data, (dict, list)):
-            safe_log = json.dumps(log_data, indent=2)
-        else:
-            safe_log = str(log_data)
+        # 🧪 Optional decode if server double-escaped
+        if isinstance(log_data, str) and "\\u" in log_data:
+            import codecs
+            try:
+                log_data = codecs.decode(log_data, "unicode_escape")
+                print(f"[DEBUG] Unicode decoded log for {uid}")
+            except Exception as e:
+                print(f"[WARN] Unicode decode failed: {e}")
 
-        safe_log = safe_log.replace("\\n", "\n")
-        if len(safe_log) > 50000:
-            safe_log = safe_log[-50000:]
-
-        print(f"[UI] Rendering {len(safe_log)} characters for {uid}")
+        self.log_text.clear()
         self.log_text.setVisible(True)
-        self.log_text.setPlainText(safe_log)
-        self.log_text.raise_()
-        self.log_text.repaint()
-        self.repaint()
-        if self.auto_scroll_checkbox.isChecked():
-            self.log_text.moveCursor(self.log_text.textCursor().End)
-            self.log_text.ensureCursorVisible()
+        self.log_text.setPlainText(log_data)
+        self.log_text.moveCursor(self.log_text.textCursor().End)
+        self.log_text.ensureCursorVisible()
+        self._log_poll_busy = False
 
+    def scroll_log_to_bottom(self):
+        self.log_text.moveCursor(self.log_text.textCursor().End)
+        self.log_text.ensureCursorVisible()
 
     def build_log_panel(self):
         box = QGroupBox("📡 Agent Intel Logs")
@@ -674,6 +804,13 @@ class MatrixCommandBridge(QWidget):
             }
         """)
 
+        layout.addWidget(QLabel("🎯 Target Agent (universal_id):"))
+        self.dropdown_target_uid = QComboBox()
+        self.dropdown_target_uid.setEditable(True)
+        self.dropdown_target_uid.setStyleSheet("background-color: black; color: #00ffcc; font-family: Courier;")
+        self.dropdown_target_uid.setInsertPolicy(QComboBox.NoInsert)
+        layout.addWidget(self.dropdown_target_uid)
+
         self.auto_scroll_checkbox = QCheckBox("Auto-scroll logs")
         self.auto_scroll_checkbox.setChecked(True)
         self.auto_scroll_checkbox.setStyleSheet("color: #33ff33; font-family: Courier;")
@@ -699,7 +836,7 @@ class MatrixCommandBridge(QWidget):
         self.tree_stack.setCurrentIndex(0)  # Show loading
         try:
 
-            payload = {"type": "list_tree", "timestamp": time.time(), "content": {}}
+            payload = {"handler": "cmd_list_tree", "timestamp": time.time(), "content": {}}
             response = requests.post(
                 url=MATRIX_HOST,
                 json=payload,
@@ -736,6 +873,7 @@ class MatrixCommandBridge(QWidget):
                 recurse_flatten(child)
 
         recurse_flatten(tree)
+        self.populate_target_dropdown()
 
         # 🧠 Add timestamp header
         header = QListWidgetItem(f"[MATRIX TREE @ {time.strftime('%H:%M:%S')}]")
@@ -890,7 +1028,7 @@ class MatrixCommandBridge(QWidget):
 
             # 🎯 Final payload
             payload = {
-                "type": "replace_agent",
+                "handler": "cmd_hotswap_agent",
                 "timestamp": time.time(),
                 "content": {
                     "target_universal_id": universal_id,
@@ -906,6 +1044,35 @@ class MatrixCommandBridge(QWidget):
 
         except Exception as e:
             self.status_label.setText(f"❌ Hotswap failed: {e}")
+
+    def populate_target_dropdown(self):
+
+        self.dropdown_target_uid.clear()
+
+        if not hasattr(self, "agent_tree_flat") or not self.agent_tree_flat:
+            return
+
+        agents = sorted(self.agent_tree_flat.keys())
+        self.dropdown_target_uid.addItems(agents)
+        self.dropdown_target_uid.setCurrentText("websocket-relay")  # Optional default
+
+        last_target = self.input_universal_id.text().strip()
+        if last_target in agents:
+            self.dropdown_target_uid.setCurrentText(last_target)
+
+    @staticmethod
+    def render_log_line(entry: dict) -> str:
+        emoji = {
+            "INFO": "🔹",
+            "WARNING": "⚠️",
+            "ERROR": "❌",
+            "DEBUG": "🐞"
+        }
+        ts = entry.get("timestamp", "??")
+        level = entry.get("level", "INFO").upper()
+        prefix = emoji.get(level, "🟢")
+        msg = entry.get("message", "[NO MESSAGE]")
+        return f"{prefix} [{ts}] [{level}] {msg}"
 
     def build_command_panel(self):
         box = QGroupBox("🧩 Mission Console")
@@ -933,7 +1100,7 @@ class MatrixCommandBridge(QWidget):
         layout.addWidget(self.hotswap_btn)
 
         self.folder_selector = QComboBox()
-        self.folder_selector.addItems(["payload", "incoming", "queue", "stack", "replies", "broadcast"])
+        self.folder_selector.addItems(["incoming", "payload", "queue", "stack", "replies", "broadcast", "config"])
         self.folder_selector.setStyleSheet("background-color: black; color: #00ffcc; font-family: Courier;")
         layout.addWidget(QLabel("📁 Send to folder:"))
         layout.addWidget(self.folder_selector)
@@ -973,7 +1140,7 @@ class MatrixCommandBridge(QWidget):
             return
 
         payload = {
-            "type": "spawn_agent",
+            "handler": "cmd_spawn_agent",
             "timestamp": time.time(),
             "content": {
                 "agent_name": "reboot_agent",
@@ -1015,7 +1182,7 @@ class MatrixCommandBridge(QWidget):
             return
 
         payload = {
-            "type": "delete_agent",
+            "handler": "cmd_delete_agent",
             "timestamp": time.time(),
             "content": {
                 "target_universal_id": universal_id
@@ -1143,7 +1310,7 @@ class MatrixCommandBridge(QWidget):
             return
 
         payload = {
-            "type": "resume_subtree",
+            "handler": "cmd_resume_subtree",
             "timestamp": time.time(),
             "content": {
                 "universal_id": universal_id
@@ -1159,7 +1326,7 @@ class MatrixCommandBridge(QWidget):
             return
 
         payload = {
-            "type": "shutdown_subtree",
+            "handler": "cmd_shutdown_subtree",
             "timestamp": time.time(),
             "content": {
                 "universal_id": universal_id
@@ -1202,7 +1369,7 @@ class MatrixCommandBridge(QWidget):
             self.inject_sources_into_tree(data)
 
             payload = {
-                "type": "inject",
+                "handler": "cmd_inject",
                 "timestamp": time.time(),
                 "content": {
                     "target_universal_id": self.input_target_universal_id.text().strip(),
@@ -1251,7 +1418,7 @@ class MatrixCommandBridge(QWidget):
             }
 
             payload = {
-                "type": "inject",
+                "handler": "cmd_inject",
                 "timestamp": time.time(),
                 "content": {
                     "target_universal_id": self.input_target_universal_id.text().strip(),
@@ -1287,7 +1454,7 @@ class MatrixCommandBridge(QWidget):
             return
 
         payload = {
-            "type": "kill",
+            "handler": "cmd_kill",
             "timestamp": time.time(),
             "content": {
                 "targets": [universal_id]
@@ -1303,7 +1470,7 @@ class MatrixCommandBridge(QWidget):
             return
 
         payload = {
-            "type": "delete_subtree",
+            "handler": "cmd_delete_subtree",
             "timestamp": time.time(),
             "content": {
                 "universal_id": universal_id
@@ -1351,7 +1518,27 @@ class MatrixCommandBridge(QWidget):
                     QTimer.singleShot(0, lambda: on_fail(e))
         threading.Thread(target=worker, daemon=True).start()
 
+    def build_autoscroll_left_panel(self):
+        box = QGroupBox("📡 Incoming WebSocket Feed")
+        layout = QVBoxLayout()
 
+        self.ws_feed_display = AutoScrollList()
+        self.ws_feed_display.setStyleSheet("""
+            QListWidget {
+                background-color: #000000;
+                color: #33ff33;
+                font-family: Courier;
+                font-size: 13px;
+                border: 1px solid #00ff66;
+            }
+            QListWidget::item {
+                padding: 2px;
+            }
+        """)
+
+        layout.addWidget(self.ws_feed_display)
+        box.setLayout(layout)
+        return box
 
 
 if __name__ == '__main__':

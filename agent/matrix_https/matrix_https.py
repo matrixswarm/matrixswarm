@@ -5,14 +5,19 @@ import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
-
+from flask import Response
 from flask import Flask, request, jsonify
 import ssl
 import json
 import threading
 import time
+import base64
 
 from core.boot_agent import BootAgent
+from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+
+from Cryptodome.Cipher import AES
+
 
 class Agent(BootAgent):
     def __init__(self):
@@ -79,344 +84,136 @@ class Agent(BootAgent):
                 ip = request.remote_addr or "unknown"
                 self.log(f"[MATRIX-HTTPS][SOURCE-IP] Packet received from {ip}")
                 payload = request.get_json()
-                ctype = payload.get("type")
+                ctype = payload.get("handler")
                 content = payload.get("content", {})
                 timestamp = payload.get("timestamp", time.time())
 
                 self.log(f"[MATRIX-HTTPS][RECEIVED] {ctype} from {ip} → {content}")
 
                 # === 1. Matrix-HTTPS native commands ===
-                if ctype == "get_log":
+                if ctype == "cmd_get_log":
                     uid = content.get("universal_id")
                     if not uid:
                         return jsonify({"status": "error", "message": "Missing universal_id"}), 400
 
                     log_path = os.path.join(self.path_resolution["comm_path"], uid, "logs", "agent.log")
+
                     if os.path.exists(log_path):
                         try:
-                            with open(log_path, "r", errors="ignore") as f:  # Ignore encoding issues
-                                lines = f.readlines()[-100:]  # Return the last 100 lines (prevent memory overload)
-                                return jsonify({"status": "ok", "log": "".join(lines)}), 200
+                            key_bytes = None
+                            if ENCRYPTION_CONFIG.is_enabled():
+                                swarm_key = ENCRYPTION_CONFIG.get_swarm_key()
+                                key_bytes = base64.b64decode(swarm_key)
+
+                            rendered_lines = []
+
+                            with open(log_path, "r") as f:
+                                for line in f:
+                                    try:
+                                        if key_bytes:
+                                            line = decrypt_log_line(line, key_bytes)
+
+                                        entry = json.loads(line)
+                                        ts = entry.get("timestamp", "?")
+                                        lvl = entry.get("level", "INFO")
+                                        msg = entry.get("message", "")
+                                        emoji = {
+                                            "INFO": "🔹", "ERROR": "❌", "WARNING": "⚠️", "DEBUG": "🐞"
+                                        }.get(lvl.upper(), "🔸")
+                                        rendered_lines.append(f"{emoji} [{ts}] [{lvl}] {msg}")
+                                    except Exception as e:
+                                        rendered_lines.append(f"[MALFORMED] {line.strip()}")
+
+                            output = "\n".join(rendered_lines[-250:])
+                            self.log(f"[LOG-DELIVERY] ✅ Sent {len(rendered_lines)} lines for {uid}")
+                            return Response(
+                                json.dumps({"status": "ok", "log": output}, ensure_ascii=False),
+                                status=200,
+                                mimetype="application/json"
+                            )
+
                         except Exception as e:
+                            self.log(f"[HTTPS-LOG][ERROR] Could not process log for {uid}: {e}")
                             return jsonify({"status": "error", "message": str(e)}), 500
 
-                    return jsonify({"status": "error", "message": f"Log not found for {uid}"}), 404
 
-                elif ctype == "list_tree":
-                    tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
-                    if os.path.exists(tree_path):
-                        with open(tree_path) as f:
-                            return jsonify({"status": "ok", "tree": json.load(f)})
-                    return jsonify({"status": "error", "message": "agent_tree_master.json not found"}), 404
 
-                elif ctype == "ping":
+                elif ctype == "cmd_list_tree":
+
+                    try:
+
+                        tree_path = {
+
+                            "path": self.path_resolution["comm_path"],
+
+                            "address": "matrix",
+
+                            "drop": "directive",
+
+                            "name": "agent_tree_master.json"
+
+                        }
+
+                        tp = self.load_directive(tree_path)
+
+                        if not tp or not hasattr(tp, "root"):
+                            return jsonify(
+                                {"status": "error", "message": "Failed to load directive or invalid tree."}), 500
+
+                        return jsonify({"status": "ok", "tree": tp.root}), 200
+
+
+                    except Exception as e:
+
+                        self.log(f"[LIST_TREE][ERROR] {str(e)}")
+
+                        return jsonify({"status": "error", "message": str(e)}), 500
+
+                elif ctype == "cmd_ping":
                     return jsonify({"status": "ok"}), 200
 
                 # === 2. All other commands go to Matrix ===
                 target = "matrix"
                 target_dir = os.path.join(self.path_resolution["comm_path"], target, "incoming")
-                os.makedirs(target_dir, exist_ok=True)
 
                 fname = f"{ctype}_{int(timestamp)}.cmd"
                 fpath = os.path.join(target_dir, fname)
 
-                with open(fpath, "w") as f:
-                    json.dump(payload, f, indent=2)
+                payload['origin'] = self.command_line_args['universal_id']
 
-                self.log(f"[MATRIX-HTTPS][FORWARDED] {ctype} → {fpath}")
+                pk = self.get_delivery_packet("standard.command.packet", new=True)
+                pk.set_data(payload)
+
+                pk2 = self.get_delivery_packet("standard.general.json.packet", new=True)
+
+                pk.set_packet(pk2,"content")
+
+                da = self.get_delivery_agent("file.json_file", new=True)
+
+                da.set_location({"path": self.path_resolution["comm_path"]}) \
+                    .set_address([target]) \
+                    .set_drop_zone({"drop": "incoming"}) \
+                    .set_packet(pk) \
+                    .deliver()
+
+                self.log(f"##################{da.get_saved_filename()}{pk.get_packet()}***********************")
+
+
+                self.log(f"[MATRIX-HTTPS][FORWARDED] {ctype} → {da.get_saved_filename()}")
                 return jsonify({"status": "ok", "message": f"{ctype} routed to Matrix"})
 
             except Exception as e:
                 self.log(f"[MATRIX-HTTPS][ERROR] {e}")
-                return jsonify({"status": "error", "message": str(e)}), 500
 
-        def receive_commasdfsdfsdnd():
-
+        def decrypt_log_line(line, key_bytes):
             try:
-                payload = request.get_json()
-                payload["source_ip"] = request.remote_addr
-                self.log(f"[CMD] Received HTTPS command: {payload}")
-                ctype = payload.get("type")
-                content = payload.get("content", {})
-
-                self.log(f"[DEBUG] Incoming inject content: {content}")
-
-                self.log(f"[MATRIX_HTTPS][PAYLOAD] Received command: {payload}")
-
-                if ctype == "spawn":
-                    self.log(f"'[MATRIX_HTTPS][PAYLOAD] Received Spawn command. Payload: ' {payload}")
-                    #from core.core_spawner import spawn_agent
-                    #spawn_agent("matrix", str(uuid.uuid4()), content.get("agent_name"), content.get("universal_id"), "gui", directive=content)
-                    print('[MATRIX_HTTPS][PAYLOAD] Received Spawn command')
-                elif ctype == "inject":
-                    self.log(f"[MATRIX-HTTPS][CMD][INJECTING] {payload}")
-                    #id of agent that the new agent will be a child of, must be in tree
-                    target_universal_id = content.get("target_universal_id")
-                    #id of new agent, which must be unique though the whole tree
-                    universal_id = content.get("universal_id")
-                    #agent file to clone
-                    agent_name = content.get("agent_name")
-
-                    delegated = content.get("delegated", [])
-
-
-                    if universal_id and agent_name:
-
-                        directive = {
-                            "target_universal_id": target_universal_id,
-                            "universal_id": universal_id,
-                            "agent_name": agent_name,
-                            "delegated": delegated
-                        }
-
-                        inject_payload = {
-                            "type": "inject",
-                            "timestamp": time.time(),
-                            "content": directive
-                        }
-
-                        #FILENAME OF COMMAND TO MATRIX
-                        fname = f"inject_{agent_name}_{int(time.time())}.json"
-
-                        fpath = os.path.join(self.payload_dir, fname)
-
-                        with open(fpath, "w") as f:
-
-                            json.dump(inject_payload, f, indent=2)
-
-                        self.log(f"[INJECT] Payload dropped to Matrix: {fpath}")
-                        return jsonify({"status": "ok", "message": f"{agent_name} inject routed to Matrix"})
-                    else:
-                        return jsonify({"status": "error", "message": "Missing universal_id or agent_name"}), 400
-
-                elif ctype == "inject_team":
-                    target_universal_id = content.get("target_universal_id")
-                    subtree = content.get("subtree")
-
-                    if not target_universal_id or not subtree:
-                        return jsonify({"status": "error", "message": "Missing target_universal_id or subtree"}), 400
-
-                    inject_payload = {
-                        "type": "inject_team",
-                        "timestamp": time.time(),
-                        "content": {
-                            "target_universal_id": target_universal_id,
-                            "subtree": subtree
-                        }
-                    }
-
-                    fname = f"inject_team_{int(time.time())}.json"
-                    fpath = os.path.join(self.payload_dir, fname)
-
-                    with open(fpath, "w") as f:
-                        json.dump(inject_payload, f, indent=2)
-
-                    self.log(f"[INJECT_TEAM] Payload dropped to Matrix: {fpath}")
-                    return jsonify({"status": "ok", "message": f"Team injected under {target_universal_id}"})
-
-
-                elif ctype == "replace_agent":
-
-                    full_payload = {
-
-                        "type": "replace_agent",
-
-                        "timestamp": time.time(),
-
-                        "content": content
-
-                    }
-
-                    fname = f"replace_agent_{int(time.time())}.json"
-
-                    fpath = os.path.join(self.payload_dir, fname)
-
-                    with open(fpath, "w") as f:
-
-                        json.dump(full_payload, f, indent=2)
-
-                    self.log(f"[REPLACE_AGENT] Payload routed to Matrix: {fpath}")
-
-                    return jsonify({"status": "ok", "message": "replace_agent queued for Matrix"})
-
-                elif ctype == "stop":
-                    content = payload.get("content", {})
-                    targets = content.get("targets", [])
-                    if isinstance(targets, str):
-                        targets = [targets]
-
-                    # Build stop payload to drop into Matrix's payload queue
-                    payload = {
-                        "type": "stop",
-                        "timestamp": time.time(),
-                        "content": {
-                            "targets": targets
-                        }
-                    }
-
-                    inbox = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
-                    os.makedirs(inbox, exist_ok=True)
-
-                    fname = f"stop_{int(time.time())}.json"
-                    fpath = os.path.join(inbox, fname)
-
-                    with open(fpath, "w") as f:
-                        json.dump(payload, f, indent=2)
-
-                    self.log(f"[MATRIX-HTTPS][PAYLOAD-CMD][STOP-AGENT] Payload dropped to Matrix: {fpath}")
-                    return jsonify({"status": "ok", "message": f"Agent sent stop under {targets}"})
-
-                elif ctype == "resume":
-                    targets = content.get("targets", [])
-                    if isinstance(targets, str):
-                        targets = [targets]
-
-                    for universal_id in targets:
-                        die_path = os.path.join(self.path_resolution["comm_path"], universal_id, "incoming", "die")
-                        tombstone_path = os.path.join(self.path_resolution["comm_path"], universal_id, "incoming",
-                                                      "tombstone")
-
-                        if os.path.exists(die_path):
-                            os.remove(die_path)
-                            self.log(f"[MATRIX][RESUME] Removed die file for {universal_id}")
-
-                        if os.path.exists(tombstone_path):
-                            os.remove(tombstone_path)
-                            self.log(f"[MATRIX][RESUME] Removed tombstone for {universal_id}")
-
-
-                elif ctype == "shutdown_subtree":
-                    target_id = content.get("universal_id")
-                    if not target_id:
-                        return jsonify({"status": "error", "message": "Missing universal_id"}), 400
-                    try:
-
-                        from core.tree_parser import TreeParser
-                        tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
-                        tp = TreeParser.load_tree(tree_path)
-                        subtree_ids = tp.get_subtree_nodes(target_id)
-
-                        for agent_id in subtree_ids:
-                            die_path = os.path.join(self.path_resolution["comm_path"], agent_id, "incoming", "die")
-                            os.makedirs(os.path.dirname(die_path), exist_ok=True)
-                            with open(die_path, "w") as f:
-                                f.write("☠️")
-
-                        self.log(f"[MATRIX-HTTPS][SHUTDOWN] Issued die to subtree under: {target_id}")
-                        return jsonify(
-                            {"status": "ok", "message": f"Shutdown signal sent to {len(subtree_ids)} agents"})
-
-                    except Exception as e:
-                        self.log(f"[ERROR][SHUTDOWN_SUBTREE] {str(e)}")
-                        return jsonify({"status": "error", "message": str(e)}), 500
-
-                elif ctype == "restart_subtree":
-                    target_id = content.get("universal_id")
-                    if not target_id:
-                        return jsonify({"status": "error", "message": "Missing universal_id"}), 400
-
-                    try:
-                        from core.tree_parser import TreeParser
-                        tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
-                        tp = TreeParser.load_tree(tree_path)
-                        subtree_ids = tp.get_subtree_nodes(target_id)
-
-                        for agent_id in subtree_ids:
-                            die_path = os.path.join(self.path_resolution["comm_path"], agent_id, "incoming", "die")
-                            tombstone_path = os.path.join(self.path_resolution["comm_path"], agent_id, "incoming",
-                                                          "tombstone")
-
-                            if os.path.exists(die_path):
-                                os.remove(die_path)
-                                self.log(f"[MATRIX-HTTPS][RESUME] Removed die signal for {agent_id}")
-
-                            if os.path.exists(tombstone_path):
-                                os.remove(tombstone_path)
-                                self.log(f"[MATRIX-HTTPS][RESUME] Removed tombstone for {agent_id}")
-
-                        self.log(f"[MATRIX-HTTPS][RESTART_SUBTREE] Resumed {len(subtree_ids)} agents under {target_id}")
-                        return jsonify(
-                            {"status": "ok", "message": f"Resumed {len(subtree_ids)} agents under {target_id}."})
-
-                    except Exception as e:
-                        self.log(f"[MATRIX-HTTPS][ERROR] Restart Subtree: {str(e)}")
-                        return jsonify({"status": "error", "message": str(e)}), 500
-
-                elif ctype in {"restart_subtree", "delete_node", "delete_subtree"}:
-                    payload = {
-                        "type": ctype,
-                        "timestamp": time.time(),
-                        "content": content
-                    }
-                    fname = f"{ctype}_{int(time.time())}.json"
-                    fpath = os.path.join(self.payload_dir, fname)
-
-                    with open(fpath, "w") as f:
-                        json.dump(payload, f, indent=2)
-
-                    self.log(f"[MATRIX-HTTPS][QUEUED] {ctype} → {fpath}")
-                    return jsonify({"status": "ok", "message": f"{ctype} routed to Matrix"})
-
-
-                elif ctype == "get_log":
-                    self.log(f"[MATRIX-HTTPS][CMD][GET-LOG] {payload}")
-                    universal_id = content.get("universal_id")
-                    if not universal_id:
-                        return jsonify({"status": "error", "message": "Missing universal_id"}), 400
-
-                    log_path = os.path.join(self.path_resolution["comm_path"], universal_id, "logs", "agent.log")
-
-                    if os.path.exists(log_path):
-                        try:
-                            with open(log_path, "r") as f:
-                                logs = f.read()
-                            return jsonify({"status": "ok", "log": logs})
-                        except Exception as e:
-                            self.log(f"[HTTPS-LOG] Error reading log: {e}")
-                            return jsonify({"status": "error", "message": str(e)}), 500
-                    else:
-                        self.log(f"[HTTPS-LOG] Log not found for {universal_id}")
-                        return jsonify({"status": "error", "message": f"No log found for {universal_id}"}), 404
-
-                elif ctype == "list_tree":
-                    tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
-                    if os.path.exists(tree_path):
-                        with open(tree_path) as f:
-                            data = json.load(f)
-                        return jsonify({"status": "ok", "tree": data})
-                    else:
-                        return jsonify({"status": "error", "message": "agent_tree_master.json not found"}), 404
-
-                elif ctype == "kill":
-                    payload_path = os.path.join(self.payload_dir, f"kill_{int(time.time())}.json")
-                    with open(payload_path, "w") as f:
-                        json.dump(payload, f, indent=2)
-                        return jsonify({"status": "ok", "message": f"Kill payload routed to Matrix"})
-
-
-                else:
-
-                    # Fallback: drop ANY unrecognized payload into Matrix's payload dir
-
-                    fallback_name = f"cmd_{ctype}_{int(time.time())}.json"
-
-                    fallback_path = os.path.join(self.payload_dir, fallback_name)
-
-                    with open(fallback_path, "w") as f:
-
-                        json.dump(payload, f, indent=2)
-
-                    self.log(f"[MATRIX-HTTPS][FALLBACK] Routed unknown command '{ctype}' to Matrix payload queue.")
-
-                    return jsonify({"status": "ok", "message": f"Command '{ctype}' routed to Matrix."})
-
-                return jsonify({"status": "ok", "message": f"Command {ctype} processed."})
-
+                blob = base64.b64decode(line.strip())
+                nonce, tag, ciphertext = blob[:12], blob[12:28], blob[28:]
+                cipher = AES.new(key_bytes, AES.MODE_GCM, nonce=nonce)
+                return cipher.decrypt_and_verify(ciphertext, tag).decode()
             except Exception as e:
+                return f"[DECRYPT-FAIL] {str(e)}"
 
-                self.log(f"[ERROR] Command handling failed: {str(e)}")
-
-                return jsonify({"status": "error", "message": str(e)}), 500
 
     def run_server(self):
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)

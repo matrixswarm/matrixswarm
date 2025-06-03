@@ -43,7 +43,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[DISCORD] Worker alive, idling.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
 
         interruptible_sleep(self, 2320)
 
@@ -97,7 +97,7 @@ class Agent(BootAgent):
             import traceback
             traceback.print_exc()
 
-    def msg_send_packet_incoming(self, content, packet):
+    def cmd_send_alert_msg(self, content, packet):
         try:
             message = self.format_message(content)
             self.send_to_discord(message)

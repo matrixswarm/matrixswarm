@@ -1,7 +1,13 @@
 from abc import ABC, abstractmethod
+from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
 
 class BaseDeliveryAgent(ABC):
     """Interface for all delivery agent implementations (filesystem, redis, etc)."""
+
+    @abstractmethod
+    def set_crypto_handler(self, crypto_handler: PacketProcessorBase):
+        pass
+
 
     @abstractmethod
     def set_metadata(self, metadata: dict):
@@ -11,6 +17,11 @@ class BaseDeliveryAgent(ABC):
     @abstractmethod
     def set_location(self, loc: dict):
         """Sets the base location (e.g., file path or Redis structure). Returns self."""
+        pass
+
+    @abstractmethod
+    def set_identifier(self, name: str):
+        """Overrides the default filename: filename_prefix_timestamp."""
         pass
 
     @abstractmethod

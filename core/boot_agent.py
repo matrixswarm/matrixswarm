@@ -5,28 +5,32 @@ import traceback
 import threading
 import json
 import hashlib
-from datetime import datetime
+import fnmatch
 from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.core_spawner import CoreSpawner
-from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 from core.path_manager import PathManager
 from core.mixin.identity_registry import IdentityRegistryMixin
-
+from core.utils.swarm_sleep import interruptible_sleep
 from string import Template
 from core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
 from core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
 from core.class_lib.logging.logger import Logger
 from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
+from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
+from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+
+from core.class_lib.packet_delivery.utility.encryption.config import EncryptionConfig
 from core.mixin.ghost_vault import decrypt_vault
 from core.utils.trust_log import log_trust_banner
 from core.mixin.ghost_vault import generate_agent_keypair
 from core.boot_agent_thread_config import get_default_thread_registry
 from core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
+from core.tree_parser import TreeParser
 
-class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraMixin, IdentityRegistryMixin):
+class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin, GhostRiderUltraMixin, IdentityRegistryMixin):
 
     if __name__ == "__main__":
 
@@ -59,7 +63,15 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
         self.pub_fingerprint = payload["pub_fingerprint"]
         self.secure_keys = payload.get("secure_keys", {})
         self.cached_pem = payload.get("cached_pem", {})
+        config = EncryptionConfig()
+
         self.logger = Logger(self.path_resolution["comm_path_resolved"], "logs", "agent.log")
+
+        self.encryption_enabled=bool(payload.get("encryption_enabled",0))
+        if self.encryption_enabled:
+            config.set_swarm_key(self.swarm_key)
+            config.set_enabled(True)
+            self.logger.set_encryption_key(self.swarm_key)
 
         # Optional fingerprint of Matrix public key
         try:
@@ -97,14 +109,33 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
             swarm_key=self.swarm_key,
         )
 
+        #this option will be pulled from the command line as debug
+        #all packets all directives, using the self.swarm_key
+        self.packet_encryption=True
+
         self.boot_time = time.time()
         self.running = False
         self.subordinates = []
         self.thread_registry = get_default_thread_registry()
+
+        if self.encryption_enabled:
+            config.set_public_key(self.public_key_obj)
+            config.set_private_key(self.private_key_obj)
+            config.set_matrix_public_key(self.matrix_pub_obj)
+            config.set_matrix_private_key(self.matrix_priv_obj)
+
+        self.verbose = bool(self.command_line_args.get('verbose',0))
+        self._loaded_tree_nodes={}
+        self._service_manager_services = {}
+
         self.running = False
 
-    def log(self, message):
-        self.logger.log(message)
+    def log(self, message, **kwargs):
+        if hasattr(self, "logger"):
+            self.logger.log(message, **kwargs)
+        else:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{ts}] [INFO] {message}")
 
     def send_message(self, message):
         self.log(f"[SEND] {json.dumps(message)}")
@@ -113,7 +144,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
 
     def heartbeat(self):
         hello_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto")
-        ping_file = os.path.join(hello_path, "last.ping")
+        ping_file = os.path.join(hello_path, "poke.heartbeat")
 
         os.makedirs(hello_path, exist_ok=True)
 
@@ -122,7 +153,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
                 with open(ping_file, "w") as f:
                     now = time.time()
                     f.write(str(now))
-                    print(f"[HEARTBEAT] Touched last.ping for {ping_file} -> {now}")
+                    print(f"[HEARTBEAT] Touched poke.heartbeat for {ping_file} -> {now}")
             except Exception as e:
                 print(f"[HEARTBEAT][ERROR] Failed to write ping: {e} -> {ping_file} -> {now}")
             time.sleep(10)
@@ -203,39 +234,44 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
         return self.__class__.worker != BootAgent.worker
 
     def boot(self):
-        self.pre_boot()
 
-        pm = PathManager(use_session_root=True, site_root_path=self.path_resolution["site_root_path"])
-        cp = CoreSpawner(path_manager=pm)
-        fail_success, self.boot_log = cp.get_boot_log(self.path_resolution["pod_path_resolved"])
-        if not (fail_success and self.boot_log.get("universal_id")):
+        try:
+            self.pre_boot()
 
-            return
+            pm = PathManager(use_session_root=True, site_root_path=self.path_resolution["site_root_path"])
+            cp = CoreSpawner(path_manager=pm)
+            fail_success, self.boot_log = cp.get_boot_log(self.path_resolution["pod_path_resolved"])
+            if not (fail_success and self.boot_log.get("universal_id")):
 
-        self.running = True
+                return
 
-        self.worker_thread = threading.Thread(target=self._throttled_worker_wrapper, name="worker", daemon=False)
-        self.worker_thread.start()
-        self.thread_registry["worker"]["active"] = self.is_worker_overridden()
+            self.running = True
 
-        threading.Thread(target=self.enforce_singleton, name="enforce_singleton", daemon=True).start()
-        self.thread_registry["enforce_singleton"]["active"] = True
-        threading.Thread(target=self.heartbeat, name="heartbeat", daemon=True).start()
-        self.thread_registry["heartbeat"]["active"] = True
-        threading.Thread(target=self.spawn_manager, name="spawn_manager", daemon=True).start()
-        self.thread_registry["spawn_manager"]["active"] = True
-        threading.Thread(target=self.command_listener, name="cmd_listener", daemon=True).start()
-        self.thread_registry["cmd_listener"]["active"] = True
-        threading.Thread(target=self.reflex_listener, name="reflex_listener", daemon=True).start()
-        self.thread_registry["reflex_listener"]["active"] = True
-        self.start_dynamic_throttle()
-        self.post_boot()
-        self.monitor_threads()
+            self.worker_thread = threading.Thread(target=self._throttled_worker_wrapper, name="worker", daemon=False)
+            self.worker_thread.start()
+            self.thread_registry["worker"]["active"] = self.is_worker_overridden()
 
-    def worker(self):
+            threading.Thread(target=self.enforce_singleton, name="enforce_singleton", daemon=True).start()
+            self.thread_registry["enforce_singleton"]["active"] = True
+            threading.Thread(target=self.heartbeat, name="heartbeat", daemon=True).start()
+            self.thread_registry["heartbeat"]["active"] = True
+            threading.Thread(target=self.spawn_manager, name="spawn_manager", daemon=True).start()
+            self.thread_registry["spawn_manager"]["active"] = True
+            threading.Thread(target=self.packet_listener, name="packet_listener", daemon=True).start()
+            self.thread_registry["packet_listener"]["active"] = True
+            self.start_dynamic_throttle()
+            self.post_boot()
+            self.monitor_threads()
+
+        except Exception as e:
+            print(f"[boot_agent][boot] Error: {e}")
+            traceback.print_exc()
+
+    def worker(self, config:dict = None):
         self.log("[BOOT] Default worker loop running. Override me.")
         while self.running:
-            time.sleep(5)
+            interruptible_sleep(self, 5)
+
 
     def pre_boot(self):
         self.log("[BOOT] Default pre_boot (override me if needed)")
@@ -243,109 +279,187 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
     def post_boot(self):
         self.log("[BOOT] Default post_boot (override me if needed)")
 
-    def command_listener(self):
+    def packet_listener(self):
+        self.log("[UNIFIED-LISTENER] Monitoring incoming packets...")
         incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(incoming_path, exist_ok=True)
-        self.log("[COMMAND] Listening for standardized .cmd files...")
-        emit_beacon = self.check_for_thread_poke("cmd_listener", 5)
+        emit_beacon = self.check_for_thread_poke("packet_listener", 5)
+        last_dir_mtime = os.path.getmtime(incoming_path)
+
+        try:
+
+            ra = self.get_reception_agent("file.json_file", new=True)
+            ra.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([self.command_line_args["universal_id"]]) \
+                .set_drop_zone({"drop": "incoming"})
+
+        except Exception as e:
+            self.log(f"[UNIFIED][ERROR] Failed to process: {e}")
+
         while self.running:
+
             try:
+
                 emit_beacon()
-                for fname in os.listdir(incoming_path):
-                    if not fname.endswith(".cmd"):
-                        continue
-                    fpath = os.path.join(incoming_path, fname)
-                    with open(fpath, "r") as f:
+
+                current_dir_mtime = os.path.getmtime(incoming_path)
+                if current_dir_mtime != last_dir_mtime:
+                    last_dir_mtime = current_dir_mtime
+
+                    for fname in os.listdir(incoming_path):
+                        if not fname.endswith(".json"):
+                            continue
                         try:
-                            packet = json.load(f)
+
+                            pk = self.get_delivery_packet("standard.command.packet", new=True)
+                            pk2 = self.get_delivery_packet("standard.general.json.packet", new=True)
+                            pk.set_packet(pk2)
+
+                            packet = ra.set_identifier(fname) \
+                                       .set_packet(pk) \
+                                       .receive()
+
+                            fpath = os.path.join(incoming_path, fname)  # get the file's path
+                            os.remove(fpath)
+
+                            try:
+                                pk = packet.get_packet()
+                            except Exception as e:
+                                self.log(f"[UNIFIED][ERROR] Failed to process {fname}: {e} :{pk}")
+                                pk={}
+
+                            if ra.get_error_success() or packet is None:
+                                pk={}
+                                self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
+
+                            handler = pk.get("handler")
+                            if not handler:
+                                self.log(f"[UNIFIED][SKIP] No 'call' in: {fname}")
+                                continue
+
+                            #self.log(f"#########{pk}xxxxxxxxxxxxxxxx")
+
+                            handler_name = pk.get("handler")
+                            content = pk.get("content", {})
+
+
+                            # 1. Check if the class has a direct method with this name
+                            handler_fn = getattr(self, handler_name, None)
+
+                            if callable(handler_fn):
+                                try:
+                                    handler_fn(content, pk)
+                                    self.log(f"[UNIFIED] ✅ Executed handler: {handler_name}")
+                                    continue
+                                except Exception as e:
+                                    self.log(f"[UNIFIED][ERROR] Handler '{handler_name}' failed: {e}")
+
+                            # 2. Fallback: Try to dynamically load a factory module
+                            self.log(f"[UNIFIED][MISS] No direct handler '{handler_name}', attempting factory load...")
+
+                            try:
+                                # Clean up handler name (e.g. strip namespaces)
+                                handler_id = handler_name.split(".")[-1]  # e.g. cmd_example
+                                full_module_path = f"agent.{self.command_line_args['agent_name']}.factory.{handler_id}"
+
+                                self.log(f"[FACTORY] Attempting: {full_module_path}")
+
+                                mod = __import__(full_module_path, fromlist=["attach"])
+                                mod.attach(self, {"packet": pk, "content": content})
+
+                                self.log(f"[FACTORY] ✅ Loaded and attached: {full_module_path}")
+
+                            except Exception as fallback_error:
+                                self.log(
+                                    f"[FACTORY][FAIL] Could not dynamically load handler '{handler_name}': {fallback_error}")
+
                         except Exception as e:
-                            self.log(f"[CMD][PARSE-FAIL] {fname}: {e}")
+                            self.log(f"[UNIFIED][ERROR] Failed to process {fname}: {e}")
                             continue
 
-                    os.remove(fpath)
+            except Exception as loop_error:
+                self.log(f"[UNIFIED][LOOP-ERROR] {loop_error}")
 
-                    cmd_type = packet.get("type")
-                    content = packet.get("content", {})
-
-                    if not cmd_type:
-                        self.log(f"[CMD][SKIP] No 'type' field in: {fname}")
-                        continue
-
-                    handler_name = f"cmd_{cmd_type}"
-                    if hasattr(self, handler_name):
-                        try:
-                            getattr(self, handler_name)(content, packet)
-                            self.log(f"[CMD] ✅ Executed handler: {handler_name}")
-                        except Exception as e:
-                            self.log(f"[CMD][ERROR] {handler_name} crashed → {e}")
-                    else:
-                        self.log(f"[CMD][MISS] No handler for: {cmd_type}")
-
-            except Exception as e:
-                self.log(f"[CMD][LOOP-ERR] {e}")
-
-            time.sleep(1)
-
-    def reflex_listener(self):
-        inbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
-        os.makedirs(inbox_path, exist_ok=True)
-        self.log("[REFLEX] Listening for .msg and .prompt reflex queries...")
-        emit_beacon = self.check_for_thread_poke("reflex_listener", 5)
-        while self.running:
             try:
-                emit_beacon()
-
-                for fname in os.listdir(inbox_path):
-                    fpath = os.path.join(inbox_path, fname)
-
-                    # 🎯 PROMPT HANDLER
-                    if fname.endswith(".prompt"):
-                        try:
-                            with open(fpath, "r") as f:
-                                prompt = f.read().strip()
-                            os.remove(fpath)
-                            if hasattr(self, "msg_prompt"):
-                                self.msg_prompt(prompt,
-                                                {"type": "prompt", "source": self.command_line_args["universal_id"]})
-                                self.log(f"[REFLEX] ✅ Executed handler: msg_prompt")
-                            else:
-                                self.log("[REFLEX][MISS] No msg_prompt handler defined.")
-                        except Exception as e:
-                            self.log(f"[REFLEX][PROMPT-ERROR] {fname}: {e}")
-                        continue
-
-                    # 🎯 MSG HANDLER
-                    if not fname.endswith(".msg"):
-                        continue
-
-                    try:
-                        with open(fpath, "r") as f:
-                            packet = json.load(f)
-                    except Exception as e:
-                        self.log(f"[REFLEX][PARSE-ERROR] {fname}: {e}")
-                        continue
-
-                    os.remove(fpath)
-                    msg_type = packet.get("type")
-                    content = packet.get("content", {})
-
-                    if not msg_type:
-                        self.log(f"[REFLEX][SKIP] No 'type' in: {fname}")
-                        continue
-
-                    handler_name = f"msg_{msg_type}"
-                    if hasattr(self, handler_name):
-                        try:
-                            getattr(self, handler_name)(content, packet)
-                            self.log(f"[REFLEX] ✅ Executed handler: {handler_name}")
-                        except Exception as e:
-                            self.log(f"[REFLEX][ERROR] {handler_name} crashed → {e}")
-                    else:
-                        self.log(f"[REFLEX][MISS] No msg_* handler for: {msg_type}")
+                handler_fn = getattr(self, "packet_listener_post", None)
+                if callable(handler_fn):
+                    self.packet_listener_post() #used as hook or cron, so any operation that effect the agent_tree for instance stay on same thread
 
             except Exception as e:
-                self.log(f"[REFLEX][LOOP-ERROR] {e}")
-            time.sleep(1)
+                print(f"[UNIFIED-LISTENER][INFO] self.packet_listener_post() not implemented")
+
+            interruptible_sleep(self, 2)
+
+
+
+    def save_directive(self, path: dict, node_tree :dict):
+        """
+        Encrypt and deliver the directive tree using a structured path dictionary.
+
+        path: {
+            "path": base communication path (e.g., /comm/data),
+            "address": universal_id (e.g., agent ID),
+            "drop": drop zone (e.g., 'directive'),
+            "name": filename (e.g., 'agent_tree_master.json')
+        }
+        """
+        try:
+
+            pk1 = self.get_delivery_packet("standard.tree.packet", new=True)
+
+            pk1.set_data(node_tree)
+
+            priv_key=None
+
+            if ENCRYPTION_CONFIG.is_enabled():
+               priv_key = ENCRYPTION_CONFIG.get_matrix_private_key()
+
+            ra = self.get_delivery_agent("file.json_file", new=True, priv_key=priv_key)
+
+            ra.set_location({"path": path["path"]}) \
+                .set_identifier(path['name']) \
+                .set_metadata({"atomic": True}) \
+                .set_address([path["address"]]) \
+                .set_drop_zone({"drop": path["drop"]}) \
+                .set_packet(pk1) \
+                .deliver()
+
+            self.log(f"[SAVE] ✅ Encrypted directive delivered to {path['address']}/{path['drop']}/{path['name']}")
+            return True
+
+        except Exception as e:
+            self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌ {e}")
+            return False
+
+    def load_directive(self,path :dict):
+        try:
+
+            pub_key=None
+
+            if ENCRYPTION_CONFIG.is_enabled():
+                pub_key = ENCRYPTION_CONFIG.get_matrix_public_key()
+
+            pk1 = self.get_delivery_packet("standard.tree.packet", new=True)
+
+            packet = self.get_reception_agent("file.json_file", new=True, pub_key=pub_key) \
+                .set_location({"path": path["path"]}) \
+                .set_identifier(path["name"]) \
+                .set_address(path["address"]) \
+                .set_packet(pk1) \
+                .set_drop_zone({"drop": path["drop"]}) \
+                .receive()
+
+            if packet is None:
+                raise ValueError("Failed to receive data from reception agent.")
+
+            data=packet.get_packet()
+
+            return TreeParser.load_tree_direct(data)
+
+        except Exception as e:
+            self.log(f"[BOOT][TREE_LOAD_ERROR] {e}")
+            return None
+
 
     def save_to_trace_session(self, packet, msg_type="msg"):
         tracer_id = packet.get("tracer_session_id")
@@ -368,15 +482,34 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
         fname = f"{packet_id:03d}.{msg_type}"
         full_path = os.path.join(base_dir, fname)
 
-        try:
-            with open(full_path, "w") as f:
-                json.dump(packet, f, indent=2)
-        except Exception as e:
-            self.log(f"[TRACE][ERROR] Failed to write trace packet {fname}: {e}")
+        #try:
+            #with open(full_path, "w") as f:
+            #    json.dump(packet, f, indent=2)
+        #except Exception as e:
+        #    self.log(f"[TRACE][ERROR] Failed to write trace packet {fname}: {e}")
 
     def _throttled_worker_wrapper(self):
         self.log("[BOOT] Throttled worker wrapper engaged.")
-        emit_beacon = self.check_for_thread_poke("worker", 5)
+        config_path = os.path.join(self.path_resolution["comm_path_resolved"], "config")
+        os.makedirs(config_path, exist_ok=True)
+        emit_beacon = self.check_for_thread_poke("poke.worker", 5)
+        last_dir_mtime = os.path.getmtime(config_path)
+
+        try:
+
+            pub_key = None
+
+            if ENCRYPTION_CONFIG.is_enabled():
+                pub_key = ENCRYPTION_CONFIG.get_matrix_public_key()
+
+            ra = self.get_reception_agent("file.json_file", new=True, pub_key=pub_key)
+            ra.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([self.command_line_args["universal_id"]]) \
+                .set_drop_zone({"drop": "config"})
+
+        except Exception as e:
+            self.log(f"[UNIFIED][ERROR] Failed to process: {e}")
+
         # 🔹 Optional pre-hook (called ONCE before loop)
         if hasattr(self, "worker_pre"):
             try:
@@ -386,13 +519,53 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
                 self.log(f"[WORKER_PRE][ERROR] {e}")
 
         while self.running:
+
             if getattr(self, "can_proceed", True):
+
                 try:
+
                     self.can_proceed = False
 
                     if self.is_worker_overridden():
+
+                        config=None
+
+                        try:
+
+                            current_dir_mtime = os.path.getmtime(config_path)
+                            if current_dir_mtime != last_dir_mtime:
+                                last_dir_mtime = current_dir_mtime
+
+                                for fname in os.listdir(config_path):
+                                    if not fname.endswith(".json"):
+                                        continue
+
+                                    #get json packet
+                                    pk1 = self.get_delivery_packet("standard.general.json.packet", new=True)
+
+                                    packet = ra.set_identifier(fname) \
+                                        .set_packet(pk1) \
+                                        .receive()
+
+                                    fpath = os.path.join(config_path, fname)  # get the file's path
+                                    os.remove(fpath)
+
+                                    config = packet.get_packet()
+
+                                    if ra.get_error_success() or packet is None:
+                                        self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
+
+                        except Exception as e:
+                            self.log(f"[WORKER]['CONFIG'][ERROR] {e}")
+                            e=e
+
+                        if not isinstance(config, dict):
+                            config=None
+                        else:
+                            self.log(f"[WORKER]['CONFIG'] loaded config: {config}")
+
                         self.log(f"[WORKER] Executing worker cycle...")
-                        self.worker()
+                        self.worker(config)
 
                     else:
                         if not hasattr(self, "_worker_skip_logged"):
@@ -463,96 +636,79 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
         self.can_proceed = False
         threading.Thread(target=dynamic_throttle_loop, daemon=True).start()
 
-    # Gets first level children of parent
-    def get_node_by_role(self, role):
+    def get_nodes_by_role(self, role: str, scope: str = "child", return_count: int = 0):
         """
-        Consults the agent's own agent_tree.json (if present).
-        Returns node dictionary for any direct subordinate matching given role.
-        Hardened against missing or malformed trees.
-        """
-        try:
-            tree_path = os.path.join(
-                self.path_resolution['comm_path'],
-                self.command_line_args['universal_id'],
-                'agent_tree.json'
-            )
+        Unified role matcher from both tree and cached service list.
 
-            if not hasattr(self, '_cached_tree'):
-                self._cached_tree = None
-                self._tree_mtime = 0
-
-            if os.path.exists(tree_path):
-                mtime = os.path.getmtime(tree_path)
-                if mtime != self._tree_mtime:
-                    with open(tree_path, 'r') as f:
-                        self._cached_tree = json.load(f)
-                    self._tree_mtime = mtime
-
-            if not self._cached_tree:
-                self.log("[INTEL] No cached agent_tree found.")
-                return None
-
-            children = self._cached_tree.get("children", [])
-            if not isinstance(children, list):
-                self.log("[INTEL][ERROR] agent_tree children malformed.")
-                return None
-
-            for child in children:
-                cfg = child.get("config", {})
-                if cfg.get("role") == role:
-                    return child
-
-            self.log(f"[INTEL] No direct child with role '{role}' found.")
-            return None
-
-        except Exception as e:
-            self.log(f"[INTEL][CRASH] get_node_by_role() failed: {e}")
-            return None
-
-    def get_nodes_by_role(self, role):
-        """
-        Returns a list of all direct children matching the given role.
+        role: comma-separated roles (e.g., "hive.alert.*, comm")
+        scope: "child", "child(1)", "any", or "child(0)"
+        return_count: 0 = return all, 1 = first match, 2 = first two, etc.
         """
         try:
-            tree_path = os.path.join(
-                self.path_resolution['comm_path'],
-                self.command_line_args['universal_id'],
-                'agent_tree.json'
-            )
-
-            if not hasattr(self, '_cached_tree'):
-                self._cached_tree = None
-                self._tree_mtime = 0
-
-            if os.path.exists(tree_path):
-                mtime = os.path.getmtime(tree_path)
-                if mtime != self._tree_mtime:
-                    with open(tree_path, 'r') as f:
-                        self._cached_tree = json.load(f)
-                    self._tree_mtime = mtime
-
-            if not self._cached_tree:
-                self.log("[INTEL] No cached agent_tree found.")
+            role_list = [r.strip() for r in role.split(",") if r.strip()]
+            if not role_list:
                 return []
 
-            children = self._cached_tree.get("children", [])
-            if not isinstance(children, list):
-                self.log("[INTEL][ERROR] agent_tree children malformed.")
-                return []
+            # Determine depth limit
+            depth_limit = None
+            if scope.startswith("child("):
+                try:
+                    depth_limit = int(scope.split("(")[1].split(")")[0])
+                except:
+                    depth_limit = 1
+            elif scope == "child":
+                depth_limit = 1
+            elif scope == "any" or scope == "child(0)":
+                depth_limit = None
+            else:
+                depth_limit = 1
 
             matches = []
-            for child in children:
-                cfg = child.get("config", {})
-                if cfg.get("role") == role:
-                    matches.append(child)
 
-            if not matches:
-                self.log(f"[INTEL] No children with role '{role}' found.")
-            return matches
+            nodes = self.get_cached_service_managers()
+
+            seen_uids = set()
+            matches = []
+
+            for node in nodes:
+                for svc in node.get("config", {}).get("service-manager", []):
+                    raw_roles = svc.get("role", [])
+                    flat_roles = []
+                    for role_entry in raw_roles:
+                        if isinstance(role_entry, str):
+                            if "," in role_entry:
+                                flat_roles.extend(r.strip() for r in role_entry.split(","))
+                            else:
+                                flat_roles.append(role_entry.strip())
+
+                    for role in flat_roles:
+                        for pattern in role_list:
+                            if fnmatch.fnmatch(role, pattern):
+                                uid = node.get("universal_id")
+                                if uid and uid not in seen_uids:
+                                    seen_uids.add(uid)
+                                    matches.append(node)
+                                break
+
+            unique_matches = {}
+            for m in matches:
+                uid = m.get("universal_id")
+                if uid and uid not in unique_matches:
+                    unique_matches[uid] = m
+
+            result = list(unique_matches.values())
+            return result if return_count <= 0 else result[:return_count]
 
         except Exception as e:
-            self.log(f"[INTEL][CRASH] get_nodes_by_role() failed: {e}")
+            self.log(f"[INTEL][ERROR] get_nodes_by_role failed: {e}")
             return []
+
+    def get_cached_service_managers(self):
+        if hasattr(self, "_service_manager_services") and self._service_manager_services:
+            return self._service_manager_services
+        else:
+            return []
+
 
     #orginizes level one children by role
     def track_direct_subordinates(self):
@@ -572,30 +728,46 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
         last_tree_mtime = 0
         tree = None  # Initial tree holder
 
-        tree_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args["universal_id"], 'agent_tree.json')
+        tree_path_resolved = os.path.join(self.path_resolution['comm_path'], self.command_line_args["universal_id"], "directive", "agent_tree.json")
+
+        tree_path = {
+            "path": self.path_resolution["comm_path"],
+            "address": self.command_line_args["universal_id"],
+            "drop": "directive",
+            "name": "agent_tree.json"
+        }
 
         while self.running:
             try:
                 print(f"[SPAWN] Checking for delegated children of {self.command_line_args['universal_id']}")
 
-                if not os.path.exists(tree_path):
-                    time.sleep(5)
+                if not os.path.exists(tree_path_resolved):
+                    interruptible_sleep(self, 5)
                     continue
 
-                mtime = os.path.getmtime(tree_path)
+                mtime = os.path.getmtime(tree_path_resolved)
                 if mtime != last_tree_mtime:
-                    tree = TreeParser.load_tree(tree_path)
+
+                    tp = self.load_directive(tree_path)
+                    self._service_manager_services = getattr(tp, "_service_manager_services", [])
+
+                    if not tp or not hasattr(tp, "root"):
+                        self.log("[SPAWN][ERROR] Failed to load directive — invalid tree object.")
+                        interruptible_sleep(self, 5)
+                        continue
+
+                    tree = tp.root
                     last_tree_mtime = mtime
                     self.log(f"[SPAWN] Tree updated from disk.")
 
                 if not tree:
                     print(f"[SPAWN][ERROR] Could not load tree for {self.command_line_args['universal_id']}")
-                    time.sleep(5)
+                    interruptible_sleep(self, 5)
                     continue
 
-                for child_id in tree.get_first_level_child_ids(self.command_line_args["universal_id"]):
+                for child_id in tp.get_first_level_child_ids(self.command_line_args["universal_id"]):
 
-                    node = tree.nodes.get(child_id)
+                    node = tp.nodes.get(child_id)
                     if not node:
                         self.log(f"[SPAWN] Could not find node for {child_id}")
                         continue
@@ -615,6 +787,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
                     keychain["swarm_key"] = self.swarm_key
                     keychain["matrix_pub"] = self.matrix_pub
                     keychain["matrix_priv"]=DUMMY_MATRIX_PRIV
+                    keychain["encryption_enabled"]=int(self.encryption_enabled)
                     if node.get("universal_id") == 'matrix':
                         keychain["matrix_priv"] = self.matrix_priv
 
@@ -622,6 +795,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
                     if bool(cfg.get("matrix_secure_verified")) is True:
                         self.logger.log("[TRUST] matrix_secure_verified: TRUE → injecting real Matrix private key.")
                         keychain["matrix_priv"] = self.matrix_priv
+
+
+
+                    #TODO: verify if the agent is in memory first, before spawning, if it is, launch a reaper
+                    #      wait for reaper to give all clear, removing die cookie to signal
 
                         # Call new tactical spawn function
                     self.spawn_agent_direct(
@@ -636,7 +814,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
                 print(f"[SPAWN] Exception occurred: {e}")
                 print(f"[SPAWN] Full traceback:\n{tb}")
 
-            time.sleep(10)
+            interruptible_sleep(self, 10)
 
     def spawn_agent_direct(self, universal_id, agent_name, tree_node, keychain=None):
 
@@ -653,6 +831,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
         spawner.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))
         new_uuid, pod_path = spawner.create_runtime(universal_id)
 
+        spawner.set_verbose(self.verbose)
+
         result = spawner.spawn_agent(
             spawn_uuid=new_uuid,
             agent_name=agent_name,
@@ -668,16 +848,32 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, GhostRiderUltraM
 
         return result
 
-    #request_tree_slice_from_matrix part of the tree that this agent is delegated to maintain
-    def request_tree_slice_from_matrix(self):
-        #   GET MATRIX COMM PATH
-        #       CREATE COMMAND
-        #       WRITE THE COMMAND TO MATRIX COMM PATH USING ATOMIC WRITE
-        path = Template(self.path_resolution["incoming_path_template"])
-        matrix_incoming_path = path.substitute(universal_id=self.command_line_args["matrix"])
+    #gives a given agent its agent_tree.json
+    def delegate_tree_to_agent(self, universal_id, tree_path):
+        try:
 
-        request = self.command_line_args["universal_id"] + ":_tree_slice_request.cmd"
+            tp = self.load_directive(tree_path)
+            if not tp:
+                self.log(f"[DELEGATE] Failed to load master tree for {universal_id}")
+                return
 
-        JsonSafeWrite.safe_write(os.path.join(matrix_incoming_path, request),  '1')
+            subtree = tp.extract_subtree_by_id(universal_id)
+            if not subtree:
+                self.log(f"[DELEGATE] No subtree found for {universal_id}, sending empty tree.")
+                subtree = {}
 
-        self.log(f"[TREE_SLICE_REQUEST] Sent request to matrix from {self.command_line_args["universal_id"]}.")
+            # define structured path dict for saving
+            path = {
+                "path": self.path_resolution["comm_path"],
+                "address": universal_id,
+                "drop": "directive",
+                "name": "agent_tree.json"
+            }
+
+            data={"agent_tree": subtree, 'services': tp.get_service_managers(universal_id)}
+            self.save_directive(path, data)
+
+            self.log(f"[DELEGATE] Tree delivered to {universal_id}")
+        except Exception as e:
+            self.log(f"[DELEGATE-ERROR] {e}")
+

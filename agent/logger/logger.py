@@ -15,7 +15,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[LOGGER] Booted and ready for timestamp duty.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         self.log(f"[LOGGER] Log cycle at {now}")
         interruptible_sleep(self, 10)

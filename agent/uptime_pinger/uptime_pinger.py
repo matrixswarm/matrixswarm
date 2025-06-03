@@ -23,7 +23,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log(f"[PINGER] Uptime monitor engaged. Interval: {self.interval}s")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.ping_once()
         interruptible_sleep(self, self.interval)
 

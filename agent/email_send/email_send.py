@@ -21,7 +21,7 @@ class Agent(BootAgent):
         self.email_addr = config.get("email") or os.getenv("EMAILSENDAGENT_SMTP_EMAIL")
         self.email_pass = config.get("password") or os.getenv("EMAILSENDAGENT_PASSWORD")
 
-    def worker(self):
+    def worker(self, config:dict = None):
 
         for fname in os.listdir(self.watch_path):
             if not fname.endswith(".json"):

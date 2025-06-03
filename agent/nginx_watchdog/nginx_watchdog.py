@@ -5,12 +5,12 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 import subprocess
 import time
-import json
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 from datetime import datetime
+from core.mixin.agent_summary_mixin import AgentSummaryMixin
 
-class Agent(BootAgent):
+class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
         super().__init__()
         self.name = "NginxSentinel"
@@ -31,8 +31,12 @@ class Agent(BootAgent):
             "downtime_sec": 0,
             "restarts": 0,
             "last_state": None,
-            "last_change": time.time()
+            "last_change": time.time(),
         }
+
+        #test writing summary
+        #self.stats["date"] = "1900-01-01"
+
 
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
@@ -101,8 +105,11 @@ class Agent(BootAgent):
         if not message:
             message = "🚨 NGINX REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
 
-        pk = self.get_delivery_packet("notify.alert.general", new=True)
-        pk.set_data({
+        pk1 = self.get_delivery_packet("standard.command.packet")
+        pk1.set_data({"handler": "cmd_send_alert_msg"})
+
+        pk2 = self.get_delivery_packet("notify.alert.general", new=True)
+        pk2.set_data({
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "universal_id": self.command_line_args.get("universal_id", "unknown"),
                 "level": "critical",
@@ -112,74 +119,28 @@ class Agent(BootAgent):
                 "origin": self.command_line_args.get("universal_id", "unknown")
         })
 
-        comms = self.get_nodes_by_role("comm")
-        if not comms:
-            self.log("[ALERT] No comm nodes found. Alert not dispatched.")
+        pk1.set_packet(pk2, "content")
+
+        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
+        if not alert_nodes:
+            self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
             return
 
-        for comm in comms:
+        for node in alert_nodes:
             da = self.get_delivery_agent("file.json_file", new=True)
             da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([comm["universal_id"]]) \
+                .set_address([node["universal_id"]]) \
                 .set_drop_zone({"drop": "incoming"}) \
-                .set_packet(pk) \
+                .set_packet(pk1) \
                 .deliver()
 
             if da.get_error_success() != 0:
-                self.log(f"[ALERT][DELIVERY-FAIL] {comm['universal_id']}: {da.get_error_success_msg()}")
+                self.log(f"[ALERT][DELIVERY-FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
             else:
-                self.log(f"[ALERT][DELIVERED] Alert sent to {comm['universal_id']}")
+                self.log(f"[ALERT][DELIVERED] Alert sent to {node['universal_id']}")
 
-    def drop_reflex_alert(self, message, agent_dir, level="critical", cause=""):
-        """
-        Drop a reflex alert .msg file into /incoming/<agent_dir>/ for comm relays to pick up.
-        Respects factory-injected Discord/Telegram agents already listening.
-        """
-        msg_body = message if message else "[REFLEX] No message provided."
-        formatted_msg = f"📣 Swarm Message\n{msg_body}"
-        payload = {
-            "type": "send_packet_incoming",
-            "content": {
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "universal_id": self.command_line_args.get("universal_id", "unknown"),
-                "level": level,
-                "msg": msg_body,
-                "formatted_msg": formatted_msg,
-                "cause": cause or msg_body,
-                "origin": self.command_line_args.get("universal_id", "unknown")
-            }
-        }
-        try:
-            inbox = os.path.join(self.path_resolution["comm_path"], agent_dir, "incoming")
-            os.makedirs(inbox, exist_ok=True)
-            path = os.path.join(inbox, f"redis_alert_{int(time.time())}.msg")
-            with open(path, "w") as f:
-                json.dump(payload, f)
-        except Exception as e:
-            self.log(f"[HAMMER][ALERT][FAIL] Could not drop alert: {e}")
-
-    def persist_log(self):
-        dir = os.path.join(self.path_resolution["comm_path"], "nginx-sentinel")
-        os.makedirs(dir, exist_ok=True)
-        path = os.path.join(dir, f"uptime_{self.stats['date']}.log")
-        with open(path, "w") as f:
-            json.dump(self.stats, f, indent=2)
-        self.log(f"[SENTINEL] 📊 Daily log written: {path}")
-
-    def maybe_roll_day(self):
-        if self.stats["date"] != self.today():
-            self.persist_log()
-            self.stats = {
-                "date": self.today(),
-                "uptime_sec": 0,
-                "downtime_sec": 0,
-                "restarts": 0,
-                "last_state": None,
-                "last_change": time.time()
-            }
-
-    def worker(self):
-        self.maybe_roll_day()
+    def worker(self, config:dict = None):
+        self.maybe_roll_day("nginx")
         running = self.is_nginx_running()
         ports_open = self.are_ports_open()
         last_state = self.stats["last_state"]

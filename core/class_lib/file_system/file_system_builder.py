@@ -40,7 +40,7 @@ class FileSystemBuilder:
 
             # If content is a dictionary, recursively process its items
             if isinstance(content, dict):
-                print(f"[INFO] Recursively processing the contents of directory: {name}")
+                #print(f"[INFO] Recursively processing the contents of directory: {name}")
                 for key, value in content.items():
                     nested_item = {'name': key, 'type': 'd' if isinstance(value, dict) else 'f', 'content': value}
                     self.process_item(nested_item, item_path)

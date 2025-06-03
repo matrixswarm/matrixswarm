@@ -37,7 +37,7 @@ class Agent(BootAgent):
         self.log(f"[GPT][BOOT] Inbox path: {self.inbox}")
         self.log(f"[GPT][BOOT] Outbox path: {self.outbox}")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.log("[GPT][DEBUG] Entered worker() loop.")
         processed = 0
         try:

@@ -14,11 +14,15 @@ class Agent(BootAgent):
 
         self.target = self.tree_node.get("config", {}).get("target")
         self.interval = self.tree_node.get("config", {}).get("interval", 5)
-        self.stream_to = self.tree_node.get("config", {}).get("stream_to", "websocket-relay")
 
-    def worker(self):
+    def worker(self, config:dict = None):
 
         try:
+
+            if config and "target" in config:
+                self.target = config["target"]
+                self.log(f"[HEALTH] Updated probe target: {self.target}")
+
             if not self.target:
                 self.log("[HEALTH] No target defined.")
                 return  # ✅ replaces illegal 'continue'
@@ -48,10 +52,9 @@ class Agent(BootAgent):
 
         try:
             comm_root = self.path_resolution["comm_path"]
-            pod_root = self.path_resolution["pod_path"]
 
             # Heartbeat
-            ping_file = os.path.join(comm_root, target_uid, "hello.moto", "last.ping")
+            ping_file = os.path.join(comm_root, target_uid, "hello.moto", "poke.heartbeat")
             if os.path.exists(ping_file):
                 delta = time.time() - os.path.getmtime(ping_file)
                 report["last_heartbeat"] = round(delta, 2)
@@ -122,37 +125,45 @@ class Agent(BootAgent):
         return report
 
     def dispatch_report(self, report):
-        inbox = os.path.join(self.path_resolution["comm_path"], self.stream_to, "incoming")
-        self.log(f"[HEALTH][DEBUG] Final inbox path: {inbox}")
-        if os.path.isdir(inbox):
-            fname = f"health_{self.target}_{int(time.time())}.msg"
-            packet = {
-                "type": "health_report",
-                "content": report
-            }
-            with open(os.path.join(inbox, fname), "w") as f:
-                json.dump(packet, f, indent=2)
-            self.log(f"[HEALTH] Report sent to {self.stream_to}")
-        else:
-            # Escalate to Matrix
-            matrix_inbox = os.path.join(self.path_resolution["comm_path"], "matrix", "incoming")
-            os.makedirs(matrix_inbox, exist_ok=True)
-            fname = f"relay_failed_{int(time.time())}.cmd"
-            fallback = {
-                "type": "relay_failed",
-                "timestamp": time.time(),
-                "content": {
-                    "source": self.command_line_args["universal_id"],
-                    "target": self.target,
-                    "stream_to": self.stream_to,
-                    "report": report
-                }
-            }
-            with open(os.path.join(matrix_inbox, fname), "w") as f:
-                json.dump(fallback, f, indent=2)
-            self.log(f"[HEALTH] Stream failed → escalated to Matrix.")
 
-    def msg_agent_status_report(self, content, packet):
+        pk = self.get_delivery_packet("standard.command.packet", new=True)
+        pk.set_data({
+            "handler": "cmd_alert_to_gui",
+            "content": {
+                "msg": f"🩺 Health Status: {report.get('status')}",
+                "level": "info",
+                "origin": self.command_line_args.get("universal_id"),
+                "report": report
+            }
+        })
+
+
+        alert_nodes = self.get_nodes_by_role("hive.alert.*", "any")
+
+        if not alert_nodes:
+            self.log("[ALERT] No alert-compatible agents found (role: hive.alert.*)")
+            return
+
+        for node in alert_nodes:
+            uid = node.get("universal_id")
+            if not uid:
+                continue
+
+            da = self.get_delivery_agent("file.json_file", new=True)
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([uid]) \
+                .set_drop_zone({"drop": "incoming"}) \
+                .set_packet(pk) \
+                .deliver()
+
+            if da.get_error_success() == 0:
+                self.log(f"[DISPATCH-REPORT][ALERT] ✅ Sent alert to {uid}")
+            else:
+                self.log(f"[DISPATCH-REPORT][ALERT][ERROR] Failed to send to {uid}: {da.get_error_success_msg()}")
+
+
+
+    def cmd_change_target_agent(self, content, packet):
         new_target = content.get("target_universal_id")
         if new_target:
             self.target = new_target
