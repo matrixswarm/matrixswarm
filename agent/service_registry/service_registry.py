@@ -24,7 +24,7 @@ class Agent(BootAgent):
         self.scan_tree_once()
         threading.Thread(target=self.watch_files, daemon=True).start()
 
-    def worker(self):
+    def worker(self, config:dict = None):
         while self.running:
             interruptible_sleep(self, 600)
 

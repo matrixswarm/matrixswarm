@@ -4,6 +4,7 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 import ssl
 import time
+import copy
 import threading
 import asyncio
 import websockets
@@ -24,10 +25,36 @@ class Agent(BootAgent):
         self.loop = None
         self.websocket_ready = False
         self.cert_dir = "socket_certs"
+        self._stop_event = None
+        self._thread = None
+        self._config = None
+        self._lock = threading.Lock()
 
-    def worker_pre(self):
-        self.log("[WS] Launching WebSocket thread...")
-        threading.Thread(target=self.start_socket_loop, daemon=True).start()
+    def worker(self, config:dict = None):
+        """
+        Starts or restarts the WebSocket thread if config changes or thread is dead.
+        """
+        if config is None:
+            config = self.tree_node.get("config", {})  # Default fallback
+
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                if config == self._config:
+                    # Config unchanged, thread alive — do nothing
+                    return
+                else:
+                    self.log("[WS] Launching WebSocket thread... Or Config changed and restarting thread...")
+                    self._stop_event.set()
+                    self._thread.join(timeout=3)
+            elif self._thread and not self._thread.is_alive():
+                self.log("[WS] Previous thread is dead — restarting...")
+
+            # Start new thread
+            self._config = copy.deepcopy(config)  # Defensive copy
+            self._stop_event = threading.Event()
+            self._thread = threading.Thread(target=self.start_socket_loop, daemon=True)
+            self._thread.start()
+            self.log("[WS] WebSocket thread started.")
 
     def start_socket_loop(self):
         try:
@@ -64,13 +91,27 @@ class Agent(BootAgent):
                 await server.wait_closed()
 
             loop.run_until_complete(launch())
+
+            # Run the loop in a background task that watches the stop event
+            async def monitor_stop():
+                while not self._stop_event.is_set():
+                    await asyncio.sleep(1)
+                self.log("[WS] Stop event received — shutting down WebSocket server.")
+                loop.stop()
+
+            # Schedule the monitor coroutine
+            loop.create_task(monitor_stop())
+
             loop.run_forever()
+            loop.close()
+            self.log("[WS] Event loop closed.")
+
 
         except Exception as e:
             self.log(f"[WS][FATAL] WebSocket startup failed: {e}")
             self.running = False
 
-    def msg_health_report(self, content, packet):
+    def cmd_health_report(self, content, packet):
         self.log(f"[RELAY] Received health report for {content.get('target_universal_id', '?')}")
 
     async def websocket_handler(self, websocket, path):
@@ -94,7 +135,9 @@ class Agent(BootAgent):
 
                     # Attempt to decode JSON (if applicable)
                     try:
+
                         data = json.loads(message)
+
                         self.log(f"[WS][VALID MESSAGE] {data}")
                     except json.JSONDecodeError:
                         self.log("[WS][ERROR] Malformed JSON received")
@@ -125,7 +168,36 @@ class Agent(BootAgent):
             self.clients.discard(websocket)
             self.log(f"[WS] Client disconnected and removed. Active clients: {len(self.clients)}")
 
-    def msg_broadcast(self, content, packet):
+    def cmd_send_alert_msg(self, content, packet):
+        try:
+            # Format the alert message
+            msg = content.get("formatted_msg") or content.get("msg") or "[SWARM] Alert received."
+
+            # Construct GUI-style feed packet
+            broadcast_packet = {
+                "handler": "cmd_alert_to_gui",
+                "origin": content.get("origin", "unknown"),
+                "timestamp": time.time(),
+                "content": {
+                    "msg": msg,
+                    "level": content.get("level", "info"),
+                    "origin": content.get("origin", "unknown"),
+                    "formatted_msg": msg
+                }
+            }
+
+            # Dispatch it via WebSocket
+            self.cmd_broadcast(broadcast_packet["content"], broadcast_packet)
+
+            self.log("[WS] Alert message sent to GUI feed.")
+        except Exception as e:
+            self.log(f"[WS][ERROR] Failed to relay alert msg: {e}")
+
+    def cmd_alert_to_gui(self, content, packet):
+        self.log(f"[ALERT] Dispatching alert to GUI: {content}")
+        self.cmd_broadcast(content, packet)
+
+    def cmd_broadcast(self, content, packet):
         if not hasattr(self, "loop") or self.loop is None:
             self.log("[WS][REFLEX][SKIP] Event loop not ready.")
             return
@@ -135,6 +207,7 @@ class Agent(BootAgent):
             return
 
         try:
+            self.log(f"[WS][REFLEX]{packet}")
             data = json.dumps(packet)
             dead = []
             for client in self.clients:

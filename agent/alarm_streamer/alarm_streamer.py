@@ -44,7 +44,7 @@ class Agent(BootAgent):
         os.makedirs(self.alarm_path, exist_ok=True)
         threading.Thread(target=self.alarm_watcher, daemon=True).start()
 
-    def worker(self):
+    def worker(self, config:dict = None):
         interruptible_sleep(self, 20)
 
     def post_boot(self):

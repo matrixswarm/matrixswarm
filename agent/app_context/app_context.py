@@ -16,7 +16,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[CONTEXT] AppContextAgent online. Awaiting deployment commands.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         pass  # passive agent, listens only
 
     def process_command(self, command):

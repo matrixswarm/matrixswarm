@@ -121,39 +121,7 @@ matrix_directive = {
                 "always_alert": 1,
                 "alert_cooldown": 300
             },
-            "children": [
-
-                {
-                    "universal_id": "discord-delta-12",
-                    "name": "discord",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("DISCORD_TOKEN"),
-                        "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
-                        "role": "comm",
-
-                    }
-                },
-                {
-                    "universal_id": "telegram-bot-father-12",
-                    "name": "telegram_relay",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("TELEGRAM_API_KEY"),
-                        "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-                        "role": "comm",
-
-                    }
-                },
-
-
-            ],
+            "children": [],
             "filesystem": {},
             "delegated": [],
         }
@@ -177,53 +145,7 @@ matrix_directive = {
                 "service_name": "redis"
             }
             ,
-            "children": [
-
-                {
-                    "universal_id": "discord-delta",
-                    "name": "discord",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("DISCORD_TOKEN"),
-                        "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
-                        "role": "comm",
-
-                    }
-                },
-                {
-                    "universal_id": "telegram-bot-father",
-                    "name": "telegram_relay",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("TELEGRAM_API_KEY"),
-                        "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-                        "role": "comm",
-
-                    }
-                },
-                {
-                    "universal_id": "golden-child-4",
-                    "name": "oracle",
-                    "app": "blackhole-cometh",
-                    "filesystem": {
-                        "folders": [],
-                        "files": {}
-                    },
-                    "children": [],
-                    "config": {
-                        "role": "oracle",
-                        "api_key": os.getenv("OPENAI_API_KEY_2"),
-                    }
-
-                },
-
-            ]
+            "children": []
         },
         {
             "universal_id": "gatekeeper",
@@ -236,39 +158,7 @@ matrix_directive = {
                 "always_alert": 1,
             }
             ,
-            "children": [
-
-                {
-                    "universal_id": "discord-delta-8",
-                    "name": "discord",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("DISCORD_TOKEN"),
-                        "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
-                        "role": "comm",
-
-                    }
-                },
-                {
-                    "universal_id": "telegram-bot-father-9",
-                    "name": "telegram_relay",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("TELEGRAM_API_KEY"),
-                        "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-                        "role": "comm",
-
-                    }
-                },
-
-
-            ]
+            "children": []
         },
         {
             "universal_id": "mysql-red-phone",
@@ -287,39 +177,7 @@ matrix_directive = {
                 "role": "mysql-alarm",
             }
             ,
-            "children": [
-
-                {
-                    "universal_id": "discord-delta-5",
-                    "name": "discord",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("DISCORD_TOKEN"),
-                        "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
-                        "role": "comm",
-
-                    }
-                },
-                {
-                    "universal_id": "telegram-bot-father-2",
-                    "name": "telegram_relay",
-                    "app": "mysql-demo",
-                    "filesystem": {
-                        "folders": []
-                    },
-                    "config": {
-                        "bot_token": os.getenv("TELEGRAM_API_KEY"),
-                        "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-                        "role": "comm",
-
-                    }
-                },
-
-
-            ]
+            "children": []
         },
         {
           "universal_id": "shadowgeist",
@@ -334,17 +192,7 @@ matrix_directive = {
             "alert_cooldown": 300
           }
         },
-        {
-            "universal_id": "health-probe-oracle-1",
-            "name": "agent_health_probe",
-            "config": {
-                "target": "oracle-1",
-                "interval": 5,
-                "stream_to": "websocket-relay"
-            },
-            "filesystem": {},
-            "delegated": []
-        },
+
         {
             "universal_id": "websocket-relay",
             "name": "matrix_websocket",
@@ -353,10 +201,56 @@ matrix_directive = {
                 "factories": {
                     "reflex.health.status_report": {}
                 },
+                "service-manager": [{
+                    "role": ["hive.alert.send_alert_msg"],
+                    "scope": ["parent", "any"],     # who it serves
+                    "auth": {"sig": True},
+                    "priority": 10,                # lower = more preferred
+                    "exclusive": False             # can other services respond?
+                }],
             },
+
             "filesystem": {},
             "delegated": []
-        }
+        },
+        {
+            "universal_id": "discord-delta-5",
+            "name": "discord",
+            "app": "mysql-demo",
+            "filesystem": {
+                "folders": []
+            },
+            "config": {
+                "bot_token": os.getenv("DISCORD_TOKEN"),
+                "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
+                "service-manager": [{
+                    "role": ["comm", "comm.security", "hive.alert.send_alert_msg", "comm.*"],
+                    "scope": ["parent", "any"],     # who it serves
+                    "auth": {"sig": True},
+                    "priority": 10,                # lower = more preferred
+                    "exclusive": False             # can other services respond?
+                }]
+            }
+        },
+        {
+            "universal_id": "telegram-bot-father-2",
+            "name": "telegram_relay",
+            "app": "mysql-demo",
+            "filesystem": {
+                "folders": []
+            },
+            "config": {
+                "bot_token": os.getenv("TELEGRAM_API_KEY"),
+                "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+                "service-manager": [{
+                    "role": ["comm", "comm.security", "comm.*, hive.alert.send_alert_msg"],
+                    "scope": ["parent", "any"],     # who it serves
+                    "auth": {"sig": True},
+                    "priority": 10,                # lower = more preferred
+                    "exclusive": False             # can other services respond?
+                }]
+            }
+        },
 
     ]
 }

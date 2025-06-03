@@ -26,7 +26,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[SWEEP] Agent activated. Awaiting cleanup directives.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.check_incoming_once()
         interruptible_sleep(self, 3)
 

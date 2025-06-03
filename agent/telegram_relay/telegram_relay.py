@@ -26,36 +26,13 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[TELEGRAM] Telegram relay activated. Awaiting message drops...")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         interruptible_sleep(self, 230)
 
     def worker_post(self):
         self.log("[TELEGRAM] Relay shutting down. No more echoes for now.")
 
-    def check_incoming_once(self):
-        try:
-            for file in os.listdir(self.watch_path):
-                if not file.endswith(".msg"):
-                    continue
-                full_path = os.path.join(self.watch_path, file)
-                try:
-                    with open(full_path, "r") as f:
-                        content = f.read()
-                        if not content.strip():
-                            raise ValueError("File is empty")
-                        data = json.loads(content)
-                except Exception as e:
-                    self.log(f"[TELEGRAM][ERROR] Failed to parse {file}: {e}")
-                    os.remove(full_path)
-                    continue
-
-                message = self.format_message(data)
-                self.send_to_telegram(message)
-                os.remove(full_path)
-        except Exception as e:
-            self.log(f"[TELEGRAM][ERROR] {e}")
-
-    def msg_send_packet_incoming(self, content, packet):
+    def cmd_send_alert_msg(self, content, packet):
         try:
             message = self.format_message(content)
             self.send_to_telegram(message)

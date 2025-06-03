@@ -1,7 +1,10 @@
 import os
 import json
+import uuid
 import time
+import tempfile
 from core.class_lib.packet_delivery.interfaces.base_delivery_agent import BaseDeliveryAgent
+from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
 
 class DeliveryAgent(BaseDeliveryAgent):
     def __init__(self):
@@ -10,9 +13,24 @@ class DeliveryAgent(BaseDeliveryAgent):
         self._packet = None
         self._drop_zone = None
         self._error = None
-        self._file_ext = ".msg"
-        self._filename_prefix = "packet"
+        self._file_ext = ".json"
+        self._filename_prefix = "pk"
         self._custom_metadata = {}
+        self._crypto=None
+        self._filename_override = None
+        self._save_filename=""
+        self._logger = None
+        self._sent_packet = "PACKET_NOT_SENT"
+
+    def set_crypto_handler(self, crypto_handler: PacketProcessorBase):
+        self._crypto = crypto_handler
+        return self
+
+    def set_identifier(self, name: str):
+        if not name.endswith(self._file_ext):
+            name += self._file_ext
+        self._filename_override = name
+        return self
 
     def set_metadata(self, metadata: dict):
         self._file_ext = metadata.get("file_ext", self._file_ext)
@@ -60,7 +78,20 @@ class DeliveryAgent(BaseDeliveryAgent):
             self._error = f"[JSON_FILE][CREATE] Failed: {e}"
         return self
 
+    def get_saved_filename(self) -> str:
+        return self._save_filename
+
+    def set_logger(self, logger):
+        self._logger = logger
+
+    def log(self, msg):
+        if self._logger:
+            self._logger.log(msg)
+        else:
+            print(msg)
+
     def deliver(self, create=True):
+
         if create:
             self.create_loc()
 
@@ -73,24 +104,63 @@ class DeliveryAgent(BaseDeliveryAgent):
                 return self
 
             data = self._packet.get_packet()
+
             if not isinstance(data, dict):
                 self._error = "[JSON_FILE][DELIVER] Packet data invalid"
+
+
                 return self
 
-            for uid in self._address:
-                drop_path = os.path.join(self._location, uid)
+            uids = self._address if self._address else [None]
+            for uid in uids:
+
+                drop_path = os.path.join(self._location, uid) if uid else self._location
                 if self._drop_zone:
                     drop_path = os.path.join(drop_path, self._drop_zone)
-                os.makedirs(drop_path, exist_ok=True)
 
                 timestamp = int(time.time())
-                fname = f"{self._filename_prefix}_{timestamp}{self._file_ext}"
-                full_path = os.path.join(drop_path, fname)
 
-                with open(full_path, "w") as f:
-                    json.dump(data, f, indent=2)
+                try:
+
+                    data = self._crypto.prepare_for_delivery(self._packet)
+
+                    fname = self._filename_override or f"{self._filename_prefix}_{timestamp}_{uuid.uuid4().hex}{self._file_ext}"
+                    full_path = os.path.join(drop_path, fname)
+
+                    # Optional metadata config
+                    indent = self._custom_metadata.get("indent", 2)
+                    atomic = self._custom_metadata.get("atomic", True)
+                    output_dir = os.path.dirname(full_path)
+
+                    if atomic:
+                        self._sent_packet = data
+                        with tempfile.NamedTemporaryFile("w", delete=False, dir=output_dir,
+                                                         suffix=self._file_ext) as temp_file:
+                            json.dump(data, temp_file, indent=indent)
+                            temp_file.flush()
+                            os.fsync(temp_file.fileno())
+                            temp_path = temp_file.name
+
+                        os.replace(temp_path, full_path)
+
+                    else:
+                        with open(full_path, "w") as f:
+                            self._sent_packet=data
+                            json.dump(data, f, indent=indent)
+
+                    self._save_filename = full_path
+
+                except Exception as e:
+
+                    self._error = f"[DELIVER][WRITE] Failed to write packet: {e}"
+                    self.log(self._error)
+
+                return self
 
         except Exception as e:
             self._error = f"[JSON_FILE][DELIVER] Failed: {e}"
-
+            self.log(self._error)
         return self
+
+    def get_sent_packet(self):
+        return self._sent_packet

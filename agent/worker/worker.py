@@ -19,7 +19,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[WORKER] Booted. WorkerAgent is awake and ready.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.do_task_once()
         interruptible_sleep(self, 10)
 

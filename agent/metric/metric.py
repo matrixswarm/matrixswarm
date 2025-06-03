@@ -34,7 +34,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[METRICS] Agent initialized. Beginning observation.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.collect_and_report()
         interruptible_sleep(self, self.interval)
 

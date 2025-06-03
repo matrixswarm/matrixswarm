@@ -22,7 +22,7 @@ class Agent(BootAgent):
     def post_boot(self):
         self.log("[COMMANDER] Active swarm dashboard engaged.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.track_agents()
         self.thread_registry["worker"]["timeout"] = 15
         interruptible_sleep(self, 10)
@@ -42,7 +42,7 @@ class Agent(BootAgent):
                     continue
 
             try:
-                ping_file = os.path.join(comm_root, agent_id, "hello.moto", "last.ping")
+                ping_file = os.path.join(comm_root, agent_id, "hello.moto", "poke.heartbeat")
                 if os.path.exists(ping_file):
                     delta = time.time() - os.path.getmtime(ping_file)
                 status = "✅" if delta < 20 else "⚠️"
@@ -57,28 +57,6 @@ class Agent(BootAgent):
         self.log("\n[COMMANDER] Swarm Agent Status:")
         for agent_id, age, flag in flat:
             self.log(f"   {flag} {agent_id.ljust(28)}  last seen: {age}s ago")
-
-    def process_command(self, command):
-        action = command.get("action")
-        if action == "resurrect":
-            target = command.get("target")
-            if target:
-                self.send_resurrect(target)
-        else:
-            self.log(f"[COMMANDER] Unknown command: {command}")
-
-    def send_resurrect(self, agent_id):
-        matrix_comm = os.path.join(self.path_resolution["comm_path"], "matrix", "incoming")
-        os.makedirs(matrix_comm, exist_ok=True)
-        payload = {
-            "action": "request_delegation",
-            "requester": agent_id
-        }
-        ts = int(time.time())
-        filename = f"resurrect_{agent_id}_{ts}.cmd"
-        with open(os.path.join(matrix_comm, filename), "w") as f:
-            json.dump(payload, f, indent=2)
-        self.log(f"[COMMANDER] Resurrection request for {agent_id} dispatched to Matrix → {filename}")
 
     def is_real_agent(self, universal_id):
         pod_root = self.path_resolution["pod_path"]

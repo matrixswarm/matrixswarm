@@ -28,7 +28,7 @@ class Agent(BootAgent):
         self.log(f"[FILEWATCH] Booted. Watching: {self.watch_path}, Reporting: {self.send_to}")
         threading.Thread(target=self.start_filewatch_loop, daemon=True).start()
 
-    def worker(self):
+    def worker(self, config:dict = None):
         pass  # Not used — all work happens in filewatch thread
 
     def worker_pre(self):

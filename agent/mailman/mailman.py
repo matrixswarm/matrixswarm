@@ -33,7 +33,7 @@ class Agent(BootAgent):
     def worker_post(self):
         self.log("[MAILMAN] Agent shutting down.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         self.process_payload_once()
         interruptible_sleep(self, 10)
 

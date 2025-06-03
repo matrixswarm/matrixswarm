@@ -1,18 +1,16 @@
-# ======== 🧠 CAPITAL_GPT: MISSION STRATEGIST ========
-# One mission. One mind. No mercy.
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
-import time
 import subprocess
-import json
+import time
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
-from datetime import datetime, timedelta
+from datetime import datetime
+from core.mixin.agent_summary_mixin import AgentSummaryMixin
 
-class Agent(BootAgent):
+class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
         super().__init__()
         self.name = "MySQLWatchdog"
@@ -31,14 +29,16 @@ class Agent(BootAgent):
         self.alert_thresholds = cfg.get("alert_thresholds", {"uptime_pct_min": 90, "slow_restart_sec": 10})
         self.service_name = cfg.get("service_name", "mysql")
         self.comm_targets = cfg.get("comm_targets", [])
-        self.daily_stats = {
+        self.stats = {
             "date": self.today(),
-            "restart_count": 0,
-            "total_uptime_sec": 0,
-            "total_downtime_sec": 0,
+            "restarts": 0,
+            "uptime_sec": 0,
+            "downtime_sec": 0,
             "last_status": None,
             "last_status_change": time.time()
         }
+        # test writing summary
+        self.stats["date"] = "1900-01-01"
 
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
@@ -65,7 +65,7 @@ class Agent(BootAgent):
             self.log("[WATCHDOG] ✅ MySQL successfully restarted.")
             self.post_restart_check()
             self.last_restart = time.time()
-            self.daily_stats["restart_count"] += 1
+            self.stats["restarts"] += 1
             self.failed_restart_count = 0  # reset on success
         except Exception as e:
             self.failed_restart_count += 1
@@ -77,15 +77,15 @@ class Agent(BootAgent):
 
     def update_status_metrics(self, is_running):
         now = time.time()
-        last = self.daily_stats["last_status"]
-        elapsed = now - self.daily_stats["last_status_change"]
+        last = self.stats.get("last_status")
+        elapsed = now - self.stats.get("last_status_change", now)
 
         # If state changed (or first run), update timing
         if last is not None:
             if last:
-                self.daily_stats["total_uptime_sec"] += elapsed
+                self.stats["uptime_sec"] += elapsed
             else:
-                self.daily_stats["total_downtime_sec"] += elapsed
+                self.stats["downtime_sec"] += elapsed
 
         if last != is_running:
             self.log(f"[WATCHDOG] MySQL status changed → {'UP' if is_running else 'DOWN'}")
@@ -97,21 +97,8 @@ class Agent(BootAgent):
             elif not is_running:
                 self.last_alerted_status = "DOWN"
 
-        self.daily_stats["last_status"] = is_running
-        self.daily_stats["last_status_change"] = now
-
-    def maybe_roll_day(self):
-        today = self.today()
-        if self.daily_stats["date"] != today:
-            self.persist_daily_log()
-            self.daily_stats = {
-                "date": today,
-                "restart_count": 0,
-                "total_uptime_sec": 0,
-                "total_downtime_sec": 0,
-                "last_status": None,
-                "last_status_change": time.time()
-            }
+        self.stats["last_status"] = is_running
+        self.stats["last_status_change"] = now
 
     def is_socket_accessible(self):
         return os.path.exists(self.socket_path)
@@ -124,29 +111,12 @@ class Agent(BootAgent):
             self.log(f"[WATCHDOG][ERROR] Failed to scan ports: {e}")
             return False
 
-    def persist_daily_log(self):
-        comm_dir = os.path.join(self.path_resolution["comm_path"], "mysql-watchdog")
-        os.makedirs(comm_dir, exist_ok=True)
-        fname = f"restarts_{self.daily_stats['date']}.log"
-        full_path = os.path.join(comm_dir, fname)
-        with open(full_path, "w") as f:
-            json.dump(self.daily_stats, f, indent=2)
-        self.log(f"[WATCHDOG] 📊 Daily log written to {fname}")
-        uptime = self.daily_stats["total_uptime_sec"]
-        downtime = self.daily_stats["total_downtime_sec"]
-        total = uptime + downtime
-
-        if total > 0 and (uptime / total) < 0.9:
-            self.alert_operator(f"⚠️ MySQL uptime dropped to {uptime / total:.2%} today.")
-
-
-
     def worker_pre(self):
         self.log(f"[WATCHDOG] Watching systemd unit: {self.service_name}")
 
-    def worker(self):
+    def worker(self, config:dict = None):
 
-        self.maybe_roll_day()
+        self.maybe_roll_day("mysql")
         running = self.is_mysql_running()
         self.update_status_metrics(running)
 
@@ -183,41 +153,44 @@ class Agent(BootAgent):
 
     def alert_operator(self, message=None):
         """
-        Uses Swarm packet + delivery agent pipeline to send structured alerts.
+        Uses packet + delivery agent system to send alert to all comms.
         """
         if not message:
-            message = "🚨 MySQL REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
+            message = "🚨 MYSQL REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
 
-        pk = self.get_delivery_packet("notify.alert.general", new=True)
-        pk.set_data({
+        pk1 = self.get_delivery_packet("standard.command.packet")
+        pk1.set_data({"handler": "cmd_send_alert_msg"})
+
+        pk2 = self.get_delivery_packet("notify.alert.general", new=True)
+        pk2.set_data({
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "universal_id": self.command_line_args.get("universal_id", "unknown"),
                 "level": "critical",
                 "msg": message,
                 "formatted_msg": f"📣 Swarm Message\n{message}",
-                "cause": "MySQL Watchdog Alert",
+                "cause": "Mysql Sentinel Alert",
                 "origin": self.command_line_args.get("universal_id", "unknown")
-
         })
 
-        comms = self.get_nodes_by_role("comm")
-        if not comms:
-            self.log("[ALERT] No comm nodes found. Alert not dispatched.")
+        pk1.set_packet(pk2, "content")
+
+        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
+        if not alert_nodes:
+            self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
             return
 
-        for comm in comms:
+        for node in alert_nodes:
             da = self.get_delivery_agent("file.json_file", new=True)
             da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([comm["universal_id"]]) \
+                .set_address([node["universal_id"]]) \
                 .set_drop_zone({"drop": "incoming"}) \
-                .set_packet(pk) \
+                .set_packet(pk1) \
                 .deliver()
 
             if da.get_error_success() != 0:
-                self.log(f"[ALERT][DELIVERY-FAIL] {comm['universal_id']}: {da.get_error_success_msg()}")
+                self.log(f"[ALERT][DELIVERY-FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
             else:
-                self.log(f"[ALERT][DELIVERED] Alert sent to {comm['universal_id']}")
-
+                self.log(f"[ALERT][DELIVERED] Alert sent to {node['universal_id']}")
 
 if __name__ == "__main__":
     agent = Agent()

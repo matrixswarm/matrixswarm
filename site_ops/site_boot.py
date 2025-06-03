@@ -43,8 +43,9 @@ parser.add_argument("--reboot", action="store_true", help="Soft reboot — skip 
 parser.add_argument("--verbose", action="store_true", help="Enable verbose terminal output")
 parser.add_argument("--python-site", help="Override Python site-packages path to inject")
 parser.add_argument("--python-bin", help="Override Python interpreter to use for agent spawns")
-parser.add_argument("--encrypted_directive", help="Path to AES-GCM encrypted directive JSON")
+parser.add_argument("--encrypted-directive", help="Path to AES-GCM encrypted directive JSON")
 parser.add_argument("--swarm_key", help="Base64-encoded swarm key used to decrypt directive")
+parser.add_argument("--encryption-off", action="store_true", help="Turn encryption off for all agents")
 
 args = parser.parse_args()
 
@@ -52,6 +53,8 @@ universe_id = args.universe.strip()
 boot_name = args.directive.strip().replace(".py", "")
 reboot = args.reboot
 verbose = args.verbose
+
+encryption_enabled = not args.encryption_off
 
 # === ENVIRONMENT DETECTION ===
 python_exec = args.python_bin.strip() if args.python_bin else sys.executable
@@ -117,13 +120,6 @@ cp = CoreSpawner(path_manager=pm, site_root_path=SITE_ROOT, python_site=python_s
 if verbose:
     cp.set_verbose(True)
 
-# === Set up Matrix comm channel and trust ===
-cp.ensure_comm_channel(MATRIX_UUID, [{
-    'name': 'agent_tree_master.json',
-    'type': 'f',
-    'atomic': True,
-    'content': tp.root
-}], matrix_directive)
 
 from core.mixin.ghost_vault import generate_agent_keypair
 from cryptography.hazmat.primitives import serialization
@@ -157,12 +153,40 @@ def decrypt_directive(encrypted_path, swarm_key_b64):
     return json.loads(decrypted.decode())
 
 
-swarm_symkey = get_random_bytes(32)  # AES-256
-swarm_symkey_b64 = base64.b64encode(swarm_symkey).decode()
+
+swarm_key_bytes = get_random_bytes(32)
+swarm_key_b64 = base64.b64encode(swarm_key_bytes).decode()
+# === Set up Matrix comm channel and trust ===
+comm_path =cp.ensure_comm_channel(MATRIX_UUID, [{}])
+
+#encrypt directive with swarm_key
+from core.class_lib.packet_delivery.packet.standard.general.json.packet import Packet
+from core.class_lib.packet_delivery.delivery_agent.file.json_file.delivery_agent import DeliveryAgent
+from core.class_lib.packet_delivery.utility.crypto_processors.packet_encryption_factory import packet_encryption_factory
+from cryptography.hazmat.primitives import serialization
 
 matrix_keys = generate_agent_keypair()
 matrix_pub = matrix_keys["pub"]
 matrix_priv = matrix_keys["priv"]
+
+matrix_priv_obj = serialization.load_pem_private_key(
+    matrix_keys["priv"].encode(),
+    password=None
+)
+
+mode="encrypt"
+if not bool(encryption_enabled):
+    mode = "plaintext_encrypt"
+
+agent = DeliveryAgent()
+agent.set_crypto_handler(packet_encryption_factory(mode, swarm_key_bytes, priv_key=matrix_priv_obj))
+pk = Packet()
+pk.set_data({'agent_tree': tp.root})
+agent.set_location({"path": comm_path}) \
+    .set_packet(pk) \
+    .set_identifier("agent_tree_master") \
+    .set_address(["directive"]) \
+    .deliver()
 
 if args.encrypted_directive and args.swarm_key:
     print(f"[BOOT] 🔐 Decrypting encrypted directive from {args.encrypted_directive}")
@@ -171,18 +195,14 @@ else:
     print(f"[BOOT] 📦 Loading plaintext directive: {boot_name}")
     matrix_directive = load_boot_directive(boot_name)
 
-
-swarm_key_bytes = get_random_bytes(32)
-swarm_key_b64 = base64.b64encode(swarm_key_bytes).decode()
-
 trust_payload = {
+    "encryption_enabled": int(encryption_enabled),
     "pub": matrix_pub,
     "priv": matrix_priv,
     "swarm_key": swarm_key_b64,
     "matrix_pub": matrix_pub,
     "matrix_priv": matrix_priv
 }
-
 cp.set_keys(trust_payload)
 
 # 🚀 Create pod and deploy Matrix

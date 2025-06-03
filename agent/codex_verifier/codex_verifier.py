@@ -26,7 +26,7 @@ class Agent(BootAgent):
     def post_boot(self):
         self.log("[CodexVerifier] Active swarm dashboard engaged.")
 
-    def worker(self):
+    def worker(self, config:dict = None):
         if not os.path.exists(self.auth_file) or not os.path.exists(self.ots_file):
             self.log("[VERIFIER][SKIP] Auth file or .ots missing.")
             return
@@ -64,7 +64,7 @@ class Agent(BootAgent):
                     continue
 
             try:
-                ping_file = os.path.join(comm_root, agent_id, "hello.moto", "last.ping")
+                ping_file = os.path.join(comm_root, agent_id, "hello.moto", "poke.heartbeat")
                 if os.path.exists(ping_file):
                     delta = time.time() - os.path.getmtime(ping_file)
                 status = "✅" if delta < 20 else "⚠️"

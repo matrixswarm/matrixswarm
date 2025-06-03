@@ -2,9 +2,7 @@
 import sys
 import os
 import site
-import hashlib
-
-
+import base64
 # Add the directory containing this script to the PYTHONPATH
 current_directory = os.path.dirname(os.path.abspath(__file__))  # Directory of the current script
 if current_directory not in sys.path:
@@ -34,6 +32,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         self.python_exec= detected_python
 
         self.default_comm_file_spec = [
+            {"name": "directive", "type": "d", "content": None},
             {"name": "hello.moto", "type": "d", "content": None},
             {"name": "payload", "type": "d", "content": None},
             {"name": "incoming", "type": "d", "content": None},
@@ -41,6 +40,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             {"name": "stack", "type": "d", "content": None, "meta": "Long - term mission chaining"},
             {"name": "replies", "type": "d", "content": None, "meta": "stack / Long - term mission chaining"},
             {"name": "broadcast", "type": "d", "content": None, "meta": "Shared folder for swarms with listeners"},
+            {"name": "config", "type": "d", "content": None, "meta": "Updated configs go here"},
         ]
 
         self.root_path = pm.get_path("root")
@@ -117,7 +117,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
         if self.default_comm_file_spec:
             fs_node = {"folders": self.default_comm_file_spec}
-            print(f"[DEBUG] Processing default folders spec: {fs_node}")
+            #print(f"[DEBUG] Processing default folders spec: {fs_node}")
 
             folders = fs_node.get("folders", [])
             if folders:
@@ -139,11 +139,11 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         fsb.process_selection(base, file_spec)
         if agent_directive:
             fs_node = agent_directive if isinstance(agent_directive, dict) and "folders" in agent_directive else {}
-            print(f"[DEBUG] Processing filesystem spec: {fs_node}")
+            #print(f"[DEBUG] Processing filesystem spec: {fs_node}")
 
             folders = fs_node.get("folders", [])
             if folders:
-                print(f"[FS-BUILDER] Merging folders from directive for {universal_id}")
+                #print(f"[FS-BUILDER] Merging folders from directive for {universal_id}")
                 fsb.process_selection(base, folders)
 
             files = fs_node.get("files", {})
@@ -198,11 +198,17 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         try:
 
             logger = Logger(os.path.join(self.comm_path, universal_id))
+            if bool(self._keychain["encryption_enabled"]):
+                logger.set_encryption_key(self._keychain["swarm_key"])
 
             with open("/matrix/spawn.log", "a") as f:
                 f.write(f"{datetime.now().isoformat()} :: {universal_id} → {agent_name}\n")
 
             logger = Logger(os.path.join(self.comm_path, universal_id))
+            if bool(self._keychain["encryption_enabled"]):
+                logger.set_encryption_key(self._keychain["swarm_key"])
+
+
             spawn_path = os.path.join(self.pod_path, spawn_uuid)
             os.makedirs(spawn_path, exist_ok=True)
 
@@ -339,7 +345,8 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "universal_id": universal_id,
                     "agent_name": agent_name,
                     "universe": universe_id,
-                    "site_root_path": self.site_root_path
+                    "site_root_path": self.site_root_path,
+                    "verbose": int(self.verbose),
                 },
                 "tree_node": tree_node,
                 "secure_keys": {
@@ -349,6 +356,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 "swarm_key": self._keychain["swarm_key"],
                 "matrix_pub": self._keychain["matrix_pub"],
                 "matrix_priv": self._keychain["matrix_priv"],
+                "encryption_enabled": self._keychain["encryption_enabled"],
             }
 
             python_site_path = site.getsitepackages()[0]
