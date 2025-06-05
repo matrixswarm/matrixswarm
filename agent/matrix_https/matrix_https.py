@@ -124,7 +124,8 @@ class Agent(BootAgent):
                                     except Exception as e:
                                         rendered_lines.append(f"[MALFORMED] {line.strip()}")
 
-                            output = "\n".join(rendered_lines[-250:])
+                            #output = "\n".join(rendered_lines[-250:])
+                            output = "\n".join(rendered_lines)
                             self.log(f"[LOG-DELIVERY] ✅ Sent {len(rendered_lines)} lines for {uid}")
                             return Response(
                                 json.dumps({"status": "ok", "log": output}, ensure_ascii=False),
@@ -174,10 +175,6 @@ class Agent(BootAgent):
 
                 # === 2. All other commands go to Matrix ===
                 target = "matrix"
-                target_dir = os.path.join(self.path_resolution["comm_path"], target, "incoming")
-
-                fname = f"{ctype}_{int(timestamp)}.cmd"
-                fpath = os.path.join(target_dir, fname)
 
                 payload['origin'] = self.command_line_args['universal_id']
 

@@ -9,6 +9,7 @@ import threading
 import asyncio
 import websockets
 import json
+import traceback
 
 from core.boot_agent import BootAgent
 
@@ -168,6 +169,18 @@ class Agent(BootAgent):
             self.clients.discard(websocket)
             self.log(f"[WS] Client disconnected and removed. Active clients: {len(self.clients)}")
 
+    def cmd_rpc_route(self, content, packet):
+        try:
+            self.log("[RPC-ROUTE] Incoming routed RPC packet.")
+
+            self.cmd_broadcast(content, content)
+            self.log(f"[RPC-ROUTE] Routed response_id={content.get('response_id')} status={content.get('status')}")
+        except Exception as e:
+            err = str(e)
+            stack = traceback.format_exc()
+            self.log(f"[WS][CMD_RPC_ROUTE][ERROR] {err}")
+            self.log(stack)  # Optional: write full trace to logs
+
     def cmd_send_alert_msg(self, content, packet):
         try:
             # Format the alert message
@@ -191,7 +204,10 @@ class Agent(BootAgent):
 
             self.log("[WS] Alert message sent to GUI feed.")
         except Exception as e:
-            self.log(f"[WS][ERROR] Failed to relay alert msg: {e}")
+            err = str(e)
+            stack = traceback.format_exc()
+            self.log(f"[WS][CMD_SEND_ALERT_MSG][ERROR] {err}")
+            self.log(stack)  # Optional: write full trace to logs
 
     def cmd_alert_to_gui(self, content, packet):
         self.log(f"[ALERT] Dispatching alert to GUI: {content}")
@@ -221,7 +237,10 @@ class Agent(BootAgent):
 
             self.log(f"[WS][REFLEX] Broadcasted to {len(self.clients)} clients.")
         except Exception as e:
-            self.log(f"[WS][REFLEX][ERROR] {e}")
+            err = str(e)
+            stack = traceback.format_exc()
+            self.log(f"[WS][CMD_BROADCAST][ERROR] {err}")
+            self.log(stack)  # Optional: write full trace to logs
 
 
 if __name__ == "__main__":

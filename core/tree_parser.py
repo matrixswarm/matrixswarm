@@ -17,7 +17,8 @@ class TreeParser:
         self.duplicates = []  # To track any duplicate permanent IDs
         self.delegated = {}  # Any delegated data (not relevant here)
         self.tree_path = tree_path
-        self.rejected_subtrees = []  # Track rejected universal_ids
+        self._rejected_nodes = []  # Track rejected universal_ids
+        self._added_nodes = []
 
     def _initialize_data(self, data):
         """
@@ -45,7 +46,7 @@ class TreeParser:
         if universal_id in self.nodes:
             print(f"[TREE-REJECT] ❌ Duplicate universal_id '{universal_id}' — rejecting this subtree and all children.")
             self.duplicates.append(universal_id)
-            self.rejected_subtrees.append(universal_id)
+            self._rejected_nodes.append(universal_id)
             return  # Skip entire subtree
 
         self._validate_and_store_node(node)
@@ -68,6 +69,7 @@ class TreeParser:
                valid_children.append(child)
            else:
                print(f"[TREE] ⚠️ Malformed child skipped: {child}")
+               self._rejected_nodes.append(child)
 
         node[self.CHILDREN_KEY] = valid_children
         node.setdefault(self.CHILDREN_KEY, [])
@@ -75,6 +77,7 @@ class TreeParser:
         # Add the node if it's not a duplicate
         if universal_id not in self.nodes:
             self.nodes[universal_id] = node
+            self._added_nodes.append(universal_id)
         else:
             self.duplicates.append(universal_id)
             return
@@ -138,6 +141,10 @@ class TreeParser:
         """
         Insert a new node under the specified parent node.
         """
+
+        self._added_nodes.clear()
+        self._rejected_nodes.clear()
+
         new_universal_id = new_node.get(self.UNIVERSAL_ID_KEY)
         if not new_universal_id:
             raise ValueError("New node must have a `universal_id`.")
@@ -154,7 +161,7 @@ class TreeParser:
 
         parent_node[self.CHILDREN_KEY].append(new_node)
 
-        return True
+        return list(self._added_nodes)
 
     @staticmethod
     def strip_invalid_nodes(tree):
@@ -325,6 +332,12 @@ class TreeParser:
         # Start at root
         return recurse(self.root)
 
+    def get_rejected_nodes(self):
+        return self._rejected_nodes
+
+    def get_added_nodes(self):
+        return self._added_nodes
+
     def pre_scan_for_duplicates(self, node):
         """
         Pre-scan the tree to detect duplicates and remove all but the first instance.
@@ -348,11 +361,11 @@ class TreeParser:
         for uid, instances in seen.items():
             if len(instances) > 1:
                 print(f"[TREE-SCAN] ⚠️ Found {len(instances)} clones of '{uid}' — purging {len(instances) - 1}")
-                self.rejected_subtrees.append(uid)
+                self._rejected_nodes.append(uid)
                 # Remove by ID, not direct node, so cleanup will strike even deep ghosts
                 for dup_node in instances[1:]:
                     self.remove_exact_node(dup_node)
-                    self.rejected_subtrees.append(uid)
+                    self._rejected_nodes.append(uid)
 
     @classmethod
     def load_tree(cls, input_path):
@@ -449,7 +462,7 @@ class TreeParser:
         if collision:
             print(f"[MERGE-REJECT] ❌ Subtree rejected due to duplicate IDs: {list(collision)}")
             self.duplicates.extend(collision)
-            self.rejected_subtrees.extend(collision)
+            self._rejected_nodes.extend(collision)
             return False
 
         new_root_id = subtree.get("universal_id")

@@ -1,0 +1,42 @@
+[
+  {
+    "pair": "BTC/USDT",
+    "type": "price_above",
+    "threshold": 110000.0,
+    "cooldown": 300,
+    "notify": [
+      "gui"
+    ],
+    "universal_id": "crypto-btcusdt-94410c",
+    "dispatched": null,
+    "confirmed": false
+  },
+  {
+    "pair": "BTC/USDT",
+    "type": "price_below",
+    "threshold": 101000.0,
+    "cooldown": 300,
+    "notify": [
+      "gui"
+    ],
+    "universal_id": "crypto-btcusdt-2c8b9e",
+    "dispatched": null,
+    "confirmed": false
+  },
+  {
+    "pair": "BTC/USDT",
+    "type": "price_above",
+    "threshold": 35000.0,
+    "cooldown": 300,
+    "notify": [
+      "gui"
+    ],
+    "universal_id": "crypto-btcusdt-7a31dc",
+    "dispatched": null,
+    "confirmed": false,
+    "exchange": "binance",
+    "limit_mode": "custom",
+    "activation_limit": 5,
+    "active": true
+  }
+]
