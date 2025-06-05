@@ -26,11 +26,11 @@ class Agent(BootAgent):
         self.process_stats = Counter()
         self.cpu_count = psutil.cpu_count(logical=True)
         self.last_bin_report = {}
-        self.report_path = os.path.join("/tmp", "load_range_summary.json")  # customize if needed
         self.current_day = self.today()
 
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
+
 
     def sample(self):
         load = psutil.getloadavg()[0]  # 1-minute load avg
@@ -107,15 +107,25 @@ class Agent(BootAgent):
 
     def write_daily_summary(self, report):
         try:
-            with open(self.report_path, "w") as f:
+            summary_dir = os.path.join(self.path_resolution["comm_path_resolved"], "summary")
+            os.makedirs(summary_dir, exist_ok=True)
+
+            date = self.today()
+            summary_path = os.path.join(summary_dir, f"loadrange_summary_{date}.json")
+            latest_path = os.path.join(summary_dir, "loadrange_summary_latest.json")
+
+            with open(summary_path, "w") as f:
                 json.dump(report, f, indent=2)
-            self.log(f"[SUMMARY] ✅ Load range report written to {self.report_path}")
+            with open(latest_path, "w") as f:
+                json.dump(report, f, indent=2)
+
+            self.log(f"[SUMMARY] ✅ loadrange summary written to: {summary_path}")
+
         except Exception as e:
-            self.log(f"[SUMMARY][ERROR] Failed to write summary: {e}")
+            self.log(f"[SUMMARY][ERROR] Failed to write loadrange summary: {e}")
 
     def worker(self, config:dict = None):
         try:
-            while True:
                 if self.today() != self.current_day:
                     # new day, flush report
                     report = self.analyze()
@@ -125,13 +135,14 @@ class Agent(BootAgent):
                     self.current_day = self.today()
 
                 self.sample()
-                interruptible_sleep(self, self.sample_interval)
+
         except Exception as e:
             err = str(e)
             stack = traceback.format_exc()
             self.log(f"[LOAD_RANGE][WORKER][ERROR] {err}")
             self.log(stack)  # Optional: write full trace to logs
 
+        interruptible_sleep(self, self.sample_interval)
 
 if __name__ == "__main__":
     agent = Agent()
