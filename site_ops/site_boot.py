@@ -109,8 +109,10 @@ tp = TreeParser.load_tree_direct(matrix_directive)
 if not tp:
     print("[FATAL] Tree load failed. Invalid structure.")
     sys.exit(1)
-if tp.rejected_subtrees:
-    print(f"[RECOVERY] ⚠️ Removed duplicate nodes: {tp.rejected_subtrees}")
+
+rejected_nodes=    tp.get_rejected_nodes()
+if rejected_nodes:
+    print(f"[RECOVERY] ⚠️ Removed duplicate nodes: {rejected_nodes}")
 
 # === SPAWN CORE ===
 MATRIX_UUID = matrix_directive.get("universal_id", "matrix")

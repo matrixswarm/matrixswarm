@@ -12,19 +12,17 @@ from PyQt5.QtGui import QColor, QFont, QPalette
 from PyQt5.QtMultimedia import QSound
 import sys
 import requests
-import os
-import json
 import time
 import string
 import random
 import ssl
 import hashlib
 import base64
-import re
 import threading
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QListWidget
-
+import os
+import json
 from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
@@ -67,7 +65,7 @@ MATRIX_WEBSOCKET_HOST = "wss://147.135.68.135:8765"
 
 import asyncio
 import websockets
-from PyQt5.QtGui import QFont
+from matrix_gui.crypto_alert_panel import CryptoAlertPanel
 
 #when tree click event
 class NodeSelectionEventBus(QObject):
@@ -110,6 +108,10 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         self.log_scroll_timer.timeout.connect(self.slow_scroll_log)
         self.log_scroll_timer.start(100)  # Scroll every 100ms (adjust as needed)
 
+        for alert in self.alert_panel.alerts:
+            self.alert_panel.dispatch_agent(alert)
+
+
     def slow_scroll_log(self):
         if self.auto_scroll_checkbox.isChecked() and self.log_text.isVisible():
             scrollbar = self.log_text.verticalScrollBar()
@@ -131,6 +133,17 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         self.stack.addWidget(self.code_view)
 
         self.main_layout.addLayout(self.stack)
+
+        self.alert_panel = CryptoAlertPanel(
+            alert_path=os.path.join("matrix_gui/config/alerts.json"),
+            back_callback=self.show_main_panel
+        )
+
+
+        self.stack.addWidget(self.alert_panel)
+
+    def show_main_panel(self):
+        self.stack.setCurrentWidget(self.command_view)
 
     def setup_status_bar(self):
         self.status_bar = QStatusBar()
@@ -278,6 +291,8 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
                     summary = f"[{msg_type.upper()}] {json.dumps(data.get('content', data), indent=2)[:200]}"
                     QTimer.singleShot(0, lambda: self.append_ws_feed_message(summary))
 
+
+            #sent to websocket feed
             if msg_type in ("alert", "cmd_alert_to_gui"):
                 content = data.get("content", {})
                 msg_text = content.get("msg", "[No message]")
@@ -303,19 +318,31 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
 
             else:
 
+                if isinstance(msg_type, str):
+                    handler_func = getattr(self.alert_panel, msg_type, None)
+                    print(msg_type)
+                    if callable(handler_func):
+                        try:
+                            handler_func(data.get("content", {}), data)
+                        except Exception as e:
+                            print(f"[HANDLER][ERROR] Failed to handle {msg_type}: {e}")
+
+                else:
+                    print(f"[WS][WARN] Invalid message type: {msg_type}")
+
                 # all other message types
 
-                if self.user_requested_log_view:
-                    print("[WS][SKIP] User is actively viewing logs, ignoring unsolicited update.")
+                #if self.user_requested_log_view:
+                #    print("[WS][SKIP] User is actively viewing logs, ignoring unsolicited update.")
 
-                    return
+                #    return
 
-                text = json.dumps(data, indent=2)
+                #text = json.dumps(data, indent=2)
 
-                QTimer.singleShot(0, lambda: self.log_text.append(text))
+                #QTimer.singleShot(0, lambda: self.log_text.append(text))
 
-            summary = f"[{msg_type.upper()}] {data.get('content', str(data))[:100]}"
-            QTimer.singleShot(0, lambda: self.append_ws_feed_message(summary))
+            #summary = f"[{msg_type.upper()}] {data.get('content', str(data))[:100]}"
+            #QTimer.singleShot(0, lambda: self.append_ws_feed_message(summary))
 
 
         except Exception as e:
@@ -346,7 +373,19 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
     def _safe_log_append(self, text):
         #if self.log_text.document().blockCount() > 500:
         #    self.log_text.setPlainText("")
-        self.log_text.append(text)
+
+        #self.log_text.append(line)
+
+        # Enforce log limit
+        limit_text = self.log_limit_box.currentText()
+        limit = int(limit_text.split()[0]) if limit_text else 500
+
+        if limit > 0 and self.log_text.document().blockCount() > limit:
+            cursor = self.log_text.textCursor()
+            cursor.movePosition(cursor.Start)
+            cursor.select(cursor.LineUnderCursor)
+            cursor.removeSelectedText()
+            cursor.deleteChar()
 
     def handle_tree_click(self, item):
         try:
@@ -804,12 +843,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
             }
         """)
 
-        layout.addWidget(QLabel("🎯 Target Agent (universal_id):"))
-        self.dropdown_target_uid = QComboBox()
-        self.dropdown_target_uid.setEditable(True)
-        self.dropdown_target_uid.setStyleSheet("background-color: black; color: #00ffcc; font-family: Courier;")
-        self.dropdown_target_uid.setInsertPolicy(QComboBox.NoInsert)
-        layout.addWidget(self.dropdown_target_uid)
+        self.log_limit_box = QComboBox()
+        self.log_limit_box.addItems(["0 (unlimited)", "100", "500", "1000"])
+        self.log_limit_box.setCurrentIndex(0)  # default to unlimited
+        layout.addWidget(QLabel("Limit:"))
+        layout.addWidget(self.log_limit_box)
 
         self.auto_scroll_checkbox = QCheckBox("Auto-scroll logs")
         self.auto_scroll_checkbox.setChecked(True)
@@ -823,8 +861,6 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         layout.addWidget(self.log_text)
         box.setLayout(layout)
         return box
-
-
 
     def start_tree_autorefresh(self, interval=10):
         self.tree_timer = QTimer(self)
@@ -1099,6 +1135,13 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         self.hotswap_btn.setEnabled(False)
         layout.addWidget(self.hotswap_btn)
 
+        layout.addWidget(QLabel("🎯 Target Agent (universal_id):"))
+        self.dropdown_target_uid = QComboBox()
+        self.dropdown_target_uid.setEditable(True)
+        self.dropdown_target_uid.setStyleSheet("background-color: black; color: #00ffcc; font-family: Courier;")
+        self.dropdown_target_uid.setInsertPolicy(QComboBox.NoInsert)
+        layout.addWidget(self.dropdown_target_uid)
+
         self.folder_selector = QComboBox()
         self.folder_selector.addItems(["incoming", "payload", "queue", "stack", "replies", "broadcast", "config"])
         self.folder_selector.setStyleSheet("background-color: black; color: #00ffcc; font-family: Courier;")
@@ -1110,6 +1153,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         self.payload_editor.setStyleSheet("background-color: #000; color: #00ffcc; font-family: Courier;")
         self.payload_editor.setFixedHeight(150)
         layout.addWidget(self.payload_editor)
+
 
         send_payload_btn = QPushButton("🚀 SEND PAYLOAD TO AGENT")
         send_payload_btn.clicked.connect(self.send_payload_to_matrix)
@@ -1125,6 +1169,8 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         toggle_btn.clicked.connect(lambda: self.stack.setCurrentIndex(1))
         toggle_btn.setStyleSheet("background-color: #000; color: #00ff66; font-weight: bold;")
         layout.addWidget(toggle_btn)
+
+
 
         box.setLayout(layout)
         return box
@@ -1266,7 +1312,8 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         self.resume_btn = QPushButton("RESUME")
         self.shutdown_btn = QPushButton("SHUTDOWN")
         self.inject_btn = QPushButton("INJECT")
-        self.reaper_btn = QPushButton("REAPER")
+        self.reaper_btn = QPushButton("📈 Crypto Alerts")
+        self.reaper_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.alert_panel))
         self.delete_btn = QPushButton("DELETE")
 
         for btn in [self.resume_btn, self.shutdown_btn, self.inject_btn, self.reaper_btn, self.delete_btn]:
@@ -1369,7 +1416,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
             self.inject_sources_into_tree(data)
 
             payload = {
-                "handler": "cmd_inject",
+                "handler": "cmd_inject_agents",
                 "timestamp": time.time(),
                 "content": {
                     "target_universal_id": self.input_target_universal_id.text().strip(),
@@ -1418,7 +1465,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
             }
 
             payload = {
-                "handler": "cmd_inject",
+                "handler": "cmd_inject_agents",
                 "timestamp": time.time(),
                 "content": {
                     "target_universal_id": self.input_target_universal_id.text().strip(),

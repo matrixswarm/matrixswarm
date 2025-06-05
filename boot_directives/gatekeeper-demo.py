@@ -214,6 +214,16 @@ matrix_directive = {
             "delegated": []
         },
         {
+          "universal_id": "crypto-alert-agent",
+          "name": "crypto_alert",
+          "description": "Monitors cryptocurrency price triggers using alert configs stored in /config/alerts.json. Sends encrypted alerts to matrix swarm endpoints when thresholds are hit.",
+          "config": {
+                "check_interval_sec": 5,
+                "default_cooldown_sec": 300,
+                "roles": ["hive.crypto.alerts"],
+          }
+        },
+        {
             "universal_id": "discord-delta-5",
             "name": "discord",
             "app": "mysql-demo",

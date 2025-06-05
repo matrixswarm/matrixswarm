@@ -32,6 +32,7 @@ import hashlib
 import json
 import copy
 import base64
+import traceback
 from core.boot_agent import BootAgent
 from agent.reaper.reaper_factory import make_reaper_node
 from core.mixin.ghost_vault import generate_agent_keypair
@@ -280,13 +281,9 @@ class Agent(BootAgent):
             os.makedirs(inbox, exist_ok=True)
             fname = f"status_{uid}_{int(time.time())}.msg"
 
-
-
             #REFACTOR INTO PACKET
             #with open(os.path.join(inbox, fname), "w") as f:
             #    json.dump(report, f, indent=2)
-
-
 
 
             self.log(f"[STATUS] Sent report on {uid} to {reply_to}")
@@ -329,7 +326,7 @@ class Agent(BootAgent):
 
             if da.get_error_success() == 0:
                 self.log(
-                    f"[FORWARD] ✅ Forwarded to {target}/{drop_zone}: {forwarded_packet['handler']}: {da.get_sent_packet()}")
+                    f"[FORWARD] ✅ Forwarded to {target}/{folder}: {forwarded_packet['handler']}: {da.get_sent_packet()}")
             else:
                 self.log(f"[FORWARD][FAIL] {da.get_error_success_msg()}")
 
@@ -617,10 +614,187 @@ class Agent(BootAgent):
         self.log(f"[REPLACE-VALIDATE] ❌ No source and no install payload for '{agent_name}'. Replace aborted.")
         return False
 
-    def cmd_inject(self, content, packet):
+    def cmd_update_agent(self, content, packet):
+        uid = content.get("target_universal_id")
+        updates = content.get("config", {})
+
+        try:
+            if not uid or not updates:
+                self.log("[UPDATE_AGENT][ERROR] Missing target_universal_id or fields.")
+                return
+
+            tp = self.load_directive(self.tree_path_dict)
+            if not tp:
+                self.log("[UPDATE_AGENT][ERROR] Failed to load tree.")
+                return
+
+            node = tp.get_node(uid)
+            if not node:
+                self.log(f"[UPDATE_AGENT][ERROR] Agent '{uid}' not found.")
+                return
+
+            if "config" not in node or not isinstance(node["config"], dict):
+                node["config"] = {}
+
+            updated = False
+            for key, val in updates.items():
+                node["config"][key] = val
+                updated = True
+                self.log(f"[UPDATE_AGENT] ✅ Patched config['{key}'] for '{uid}'")
+
+            if content.get("push_live_config", False):
+                try:
+                    pk1 = self.get_delivery_packet("standard.command.packet")
+                    pk1.set_data({
+                        "handler": "cmd_update_agent_config",
+                        "content": {
+                            "tree_node": node
+                        }
+                    })
+
+                    da = self.get_delivery_agent("file.json_file", new=True)
+                    da.set_location({"path": self.path_resolution["comm_path"]}) \
+                        .set_address([uid]) \
+                        .set_drop_zone({"drop": "incoming"}) \
+                        .set_packet(pk1) \
+                        .deliver()
+
+                    if da.get_error_success() == 0:
+                        self.log(f"[UPDATE_AGENT] ✅ Live config patch sent to {uid}")
+                    else:
+                        self.log(f"[UPDATE_AGENT][ERROR] Failed to patch running agent: {da.get_error_success_msg()}")
+                except Exception as e:
+                    self.log(f"[UPDATE_AGENT][LIVE][CRASH] {e}")
+
+            if updated:
+                self.save_directive(self.tree_path_dict, {"agent_tree": tp.root})
+                self.delegate_tree_to_agent(uid, self.tree_path_dict)
+
+                parent = tp.find_parent_of(uid)
+                if parent and parent.get("universal_id"):
+                    self.delegate_tree_to_agent(parent["universal_id"], self.tree_path_dict)
+
+                self.log(f"[UPDATE_AGENT] 🔁 Agent '{uid}' successfully updated and delegated.")
+            else:
+                self.log(f"[UPDATE_AGENT] ⚠️ No valid fields updated for '{uid}'")
+
+        except Exception as e:
+            err = str(e)
+            stack = traceback.format_exc()
+            self.log(f"[CMD_UPDATE_AGENT][ERROR] {err}")
+            self.log(stack)  # Optional: write full trace to logs
+
+    def cmd_inject_agents(self, content, packet):
+
+        try:
+            confirm_response = bool(content.get("confirm_response", 0))
+            handler_role = content.get("handler_role",None) #handler role
+            handler = content.get("handler",None) #local command to execute
+            response_handler = content.get("response_handler", None)  #sent back to gui, so it knows what handler to call
+            response_id = content.get("response_id", 0)
+
+            ret = self._cmd_inject_agents(content, packet)
+
+            if confirm_response and handler_role and handler and response_handler:
+
+                alert_nodes = self.get_nodes_by_role(handler_role)
+                if not alert_nodes:
+                    self.log(f"[RPC][RESULT] No agent found with role: {handler_role}")
+                    return
+
+                pk1 = self.get_delivery_packet("standard.command.packet")
+                pk1.set_data({"handler": handler})
+
+                payload_summary = []
+
+                #PAYLOAD SUMMARY
+                try:
+
+                    tp = self.load_directive(self.tree_path_dict)
+                    if isinstance(tp, TreeParser):
+                        for uid in ret.get("injected", []):
+                            node = tp.get_node(uid)
+                            if not node:
+                                continue
+                            payload_summary.append({
+                                "universal_id": uid,
+                                "parent": content.get("target_universal_id"),
+                                "roles": node.get("config", {}).get("role", []),
+                                "delegated": node.get("delegated", [])
+                            })
+
+                except Exception as e:
+                    err = str(e)
+                    stack = traceback.format_exc()
+                    self.log(f"[CMD_INJECT_AGENT][PAYLOAD_SUMMARY][ERROR] {err}")
+                    self.log(stack)  # Optional: write full trace to logs
+
+                pk2 = self.get_delivery_packet("standard.rpc.handler.general.packet")
+                pk2.set_data({
+                    "handler": response_handler,
+                    "origin": self.command_line_args.get("universal_id", "matrix"),
+                    "content": {
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "response_id": response_id,
+                        "status": ret.get("status", "error"),
+                        "error_code": ret.get("error_code", 99),
+                        "message": ret.get("message", "Injection result."),
+                        "details": {
+                            "injected": ret.get("injected", []),
+                            "rejected": ret.get("rejected", []),
+                            "duplicates": ret.get("duplicates", []),
+                            "errors": ret.get("errors", [])
+                        },
+                        "payload": payload_summary
+                    }
+                })
+
+                pk1.set_packet(pk2, "content")
+
+                for node in alert_nodes:
+                    da = self.get_delivery_agent("file.json_file")
+                    da.set_location({"path": self.path_resolution["comm_path"]}) \
+                        .set_address([node["universal_id"]]) \
+                        .set_drop_zone({"drop": "incoming"}) \
+                        .set_packet(pk1) \
+                        .deliver()
+
+                    if da.get_error_success() != 0:
+                        self.log(f"[ALERT][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
+                    else:
+                        self.log(f"[ALERT] Delivered to {node['universal_id']}")
+
+
+        except Exception as e:
+            err = str(e)
+            stack = traceback.format_exc()
+            self.log(f"[CMD_INJECT_AGENT][ERROR] {err}")
+            self.log(stack)  # Optional: write full trace to logs
+
+    def _cmd_inject_agents(self, content, packet):
 
         parent = content.get("target_universal_id")
         subtree = content.get("subtree")
+
+        # error_codes
+        # 0 success agent spawned
+        # 1 TreeParse not returned from load_directive
+        # 2 agent already exists
+        # 3 couldn't load agent_tree_master
+        # 4 parent doesn't exist
+        # 5 tried to inject a matrix
+        # 6 crashed while saving node into tree
+        # 7 rejected malformed node
+        ret = {
+            "error_code": 0,
+            "status": "pending",
+            "message": "",
+            "injected": [],
+            "rejected": [],
+            "errors": []
+        }
+
+        # Parse base agent identity
         if "subtree" in content:
             universal_id = content["subtree"].get("universal_id")
             agent_name = content["subtree"].get("name", "").lower()
@@ -628,23 +802,22 @@ class Agent(BootAgent):
             universal_id = content.get("universal_id")
             agent_name = content.get("name", "").lower()
 
+        # Load tree directive
         tp = self.load_directive(self.tree_path_dict)
         if not tp:
-            self.log("[INJECT][ERROR] Failed to load tree.")
-            return
+            ret["error_code"] = 1
+            ret["status"] = "error"
+            ret["message"] = "[INJECT][ERROR] Failed to load tree directive."
+            self.log(ret["message"])
+            return ret
 
-        self.log(f"[INJECT][DEBUG] Available nodes: {list(tp.nodes.keys())}")
+        # Check for parent node existence
         if not tp.has_node(parent):
-            self.log(f"[INJECT][ERROR] Parent '{parent}' not found in parsed tree.")
-            return
-
-        if not tp:
-            self.log("[INJECT][ERROR] Could not load tree.")
-            return
-
-        if not tp.has_node(parent):
-            self.log(f"[INJECT][ERROR] Parent node {parent} not found.")
-            return
+            ret["error_code"] = 2
+            ret["status"] = "error"
+            ret["message"] = f"[INJECT][ERROR] Parent '{parent}' not found in parsed tree."
+            self.log(ret["message"])
+            return ret
 
         # 🔒 Scan subtree for any node with matrix identity
         def contains_matrix_node(tree):
@@ -662,39 +835,50 @@ class Agent(BootAgent):
         if subtree:
             if contains_matrix_node(subtree):
                 self.log("[INJECT][BLOCKED] Subtree injection attempt includes forbidden Matrix agent.")
-                return
+                ret['error_code'] = 4
+                return ret
         else:
             if agent_name == "matrix" or universal_id == "matrix":
                 self.log("[INJECT][BLOCKED] Direct Matrix injection attempt denied.")
-                return
+                ret['error_code'] = 4
+                return ret
 
         try:
+            success = False
             if subtree:
+
                 try:
-                    success = tp.insert_node(subtree, parent_universal_id=parent)
+                    injected_ids = tp.insert_node(subtree, parent_universal_id=parent)
+                    ret["injected"] = tp.get_added_nodes()
+                    ret["rejected"] = tp.get_rejected_nodes()
+                    ret["duplicates"] = tp.get_duplicates()
+                    self.log(f"[DEBUG] Injected IDs: {ret["injected"]}")
+                    self.log(f"[DEBUG] rejected IDs: {ret["rejected"]}")
+                    self.log(f"[DEBUG] duplicates IDs: {ret["duplicates"]}")
+
+                    success = bool(len(injected_ids))
+                    if not success:
+                        self.log(f"[INJECT][ERROR] Insert failed. Rejected nodes: {tp.get_rejected_nodes()}")
+                        msg = f"[INJECT][ERROR] Insert failed. Rejected nodes: {tp.get_rejected_nodes()}"
+                        ret["message"] = msg
+                        ret['error_code'] = 5
+                        self.log(msg)
+
                 except Exception as e:
-                    self.log(f"[INJECT][CRASH] Insert threw: {e}")
-                    return
-                if not success:
-                    self.log("[INJECT][ERROR] Insert failed. Rejected nodes:")
-                    self.log(json.dumps(tp.rejected_subtrees, indent=2))
-                    return
+                    ret['error_code'] = 6
+                    msg = ret.get("message", "")
+                    ret['message'] = f"{msg} | {type(e).__name__}: {str(e)}"
 
-                inserted_uid = subtree.get("universal_id")
-                attached = inserted_uid in tp.get_first_level_child_ids(parent)
+                if success:
+                    # NEW: Save payloads for each node in the subtree
+                    for node in TreeParser.flatten_tree(subtree):
+                        src = node.get("source_payload")
+                        name = node.get("name")
+                        if src and name:
+                            self._save_payload_to_boot_dir(name, src)
 
-                if not attached:
-                    self.log(
-                        f"[INJECT][WARNING] Inserted node '{inserted_uid}' NOT found under parent '{parent}' — possible orphan.")
-                    return
-
-                # NEW: Save payloads for each node in the subtree
-                for node in TreeParser.flatten_tree(subtree):
-                    src = node.get("source_payload")
-                    name = node.get("name")
-                    if src and name:
-                        self._save_payload_to_boot_dir(name, src)
             else:
+
                 delegated = content.get("delegated", [])
                 filesystem = content.get("filesystem", {})
                 config = content.get("config", {})
@@ -710,22 +894,46 @@ class Agent(BootAgent):
                     "confirmed": time.time()
                 }
 
-                tp.insert_node(new_node, parent_universal_id=parent)
-                self.log(f"[INJECT] ✅ Injected agent '{universal_id}' under '{parent}'.")
+                injected_ids = tp.insert_node(new_node, parent_universal_id=parent)
+                success = bool(len(injected_ids))
+                if not success:
+                    self.log(f"[INJECT][ERROR] Insert failed. Rejected node {universal_id}")
+                    ret['error_code'] = 5
+                    ret["message"] = f"[INJECT][ERROR] Insert failed. Rejected node: {universal_id}"
+                else:
+                    self.log(f"[INJECT] ✅ Injected agent '{universal_id}' under '{parent}'.")
 
-                if src:
-                    self._save_payload_to_boot_dir(agent_name, src)
+                    if src:
+                        self._save_payload_to_boot_dir(agent_name, src)
 
-            data = {"agent_tree": tp.root}
-            self.save_directive(self.tree_path_dict, data)
+                    success=True
 
-            self.delegate_tree_to_agent(parent, self.tree_path_dict)
+            if success:
 
-            for agent_id in tp.get_first_level_child_ids(parent):
-                self.delegate_tree_to_agent(agent_id, self.tree_path_dict)
+                data = {"agent_tree": tp.root}
+                self.save_directive(self.tree_path_dict, data)
+
+                #delegate to parent agent
+                self.delegate_tree_to_agent(parent, self.tree_path_dict)
+
+                for agent_id in tp.get_first_level_child_ids(parent):
+                    self.delegate_tree_to_agent(agent_id, self.tree_path_dict)
+
+                ret["status"] = "success"
+                ret.setdefault("message", "Agent(s) injected successfully.")
+
+            else:
+
+                ret["status"] = "error"
+                ret.setdefault("message", "Injection failed or partial success.")
 
         except Exception as e:
-            self.log(f"[INJECT][CRASH] {e}")
+            err = str(e)
+            stack = traceback.format_exc()
+            self.log(f"[_CMD_INJECT_AGENT][ERROR] {err}")
+            self.log(stack)  # Optional: write full trace to logs
+
+        return ret
 
     def cmd_shutdown_subtree(self, content, packet):
         target_id = content.get("universal_id")
@@ -791,6 +999,8 @@ class Agent(BootAgent):
 
     #checks everyone's tree against Matrix's agent_tree_master, using a hash of the agents tree
     def perform_tree_master_validation(self):
+
+        data2=None
 
         def canonical_json(obj):
             """
