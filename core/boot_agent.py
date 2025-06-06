@@ -279,19 +279,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
     def post_boot(self):
         self.log("[BOOT] Default post_boot (override me if needed)")
 
-    def cmd_update_agent_config(self, content, packet):
-        tree_node=content.get("tree_node",None)
-        if isinstance(tree_node, dict):
-            self.tree_node=tree_node
-            handler_fn='cmd_agent_config_update'
-            if callable(handler_fn):
-                try:
-                    handler_fn = getattr(self, handler_fn, None)
-                    handler_fn(content, packet)
-                    self.log(f"[UNIFIED] ✅ Executed handler: {handler_fn}")
-                except Exception as e:
-                    self.log(f"[UNIFIED][ERROR] Handler '{handler_fn}' failed: {e}")
-
     def packet_listener(self):
         self.log("[UNIFIED-LISTENER] Monitoring incoming packets...")
         incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")

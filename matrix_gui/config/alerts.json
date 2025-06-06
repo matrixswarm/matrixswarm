@@ -1,8 +1,8 @@
 [
   {
     "pair": "BTC/USDT",
-    "type": "price_below",
-    "threshold": 121111.0,
+    "type": "price_above",
+    "threshold": 101850.0,
     "cooldown": 301,
     "notify": [
       "gui"
@@ -16,13 +16,13 @@
   {
     "pair": "BTC/USDT",
     "type": "price_below",
-    "threshold": 543211.0,
+    "threshold": 101800.0,
     "cooldown": 301,
     "notify": [
       "gui"
     ],
     "universal_id": "crypto-btcusdt-7f240e",
-    "exchange": "kraken",
+    "exchange": "coingecko",
     "limit_mode": "1",
     "activation_limit": null,
     "active": true

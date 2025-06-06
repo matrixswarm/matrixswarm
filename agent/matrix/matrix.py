@@ -646,7 +646,7 @@ class Agent(BootAgent):
                 try:
                     pk1 = self.get_delivery_packet("standard.command.packet")
                     pk1.set_data({
-                        "handler": "cmd_update_agent_config",
+                        "handler": "_cmd_update_agent_config",
                         "content": {
                             "tree_node": node
                         }
@@ -655,7 +655,7 @@ class Agent(BootAgent):
                     da = self.get_delivery_agent("file.json_file", new=True)
                     da.set_location({"path": self.path_resolution["comm_path"]}) \
                         .set_address([uid]) \
-                        .set_drop_zone({"drop": "incoming"}) \
+                        .set_drop_zone({"drop": "config"}) \
                         .set_packet(pk1) \
                         .deliver()
 
