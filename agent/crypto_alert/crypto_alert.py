@@ -3,7 +3,7 @@ import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
-import json
+import importlib
 import time
 import traceback
 from core.boot_agent import BootAgent
@@ -12,79 +12,166 @@ from core.utils.swarm_sleep import interruptible_sleep
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
-        self.cooldowns = {}  # key = alert signature, value = last_trigger_time
-        self.exchange = None  # will be your dynamically loaded object
+        self.name = "CryptoAgent"
+        self.exchange = None
         self._initialized_from_tree = False
+        self._private_config = self.tree_node.get("config", {})
+        self._last_price = None
+        self.trigger_hits = 0
 
-
-    def cmd_agent_config_update(self):
+    def cmd_update_agent_config(self):
         try:
-            exchange_name = self.tree_node.get("config", {}).get("exchange", "coingecko")
+            self._initialized_from_tree = True
+            exchange_name = self._private_config.get("exchange", "coingecko")
+            mod_path = f"crypto_alert.factory.alert.crypto.exchange.{exchange_name}"
 
+            self.log(f"[EXCHANGE-LOADER] Attempting to load: {mod_path}")
             try:
-                mod_path = f"agent.crypto_alert.cmd.exchange.{exchange_name}"
-                self.log(f"[EXCHANGE-LOADER] Attempting to load: {mod_path}")
-                module = __import__(mod_path, fromlist=["Exchange"])
-                self.exchange = module.Exchange(self)  # You can pass `self` to give the object agent access
-                self.log(f"[EXCHANGE-LOADER] ✅ Loaded {exchange_name} exchange handler.")
+                import importlib
+                module = importlib.import_module(mod_path)
+                ExchangeClass = getattr(module, "Exchange")
+                self.exchange = ExchangeClass(self)
+                self.log(f"[EXCHANGE-LOADER] ✅ Loaded exchange handler: {exchange_name}")
             except Exception as e:
-                self.exchange = None
-                self.log(f"[EXCHANGE-LOADER][FAIL] {exchange_name}: {e}")
-
+                self.log(f"[EXCHANGE-LOADER][ERROR] Could not load exchange module '{exchange_name}': {e}")
+                self.log(traceback.format_exc())
         except Exception as e:
-            self.log(f"[INIT-FAIL] Could not load initial config: {e}")
+            self.log(f"[INIT-FAIL] Failed to initialize config: {e}")
 
-    def packet_listener_post(self, config=None):
+    def worker(self, config=None):
         if not self._initialized_from_tree:
-            self.cmd_agent_config_update()
+            self.cmd_update_agent_config()
 
-    def execute(agent, action):
-        pair = action.get("pair")
-        threshold = action.get("threshold")
-        cooldown = action.get("cooldown", 300)
+        if config:
+            self._private_config = config
+            self.log(f"[WORKER] Config: {config}")
 
-        price = agent.exchange.get_price(pair)
-        if price is None:
-            agent.log(f"[ACTION][SKIP] No price for {pair}")
+        if not self._private_config.get("active", True):
+            self.log("[CRYPTOAGENT] 🔇 Agent marked inactive. Exiting cycle.")
             return
 
-        key = f"{pair}:price_above:{threshold}"
-        last = agent.cooldowns.get(key, 0)
-        if time.time() - last < cooldown:
-            return
+        trigger = self._private_config.get("trigger_type", "price_change")
 
-        if price > threshold:
-            agent.cooldowns[key] = time.time()
-            agent.alert_operator(f"{pair} price is ABOVE {threshold} (now {price})")
+        if trigger == "price_change":
+            self._run_price_change_monitor()
+        elif trigger == "price_above":
+            self._run_price_threshold("above")
+        elif trigger == "price_below":
+            self._run_price_threshold("below")
+        elif trigger == "asset_conversion":
+            self._run_asset_conversion_check()
 
-    def should_trigger(self, key, price, threshold, mode, cooldown):
-        last = self.cooldowns.get(key, 0)
-        if time.time() - last < cooldown:
-            return False
+        interval = int(self._private_config.get("poll_interval", 60))
+        interruptible_sleep(self, interval)
 
-        if mode == "price_below" and price < threshold:
-            return True
-        if mode == "price_above" and price > threshold:
-            return True
-
-        return False
-
-    def get_price(self, pair):
+    def _run_price_change_monitor(self):
         try:
-            if self.exchange:
-                pair = self.tree_node.get("pair", None).get("pair", None)
-                if pair:
-                    self.exchange.get_price(pair)
-                else:
-                    raise
-        except Exception as e:
-            self.log(f"[PRICE-FETCH][ERROR] Failed to fetch price for {pair}: {e}", level="ERROR")
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[PRICE_FETCH][GET_PRICE][ERROR] {err}")
-            self.log(stack)  # Optional: write full trace to logs
+            pair = self._private_config.get("pair", "BTC/USDT")
+            threshold_pct = float(self._private_config.get("change_percent", 1.5))
+            current = self.exchange.get_price(pair)
+            if current is None:
+                self.log("[CRYPTOAGENT][ERROR] No price received.")
+                return
 
-        return None
+            if self._last_price is None:
+                self._last_price = current
+                self.log(f"[DEBUG] Initial price set to {self._last_price}")
+                return
+
+            delta = abs(current - self._last_price)
+            delta_pct = (delta / self._last_price) * 100
+            self.log(f"[DEBUG] Current: {current}, Previous: {self._last_price}, Δ = {delta:.2f}, Δ% = {delta_pct:.4f}%")
+
+            if delta_pct >= threshold_pct:
+                self._alert(f"{pair} moved {delta_pct:.2f}% → from {self._last_price} to {current}")
+                self._last_price = current
+
+        except Exception as e:
+            self.log(f"[CRYPTOAGENT][FAIL] {e}")
+            self.log(traceback.format_exc())
+
+    def _run_price_threshold(self, mode):
+        try:
+            pair = self._private_config.get("pair", "BTC/USDT")
+            threshold = float(self._private_config.get("threshold", 0))
+            current = self.exchange.get_price(pair)
+            if current is None:
+                return
+
+            if mode == "above" and current > threshold:
+                self._alert(f"{pair} is above threshold: {current} > {threshold}")
+            elif mode == "below" and current < threshold:
+                self._alert(f"{pair} is below threshold: {current} < {threshold}")
+
+        except Exception as e:
+            self.log(f"[CRYPTOAGENT][THRESHOLD-FAIL] {e}")
+            self.log(traceback.format_exc())
+
+    def _run_asset_conversion_check(self):
+        try:
+            from_asset = self._private_config.get("from_asset", "BTC")
+            to_asset = self._private_config.get("to_asset", "ETH")
+            from_amount = float(self._private_config.get("from_amount", 0.1))
+            threshold = float(self._private_config.get("threshold", 3.0))
+
+            pair1 = f"{from_asset}/USDT"
+            pair2 = f"{to_asset}/USDT"
+            price1 = self.exchange.get_price(pair1)
+            price2 = self.exchange.get_price(pair2)
+
+            if price1 is None or price2 is None:
+                return
+
+            value = from_amount * price1 / price2
+            self.log(f"[DEBUG] {from_amount} {from_asset} = {value:.4f} {to_asset}")
+
+            if value >= threshold:
+                self._alert(f"{from_amount} {from_asset} = {value:.4f} {to_asset} (≥ {threshold})")
+
+        except Exception as e:
+            self.log(f"[CRYPTOAGENT][CONVERSION-FAIL] {e}")
+            self.log(traceback.format_exc())
+
+    def _alert(self, message):
+        self.alert_operator(message)
+        self._handle_trigger_limit()
+
+    def _handle_trigger_limit(self):
+        self.trigger_hits += 1
+        limit_mode = self._private_config.get("limit_mode", "forever")
+
+        if limit_mode == "forever":
+            return
+
+        max_triggers = int(self._private_config.get("activation_limit", 1))
+        if self.trigger_hits >= max_triggers:
+            self.log("[CRYPTOAGENT] 🎯 Max triggers reached. Sending kill packet.")
+            self._self_destruct()
+
+    def _self_destruct(self):
+        try:
+            pk = self.get_delivery_packet("standard.command.packet")
+            pk.set_data({
+                "handler": "cmd_delete_agent",
+                "content": {
+                    "target_universal_id": self.command_line_args.get("universal_id", "unknown")
+                }
+            })
+            da = self.get_delivery_agent("file.json_file", new=True)
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+              .set_address(["matrix"]) \
+              .set_drop_zone({"drop": "incoming"}) \
+              .set_packet(pk) \
+              .deliver()
+
+            if da.get_error_success() == 0:
+                self.log("[CRYPTOAGENT] ☠️ Self-destruct packet sent.")
+            else:
+                self.log(f"[CRYPTOAGENT][SELF-DESTRUCT-FAIL] {da.get_error_success_msg()}")
+
+        except Exception as e:
+            self.log(f"[CRYPTOAGENT][SELF-DESTRUCT-CRASH] {e}")
+            self.log(traceback.format_exc())
 
     def alert_operator(self, message):
         pk1 = self.get_delivery_packet("standard.command.packet")
@@ -111,6 +198,12 @@ class Agent(BootAgent):
               .set_packet(pk1) \
               .deliver()
 
+            if da.get_error_success() == 0:
+                self.log(f"[ALERT] Delivered to {node['universal_id']}")
+            else:
+                self.log(f"[ALERT][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
+
 if __name__ == "__main__":
     agent = Agent()
     agent.boot()
+

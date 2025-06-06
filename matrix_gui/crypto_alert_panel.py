@@ -251,7 +251,9 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
                 "exchange": alert.get("exchange", "coingecko"),
                 "limit_mode": alert.get("limit_mode", "forever"),
                 "activation_limit": alert.get("activation_limit"),
-                "active": alert.get("active", True)
+                "active": alert.get("active", True),
+                "trigger_type": alert.get("trigger_type", "price_change"),
+                "poll_interval": alert.get("poll_interval", 60)
             },
             "source_payload": None  # Optional code payload for spawn
         }
@@ -293,7 +295,9 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             "exchange": alert.get("exchange", "coingecko"),
             "limit_mode": alert.get("limit_mode", "forever"),
             "activation_limit": alert.get("activation_limit"),
-            "active": alert.get("active", True)
+            "active": alert.get("active", True),
+            "trigger_type": alert.get("trigger_type", "price_change"),
+            "poll_interval": alert.get("poll_interval", 60)
         }
 
         payload = {
