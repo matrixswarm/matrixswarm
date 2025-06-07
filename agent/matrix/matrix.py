@@ -176,7 +176,9 @@ class Agent(BootAgent):
 
     def cmd_delete_agent(self, content, packet):
         try:
+            #is a repsonse expected
             confirm_response = bool(content.get("confirm_response", 0))
+            #role of the
             handler_role = content.get("handler_role")
             handler = content.get("handler")
             response_handler = content.get("response_handler")

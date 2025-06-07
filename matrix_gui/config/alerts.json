@@ -2,7 +2,7 @@
   {
     "pair": "BTC/USDT",
     "type": "price_below",
-    "threshold": 104390.0,
+    "threshold": 105680.0,
     "cooldown": 301,
     "notify": [
       "gui"
