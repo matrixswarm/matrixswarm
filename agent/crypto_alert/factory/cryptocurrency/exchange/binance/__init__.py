@@ -11,6 +11,8 @@ class Exchange:
             resp = requests.get(url, timeout=5)
             if resp.status_code == 200:
                 return float(resp.json().get("price"))
+            if resp.status_code == 429:
+                self.agent.log("Binance rate limit hit", block="EXCHANGE")
         except Exception as e:
-            self.agent.log(f"[BINANCE][ERROR] {e}")
+            self.agent.log(f"[BINANCE][ERROR]", error=e )
         return None

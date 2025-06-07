@@ -17,6 +17,7 @@ class Exchange:
             resp = requests.get(url, timeout=5)
             if resp.status_code == 200:
                 return resp.json().get(symbol, {}).get("usd")
+
         except Exception as e:
             self.agent.log(f"[COINGECKO][ERROR] {e}")
         return None

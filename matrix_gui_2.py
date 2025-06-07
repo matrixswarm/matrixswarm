@@ -286,7 +286,6 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
                         print(f"[WS][SKIP] Blocking health_report for {target} from log viewer")
                         return
 
-
                 else:
                     summary = f"[{msg_type.upper()}] {json.dumps(data.get('content', data), indent=2)[:200]}"
                     QTimer.singleShot(0, lambda: self.append_ws_feed_message(summary))

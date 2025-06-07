@@ -6,6 +6,7 @@ import threading
 import json
 import hashlib
 import fnmatch
+import inspect
 from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
@@ -77,7 +78,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         try:
             self.matrix_fingerprint = hashlib.sha256(self.matrix_pub.encode()).hexdigest()[:12]
         except Exception as e:
-            self.log(f"[BOOT] matrix_pub is missing. Trust cannot be verified. {e}")
+            self.log(f"[BOOT] matrix_pub is missing. Trust cannot be verified.", error=e, block="optional_fingerprint")
 
 
         # Convert to objects
@@ -87,7 +88,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.matrix_pub_obj = serialization.load_pem_public_key(self.matrix_pub.encode())
         except Exception as e:
             self.matrix_pub_obj = None
-            self.logger.log(f"[BOOT] matrix_pub is missing. Trust cannot be verified. {e}")
+            self.log(f"[BOOT] matrix_pub is missing. Trust cannot be verified.", error=e, block="serialize_public_key")
 
             exit()
 
@@ -95,7 +96,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.matrix_priv_obj = serialization.load_pem_private_key(self.matrix_priv.encode(), password=None)
         except Exception as e:
             self.matrix_priv_obj = None
-            self.log(f"[TRUST][WARN] Matrix private key invalid or placeholder: {e}")
+            self.log(f"[TRUST][WARN] Matrix private key invalid or placeholder", error=e, block="serialize_private_key")
             exit()
 
         # 🧬 Chain-of-trust determination
@@ -130,12 +131,42 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         self.running = False
 
-    def log(self, message, **kwargs):
-        if hasattr(self, "logger"):
-            self.logger.log(message, **kwargs)
-        else:
-            ts = time.strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{ts}] [INFO] {message}")
+    def log(self, msg="", error: Exception = None, block=None, include_stack=True, level="INFO"):
+        try:
+            import inspect
+            frame = inspect.currentframe()
+            outer_frames = inspect.getouterframes(frame)
+
+            if len(outer_frames) > 1:
+                outer = outer_frames[1]
+            else:
+                outer = outer_frames[0]
+
+            method_name = outer.function.upper()
+            lineno = outer.lineno
+
+
+            if not isinstance(error, (BaseException, type(None))):
+                raise TypeError(f"'error' must be an Exception, not {type(error).__name__}")
+
+            agent = self.command_line_args.get("agent_name", "UNKNOWN").upper()
+            prefix = f"[{agent}][{method_name}][L{lineno}]"
+            if block:
+                prefix += f"[{block.upper()}]"
+
+            if not msg and error is None:
+                return  # no payload to log
+
+            if error:
+                err_str = str(error)
+                self.logger.log(f"{prefix} {msg} : {err_str}", level=level)
+                if include_stack:
+                    self.logger.log(traceback.format_exc(), level="DEBUG")
+            else:
+                self.logger.log(f"{prefix} {msg}", level=level)
+
+        except Exception as fallback:
+            print(f"[LOG-FAIL] Logging system failure: {fallback}")
 
     def send_message(self, message):
         self.log(f"[SEND] {json.dumps(message)}")
@@ -226,7 +257,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 mod.attach(self, factory_config)
                 self.log(f"[FACTORY] Loaded: {full_module_path}")
             except Exception as e:
-                self.log(f"[FACTORY-ERROR] {dotted_path} → {e}")
+                self.log(f"{dotted_path} → {e}", error=e, block="main-try")
 
 
 
@@ -264,8 +295,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.monitor_threads()
 
         except Exception as e:
-            print(f"[boot_agent][boot] Error: {e}")
-            traceback.print_exc()
+            self.log(error=e, block="main-try")
 
     def worker(self, config:dict = None):
         self.log("[BOOT] Default worker loop running. Override me.")
@@ -285,7 +315,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         os.makedirs(incoming_path, exist_ok=True)
         emit_beacon = self.check_for_thread_poke("packet_listener", 5)
         last_dir_mtime = os.path.getmtime(incoming_path)
-
+        #TOP TRY
         try:
 
             ra = self.get_reception_agent("file.json_file", new=True)
@@ -294,10 +324,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 .set_drop_zone({"drop": "incoming"})
 
         except Exception as e:
-            self.log(f"[UNIFIED][ERROR] Failed to process: {e}")
+            self.log(error=e, block="top_try")
 
         while self.running:
 
+            #Main Try
             try:
 
                 emit_beacon()
@@ -309,6 +340,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     for fname in os.listdir(incoming_path):
                         if not fname.endswith(".json"):
                             continue
+
+                        #dynamic config packet
                         try:
 
                             pk = self.get_delivery_packet("standard.command.packet", new=True)
@@ -325,7 +358,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                             try:
                                 pk = packet.get_packet()
                             except Exception as e:
-                                self.log(f"[UNIFIED][ERROR] Failed to process {fname}: {e} :{pk}")
+                                self.log(f"Failed to process {fname} :{pk}", error=e, block="dynamic_config_packet")
                                 pk={}
 
                             if ra.get_error_success() or packet is None:
@@ -345,7 +378,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                             # 1. Check if the class has a direct method with this name
                             handler_fn = getattr(self, handler_name, None)
-
+                            #factory handler check
                             if callable(handler_fn):
                                 try:
                                     handler_fn(content, pk)
@@ -355,8 +388,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                     self.log(f"[UNIFIED][ERROR] Handler '{handler_name}' failed: {e}")
 
                             # 2. Fallback: Try to dynamically load a factory module
-                            self.log(f"[UNIFIED][MISS] No direct handler '{handler_name}', attempting factory load...")
+                            self.log(f"No direct handler '{handler_name}', attempting factory load...")
 
+                            #dynamic module loader
                             try:
                                 # Clean up handler name (e.g. strip namespaces)
                                 handler_id = handler_name.split(".")[-1]  # e.g. cmd_example
@@ -370,23 +404,25 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                 self.log(f"[FACTORY] ✅ Loaded and attached: {full_module_path}")
 
                             except Exception as fallback_error:
-                                self.log(
-                                    f"[FACTORY][FAIL] Could not dynamically load handler '{handler_name}': {fallback_error}")
+                                self.log( f"[FACTORY][FAIL] Could not dynamically load handler '{handler_name}': {fallback_error}", error=fallback_error, block="dynamic_config_packet")
 
                         except Exception as e:
-                            self.log(f"[UNIFIED][ERROR] Failed to process {fname}: {e}")
+                            self.log(f"Failed to process {fname}", error=e)
                             continue
 
-            except Exception as loop_error:
-                self.log(f"[UNIFIED][LOOP-ERROR] {loop_error}")
 
+            except Exception as loop_error:
+
+                self.log("Error in loop", error=loop_error, block="main_try")
+
+            #packet_listener_post call
             try:
                 handler_fn = getattr(self, "packet_listener_post", None)
                 if callable(handler_fn):
                     self.packet_listener_post() #used as hook or cron, so any operation that effect the agent_tree for instance stay on same thread
 
             except Exception as e:
-                print(f"[UNIFIED-LISTENER][INFO] self.packet_listener_post() not implemented")
+                self.log(error=e, block="packet_listener_post")
 
             interruptible_sleep(self, 2)
 
@@ -428,7 +464,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             return True
 
         except Exception as e:
-            self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌ {e}")
+            self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌", error=e, block="main_try")
             return False
 
     def load_directive(self,path :dict):
@@ -457,8 +493,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             return TreeParser.load_tree_direct(data)
 
         except Exception as e:
-            self.log(f"[BOOT][TREE_LOAD_ERROR] {e}")
+            self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌", error=e, block="main_try")
             return None
+
 
 
     def save_to_trace_session(self, packet, msg_type="msg"):
@@ -508,7 +545,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 .set_drop_zone({"drop": "config"})
 
         except Exception as e:
-            self.log(f"[UNIFIED][ERROR] Failed to process: {e}")
+            self.log(f"Failed to process", error=e, block="main_try")
 
         # 🔹 Optional pre-hook (called ONCE before loop)
         if hasattr(self, "worker_pre"):
@@ -556,8 +593,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                         self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
 
                         except Exception as e:
-                            self.log(f"[WORKER]['CONFIG'][ERROR] {e}")
-                            e=e
+                            self.log(error=e)
 
                         if not isinstance(config, dict):
                             config=None
@@ -575,7 +611,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     emit_beacon()
                 except Exception as e:
                     self.emit_dead_poke("worker", str(e))
-                    self.log(f"[WORKER][ERROR] {e}")
+                    self.log(error=e, block="main_try")
 
             else:
 
@@ -586,7 +622,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             try:
                 self.worker_post()
             except Exception as e:
-                self.log(f"[WORKER_POST][ERROR] {e}")
+                self.log(error=e)
 
     #used to verify and map threads to verify consciousness
     def check_for_thread_poke(self, thread_token="worker", interval=5):
@@ -630,7 +666,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     self.can_proceed = True
                     time.sleep(delay)
                 except Exception as e:
-                    self.log(f"[THROTTLE-ERR] {e}")
+                    self.log(error=e)
                     time.sleep(min_delay)
 
         self.can_proceed = False
@@ -793,7 +829,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                     cfg = node.get("config", {})
                     if bool(cfg.get("matrix_secure_verified")) is True:
-                        self.logger.log("[TRUST] matrix_secure_verified: TRUE → injecting real Matrix private key.")
+                        self.log("[TRUST] matrix_secure_verified: TRUE → injecting real Matrix private key.")
                         keychain["matrix_priv"] = self.matrix_priv
 
 
@@ -875,5 +911,5 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             self.log(f"[DELEGATE] Tree delivered to {universal_id}")
         except Exception as e:
-            self.log(f"[DELEGATE-ERROR] {e}")
+            self.log(error=e, block="main-try")
 
