@@ -531,7 +531,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         os.makedirs(config_path, exist_ok=True)
         emit_beacon = self.check_for_thread_poke("poke.worker", 5)
         last_dir_mtime = os.path.getmtime(config_path)
-
+        last_worker_cycle_execution = 0
         try:
 
             pub_key = None
@@ -598,9 +598,14 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         if not isinstance(config, dict):
                             config=None
                         else:
+
                             self.log(f"[WORKER]['CONFIG'] loaded config: {config}")
 
-                        self.log(f"[WORKER] Executing worker cycle...")
+                        now = time.time()
+                        if (last_worker_cycle_execution + 30) < now:
+                            last_worker_cycle_execution = now
+                            self.log(f"Executing worker cycle...")
+
                         self.worker(config)
 
                     else:
@@ -656,13 +661,17 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
     def start_dynamic_throttle(self, min_delay=2, max_delay=10, max_load=2.0):
         def dynamic_throttle_loop():
+            last_throttle_cycle_execution=0
             while self.running:
                 try:
                     load_avg = os.getloadavg()[0]
                     scale = min(1.0, (load_avg - max_load) / max_load) if load_avg > max_load else 0
                     delay = int(min_delay + scale * (max_delay - min_delay))
                     if scale > 0:
-                        self.log(f"[THROTTLE] Load: {load_avg:.2f} → delay: {delay}s")
+                        now = time.time()
+                        if (last_throttle_cycle_execution + 30) < now:
+                            last_throttle_cycle_execution = now
+                            self.log(f"[THROTTLE] Load: {load_avg:.2f} → delay: {delay}s")
                     self.can_proceed = True
                     time.sleep(delay)
                 except Exception as e:

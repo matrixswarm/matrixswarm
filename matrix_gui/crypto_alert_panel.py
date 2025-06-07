@@ -145,6 +145,7 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             self.alerts = []
         self.refresh_list()
         self.reissue_pending_deletes()
+        self.verify_agent_status()
 
     def update_refresh(self):
         self.update_price_display()
@@ -158,12 +159,12 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         current_price = self.get_price(self.pair_input.text().strip())
 
         for i, alert in enumerate(self.alerts):
+            status_flag = alert.get("swarm_status", "")
             threshold = alert.get("threshold")
             current_price = self.get_price(alert.get("pair", ""))
             delta = (current_price - threshold) if current_price and threshold else None
             diff = f" | Δ ${delta:,.2f}" if delta is not None else ""
 
-            # Determine status label
             status = "🟢 Active"
             if alert.get("active") is False:
                 status = "🔴 Inactive"
@@ -174,9 +175,38 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             pair = alert.get("pair", "???")
             trigger_type = alert.get("trigger_type", alert.get("type", "?"))
             cooldown = alert.get("cooldown", 300)
+
+            # Build base txt
             txt = f"{pair} {trigger_type} {threshold} ({cooldown}s) {diff} | {status} | {exchange}"
 
+            # Add status flag icon to front
+            if status_flag == "missing":
+                txt = "⚠️ " + txt
+            elif status_flag == "online":
+                txt = "✅ " + txt
+
             item = QListWidgetItem(txt)
+
+            # Optional: tooltip
+            if status_flag == "missing":
+                item.setToolTip("Agent not running in swarm")
+            elif status_flag == "online":
+                item.setToolTip("Agent is verified in swarm")
+            else:
+                item.setToolTip("Swarm status unknown")
+
+            # Optional: coloring logic (unchanged)
+            if current_price:
+                if alert["type"] == "price_above" and current_price >= threshold:
+                    item.setForeground(QColor("red"))
+                elif alert["type"] == "price_below" and current_price <= threshold:
+                    item.setForeground(QColor("red"))
+                elif abs(current_price - threshold) / threshold < 0.02:
+                    item.setForeground(QColor("yellow"))
+                else:
+                    item.setForeground(QColor("#33ff33"))
+
+            self.alert_list.addItem(item)
 
             # Optional: alert color rules
             if current_price:
@@ -188,6 +218,12 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
                     item.setForeground(QColor("yellow"))
                 else:
                     item.setForeground(QColor("#33ff33"))
+
+            status_flag = alert.get("swarm_status", "")
+            if status_flag == "missing":
+                txt += " ⚠️ Not Running"
+            elif status_flag == "online":
+                txt += " ✅ Running"
 
             self.alert_list.addItem(item)
 
@@ -237,6 +273,39 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         except Exception as e:
             print(f"[ALERT PANEL][ERROR] Failed to add alert: {e}")
             QMessageBox.critical(self, "Error", f"Failed to add alert:\n{e}")
+
+    def verify_agent_status(self):
+        for alert in self.alerts:
+            uid = alert.get("universal_id")
+            if not uid:
+                continue
+
+            payload = {
+                "handler": "cmd_check_agent_presence",
+                "timestamp": time.time(),
+                "content": {
+                    "target_universal_id": uid
+                },
+                "respond_to": "crypto_gui_1",
+                "handler_role": "hive.rpc.route",
+                "handler": "cmd_rpc_route",
+                "response_handler": "rpc_result_check_agent_presence",
+                "response_id": uid + "-presence"
+            }
+
+            pkt = self.get_delivery_packet("standard.command.packet")
+            pkt.set_data(payload)
+            self.send_post(pkt.get_packet())
+
+    def rpc_result_check_agent_presence(self, content, payload):
+        uid = content.get("target_universal_id")
+        found = content.get("found", False)
+
+        for alert in self.alerts:
+            if alert.get("universal_id") == uid:
+                alert["swarm_status"] = "online" if found else "missing"
+                self.refresh_list()
+                break
 
     def deactivate_selected_alert(self):
         selected = self.alert_list.currentRow()
@@ -538,5 +607,5 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
                     self.price_last_fetch = now
                     return price
         except Exception as e:
-            print(f"[PRICE][ERROR] Failed to fetch price: {e}")
+            print(f"[PRICE][ERROR] Failed to fetch price")
         return None

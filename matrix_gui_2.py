@@ -1340,7 +1340,6 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         self.resume_btn.clicked.connect(self.handle_resume_agent)
         self.shutdown_btn.clicked.connect(self.handle_shutdown_agent)
         self.inject_btn.clicked.connect(self.handle_inject_to_tree)
-        self.reaper_btn.clicked.connect(self.handle_call_reaper)
         self.delete_btn.clicked.connect(self.handle_delete_agent)
 
 
@@ -1493,21 +1492,6 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
             self.inject_sources_into_tree(child)
 
 
-    def handle_call_reaper(self):
-        universal_id = self.input_universal_id.text().strip()
-        if not universal_id:
-            self.status_label.setText("⚠️ No agent selected.")
-            return
-
-        payload = {
-            "handler": "cmd_kill",
-            "timestamp": time.time(),
-            "content": {
-                "targets": [universal_id]
-            }
-        }
-
-        self.send_post_to_matrix(payload, f"Reaper dispatched for {universal_id}")
 
     def handle_delete_subtree(self):
         universal_id = self.input_universal_id.text().strip()

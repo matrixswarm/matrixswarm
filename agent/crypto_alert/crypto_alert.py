@@ -20,6 +20,7 @@ class Agent(BootAgent):
         self.trigger_hits = 0
 
     def cmd_update_agent_config(self):
+
         try:
             self._initialized_from_tree = True
             exchange_name = self._private_config.get("exchange", "coingecko")
@@ -49,7 +50,7 @@ class Agent(BootAgent):
             self.cmd_update_agent_config()
 
         if not self._private_config.get("active", True):
-            self.log("[CRYPTOAGENT] 🔇 Agent marked inactive. Exiting cycle.")
+            self.log("🔇 Agent marked inactive. Exiting cycle.")
             return
 
         trigger = self._private_config.get("trigger_type", "price_change")
@@ -201,8 +202,7 @@ class Agent(BootAgent):
                 self.log(f"[CRYPTOAGENT][SELF-DESTRUCT-FAIL] {da.get_error_success_msg()}")
 
         except Exception as e:
-            self.log(f"[CRYPTOAGENT][SELF-DESTRUCT-CRASH] {e}")
-            self.log(traceback.format_exc())
+            self.log(error=e)
 
     def alert_operator(self, message):
 
