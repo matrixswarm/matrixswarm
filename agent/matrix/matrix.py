@@ -175,43 +175,124 @@ class Agent(BootAgent):
         self.log(f"[CMD-IDENTITY][REGISTERED] {uid} added to pubkey registry.")
 
     def cmd_delete_agent(self, content, packet):
+        try:
+            confirm_response = bool(content.get("confirm_response", 0))
+            handler_role = content.get("handler_role")
+            handler = content.get("handler")
+            response_handler = content.get("response_handler")
+            response_id = content.get("response_id", 0)
 
+            result = self._cmd_delete_agent(content, packet)
+
+            #RPC-DELETE
+            if confirm_response and handler_role and handler and response_handler:
+                alert_nodes = self.get_nodes_by_role(handler_role)
+                if not alert_nodes:
+                    self.log("No agent found with role", error=None, block="RPC-DELETE")
+                    return
+
+                pk1 = self.get_delivery_packet("standard.command.packet")
+                pk1.set_data({"handler": handler})
+
+                pk2 = self.get_delivery_packet("standard.rpc.handler.general.packet")
+                pk2.set_data({
+                    "handler": response_handler,
+                    "origin": self.command_line_args.get("universal_id", "matrix"),
+                    "content": {
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "response_id": response_id,
+                        "status": result.get("status", "error"),
+                        "error_code": result.get("error_code", 99),
+                        "message": result.get("message", "Deletion result."),
+                        "details": {
+                            "target_universal_id": result.get("target_universal_id"),
+                            "kill_list": result.get("kill_list", []),
+                            "reaped": result.get("reaped", 0),
+                            "existed": result.get("existed", 0),
+                            "deleted": result.get("deleted", 0)
+                        }
+                    }
+                })
+
+                pk1.set_packet(pk2, "content")
+
+                for node in alert_nodes:
+                    da = self.get_delivery_agent("file.json_file")
+                    da.set_location({"path": self.path_resolution["comm_path"]}) \
+                        .set_address([node["universal_id"]]) \
+                        .set_drop_zone({"drop": "incoming"}) \
+                        .set_packet(pk1) \
+                        .deliver()
+
+                    if da.get_error_success() != 0:
+                        self.log("RPC result delivery failed", error=None, block=node["universal_id"])
+                    else:
+                        self.log(f"RPC delete response delivered to {node['universal_id']}")
+
+        except Exception as e:
+            self.log("Failed to process cmd_delete_agent", error=e, block="main-try")
+
+    def _cmd_delete_agent(self, content, packet):
+        result = {
+            "status": "error",
+            "error_code": 99,
+            "message": "",
+            "target_universal_id": None,
+            "kill_list": [],
+            "reaped": 0,
+            "existed": 0,
+            "deleted": 0,
+        }
         try:
             target = content.get("target_universal_id")
             if not target:
-                self.log("[DELETE_AGENT][ERROR] Missing target_universal_id in content.")
-                return
+                result["message"] = "Missing target_universal_id."
+                return result
+
+            result["target_universal_id"] = target
 
             tp = self.load_directive(self.tree_path_dict)
-            if tp is None:
-                self.log("[DELETE_AGENT][ERROR] Tree load failed, aborting kill.")
-                return
+            if not tp:
+                result["message"] = "Failed to load directive."
+                return result
+
+            node_exists = tp.has_node(target)
+            result["existed"] = int(node_exists)
 
             original_tree = copy.deepcopy(tp.root)
             kill_list = self.collect_kill_list(tp, target)
 
             if tp.root != original_tree:
-
                 data = {"agent_tree": tp.root}
                 # use the generalized save_directive method
                 self.save_directive(self.tree_path_dict, data)
                 self.log("[DELETE_AGENT] Tree modified — backup created and saved.")
 
-            reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
+            result["kill_list"] = kill_list
 
-            keychain = generate_agent_keypair()
-            keychain["swarm_key"] = self.swarm_key
-            keychain["matrix_pub"] = self.matrix_pub
-            keychain["matrix_priv"] = DUMMY_MATRIX_PRIV
-            keychain["encryption_enabled"] = int(self.encryption_enabled)
+            if kill_list:
+                result["deleted"] = 1
+                reaper_node = make_reaper_node(kill_list, {k: k for k in kill_list})
+                keychain = generate_agent_keypair()
+                keychain["swarm_key"] = self.swarm_key
+                keychain["matrix_pub"] = self.matrix_pub
+                keychain["matrix_priv"] = DUMMY_MATRIX_PRIV
+                keychain["encryption_enabled"] = int(self.encryption_enabled)
 
-            self.spawn_agent_direct(reaper_node["universal_id"], reaper_node["name"], reaper_node, keychain=keychain)
-
-            self.delegation_refresh()
-            self.log(f"[DELETE_AGENT] Reaper dispatched for {kill_list}")
+                self.spawn_agent_direct(reaper_node["universal_id"], reaper_node["name"], reaper_node,
+                                        keychain=keychain)
+                self.delegation_refresh()
+                result["reaped"] = 1
+                result["status"] = "success"
+                result["message"] = f"Reaper dispatched for {target}"
+            else:
+                result["message"] = "No kill list generated. Agent might not exist."
 
         except Exception as e:
-            self.log(f"[DELETE_AGENT][ERROR] {e}")
+            self.log("Error inside _cmd_delete_agent", error=e, block="main_try")
+            result["message"] = str(e)
+
+        return result
 
     def cmd_agent_status_report(self, content, packet):
 
@@ -244,9 +325,9 @@ class Agent(BootAgent):
                 report["last_heartbeat"] = round(delta, 2)
                 report["status"] = "alive" if delta < 20 else "stale"
         except Exception as e:
-            self.log(f"[STATUS][HEARTBEAT-ERR] {e}")
+            self.log("Heartbeat not beating.", error=e, block="delete-external")
 
-        # 🐣 Spawn record lookup
+        # 🐣 SPAWN_RECORD_LOOKUP
         try:
             spawn_dir = os.path.join(comm_root, uid, "spawn")
             spawns = sorted(Path(spawn_dir).glob("*.spawn"), reverse=True)
@@ -266,7 +347,7 @@ class Agent(BootAgent):
                         report["uptime_seconds"] = round(now - proc.info["create_time"])
                         break
         except Exception as e:
-            self.log(f"[STATUS][SPAWN-ERR] {e}")
+            self.log(error=e, block="SPAWN_RECORD_LOOKUP")
 
         try:
             from core.live_tree import LiveTree
@@ -274,8 +355,8 @@ class Agent(BootAgent):
             tree.load(self.tree_path)
             report["delegates"] = tree.get_delegates(uid)
         except Exception as e:
-            self.log(f"[STATUS][TREE-ERR] {e}")
-
+            self.log(error=e, block="tree-err")
+        #REPLY_ERROR
         try:
             inbox = os.path.join(comm_root, reply_to, "incoming")
             os.makedirs(inbox, exist_ok=True)
@@ -288,7 +369,7 @@ class Agent(BootAgent):
 
             self.log(f"[STATUS] Sent report on {uid} to {reply_to}")
         except Exception as e:
-            self.log(f"[STATUS][REPLY-ERROR] {e}")
+            self.log(error=e, block="reply-error")
 
     def cmd_forward_command(self, content, packet):
         try:
@@ -331,7 +412,7 @@ class Agent(BootAgent):
                 self.log(f"[FORWARD][FAIL] {da.get_error_success_msg()}")
 
         except Exception as e:
-            self.log(f"[FORWARD][CRASH] {e}")
+            self.log(error=e, block="main_try")
 
     #CLEAR
     def collect_kill_list(self, tp, universal_id):
@@ -427,7 +508,7 @@ class Agent(BootAgent):
             self.log("[BULWARK] Delegation Refresh Completed. Battlefield memory locked.")
 
         except Exception as e:
-            self.log(f"[BULWARK][CRASH] {e}")
+            self.log(error=e, block="main_try")
 
     def cmd_hotswap_agent(self, content, packet):
 
@@ -448,6 +529,7 @@ class Agent(BootAgent):
             self.log("[REPLACE] ❌ Cannot target Matrix for self-replacement. Operation aborted.")
             return
 
+        #REPLACE AGENT
         if src:
             try:
                 decoded = base64.b64decode(src["payload"]).decode()
@@ -468,7 +550,7 @@ class Agent(BootAgent):
                 self.log(f"[REPLACE] ✅ Payload source installed to {file_path}")
 
             except Exception as e:
-                self.log(f"[REPLACE] ❌ Failed to install source payload: {e}")
+                self.log(msg="❌ Failed to install source payload", error=e, block="replace-agent")
                 return
 
         if not self._validate_or_prepare_agent(new_agent):
@@ -664,7 +746,7 @@ class Agent(BootAgent):
                     else:
                         self.log(f"[UPDATE_AGENT][ERROR] Failed to patch running agent: {da.get_error_success_msg()}")
                 except Exception as e:
-                    self.log(f"[UPDATE_AGENT][LIVE][CRASH] {e}")
+                    self.log(error=e, block="main_try")
 
             if updated:
                 self.save_directive(self.tree_path_dict, {"agent_tree": tp.root})
@@ -679,10 +761,7 @@ class Agent(BootAgent):
                 self.log(f"[UPDATE_AGENT] ⚠️ No valid fields updated for '{uid}'")
 
         except Exception as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[CMD_UPDATE_AGENT][ERROR] {err}")
-            self.log(stack)  # Optional: write full trace to logs
+            self.log(error=e, block="main_try")
 
     def cmd_inject_agents(self, content, packet):
 
@@ -724,10 +803,7 @@ class Agent(BootAgent):
                             })
 
                 except Exception as e:
-                    err = str(e)
-                    stack = traceback.format_exc()
-                    self.log(f"[CMD_INJECT_AGENT][PAYLOAD_SUMMARY][ERROR] {err}")
-                    self.log(stack)  # Optional: write full trace to logs
+                    self.log(error=e)
 
                 pk2 = self.get_delivery_packet("standard.rpc.handler.general.packet")
                 pk2.set_data({
@@ -766,10 +842,7 @@ class Agent(BootAgent):
 
 
         except Exception as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[CMD_INJECT_AGENT][ERROR] {err}")
-            self.log(stack)  # Optional: write full trace to logs
+            self.log(error=e, block="main_try")
 
     def _cmd_inject_agents(self, content, packet):
 
@@ -845,6 +918,7 @@ class Agent(BootAgent):
 
         try:
             success = False
+            #SUBTREE_INJECTION
             if subtree:
 
                 try:
@@ -865,6 +939,7 @@ class Agent(BootAgent):
                         self.log(msg)
 
                 except Exception as e:
+                    self.log(error=e, block="subtree_injection")
                     ret['error_code'] = 6
                     msg = ret.get("message", "")
                     ret['message'] = f"{msg} | {type(e).__name__}: {str(e)}"
@@ -902,7 +977,6 @@ class Agent(BootAgent):
                     ret["message"] = f"[INJECT][ERROR] Insert failed. Rejected node: {universal_id}"
                 else:
                     self.log(f"[INJECT] ✅ Injected agent '{universal_id}' under '{parent}'.")
-
                     if src:
                         self._save_payload_to_boot_dir(agent_name, src)
 
@@ -928,10 +1002,7 @@ class Agent(BootAgent):
                 ret.setdefault("message", "Injection failed or partial success.")
 
         except Exception as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[_CMD_INJECT_AGENT][ERROR] {err}")
-            self.log(stack)  # Optional: write full trace to logs
+            self.log(error=e, block="main_try")
 
         return ret
 
@@ -995,7 +1066,7 @@ class Agent(BootAgent):
             self.log(f"[INJECT] ✅ Source code installed at {file_path}")
 
         except Exception as e:
-            self.log(f"[INJECT][PAYLOAD-ERROR] {e}")
+            self.log(error=e, block="main_try")
 
     #checks everyone's tree against Matrix's agent_tree_master, using a hash of the agents tree
     def perform_tree_master_validation(self):
@@ -1056,7 +1127,7 @@ class Agent(BootAgent):
 
 
                         except Exception as e:
-                            self.log(f"[VERIFY-TREE] {universal_id} tree parse fail: {e}")
+                            self.log(error=e, block="tree_parse_fail")
                             needs_update = True
 
                     if needs_update:
@@ -1065,7 +1136,7 @@ class Agent(BootAgent):
                         self.delegate_tree_to_agent(universal_id, self.tree_path_dict)
 
         except Exception as e:
-            self.log(f"[VERIFY-TREE] Error: {e}")
+            self.log(error=e, block="main_try")
 
 
 if __name__ == "__main__":

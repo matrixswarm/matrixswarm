@@ -1,14 +1,18 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem, QComboBox, QSpinBox, QMessageBox
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                             QListWidget, QListWidgetItem, QComboBox, QSpinBox, QMessageBox)
 from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QColor
+from PyQt5.QtCore import Qt
 import os
 import json
 import requests
 import time
 import uuid
+
 from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
-from PyQt5.QtGui import QColor
+
 
 class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin):
     def __init__(self, alert_path, back_callback=None):
@@ -19,8 +23,7 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         self.price_last_fetch = 0
         self.back_callback = back_callback
 
-        self.layout = QVBoxLayout()
-        self.setLayout(self.layout)
+        self.layout = QVBoxLayout(self)
 
         self.alert_list = QListWidget()
         self.alert_list.itemClicked.connect(self.load_selected_alert)
@@ -39,9 +42,28 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         self.cooldown_input.setValue(300)
         self.price_display = QLabel("Current Price: --")
 
+        self.trigger_selector = QComboBox()
+        self.trigger_selector.addItems(["price_change", "price_above", "price_below", "price_delta", "asset_conversion"])
+        self.trigger_selector.currentTextChanged.connect(self.update_trigger_mode_fields)
+
+        self.change_absolute_input = QLineEdit("1000")
+        form_layout.addWidget(QLabel("Δ$ Absolute Change:"))
+        form_layout.addWidget(self.change_absolute_input)
+
+        self.change_percent_input = QLineEdit("1.5")
+        self.from_asset_input = QLineEdit("BTC")
+        self.to_asset_input = QLineEdit("ETH")
+        self.from_amount_input = QLineEdit("0.1")
+
         form_layout.addWidget(QLabel("Pair:"))
         form_layout.addWidget(self.pair_input)
         form_layout.addWidget(self.price_display)
+
+        self.uid_display = QLabel("Universal ID: --")
+        form_layout.addWidget(self.uid_display)
+
+        form_layout.addWidget(QLabel("Trigger Type:"))
+        form_layout.addWidget(self.trigger_selector)
         form_layout.addWidget(QLabel("Condition:"))
         form_layout.addWidget(self.type_selector)
         form_layout.addWidget(QLabel("Threshold:"))
@@ -49,15 +71,14 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         form_layout.addWidget(QLabel("Cooldown (sec):"))
         form_layout.addWidget(self.cooldown_input)
 
-        btn_row = QHBoxLayout()
-        self.create_btn = QPushButton("➕ Create Alert")
-        self.create_btn.clicked.connect(self.add_alert)
-        self.delete_btn = QPushButton("🗑 Delete Selected")
-        self.delete_btn.clicked.connect(self.delete_selected_alert)
-        self.edit_btn = QPushButton("✏️ Update Selected")
-        self.edit_btn.clicked.connect(self.edit_selected_alert)
-        self.back_btn = QPushButton("⬅️ Back to Hive")
-        self.back_btn.clicked.connect(self.handle_back)
+        form_layout.addWidget(QLabel("Δ% Change:"))
+        form_layout.addWidget(self.change_percent_input)
+        form_layout.addWidget(QLabel("From Asset:"))
+        form_layout.addWidget(self.from_asset_input)
+        form_layout.addWidget(QLabel("To Asset:"))
+        form_layout.addWidget(self.to_asset_input)
+        form_layout.addWidget(QLabel("From Amount:"))
+        form_layout.addWidget(self.from_amount_input)
 
         self.exchange_selector = QComboBox()
         self.exchange_selector.addItems(["coingecko", "binance", "coinbase", "kraken", "bitfinex"])
@@ -66,38 +87,51 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
 
         self.limit_mode_selector = QComboBox()
         self.limit_mode_selector.addItems(["1", "forever", "custom"])
+        self.limit_mode_selector.currentTextChanged.connect(
+            lambda mode: self.limit_count_input.setEnabled(mode == "custom")
+        )
         form_layout.addWidget(QLabel("Trigger Limit:"))
         form_layout.addWidget(self.limit_mode_selector)
 
         self.limit_count_input = QSpinBox()
         self.limit_count_input.setMinimum(1)
         self.limit_count_input.setMaximum(999)
-        self.limit_count_input.setEnabled(False)  # initially off unless "custom" selected
+        self.limit_count_input.setEnabled(False)
         form_layout.addWidget(self.limit_count_input)
 
-        self.limit_mode_selector.currentTextChanged.connect(
-            lambda mode: self.limit_count_input.setEnabled(mode == "custom")
-        )
-
+        btn_row = QHBoxLayout()
+        self.create_btn = QPushButton("➕ Create Alert")
+        self.create_btn.clicked.connect(self.add_alert)
+        self.edit_btn = QPushButton("✏️ Update Selected")
+        self.edit_btn.clicked.connect(self.edit_selected_alert)
+        self.delete_btn = QPushButton("🗑 Delete Selected")
+        self.delete_btn.clicked.connect(self.delete_selected_alert)
         self.deactivate_btn = QPushButton("🛑 Deactivate Alert")
         self.deactivate_btn.clicked.connect(self.deactivate_selected_alert)
-        btn_row.addWidget(self.deactivate_btn)
+        self.back_btn = QPushButton("⬅️ Back to Hive")
+        self.back_btn.clicked.connect(self.handle_back)
 
-        btn_row.addWidget(self.create_btn)
-        btn_row.addWidget(self.edit_btn)
-        btn_row.addWidget(self.delete_btn)
-        btn_row.addWidget(self.back_btn)
+        for btn in [self.deactivate_btn, self.create_btn, self.edit_btn, self.delete_btn, self.back_btn]:
+            btn_row.addWidget(btn)
 
         form_layout.addLayout(btn_row)
-
         self.layout.addLayout(form_layout)
+
         self.load_alerts()
         self.update_price_display()
 
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self.update_refresh)
         self.refresh_timer.start(15000)
+        self.update_trigger_mode_fields(self.trigger_selector.currentText())
 
+    def update_trigger_mode_fields(self, mode):
+        self.threshold_input.setEnabled(mode in ["price_above", "price_below", "asset_conversion"])
+        self.change_percent_input.setEnabled(mode == "price_change")
+        self.from_asset_input.setEnabled(mode == "asset_conversion")
+        self.to_asset_input.setEnabled(mode == "asset_conversion")
+        self.from_amount_input.setEnabled(mode == "asset_conversion")
+        self.change_absolute_input.setEnabled(mode == "price_delta")
 
     def handle_back(self):
         if self.back_callback:
@@ -110,6 +144,7 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         else:
             self.alerts = []
         self.refresh_list()
+        self.reissue_pending_deletes()
 
     def update_refresh(self):
         self.update_price_display()
@@ -124,21 +159,32 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
 
         for i, alert in enumerate(self.alerts):
             threshold = alert.get("threshold")
-            diff = ""
-            if current_price and threshold:
-                delta = current_price - threshold
-                diff = f" | Δ ${delta:,.2f}"
+            current_price = self.get_price(alert.get("pair", ""))
+            delta = (current_price - threshold) if current_price and threshold else None
+            diff = f" | Δ ${delta:,.2f}" if delta is not None else ""
 
-            txt = f"{alert['pair']} {alert['type']} {alert['threshold']} (⏱ {alert.get('cooldown', 300)}s){diff}"
+            # Determine status label
+            status = "🟢 Active"
+            if alert.get("active") is False:
+                status = "🔴 Inactive"
+            elif alert.get("pending_delete"):
+                status = "🟡 Pending Delete"
+
+            exchange = alert.get("exchange", "coingecko").capitalize()
+            pair = alert.get("pair", "???")
+            trigger_type = alert.get("trigger_type", alert.get("type", "?"))
+            cooldown = alert.get("cooldown", 300)
+            txt = f"{pair} {trigger_type} {threshold} ({cooldown}s) {diff} | {status} | {exchange}"
+
             item = QListWidgetItem(txt)
 
+            # Optional: alert color rules
             if current_price:
-                price = current_price
-                if alert["type"] == "price_above" and price >= threshold:
+                if alert["type"] == "price_above" and current_price >= threshold:
                     item.setForeground(QColor("red"))
-                elif alert["type"] == "price_below" and price <= threshold:
+                elif alert["type"] == "price_below" and current_price <= threshold:
                     item.setForeground(QColor("red"))
-                elif abs(price - threshold) / threshold < 0.02:
+                elif abs(current_price - threshold) / threshold < 0.02:
                     item.setForeground(QColor("yellow"))
                 else:
                     item.setForeground(QColor("#33ff33"))
@@ -150,25 +196,34 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             self.alert_list.setCurrentRow(current_index)
             self.selected_index = current_index
 
+
+
     def add_alert(self):
         try:
             pair = self.pair_input.text().strip()
             threshold = float(self.threshold_input.text().strip())
             cooldown = self.cooldown_input.value()
-
+            mode = self.trigger_selector.currentText()
             alert = {
                 "pair": pair,
                 "type": self.type_selector.currentText(),
-                "threshold": threshold,
+                "threshold": threshold if mode != "price_change" else None,
                 "cooldown": cooldown,
                 "notify": ["gui"],
                 "universal_id": f"crypto-{pair.replace('/', '').lower()}-{uuid.uuid4().hex[:6]}",
-                "dispatched": None,  # will be updated when sent
+                "dispatched": None,
                 "confirmed": False,
                 "exchange": self.exchange_selector.currentText(),
                 "limit_mode": self.limit_mode_selector.currentText(),
                 "activation_limit": self.limit_count_input.value() if self.limit_mode_selector.currentText() == "custom" else None,
-                "active": True
+                "active": True,
+                "trigger_type": self.trigger_selector.currentText(),
+                "poll_interval": 60,
+                "change_percent": float(self.change_percent_input.text()) if mode == "price_change" else None,
+                "from_asset": self.from_asset_input.text().strip() if mode == "asset_conversion" else None,
+                "to_asset": self.to_asset_input.text().strip() if mode == "asset_conversion" else None,
+                "from_amount": float(self.from_amount_input.text().strip()) if mode == "asset_conversion" else None,
+                "change_absolute": float(self.change_absolute_input.text()) if mode == "price_delta" else None,
             }
 
             self.alerts.append(alert)
@@ -193,6 +248,7 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
 
     def edit_selected_alert(self):
         selected = self.alert_list.currentRow()
+        mode = self.trigger_selector.currentText()
 
         if selected < 0 or selected >= len(self.alerts):
             QMessageBox.warning(self, "No Selection", "Please select an alert from the list before updating.")
@@ -212,6 +268,13 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
                 "limit_mode": self.limit_mode_selector.currentText(),
                 "activation_limit": self.limit_count_input.value() if self.limit_mode_selector.currentText() == "custom" else None,
                 "active": original.get("active", True),
+                "trigger_type": mode,
+                "poll_interval": 60,
+                "change_percent": float(self.change_percent_input.text()) if mode == "price_change" else None,
+                "from_asset": self.from_asset_input.text().strip() if mode == "asset_conversion" else None,
+                "to_asset": self.to_asset_input.text().strip() if mode == "asset_conversion" else None,
+                "from_amount": float(self.from_amount_input.text().strip()) if mode == "asset_conversion" else None,
+                "change_absolute": float(self.change_absolute_input.text()) if mode == "price_delta" else None,
             }
 
             # Replace and persist
@@ -329,26 +392,89 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         else:
             print("[ERROR] No connection to send_post_to_matrix")
 
+    def reissue_pending_deletes(self):
+        for alert in self.alerts:
+            if alert.get("pending_delete"):
+                uid = alert.get("universal_id")
+                payload = {
+                    "target_universal_id": "matrix",
+                    "confirm_response": 1,
+                    "respond_to": "crypto_gui_1",
+                    "handler_role": "hive.rpc.route",
+                    "handler": "cmd_rpc_route",
+                    "response_handler": "rpc_result_delete_agent_local_confirmed",
+                    "response_id": uuid.uuid4().hex,
+                    "content": {
+                        "target_universal_id": uid
+                    }
+                }
+
+                packet = self.get_delivery_packet("standard.command.packet")
+                packet.set_data({
+                    "handler": "cmd_delete_agent",
+                    "content": payload
+                })
+
+                self.send_post(packet.get_packet())
+
     def delete_selected_alert(self):
         selected = self.alert_list.currentRow()
+        if selected < 0:
+            return
         uid = self.alerts[selected].get("universal_id")
         if uid:
+            # Mark for pending delete
+            self.alerts[selected]["pending_delete"] = True
+            self.alerts[selected]["active"] = False
+            self.save_alerts()
+            self.refresh_list()
+
+            # Construct full matrix-routed RPC payload
             payload = {
-                "handler": "cmd_delete_agent",
-                "timestamp": time.time(),
+                "target_universal_id": "matrix",
+                "confirm_response": 1,
+                "respond_to": "crypto_gui_1",
+                "handler_role": "hive.rpc.route",
+                "handler": "cmd_rpc_route",
+                "response_handler": "rpc_result_delete_agent_local_confirmed",
+                "response_id": uuid.uuid4().hex,
                 "content": {
                     "target_universal_id": uid
                 }
             }
-            self.send_post(payload)
 
+            packet = self.get_delivery_packet("standard.command.packet")
+            packet.set_data({
+                "handler": "cmd_delete_agent",
+                "content": payload
+            })
+
+            self.send_post(packet.get_packet())
+
+        # UI confirmation (cosmetic only — logic already executed above)
         if selected >= 0:
-            confirm = QMessageBox.question(self, "Confirm Delete", "Are you sure you want to delete this alert?", QMessageBox.Yes | QMessageBox.No)
+            confirm = QMessageBox.question(
+                self,
+                "Delete Pending",
+                "Awaiting confirmation from Matrix before deletion.",
+                QMessageBox.Yes | QMessageBox.No
+            )
             if confirm == QMessageBox.Yes:
-
                 del self.alerts[selected]
                 self.save_alerts()
                 self.refresh_list()
+
+
+
+
+    def rpc_result_delete_agent_local_confirmed(self, content, payload):
+        uid = content.get("target_universal_id")
+        for i, alert in enumerate(self.alerts):
+            if alert.get("universal_id") == uid:
+                del self.alerts[i]
+                self.save_alerts()
+                self.refresh_list()
+                break
 
 
     def load_selected_alert(self):
@@ -357,9 +483,21 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         if selected >= 0:
             alert = self.alerts[selected]
             print(f"[DEBUG] Loaded alert: {alert}")
+            uid = alert.get("universal_id", "--")
+            self.uid_display.setText(f"Universal ID: {uid}")
+            self.uid_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
             self.pair_input.setText(alert.get("pair", ""))
             self.threshold_input.setText(str(alert.get("threshold", "")))
             self.cooldown_input.setValue(alert.get("cooldown", 300))
+            self.trigger_selector.setCurrentText(alert.get("trigger_type", "price_change"))
+            self.change_percent_input.setText(str(alert.get("change_percent", "")))
+            self.change_absolute_input.setText(str(alert.get("change_absolute", "")))
+            self.from_asset_input.setText(alert.get("from_asset", ""))
+            self.to_asset_input.setText(alert.get("to_asset", ""))
+            self.from_amount_input.setText(str(alert.get("from_amount", "")))
+            self.exchange_selector.setCurrentText(alert.get("exchange", "coingecko"))
+            self.limit_mode_selector.setCurrentText(alert.get("limit_mode", "forever"))
+            self.limit_count_input.setValue(alert.get("activation_limit") or 1)
             index = self.type_selector.findText(alert.get("type", "price_above"))
             if index != -1:
                 self.type_selector.setCurrentIndex(index)

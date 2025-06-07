@@ -202,7 +202,43 @@ class Agent(BootAgent):
             except Exception as e:
                 self.log(f"[MATRIX-HTTPS][ERROR] {e}")
 
-        def decrypt_log_line(line, key_bytes):
+        def threaded_log_response(self, uid, client_response):
+            try:
+                log_path = os.path.join(self.path_resolution["comm_path"], uid, "logs", "agent.log")
+
+                if not os.path.exists(log_path):
+                    return client_response({"status": "error", "message": "Log not found"}, 404)
+
+                key_bytes = None
+                if ENCRYPTION_CONFIG.is_enabled():
+                    swarm_key = ENCRYPTION_CONFIG.get_swarm_key()
+                    key_bytes = base64.b64decode(swarm_key)
+
+                rendered_lines = []
+
+                with open(log_path, "r") as f:
+                    for line in f:
+                        try:
+                            if key_bytes:
+                                line = self.decrypt_log_line(line, key_bytes)
+                            entry = json.loads(line)
+                            ts = entry.get("timestamp", "?")
+                            lvl = entry.get("level", "INFO")
+                            msg = entry.get("message", "")
+                            emoji = {"INFO": "🔹", "ERROR": "❌", "WARNING": "⚠️", "DEBUG": "🐞"}.get(lvl.upper(), "🔸")
+                            rendered_lines.append(f"{emoji} [{ts}] [{lvl}] {msg}")
+                        except Exception:
+                            rendered_lines.append(f"[MALFORMED] {line.strip()}")
+
+                output = "\n".join(rendered_lines)
+                self.log(f"[LOG-DELIVERY] ✅ Sent {len(rendered_lines)} lines for {uid}")
+                return client_response({"status": "ok", "log": output}, 200)
+
+            except Exception as e:
+                self.log(f"[HTTPS-LOG][ERROR] Could not process log for {uid}: {e}")
+                return client_response({"status": "error", "message": str(e)}, 500)
+
+        def decrypt_log_line(self, line, key_bytes):
             try:
                 blob = base64.b64decode(line.strip())
                 nonce, tag, ciphertext = blob[:12], blob[12:28], blob[28:]
@@ -210,7 +246,6 @@ class Agent(BootAgent):
                 return cipher.decrypt_and_verify(ciphertext, tag).decode()
             except Exception as e:
                 return f"[DECRYPT-FAIL] {str(e)}"
-
 
     def run_server(self):
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)

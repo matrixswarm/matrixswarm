@@ -23,28 +23,30 @@ class Agent(BootAgent):
         try:
             self._initialized_from_tree = True
             exchange_name = self._private_config.get("exchange", "coingecko")
-            mod_path = f"crypto_alert.factory.alert.crypto.exchange.{exchange_name}"
+            mod_path = f"crypto_alert.factory.cryptocurrency.exchange.{exchange_name}"
 
-            self.log(f"[EXCHANGE-LOADER] Attempting to load: {mod_path}")
+            self.log(f"Attempting to load: {mod_path}", block="exchange_loader")
             try:
-                import importlib
                 module = importlib.import_module(mod_path)
+                importlib.reload(module)
                 ExchangeClass = getattr(module, "Exchange")
                 self.exchange = ExchangeClass(self)
                 self.log(f"[EXCHANGE-LOADER] ✅ Loaded exchange handler: {exchange_name}")
             except Exception as e:
-                self.log(f"[EXCHANGE-LOADER][ERROR] Could not load exchange module '{exchange_name}': {e}")
-                self.log(traceback.format_exc())
+                self.log("Could not load exchange module '{exchange_name}", error=e)
+
         except Exception as e:
-            self.log(f"[INIT-FAIL] Failed to initialize config: {e}")
+            self.log("Failed to initialize config", error=e)
 
     def worker(self, config=None):
-        if not self._initialized_from_tree:
-            self.cmd_update_agent_config()
 
         if config:
             self._private_config = config
+            self._initialized_from_tree = False
             self.log(f"[WORKER] Config: {config}")
+
+        if not self._initialized_from_tree:
+            self.cmd_update_agent_config()
 
         if not self._private_config.get("active", True):
             self.log("[CRYPTOAGENT] 🔇 Agent marked inactive. Exiting cycle.")
@@ -60,9 +62,34 @@ class Agent(BootAgent):
             self._run_price_threshold("below")
         elif trigger == "asset_conversion":
             self._run_asset_conversion_check()
+        elif trigger == "price_delta":
+            self._run_price_delta_monitor()
 
         interval = int(self._private_config.get("poll_interval", 60))
         interruptible_sleep(self, interval)
+
+    def _run_price_delta_monitor(self):
+        try:
+            pair = self._private_config.get("pair", "BTC/USDT")
+            threshold_abs = float(self._private_config.get("change_absolute", 1000))
+            current = self.exchange.get_price(pair)
+            if current is None:
+                return
+
+            if self._last_price is None:
+                self._last_price = current
+                self.log(f"[DEBUG] Initial price set to {self._last_price}")
+                return
+
+            delta = abs(current - self._last_price)
+            self.log(f"[DEBUG] Δ = {delta:.2f} vs threshold {threshold_abs:.2f}")
+
+            if delta >= threshold_abs:
+                self._alert(f"{pair} moved ${delta:.2f} → from {self._last_price} to {current}")
+                self._last_price = current
+
+        except Exception as e:
+            self.log(error=e)
 
     def _run_price_change_monitor(self):
         try:
@@ -87,8 +114,7 @@ class Agent(BootAgent):
                 self._last_price = current
 
         except Exception as e:
-            self.log(f"[CRYPTOAGENT][FAIL] {e}")
-            self.log(traceback.format_exc())
+            self.log("Price change failure", error=e)
 
     def _run_price_threshold(self, mode):
         try:
@@ -104,8 +130,7 @@ class Agent(BootAgent):
                 self._alert(f"{pair} is below threshold: {current} < {threshold}")
 
         except Exception as e:
-            self.log(f"[CRYPTOAGENT][THRESHOLD-FAIL] {e}")
-            self.log(traceback.format_exc())
+            self.log(error=e)
 
     def _run_asset_conversion_check(self):
         try:
@@ -129,8 +154,7 @@ class Agent(BootAgent):
                 self._alert(f"{from_amount} {from_asset} = {value:.4f} {to_asset} (≥ {threshold})")
 
         except Exception as e:
-            self.log(f"[CRYPTOAGENT][CONVERSION-FAIL] {e}")
-            self.log(traceback.format_exc())
+            self.log("Conversion fail", error=e)
 
     def _alert(self, message):
         self.alert_operator(message)
@@ -143,7 +167,14 @@ class Agent(BootAgent):
         if limit_mode == "forever":
             return
 
-        max_triggers = int(self._private_config.get("activation_limit", 1))
+        # Hardened: handle None, empty string, garbage
+        raw_limit = self._private_config.get("activation_limit", 1)
+        try:
+            max_triggers = int(raw_limit) if raw_limit is not None else 1
+        except (TypeError, ValueError) as e:
+            self.log("Invalid activation_limit value", error=e, block="TRIGGER-LIMIT")
+            max_triggers = 1
+
         if self.trigger_hits >= max_triggers:
             self.log("[CRYPTOAGENT] 🎯 Max triggers reached. Sending kill packet.")
             self._self_destruct()
@@ -174,8 +205,18 @@ class Agent(BootAgent):
             self.log(traceback.format_exc())
 
     def alert_operator(self, message):
+
+        handler_role = self._private_config.get("handler_role")
+        handler = self._private_config.get("handler")
+        response_handler = self._private_config.get("response_handler")
+        response_id = f"{self.command_line_args.get('universal_id')}-alert-{int(time.time())}"
+
+        if not all([handler_role, handler, response_handler]):
+            self.log("Alert dispatch missing routing fields", block="ALERT_HANDLER")
+            return
+
         pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": "cmd_send_alert_msg"})
+        pk1.set_data({"handler": handler})
 
         pk2 = self.get_delivery_packet("notify.alert.general", new=True)
         pk2.set_data({
@@ -190,7 +231,7 @@ class Agent(BootAgent):
 
         pk1.set_packet(pk2, "content")
 
-        for node in self.get_nodes_by_role("hive.alert.send_alert_msg"):
+        for node in self.get_nodes_by_role(handler_role):
             da = self.get_delivery_agent("file.json_file", new=True)
             da.set_location({"path": self.path_resolution["comm_path"]}) \
               .set_address([node["universal_id"]]) \
