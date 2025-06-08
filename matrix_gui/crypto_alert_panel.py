@@ -125,6 +125,46 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         self.refresh_timer.start(15000)
         self.update_trigger_mode_fields(self.trigger_selector.currentText())
 
+    def reactivate_selected_alert(self):
+        selected = self.alert_list.currentRow()
+        if selected < 0:
+            return
+
+        alert = self.alerts[selected]
+        alert["active"] = True
+        alert["pending_delete"] = False
+        self.save_alerts()
+        self.refresh_list()
+
+        payload = {
+            "target_universal_id": "matrix",
+            "subtree": {
+                "name": "crypto_alert",
+                "universal_id": alert.get("universal_id"),
+                "filesystem": {},
+                "config": {
+                    **alert,  # merge all config keys
+                    "partial_config": True  # key flag
+                }
+            },
+            "confirm_response": 1,
+            "respond_to": "crypto_gui_1",
+            "handler_role": "hive.rpc.route",
+            "handler": "cmd_rpc_route",
+            "response_handler": "rpc_result_inject_agent",
+            "response_id": uuid.uuid4().hex,
+            "partial_config": True
+        }
+
+        pkt = self.get_delivery_packet("standard.command.packet")
+        pkt.set_data({
+            "handler": "cmd_agent_inject",
+            "content": payload
+        })
+
+        self.send_post(pkt.get_packet())
+        QMessageBox.information(self, "Reactivation", f"Reactivation request sent for {alert.get('universal_id')}.")
+
     def update_trigger_mode_fields(self, mode):
         self.threshold_input.setEnabled(mode in ["price_above", "price_below", "asset_conversion"])
         self.change_percent_input.setEnabled(mode == "price_change")
@@ -521,15 +561,42 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             # Cosmetic dialog only
             QMessageBox.information(self, "Delete Pending", "Awaiting confirmation from Matrix before deletion.")
 
-
+    #returns confirmation the agent was deleted. it is not physically deleted
+    #until the agent is confirmed to be deleted or returns it wasn't found in the swarm
     def rpc_result_delete_agent_local_confirmed(self, content, payload):
-        uid = content.get("target_universal_id")
+        uid = None
+
+        # Handle new format (when "content" wraps details in 'details')
+        if isinstance(content, dict):
+            uid = content.get("target_universal_id") or content.get("details", {}).get("target_universal_id")
+            status = content.get("status", "success")
+            error_code = content.get("error_code")
+            message = content.get("message", "")
+        else:
+            print("[ERROR] Invalid content format in delete_agent response")
+            return
+
+        if not uid:
+            print("[ERROR] No universal_id found in delete confirmation payload.")
+            return
+
+        # Search for matching alert
         for i, alert in enumerate(self.alerts):
             if alert.get("universal_id") == uid:
+                if status == "success":
+                    print(f"[DELETE] Agent {uid} deleted successfully.")
+                elif status == "error" and error_code == 99:
+                    print(f"[DELETE] Agent {uid} not found — assuming already deleted.")
+                else:
+                    print(f"[DELETE] Error occurred for {uid}: {message}")
+                    return  # Don't delete if it's a real failure unrelated to deletion
+
                 del self.alerts[i]
                 self.save_alerts()
                 self.refresh_list()
-                break
+                return
+
+        print(f"[DELETE] Agent {uid} was not found in local alert list.")
 
 
     def load_selected_alert(self):

@@ -451,6 +451,8 @@ class Agent(BootAgent):
 
         return subtree
 
+
+
     #removes dead agents from matrix/directive/agent_tree_master.json
     def delegation_refresh(self):
         """
@@ -772,6 +774,8 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main_try")
 
+
+
     def cmd_inject_agents(self, content, packet):
 
         try:
@@ -782,6 +786,7 @@ class Agent(BootAgent):
             response_id = content.get("response_id", 0)
 
             ret = self._cmd_inject_agents(content, packet)
+
 
             if confirm_response and handler_role and handler and response_handler:
 
@@ -938,6 +943,22 @@ class Agent(BootAgent):
                     self.log(f"[DEBUG] Injected IDs: {ret["injected"]}")
                     self.log(f"[DEBUG] rejected IDs: {ret["rejected"]}")
                     self.log(f"[DEBUG] duplicates IDs: {ret["duplicates"]}")
+
+                    if bool(ret["duplicates"]) and content.get("partial_config", False):
+                        # Check if agent exists
+                        existing_node = tp.get_node(universal_id)
+                        config = subtree.get("config", {})
+                        if existing_node and bool(len(config)):
+                            # Send config update instead of re-injection
+                            self.cmd_update_agent({
+                                "target_universal_id": universal_id,
+                                "config": config,
+                                "push_live_config": True
+                            }, packet)
+                            ret["status"] = "success"
+                            ret["message"] = f"Agent already existed — config partially updated for {universal_id}"
+                            return ret
+
 
                     success = bool(len(injected_ids))
                     if not success:
