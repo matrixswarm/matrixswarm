@@ -13,29 +13,6 @@
     "exchange": "coingecko",
     "limit_mode": "1",
     "activation_limit": null,
-    "active": true,
-    "trigger_type": "price_above",
-    "poll_interval": 60,
-    "change_percent": null,
-    "from_asset": null,
-    "to_asset": null,
-    "from_amount": null,
-    "change_absolute": null
-  },
-  {
-    "pair": "BTC/USDT",
-    "type": "price_above",
-    "threshold": 105720.0,
-    "cooldown": 300,
-    "notify": [
-      "gui"
-    ],
-    "universal_id": "crypto-btcusdt-ede5ee",
-    "dispatched": null,
-    "confirmed": false,
-    "exchange": "coingecko",
-    "limit_mode": "1",
-    "activation_limit": null,
     "active": false,
     "trigger_type": "price_above",
     "poll_interval": 60,
@@ -43,7 +20,6 @@
     "from_asset": null,
     "to_asset": null,
     "from_amount": null,
-    "change_absolute": null,
-    "pending_delete": true
+    "change_absolute": null
   }
 ]
