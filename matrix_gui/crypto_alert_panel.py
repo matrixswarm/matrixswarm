@@ -165,11 +165,13 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             delta = (current_price - threshold) if current_price and threshold else None
             diff = f" | Δ ${delta:,.2f}" if delta is not None else ""
 
-            status = "🟢 Active"
-            if alert.get("active") is False:
-                status = "🔴 Inactive"
-            elif alert.get("pending_delete"):
+            if alert.get("pending_delete"):
                 status = "🟡 Pending Delete"
+            elif alert.get("active") is False:
+                status = "🔴 Inactive"
+            else:
+                status = "🟢 Active"
+
 
             exchange = alert.get("exchange", "coingecko").capitalize()
             pair = alert.get("pair", "???")
@@ -490,26 +492,22 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         selected = self.alert_list.currentRow()
         if selected < 0:
             return
+
         uid = self.alerts[selected].get("universal_id")
         if uid:
-            # Mark for pending delete
             self.alerts[selected]["pending_delete"] = True
             self.alerts[selected]["active"] = False
             self.save_alerts()
             self.refresh_list()
 
-            # Construct full matrix-routed RPC payload
             payload = {
-                "target_universal_id": "matrix",
+                "target_universal_id": uid,
                 "confirm_response": 1,
                 "respond_to": "crypto_gui_1",
                 "handler_role": "hive.rpc.route",
                 "handler": "cmd_rpc_route",
                 "response_handler": "rpc_result_delete_agent_local_confirmed",
                 "response_id": uuid.uuid4().hex,
-                "content": {
-                    "target_universal_id": uid
-                }
             }
 
             packet = self.get_delivery_packet("standard.command.packet")
@@ -520,20 +518,8 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
 
             self.send_post(packet.get_packet())
 
-        # UI confirmation (cosmetic only — logic already executed above)
-        if selected >= 0:
-            confirm = QMessageBox.question(
-                self,
-                "Delete Pending",
-                "Awaiting confirmation from Matrix before deletion.",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if confirm == QMessageBox.Yes:
-                del self.alerts[selected]
-                self.save_alerts()
-                self.refresh_list()
-
-
+            # Cosmetic dialog only
+            QMessageBox.information(self, "Delete Pending", "Awaiting confirmation from Matrix before deletion.")
 
 
     def rpc_result_delete_agent_local_confirmed(self, content, payload):

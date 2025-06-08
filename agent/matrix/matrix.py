@@ -176,19 +176,26 @@ class Agent(BootAgent):
 
     def cmd_delete_agent(self, content, packet):
         try:
-            #is a repsonse expected
+            #is a response expected
             confirm_response = bool(content.get("confirm_response", 0))
-            #role of the
+            #role of the handler if a response is required
             handler_role = content.get("handler_role")
+            #the handler that will return the response to the client
             handler = content.get("handler")
+            #this is the client rpc handler which handles the response
             response_handler = content.get("response_handler")
             response_id = content.get("response_id", 0)
 
             result = self._cmd_delete_agent(content, packet)
 
             #RPC-DELETE
-            if confirm_response and handler_role and handler and response_handler:
+            if (confirm_response and
+                handler_role and
+                handler and
+                response_handler):
+
                 alert_nodes = self.get_nodes_by_role(handler_role)
+
                 if not alert_nodes:
                     self.log("No agent found with role", error=None, block="RPC-DELETE")
                     return
