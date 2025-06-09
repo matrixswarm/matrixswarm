@@ -1,33 +1,23 @@
-# 🧠💥  
 # **MATRIXSWARM**  
 # **THE FIRST AI OPERATING SYSTEM**
-
-███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
-██╔════╝██║    ██║██╔══██╗██╔══██╗████╗ ████║
-███████╗██║ █╗ ██║███████║██████╔╝██╔████╔██║
-╚════██║██║███╗██║██╔══██║██╔═══╝ ██║╚██╔╝██║
-███████║╚███╔███╔╝██║  ██║██║     ██║ ╚═╝ ██║
-╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝     ╚═╝     ╚═╝
-
-MatrixSwarm v0.1 "Captain Howdy"
-Reflex-Capable Crypto Alert Swarm
-Built for agents that don’t blink.
-
-🧠 Reflex logic
-💥 Live agent patching
-🎯 Directional price triggers
-📦 CLI + GUI + container support
-👁 Comes with its own warning siren
-
-https://github.com/matrixswarm/matrixswarm
-
-
 ## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.  
 ## No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
 
 ✅ No containers.  
 ✅ No servers.  
 ✅ No sockets.  
+
+MatrixSwarm v0.1 "Captain Howdy"
+Reflex-Capable Crypto Alert Swarm
+Built for agents that don’t blink.
+
+Reflex logic
+Live agent patching
+Directional price triggers
+CLI + GUI + container support
+Comes with its own warning siren
+
+https://github.com/matrixswarm/matrixswarm
 
 > **Spawn fleets.  
 Issue orders.  
