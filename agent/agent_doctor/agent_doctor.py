@@ -47,7 +47,7 @@ class Agent(BootAgent):
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    def verify_agent_consciousness(self, agent_id, threads=("poke.worker", "packet_listener")):
+    def verify_agent_consciousness(self, agent_id, threads=("heartbeat","worker", "packet_listener")):
         comm_path = os.path.join(self.path_resolution["comm_path"], agent_id)
         beacon_dir = os.path.join(comm_path, "hello.moto")
 

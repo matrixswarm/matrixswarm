@@ -8,7 +8,7 @@ import json
 import requests
 import time
 import uuid
-
+import traceback
 from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
@@ -40,9 +40,18 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             ("Asset Conversion", "asset_conversion")
         ]
 
+        self.supported_pairs = [
+            "BTC/USDT", "ETH/USDT", "SOL/USDT", "ADA/USDT", "XRP/USDT", "LTC/USDT",
+            "DOGE/USDT", "AVAX/USDT", "DOT/USDT", "ARB/USDT", "OP/USDT", "MATIC/USDT",
+            "UNI/USDT", "AAVE/USDT", "SNX/USDT", "CRV/USDT", "SHIB/USDT", "PEPE/USDT"
+        ]
+
         form_layout = QVBoxLayout()
 
-        self.pair_input = QLineEdit("BTC/USDT")
+        self.pair_input = QComboBox()
+        self.pair_input.setEditable(True)
+        self.pair_input.addItems(self.supported_pairs)
+        self.pair_input.setCurrentText("BTC/USDT")  # default value
 
         self.threshold_input = QLineEdit("35000")
         self.cooldown_input = QSpinBox()
@@ -50,7 +59,6 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         self.cooldown_input.setMaximum(86400)
         self.cooldown_input.setValue(300)
         self.price_display = QLabel("Current Price: --")
-
 
 
         # === Trigger dropdown ===
@@ -363,7 +371,7 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
         mode = self.trigger_selector.currentData()
         try:
             alert = {
-                "pair": self.pair_input.text().strip(),
+                "pair": self.pair_input.currentText().strip(),
                 "type": self.trigger_selector.currentData(),
                 "threshold": float(self.threshold_input.text().strip()) if mode != "price_change" else 0.0,
                 "cooldown": self.cooldown_input.value(),
@@ -545,34 +553,38 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
 
 
     def load_selected_alert(self):
-        selected = self.alert_list.currentRow()
-        print(f"[DEBUG] Selected row: {selected}")
-        if selected >= 0:
-            alert = self.alerts[selected]
-            print(f"[DEBUG] Loaded alert: {alert}")
-            uid = alert.get("universal_id", "--")
-            self.uid_display.setText(f"Universal ID: {uid}")
-            self.uid_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            self.pair_input.setText(alert.get("pair", ""))
-            self.threshold_input.setText(str(alert.get("threshold", "")))
-            self.cooldown_input.setValue(alert.get("cooldown", 300))
-            self.trigger_selector.setCurrentIndex(
-                self.trigger_selector.findData(alert.get("trigger_type", "price_change"))
-            )
-            mode = self.trigger_selector.currentData()
-            self.update_trigger_mode_fields(mode)
-            self.change_percent_input.setText(str(alert.get("change_percent", "")))
-            self.change_absolute_input.setText(str(alert.get("change_absolute", "")))
-            self.from_asset_input.setText(alert.get("from_asset", ""))
-            self.to_asset_input.setText(alert.get("to_asset", ""))
-            self.from_amount_input.setText(str(alert.get("from_amount", "")))
-            self.exchange_selector.setCurrentText(alert.get("exchange", "coingecko"))
-            self.limit_mode_selector.setCurrentText(alert.get("limit_mode", "forever"))
-            self.limit_count_input.setValue(alert.get("activation_limit") or 1)
-            #if index != -1:
-            #    self.type_selector.setCurrentIndex(index)
-            status_index = 0 if alert.get("active", True) else 1
-            self.active_selector.setCurrentIndex(status_index)
+
+        try:
+            selected = self.alert_list.currentRow()
+            print(f"[DEBUG] Selected row: {selected}")
+            if selected >= 0:
+                alert = self.alerts[selected]
+                print(f"[DEBUG] Loaded alert: {alert}")
+                uid = alert.get("universal_id", "--")
+                self.uid_display.setText(str(f"Universal ID: {uid}") or "")
+                self.uid_display.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                self.pair_input.setCurrentText(str(alert.get("pair", "") or ""))
+                self.threshold_input.setText(str(alert.get("threshold", "")) or "")
+                self.cooldown_input.setValue(int(alert.get("cooldown", 300) or 300))
+                self.trigger_selector.setCurrentIndex(
+                    self.trigger_selector.findData(alert.get("trigger_type", "price_change"))
+                )
+                mode = self.trigger_selector.currentData()
+                self.update_trigger_mode_fields(mode)
+                self.change_percent_input.setText(str(alert.get("change_percent", "")) or "")
+                self.change_absolute_input.setText(str(alert.get("change_absolute", "")) or "")
+                self.from_asset_input.setText(str(alert.get("from_asset", "")) or "")
+                self.to_asset_input.setText(str(alert.get("to_asset", "")) or "")
+                self.from_amount_input.setText(str(alert.get("from_amount", "")) or "")
+                self.exchange_selector.setCurrentText(alert.get("exchange", "coingecko"))
+                self.limit_mode_selector.setCurrentText(alert.get("limit_mode", "forever"))
+                self.limit_count_input.setValue(alert.get("activation_limit") or 1)
+                #if index != -1:
+                #    self.type_selector.setCurrentIndex(index)
+                status_index = 0 if alert.get("active", True) else 1
+                self.active_selector.setCurrentIndex(status_index)
+        except Exception as e:
+            print(f"{e}")
 
     def save_alerts(self):
         try:
@@ -582,7 +594,7 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             print(f"[ALERT PANEL][ERROR] Failed to save alerts: {e}")
 
     def update_price_display(self):
-        pair = self.pair_input.text().strip()
+        pair = self.pair_input.currentText().strip()
         price = self.get_price(pair)
         if price:
             self.price_display.setText(f"Current Price: ${price:,.2f}")

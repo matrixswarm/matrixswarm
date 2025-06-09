@@ -117,7 +117,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log("Price change failure", error=e)
 
-    def _run_price_delta_monitor(self):
+    def _run_price_delta_monitor(self, direction="above"):
         try:
             pair = self._private_config.get("pair", "BTC/USDT")
             threshold_abs = float(self._private_config.get("change_absolute", 1000))
@@ -130,40 +130,18 @@ class Agent(BootAgent):
                 self.log(f"[DEBUG] Initial price set to {self._last_price}")
                 return
 
-            delta = abs(current - self._last_price)
+            delta = current - self._last_price
+            delta_abs = abs(delta)
             self.log(f"[DEBUG] Δ = {delta:.2f} vs threshold {threshold_abs:.2f}")
 
-            if delta >= threshold_abs:
-                self._alert(f"{pair} moved ${delta:.2f} → from {self._last_price} to {current}")
+            condition = (direction == "above" and delta > 0) or (direction == "below" and delta < 0)
+
+            if condition and delta_abs >= threshold_abs:
+                self._alert(f"{pair} moved ${delta_abs:.2f} {direction.upper()} → from {self._last_price} to {current}")
                 self._last_price = current
 
         except Exception as e:
             self.log(error=e)
-
-    def _run_price_change_monitor(self):
-        try:
-            pair = self._private_config.get("pair", "BTC/USDT")
-            threshold_pct = float(self._private_config.get("change_percent", 1.5))
-            current = self.exchange.get_price(pair)
-            if current is None:
-                self.log("[CRYPTOAGENT][ERROR] No price received.")
-                return
-
-            if self._last_price is None:
-                self._last_price = current
-                self.log(f"[DEBUG] Initial price set to {self._last_price}")
-                return
-
-            delta = abs(current - self._last_price)
-            delta_pct = (delta / self._last_price) * 100
-            self.log(f"[DEBUG] Current: {current}, Previous: {self._last_price}, Δ = {delta:.2f}, Δ% = {delta_pct:.4f}%")
-
-            if delta_pct >= threshold_pct:
-                self._alert(f"{pair} moved {delta_pct:.2f}% → from {self._last_price} to {current}")
-                self._last_price = current
-
-        except Exception as e:
-            self.log("Price change failure", error=e)
 
     def _run_price_threshold(self, mode):
         try:
