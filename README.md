@@ -34,7 +34,7 @@ Strike targets.
 Bury the dead.  
 MatrixSwarm governs a living organism — not a machine.**
 ---
-## 💀 I'm not running a charity. I'm running a swarm.
+## I'm not running a charity. I'm running a swarm.
 
 [☠ Support the Hive ☠](https://ko-fi.com/matrixswarm)
 
@@ -44,7 +44,7 @@ MatrixSwarm governs a living organism — not a machine.**
 ---
 
 
-## ⚔️ Philosophy
+## Philosophy
 
 MatrixSwarm isn’t just code — it’s a world.  
 A breathing hierarchy where agents think, die, and come back.  
@@ -60,7 +60,7 @@ Agents don’t talk through APIs. They talk through **files**.
 
 ---
 
-## 🔧 How It Works
+## How It Works
 
 - Agents are defined in `/agent/{name}/{name}.py`
 - Matrix spawns them into `/pod/{uuid}/`
@@ -71,7 +71,7 @@ Agents don’t talk through APIs. They talk through **files**.
 
 ---
 
-🧠 Why MatrixSwarm Agents Are Revolutionary:
+ Why MatrixSwarm Agents Are Revolutionary:
 
 1. Agents Spawn Without Reloading the Hive
 You don’t restart the OS. You don’t relaunch a service.
@@ -85,7 +85,7 @@ Drop a JSON directive
 Matrix spawns it instantly
 → No global reboot. No daemon restarts. No downtime.
 
-🧬 That’s surgical scale.
+  That’s surgical scale.
 
 2. Agent Replacement = 3-Step Ritual
 Simple. Brutal. Effective.
@@ -108,17 +108,17 @@ That’s hot-swap mutation with memory — something Docker never dreams of.
 
 ---
 
-## 🧠 CLI CONTROL: MATRIX DEPLOYMENT PROTOCOL
+## CLI CONTROL: MATRIX DEPLOYMENT PROTOCOL
 
 MatrixSwarm now comes with a **three-part terminal toolkit**:
 
 ---
 
-### 🚀 Deploy the Swarm – boots a new MatrixSwarm universe.
+### Deploy the Swarm – boots a new MatrixSwarm universe.
 
 ---
 
-### 🚀 `site_boot.py` 
+### `site_boot.py` 
 
 
 
@@ -142,9 +142,9 @@ python3 site_ops/site_boot.py --universe ai --directive test-01
 ---
 
 
-### 💀 Terminate a Universe – Annihilate the Swarm
+### Terminate a Universe – Annihilate the Swarm
 
-### 💀 `site_kill.py`
+### `site_kill.py`
 
 Send a graceful but fatal signal to all agents in a Matrix universe.
 
@@ -163,7 +163,7 @@ python3 site_ops/site_kill.py --universe ai --cleanup
 - Optionally purges stale directories from previous boots
 
 
-### 🛰 List Swarm Activity
+### List Swarm Activity
 
 ```bash
 python3 site_ops/site_list.py
@@ -172,12 +172,12 @@ python3 site_ops/site_list.py
 - Lists all `/matrix/{universe}` trees
 - Shows `latest → boot_uuid` symlinks
 - Scans active PIDs and marks them:
-  - 🔥 **hot (in memory)**
-  - ❄️ **cold (inactive)**
+  -  **hot (in memory)**
+  -  **cold (inactive)**
 
 ---
 
-### 🧬 Example Workflow
+### Example Workflow
 
 ```bash
 # Boot the ai universe using test directive
@@ -194,7 +194,7 @@ You now have **docker-grade control** with zero containers.
 
 ---
 
-## 📡 Reflex RPC + Auto Routing
+## Reflex RPC + Auto Routing
 
 MatrixSwarm now includes structured packet building, command dispatch, and auto-routing:
 
@@ -229,7 +229,7 @@ Place them in `boot_directives/`. Call them with:
 
 ---
 
-### 📁 SiteOps Directory
+### SiteOps Directory
 
 Everything lives under `site_ops/`:
 
@@ -242,11 +242,11 @@ Everything lives under `site_ops/`:
 python3 {root of files}/live_hive_watch.py
 ---
 
-## 🔐 Certificate Generator: `generate_certs.sh`
+## Certificate Generator: `generate_certs.sh`
 
 This script automates SSL certificate creation for both HTTPS and WebSocket layers of your MatrixSwarm deployment.
 
-### 📦 What It Does
+### What It Does
 
 - Wipes any existing certs in `https_certs/` and `socket_certs/`
 - Creates a custom root CA
@@ -254,7 +254,7 @@ This script automates SSL certificate creation for both HTTPS and WebSocket laye
 - Issues WebSocket certs
 - Generates a GUI client certificate (used in secure UIs)
 
-### 🧠 Usage
+### Usage
 
 ```bash
 ./generate_certs.sh <server-ip-or-domain> [--name YourSwarmName]
@@ -267,7 +267,7 @@ This script automates SSL certificate creation for both HTTPS and WebSocket laye
 ./generate_certs.sh matrix.yourdomain.com --name SwarmAlpha
 ```
 
-### 🧬 Output
+### Output
 
 - `https_certs/` — Certs for HTTPS server
 - `socket_certs/` — Certs for secure WebSocket + GUI client
@@ -275,7 +275,7 @@ This script automates SSL certificate creation for both HTTPS and WebSocket laye
 
 ---
 
-### 🚨 Important Notes
+### Important Notes
 
 - You must pass a **domain name or IP address** as the first argument.
 - Certificates are valid for **500 days**.
@@ -326,9 +326,9 @@ On first boot:
 - Logs start flowing into `/comm/`
 
 ---
-## 🧠 Agent Architecture + Tutorial
+## Agent Architecture + Tutorial
 
-### 🧩 Core Concepts
+### Core Concepts
 
 #### Worker Agents
 - Inherit from `BootAgent`
@@ -355,7 +355,7 @@ Available to all agents:
 
 ---
 
-### 📁 Filesystem Structure
+### Filesystem Structure
 Each agent is deployed in two zones:
 
 #### 1. Runtime pod:
@@ -426,7 +426,7 @@ Just fork and submit a pull.
 “This system was built to outlive its creator. Spawn wisely.”
 ```
 
-## 💻 GUI Control Center
+## GUI Control Center
 
 Use the MatrixSwarm GUI to:
 - Inject agents
@@ -441,7 +441,7 @@ python3 gui/matrix_gui.py
 ```
 ---
 
-## 🧠 Agents of Legend
+## Agents of Legend
 | **Agent**                | **Role**                                                                                     |
 |--------------------------|----------------------------------------------------------------------------------------------|
 | 🧠 **MatrixAgent**        | Central cortex — receives all commands, initiates all spawns, signs the tree.               |
