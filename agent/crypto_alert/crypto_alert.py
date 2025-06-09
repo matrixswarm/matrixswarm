@@ -39,12 +39,23 @@ class Agent(BootAgent):
         except Exception as e:
             self.log("Failed to initialize config", error=e)
 
-    def worker(self, config=None):
+    def worker(self,config:dict=None):
 
         if config:
-            self._private_config = config
+            self.log(f"config loaded: {config}")
+
+            if config.get("partial_config"):
+                config = config.copy()  # avoid mutating the caller’s dict
+                config.pop("partial_config", None)
+                self._private_config.update(config)
+                self.log("[WORKER] 🧩 Partial config merged.")
+            else:
+                self._private_config = config
+                self.log("[WORKER] 🔁 Full config applied.")
+
             self._initialized_from_tree = False
-            self.log(f"[WORKER] Config: {config}")
+
+
 
         if not self._initialized_from_tree:
             self.cmd_update_agent_config()
@@ -53,21 +64,58 @@ class Agent(BootAgent):
             self.log("🔇 Agent marked inactive. Exiting cycle.")
             return
 
-        trigger = self._private_config.get("trigger_type", "price_change")
+        trigger = self._private_config.get("trigger_type", "price_change_above")
 
-        if trigger == "price_change":
-            self._run_price_change_monitor()
-        elif trigger == "price_above":
-            self._run_price_threshold("above")
-        elif trigger == "price_below":
-            self._run_price_threshold("below")
-        elif trigger == "asset_conversion":
+        # Break it into base + direction (e.g., price_change_above → price_change + above)
+        if "_" in trigger:
+            base_trigger, direction = trigger.rsplit("_", 1)
+        else:
+            base_trigger = trigger
+            direction = "above"
+
+        if base_trigger == "price_change":
+            self._run_price_change_monitor(direction)
+        elif base_trigger == "price_delta":
+            self._run_price_delta_monitor(direction)
+        elif base_trigger == "price":
+            self._run_price_threshold(direction)
+        elif base_trigger == "asset_conversion":
             self._run_asset_conversion_check()
-        elif trigger == "price_delta":
-            self._run_price_delta_monitor()
+        else:
+            self.log(f"[UNKNOWN TRIGGER] {trigger}")
+
+
 
         interval = int(self._private_config.get("poll_interval", 60))
         interruptible_sleep(self, interval)
+
+    def _run_price_change_monitor(self, direction="above"):
+        try:
+            pair = self._private_config.get("pair", "BTC/USDT")
+            threshold_pct = float(self._private_config.get("change_percent", 1.5))
+            current = self.exchange.get_price(pair)
+            if current is None:
+                self.log("[CRYPTOAGENT][ERROR] No price received.")
+                return
+
+            if self._last_price is None:
+                self._last_price = current
+                self.log(f"[DEBUG] Initial price set to {self._last_price}")
+                return
+
+            delta = current - self._last_price
+            delta_pct = abs(delta / self._last_price) * 100
+            self.log(
+                f"[DEBUG] Current: {current}, Previous: {self._last_price}, Δ = {delta:.2f}, Δ% = {delta_pct:.4f}%")
+
+            condition = (direction == "above" and delta > 0) or (direction == "below" and delta < 0)
+
+            if condition and delta_pct >= threshold_pct:
+                self._alert(f"{pair} moved {delta_pct:.2f}% {direction.upper()} → from {self._last_price} to {current}")
+                self._last_price = current
+
+        except Exception as e:
+            self.log("Price change failure", error=e)
 
     def _run_price_delta_monitor(self):
         try:
@@ -177,8 +225,45 @@ class Agent(BootAgent):
             max_triggers = 1
 
         if self.trigger_hits >= max_triggers:
-            self.log("[CRYPTOAGENT] 🎯 Max triggers reached. Sending kill packet.")
-            self._self_destruct()
+            self.log("[CRYPTOAGENT] 🎯 Max triggers reached. Marking agent inactive.")
+            self._private_config["active"] = False
+            self._save_config_patch()
+            return  # stop further work this cycle
+
+    def _save_config_patch(self):
+        try:
+            uid = self.command_line_args.get("universal_id", "unknown")
+            patch = {
+                "target_universal_id": uid,
+                "config": {"active": False},
+                "push_live_config": True,
+                "respond_to": "crypto_gui_1",
+                "handler_role": "hive.rpc.route",
+                "handler": "cmd_rpc_route",
+                "response_handler": "rpc_result_update_agent",
+                "response_id": f"{uid}-deactivate"
+            }
+
+            pkt = self.get_delivery_packet("standard.command.packet")
+            pkt.set_data({
+                "handler": "cmd_update_agent",
+                "content": patch
+            })
+
+            da = self.get_delivery_agent("file.json_file", new=True)
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address(["matrix"]) \
+                .set_drop_zone({"drop": "incoming"}) \
+                .set_packet(pkt) \
+                .deliver()
+
+            if da.get_error_success() == 0:
+                self.log("[AGENT] Inactivation patch delivered.")
+            else:
+                self.log(f"[AGENT][PATCH-FAIL] {da.get_error_success_msg()}")
+
+        except Exception as e:
+            self.log("Error saving config patch", error=e)
 
     def _self_destruct(self):
         try:
@@ -206,23 +291,21 @@ class Agent(BootAgent):
 
     def alert_operator(self, message):
 
-        handler_role = self._private_config.get("handler_role")
-        handler = self._private_config.get("handler")
-        response_handler = self._private_config.get("response_handler")
-        response_id = f"{self.command_line_args.get('universal_id')}-alert-{int(time.time())}"
+        alert_handler = self._private_config.get("alert_handler")
+        alert_role = self._private_config.get("alert_role")
 
-        if not all([handler_role, handler, response_handler]):
+        if not all([alert_handler, alert_role]):
             self.log("Alert dispatch missing routing fields", block="ALERT_HANDLER")
             return
 
         pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": handler})
+        pk1.set_data({"handler": alert_handler})
 
         pk2 = self.get_delivery_packet("notify.alert.general", new=True)
         pk2.set_data({
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "universal_id": self.command_line_args.get("universal_id", "unknown"),
-            "level": "info",
+            "level": "critical",
             "msg": message,
             "formatted_msg": f"📈 Crypto Alert\n{message}",
             "cause": "Crypto Alert",
@@ -231,7 +314,7 @@ class Agent(BootAgent):
 
         pk1.set_packet(pk2, "content")
 
-        for node in self.get_nodes_by_role(handler_role):
+        for node in self.get_nodes_by_role(alert_role):
             da = self.get_delivery_agent("file.json_file", new=True)
             da.set_location({"path": self.path_resolution["comm_path"]}) \
               .set_address([node["universal_id"]]) \

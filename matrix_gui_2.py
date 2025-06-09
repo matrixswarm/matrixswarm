@@ -109,7 +109,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         self.log_scroll_timer.start(100)  # Scroll every 100ms (adjust as needed)
 
         for alert in self.alert_panel.alerts:
-            self.alert_panel.dispatch_agent(alert)
+            self.alert_panel.send_agent_payload(alert, partial=False)
 
 
     def slow_scroll_log(self):

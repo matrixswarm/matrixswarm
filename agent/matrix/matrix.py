@@ -737,13 +737,8 @@ class Agent(BootAgent):
 
             if content.get("push_live_config", False):
                 try:
-                    pk1 = self.get_delivery_packet("standard.command.packet")
-                    pk1.set_data({
-                        "handler": "_cmd_update_agent_config",
-                        "content": {
-                            "tree_node": node
-                        }
-                    })
+                    pk1 = self.get_delivery_packet("standard.general.json.packet")
+                    pk1.set_data(node["config"])
 
                     da = self.get_delivery_agent("file.json_file", new=True)
                     da.set_location({"path": self.path_resolution["comm_path"]}) \
@@ -862,7 +857,6 @@ class Agent(BootAgent):
 
         parent = content.get("target_universal_id")
         subtree = content.get("subtree")
-
         # error_codes
         # 0 success agent spawned
         # 1 TreeParse not returned from load_directive
@@ -944,17 +938,25 @@ class Agent(BootAgent):
                     self.log(f"[DEBUG] rejected IDs: {ret["rejected"]}")
                     self.log(f"[DEBUG] duplicates IDs: {ret["duplicates"]}")
 
-                    if bool(ret["duplicates"]) and content.get("partial_config", False):
+                    push_live_config_on_duplicate = content.get("push_live_config", False)
+                    #this will delive a partial_config update, if a duplicate is found and it's flagged partial_config
+                    if (
+                        push_live_config_on_duplicate and
+                        bool(len(ret["duplicates"]))
+                        ):
+
                         # Check if agent exists
-                        existing_node = tp.get_node(universal_id)
-                        config = subtree.get("config", {})
-                        if existing_node and bool(len(config)):
-                            # Send config update instead of re-injection
-                            self.cmd_update_agent({
-                                "target_universal_id": universal_id,
-                                "config": config,
-                                "push_live_config": True
-                            }, packet)
+                        self.log('Entering the Thunderdome.')
+                        if push_live_config_on_duplicate and bool(len(ret["duplicates"])):
+                            existing_node = tp.get_node(universal_id)
+                            config = subtree.get("config", {})
+                            if existing_node and bool(config):
+                                # THIS is the important push
+                                self.cmd_update_agent({
+                                    "target_universal_id": universal_id,
+                                    "config": config,
+                                    "push_live_config": True
+                                }, packet)
                             ret["status"] = "success"
                             ret["message"] = f"Agent already existed — config partially updated for {universal_id}"
                             return ret

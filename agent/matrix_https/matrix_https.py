@@ -124,8 +124,8 @@ class Agent(BootAgent):
                                     except Exception as e:
                                         rendered_lines.append(f"[MALFORMED] {line.strip()}")
 
-                            #output = "\n".join(rendered_lines[-250:])
-                            output = "\n".join(rendered_lines)
+                            output = "\n".join(rendered_lines[-250:])
+                            #output = "\n".join(rendered_lines)
                             self.log(f"[LOG-DELIVERY] ✅ Sent {len(rendered_lines)} lines for {uid}")
                             return Response(
                                 json.dumps({"status": "ok", "log": output}, ensure_ascii=False),
