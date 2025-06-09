@@ -2,7 +2,7 @@
   {
     "pair": "ETH/USDT",
     "type": "price_above",
-    "threshold": 2494.0,
+    "threshold": 2600.0,
     "cooldown": 300,
     "notify": [
       "gui"
