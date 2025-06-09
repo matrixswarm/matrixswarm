@@ -597,6 +597,7 @@ No PR is too small. No mission is without meaning.
 
 [![Powered by MatrixSwarm](https://img.shields.io/badge/Swarm-Matrix-green)](https://github.com/matrixswarm/matrixswarm)
 
+[![License: MatrixSwarm Community v1.1](https://img.shields.io/badge/license-MatrixSwarm%20Community-brightgreen)](/LICENSE.md)
 
 ### 🔐 Authorship Verified
 
