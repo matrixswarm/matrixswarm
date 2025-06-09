@@ -171,15 +171,12 @@ class Agent(BootAgent):
 
     def cmd_rpc_route(self, content, packet):
         try:
-            self.log("[RPC-ROUTE] Incoming routed RPC packet.")
+            self.log("Incoming routed RPC packet.")
 
             self.cmd_broadcast(content, content)
-            self.log(f"[RPC-ROUTE] Routed response_id={content.get('response_id')} status={content.get('status')}")
+            self.log(f"Routed response_id={content.get('response_id')} status={content.get('status')}")
         except Exception as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[WS][CMD_RPC_ROUTE][ERROR] {err}")
-            self.log(stack)  # Optional: write full trace to logs
+            self.log(error=e)  # Optional: write full trace to logs
 
     def cmd_send_alert_msg(self, content, packet):
         try:
@@ -202,15 +199,12 @@ class Agent(BootAgent):
             # Dispatch it via WebSocket
             self.cmd_broadcast(broadcast_packet["content"], broadcast_packet)
 
-            self.log("[WS] Alert message sent to GUI feed.")
+            self.log("Alert message sent to GUI feed.")
         except Exception as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[WS][CMD_SEND_ALERT_MSG][ERROR] {err}")
-            self.log(stack)  # Optional: write full trace to logs
+            self.log(error=e)  # Optional: write full trace to logs
 
     def cmd_alert_to_gui(self, content, packet):
-        self.log(f"[ALERT] Dispatching alert to GUI: {content}")
+        self.log(f"Dispatching alert to GUI: {content}")
         self.cmd_broadcast(content, packet)
 
     def cmd_broadcast(self, content, packet):
@@ -237,11 +231,7 @@ class Agent(BootAgent):
 
             self.log(f"[WS][REFLEX] Broadcasted to {len(self.clients)} clients.")
         except Exception as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[WS][CMD_BROADCAST][ERROR] {err}")
-            self.log(stack)  # Optional: write full trace to logs
-
+            self.log(error=e)
 
 if __name__ == "__main__":
     agent = Agent()

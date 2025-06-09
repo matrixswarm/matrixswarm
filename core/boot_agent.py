@@ -598,8 +598,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         if not isinstance(config, dict):
                             config=None
                         else:
-
-                            self.log(f"[WORKER]['CONFIG'] loaded config: {config}")
+                            pass
+                            #self.log(f"[WORKER]['CONFIG'] loaded config: {config}")
 
                         now = time.time()
                         if (last_worker_cycle_execution + 30) < now:

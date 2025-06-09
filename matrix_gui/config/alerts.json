@@ -2,18 +2,16 @@
   {
     "pair": "BTC/USDT",
     "type": "price_above",
-    "threshold": 105720.0,
+    "threshold": 106000.0,
     "cooldown": 300,
     "notify": [
       "gui"
     ],
     "universal_id": "crypto-btcusdt-5c6826",
-    "dispatched": null,
-    "confirmed": false,
-    "exchange": "coingecko",
-    "limit_mode": "1",
-    "activation_limit": null,
-    "active": false,
+    "exchange": "coinbase",
+    "limit_mode": "custom",
+    "activation_limit": 2,
+    "active": true,
     "trigger_type": "price_above",
     "poll_interval": 60,
     "change_percent": null,
