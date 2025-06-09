@@ -1,5 +1,14 @@
 # **MATRIXSWARM**  
-# **THE FIRST AI OPERATING SYSTEM**
+<pre>
+███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
+██╔════╝██║    ██║██╔══██╗██╔══██╗████╗ ████║
+███████╗██║ █╗ ██║███████║██████╔╝██╔████╔██║
+╚════██║██║███╗██║██╔══██║██╔═══╝ ██║╚██╔╝██║
+███████║╚███╔███╔╝██║  ██║██║     ██║ ╚═╝ ██║
+╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝     ╚═╝     ╚═╝
+         MATRIXSWARM v0.2 "STORMCROW"
+        Reflex. Resurrection. Real-time RPC.
+</pre>
 ## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.  
 ## No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
 
@@ -184,6 +193,19 @@ python3 site_ops/site_list.py
 You now have **docker-grade control** with zero containers.
 
 ---
+
+## 📡 Reflex RPC + Auto Routing
+
+MatrixSwarm now includes structured packet building, command dispatch, and auto-routing:
+
+- `PacketFactoryMixin`: Easily create swarm-compatible command packets
+- `PacketDeliveryFactoryMixin`: Route layered payloads via GUI or agent
+- `WebSocket Reflexes`: Agents and GUI now respond to reflex triggers in real time
+- `cmd_forward_command`: Core packet for nested targeting
+- `cmd_hotswap_agent`: Inject new logic into a live pod — no downtime
+
+**New relay agents** handle command injection, resurrection, and lifecycle events without rebooting the core.
+
 
 ### ⚡ Directives Made Easy
 
