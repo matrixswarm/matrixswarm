@@ -59,5 +59,24 @@ matrix_directive = {
                     }
 
             },
+{
+            "universal_id": "telegram-bot-father-2",
+            "name": "telegram_relay",
+            "app": "mysql-demo",
+            "filesystem": {
+                "folders": []
+            },
+            "config": {
+                "bot_token": os.getenv("TELEGRAM_API_KEY"),
+                "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+                "service-manager": [{
+                    "role": ["comm", "comm.security", "comm.*, hive.alert.send_alert_msg"],
+                    "scope": ["parent", "any"],     # who it serves
+                    "auth": {"sig": True},
+                    "priority": 10,                # lower = more preferred
+                    "exclusive": False             # can other services respond?
+                }]
+            }
+        },
         ]
     }

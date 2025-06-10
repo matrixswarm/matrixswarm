@@ -10,6 +10,8 @@ from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
+
+
     def __init__(self):
         super().__init__()
         self.name = "CryptoAgent"
@@ -41,50 +43,53 @@ class Agent(BootAgent):
 
     def worker(self,config:dict=None):
 
-        if config:
-            self.log(f"config loaded: {config}")
+        try:
 
-            if config.get("partial_config"):
-                config = config.copy()  # avoid mutating the caller’s dict
-                config.pop("partial_config", None)
-                self._private_config.update(config)
-                self.log("[WORKER] 🧩 Partial config merged.")
+            if config and isinstance(config, dict):
+                self.log(f"config loaded: {config}")
+
+                if config.get("partial_config"):
+                    config = config.copy()  # avoid mutating the caller’s dict
+                    config.pop("partial_config", None)
+                    self._private_config.update(config)
+                    self.log("[WORKER] 🧩 Partial config merged.")
+                else:
+                    self._private_config = config
+                    self.log("[WORKER] 🔁 Full config applied.")
+
+                self._initialized_from_tree = False
+
+            if not self._initialized_from_tree:
+                self.cmd_update_agent_config()
+
+            if not self._private_config.get("active", True):
+                self.log("🔇 Agent marked inactive. Exiting cycle.")
+                return
+
+            trigger = self._private_config.get("trigger_type", "price_change_above")
+
+            # Break it into base + direction (e.g., price_change_above → price_change + above)
+            if "_" in trigger:
+                base_trigger, direction = trigger.rsplit("_", 1)
             else:
-                self._private_config = config
-                self.log("[WORKER] 🔁 Full config applied.")
+                base_trigger = trigger
+                direction = "above"
 
-            self._initialized_from_tree = False
-
-
-
-        if not self._initialized_from_tree:
-            self.cmd_update_agent_config()
-
-        if not self._private_config.get("active", True):
-            self.log("🔇 Agent marked inactive. Exiting cycle.")
-            return
-
-        trigger = self._private_config.get("trigger_type", "price_change_above")
-
-        # Break it into base + direction (e.g., price_change_above → price_change + above)
-        if "_" in trigger:
-            base_trigger, direction = trigger.rsplit("_", 1)
-        else:
-            base_trigger = trigger
-            direction = "above"
-
-        if base_trigger == "price_change":
-            self._run_price_change_monitor(direction)
-        elif base_trigger == "price_delta":
-            self._run_price_delta_monitor(direction)
-        elif base_trigger == "price":
-            self._run_price_threshold(direction)
-        elif base_trigger == "asset_conversion":
-            self._run_asset_conversion_check()
-        else:
-            self.log(f"[UNKNOWN TRIGGER] {trigger}")
+            if base_trigger == "price_change":
+                self._run_price_change_monitor(direction)
+            elif base_trigger == "price_delta":
+                self._run_price_delta_monitor(direction)
+            elif base_trigger == "price":
+                self._run_price_threshold(direction)
+            elif base_trigger == "asset_conversion":
+                self._run_asset_conversion_check()
+            else:
+                self.log(f"[UNKNOWN TRIGGER] {trigger}")
 
 
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
         interval = int(self._private_config.get("poll_interval", 60))
         interruptible_sleep(self, interval)
@@ -266,6 +271,44 @@ class Agent(BootAgent):
 
         except Exception as e:
             self.log(error=e)
+
+    def _send_rpc_update(self, payload):
+        try:
+            alert_role = self._private_config.get("rpc_router_role", "hive.rpc.route")
+            handler = self._private_config.get("rpc_push_handler", "crypto_agent_update")
+
+            if not alert_role:
+                self.log("[RPC] No routing role defined. Skipping reflex broadcast.")
+                return
+
+            pk1 = self.get_delivery_packet("standard.command.packet")
+            pk1.set_data({"handler": "cmd_forward_command"})
+
+            pk2 = self.get_delivery_packet("standard.general.json.packet", new=True)
+            pk2.set_data({
+                "handler": handler,
+                "filetype": "msg",
+                "content": payload
+            })
+
+            pk1.set_packet(pk2, "content")
+
+            # Broadcast to all gang members with that role
+            for node in self.get_nodes_by_role(alert_role):
+                da = self.get_delivery_agent("file.json_file", new=True)
+                da.set_location({"path": self.path_resolution["comm_path"]}) \
+                    .set_address([node["universal_id"]]) \
+                    .set_drop_zone({"drop": "incoming"}) \
+                    .set_packet(pk1) \
+                    .deliver()
+
+                if da.get_error_success() == 0:
+                    self.log(f"[HOWDY-RPC] 🎯 Delivered to {node['universal_id']}")
+                else:
+                    self.log(f"[HOWDY-RPC][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
+
+        except Exception as e:
+            self.log("Captain Howdy RPC dispatch failed", error=e, block="captain_howdy_main_try")
 
     def alert_operator(self, message):
 

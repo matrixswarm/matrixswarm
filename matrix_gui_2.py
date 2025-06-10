@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import (
     QTextEdit, QStatusBar, QSizePolicy, QStackedLayout, QCheckBox, QComboBox
 )
 from PyQt5.QtWidgets import QDesktopWidget
+from PyQt5.QtWidgets import QMessageBox
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject
@@ -26,6 +27,7 @@ import json
 from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
+
 
 class AutoScrollList(QListWidget):
     def __init__(self, *args, **kwargs):
@@ -783,11 +785,10 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
     def _handle_logs_result(self, result, uid):
         print(f"[UI] Handling log result for {uid}")
 
-        log_data = result.get("json", {}).get("log", "")
-
-        if not log_data:
-            log_data = result.get("text", "")
-            print(f"[WARN] Fallback to raw text for {uid}")
+        try:
+            log_data = result["json"]["log"]
+        except (KeyError, TypeError):
+            log_data = "[ERROR] No decrypted log returned from Matrix."
 
         if not log_data:
             print(f"[ERROR] No log data found for {uid}")
@@ -816,6 +817,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
 
     def build_log_panel(self):
         box = QGroupBox("📡 Agent Intel Logs")
+        box.setObjectName("log_panel")
         layout = QVBoxLayout()
 
         self.log_input = QLineEdit()
@@ -1111,6 +1113,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
 
     def build_command_panel(self):
         box = QGroupBox("🧩 Mission Console")
+        box.setObjectName("mission_panel")
         layout = QVBoxLayout()
         layout.setSpacing(6)
 
@@ -1123,9 +1126,19 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
             widget.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
             layout.addWidget(widget)
 
+        #zipcode change for sever weather
+        #_label = QLabel("Update Zipcode")
+        #zipcode_label.setStyleSheet("color: #33ff33; font-family: Courier;")
+        #layout.addWidget(zipcode_label)
 
-        #self.upload_btn = QPushButton("Upload Agent Code")
-        #self.upload_btn.clicked.connect(self.upload_agent_code)
+        #self.zipcode_entry = QLineEdit()
+        #self.zipcode_entry.setPlaceholderText("Enter ZIP code, e.g. 90210")
+        #self.zipcode_entry.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
+        #layout.addWidget(self.zipcode_entry)
+
+        #push_btn = QPushButton("📡 Push Zip to Agent")
+        #push_btn.clicked.connect(self.push_zipcode_to_agent)
+        #layout.addWidget(push_btn)
 
         self.hotswap_btn = QPushButton("🔥 Hotswap")
         self.hotswap_btn.clicked.connect(self.hotswap_agent_code)
@@ -1168,11 +1181,50 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         toggle_btn.clicked.connect(lambda: self.stack.setCurrentIndex(1))
         toggle_btn.setStyleSheet("background-color: #000; color: #00ff66; font-weight: bold;")
         layout.addWidget(toggle_btn)
-
-
-
         box.setLayout(layout)
         return box
+
+    def push_zipcode_to_agent(self):
+
+        try:
+            zip_code = self.zipcode_entry.get().strip()
+            target_uid = self.input_universal_id.text().strip()
+
+            if not zip_code or not target_uid:
+                QMessageBox.warning(self, "Missing Info", "Enter a zipcode and select a target agent.")
+                return
+
+            payload = {
+                "type": "cmd_update_agent",
+                "timestamp": time.time(),
+                "content": {
+                    "target_universal_id": target_uid,
+                    "config": {
+                        "zip-code": zip_code
+                    },
+                    "push_live_config": True
+                }
+            }
+
+            try:
+                import requests
+                response = requests.post(
+                    url=MATRIX_HOST,
+                    json=payload,
+                    cert=CLIENT_CERT,
+                    verify=False,
+                    timeout=REQUEST_TIMEOUT
+                )
+
+                if response.status_code == 200:
+                    QMessageBox.warning(self, "Success", f"Zipcode {zip_code} pushed to {target_uid}.")
+                else:
+                    QMessageBox.warning(self, "Matrix Error", f"{response.status_code}: {response.text}")
+            except Exception as e:
+                QMessageBox.warning(self, "Connection Failed", str(e))
+
+        except Exception as e:
+            print(f"{e}")
 
     def send_reboot_agent(self):
 
@@ -1272,6 +1324,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
 
     def build_tree_panel(self):
         box = QGroupBox("🧠 Hive Tree View")
+        box.setObjectName("tree_group")
         layout = QVBoxLayout()
 
         # Tree loading label
@@ -1550,6 +1603,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
 
     def build_autoscroll_left_panel(self):
         box = QGroupBox("📡 Incoming WebSocket Feed")
+        box.setObjectName("ws_feed_panel")
         layout = QVBoxLayout()
 
         self.ws_feed_display = AutoScrollList()
@@ -1585,32 +1639,69 @@ if __name__ == '__main__':
     dark_palette.setColor(app.palette().WindowText, QColor("#33ff33"))
     app.setPalette(dark_palette)
     app.setStyleSheet("""
-                QWidget {
-                    background-color: #121212;
-                    color: #33ff33;
-                    font-family: Courier;
-                }
-                QLineEdit, QTextEdit, QListWidget, QPushButton {
-                    background-color: #000;
-                    color: #33ff33;
-                    border: 1px solid #00ff66;
-                }
-                QGroupBox {
-                    color: #33ff33;
-                    border: 1px solid #00ff66;
-                    margin-top: 1ex;
-                    font-weight: bold;
-                }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    subcontrol-position: top center;
-                    padding: 0 3px;
-                    color: #33ff33;
-                }
-                QPushButton:hover {
-                    background-color: #1e1e1e;
-                }
-            """)
+        QWidget {
+            background-color: #121212;
+            color: #33ff33;
+            font-family: Consolas, Courier, monospace;
+            font-size: 13px;
+        }
+
+        QLineEdit, QTextEdit, QListWidget, QPushButton, QComboBox {
+            background-color: #000;
+            color: #33ff33;
+            border: 1px solid #00ff66;
+            padding: 4px;
+        }
+
+        QComboBox::drop-down {
+            width: 24px;
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            border-left: 1px solid #00ff66;
+        }
+
+        QComboBox::down-arrow {
+            image: none;
+            width: 14px;
+            height: 14px;
+            border: 1px solid #00ff66;
+            border-radius: 4px;
+            background-color: #00ff66;
+        }
+
+        QComboBox QAbstractItemView {
+            background-color: #111;
+            border: 1px solid #00ff66;
+            selection-background-color: #00ff66;
+            selection-color: #000;
+        }
+
+        QGroupBox {
+            border: none;  /* ✅ Kill the default box */
+            background-color: #101010;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 8px 0;
+        }
+
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            padding: 0 6px;
+            color: #00ff66;
+        }
+
+        QPushButton:hover {
+            background-color: #1e1e1e;
+        }
+        QGroupBox#tree_group, QGroupBox#log_panel, QGroupBox#mission_panel, QGroupBox#ws_feed_panel {
+            border: 1px solid #00ff66;
+            border-radius: 4px;
+            margin: 4px;
+            padding: 6px;
+            background-color: #111;
+        }
+    """)
 
     window = MatrixCommandBridge()
     window.show()
