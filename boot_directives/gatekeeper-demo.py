@@ -202,7 +202,7 @@ matrix_directive = {
                     "reflex.health.status_report": {}
                 },
                 "service-manager": [{
-                    "role": ["hive.alert.send_alert_msg"],
+                    "role": ["hive.alert.send_alert_msg, hive.rpc.route"],
                     "scope": ["parent", "any"],     # who it serves
                     "auth": {"sig": True},
                     "priority": 10,                # lower = more preferred
@@ -213,16 +213,7 @@ matrix_directive = {
             "filesystem": {},
             "delegated": []
         },
-        {
-          "universal_id": "crypto-alert-agent",
-          "name": "crypto_alert",
-          "description": "Monitors cryptocurrency price triggers using alert configs stored in /config/alerts.json. Sends encrypted alerts to matrix swarm endpoints when thresholds are hit.",
-          "config": {
-                "check_interval_sec": 5,
-                "default_cooldown_sec": 300,
-                "roles": ["hive.crypto.alerts"],
-          }
-        },
+
         {
             "universal_id": "discord-delta-5",
             "name": "discord",
@@ -260,6 +251,19 @@ matrix_directive = {
                     "exclusive": False             # can other services respond?
                 }]
             }
+        },
+        {
+            "universal_id": "storm-crow",
+            "name": "storm_crow",
+            "delegated": [],
+            "description": "Watches for server weather alerts for your area.",
+            "config": {
+                "zip-code": os.getenv("WEATHER_ZIPCODE"),
+                "service-manager": [{
+                    "alert-handler": ["hive.alert.send_alert_msg"], #setup discord, telegram, websocket to use this role to receive alerts from storm-crow,
+                }]
+            }
+
         },
 
     ]

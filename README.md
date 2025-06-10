@@ -409,7 +409,7 @@ Boom. Agent spawned. Directory structure built. Logs flowing.
 
 ✅ Load-aware dynamic throttling
 
-🛠️ Contribute or Extend
+Contribute or Extend
 
 You can:
 
@@ -469,7 +469,7 @@ python3 gui/matrix_gui.py
 
 ---
 
-### 🧠 How MatrixSwarm Was Created
+### How MatrixSwarm Was Created
 
 MatrixSwarm was not written by ChatGPT while someone watched.
 
@@ -494,7 +494,7 @@ You’re joining a living swarm.
 
 ---
 
-## 🧬 Join the Hive
+## Join the Hive
 
 If you:
 - Think in systems
@@ -503,13 +503,13 @@ If you:
 
 You’re home.
 
-### 🧠 Discord Now Live — Join the MatrixSwarm
+### Discord Now Live — Join the MatrixSwarm
 
 The Swarm is no longer silent.
 
 Our Discord relay agent is online and responding.  
 Come test the agents, submit lore, log a Codex entry, and witness the first autonomous system that talks back.
-🔗 [Join the Swarm](https://discord.com/invite/yPJyTYyq5F)
+[Join the Swarm](https://discord.com/invite/yPJyTYyq5F)
 
 ---
 
@@ -533,7 +533,7 @@ Edit
 
 > **spawn@matrixspawn.com**  
 
-💬 Send missions. I’ll respond.
+Send missions. I’ll respond.
 
 ---
 
@@ -559,14 +559,14 @@ For commercial licensing inquiries, please contact **swarm@matrixswarm.com**.
 Please read the full license text in the `LICENSE.md` file for complete details.
 
 
-## 📖 Dev.to Series
+## Dev.to Series
 
 - [The Hive Is Recruiting]
 - [Spawn. Delegate. Terminate. Repeat.]
 - [MatrixSwarm Manifesto] 
 - [OracleAgent — From Spawn to Prophecy] 
 ---
-## ⚠️ Use at Your Own Risk
+## Use at Your Own Risk
 
 This system has not been fully tested in all environments.
 MatrixSwarm is still evolving.
@@ -576,7 +576,7 @@ We make no guarantees that your agents won’t terminate your system. We do not 
 You run it. You control it. You deal with it.
 
 ---
-## 🛡 Status
+## Status
 
 MatrixSwarm is pre-release. Core agents are operational. GUI is live. Lore banners are encoded.
 
@@ -587,9 +587,7 @@ We are currently recruiting contributors who want to:
 
 No PR is too small. No mission is without meaning.
 
-🧠⚔️
-
-### 🧬 Codex Exit Clause
+### Codex Exit Clause
 
 **MatrixSwarm is open.**  
 **Fork it.**  
@@ -599,7 +597,7 @@ No PR is too small. No mission is without meaning.
 
 [![License: MatrixSwarm Community v1.1](https://img.shields.io/badge/license-MatrixSwarm%20Community-brightgreen)](/LICENSE.md)
 
-### 🔐 Authorship Verified
+### Authorship Verified
 
 MatrixSwarm was co-created by Daniel F. MacDonald and ChatGPT-4.
 

@@ -101,9 +101,11 @@ class Agent(BootAgent):
                     if os.path.exists(log_path):
                         try:
                             key_bytes = None
+                            self.log("[DEBUG] ENCRYPTION_CONFIG is_enabled = %s" % ENCRYPTION_CONFIG.is_enabled())
                             if ENCRYPTION_CONFIG.is_enabled():
                                 swarm_key = ENCRYPTION_CONFIG.get_swarm_key()
                                 key_bytes = base64.b64decode(swarm_key)
+                                self.log(f"[DEBUG] Swarm key loaded: {swarm_key[:10]}...")
 
                             rendered_lines = []
 
@@ -134,7 +136,7 @@ class Agent(BootAgent):
                             )
 
                         except Exception as e:
-                            self.log(f"[HTTPS-LOG][ERROR] Could not process log for {uid}: {e}")
+                            self.log(f"[HTTPS-LOG][ERROR] Could not process log for {uid}", error=e)
                             return jsonify({"status": "error", "message": str(e)}), 500
 
 
@@ -238,7 +240,7 @@ class Agent(BootAgent):
                 self.log(f"[HTTPS-LOG][ERROR] Could not process log for {uid}: {e}")
                 return client_response({"status": "error", "message": str(e)}, 500)
 
-        def decrypt_log_line(self, line, key_bytes):
+        def decrypt_log_line(line, key_bytes):
             try:
                 blob = base64.b64decode(line.strip())
                 nonce, tag, ciphertext = blob[:12], blob[12:28], blob[28:]

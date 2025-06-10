@@ -11,82 +11,60 @@ from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
+
     def __init__(self):
         super().__init__()
         self.name = "StormCrow"
-        self.api_key = os.getenv("WEATHER_API_KEY")  # OpenWeather or NWS-style
-        self.lat = os.getenv("WEATHER_LAT", "46.87")
-        self.lon = os.getenv("WEATHER_LON", "-68.01")
-        self.alert_endpoint = f"https://api.weather.gov/alerts/active?point={self.lat},{self.lon}"
-        self.last_alert_ids = set()
+        self._initialized_from_tree = False
+        self._private_config = self.tree_node.get("config", {})
+
+    def cmd_update_agent_config(self):
+
+        try:
+
+            self._initialized_from_tree = True
+            # Support ZIP code override
+            self.zipcode = self._private_config.get("zip-code") or os.getenv("WEATHER_ZIPCODE")
+
+            self.log(f"🌪 [HOWDY] We've moved. StormCrow now watches over ZIP: {self.zipcode}")
+
+            if self.zipcode:
+                self.lat, self.lon = self.resolve_zip_to_latlon(self.zipcode)
+            else:
+                self.lat = os.getenv("WEATHER_LAT", "37.7749")
+                self.lon = os.getenv("WEATHER_LON", "-122.4194")
+
+            self.alert_endpoint = f"https://api.weather.gov/alerts/active?point={self.lat},{self.lon}"
+            self.last_alert_ids = set()
+
+        except Exception as e:
+            self.log("Failed to initialize config", error=e)
 
     def pre_boot(self):
-        self.log("[STORMCROW] Pre-boot weather alert initialization complete.")
+        self.log("Pre-boot weather alert initialization complete.")
 
     def post_boot(self):
-        self.log("[STORMCROW] Agent is live and scanning the sky.")
-
-    def fetch_alerts(self):
-        try:
-            resp = requests.get(self.alert_endpoint, headers={"User-Agent": "StormCrow-Agent"}, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            features = data.get("features")
-            if not isinstance(features, list):
-                self.log(f"[STORMCROW][ERROR] Unexpected response shape: {data}")
-                return []
-            return features
-        except requests.exceptions.RequestException as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[STORMCROW]['FETCH_ALERTS][NETWORK-FAIL] {err}")
-            self.log(stack)  # Optional: write full trace to logs
-        except Exception as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[STORMCROW]['FETCH_ALERTS][NETWORK-FAIL]] Unhandled fetch failure:  {err}")
-            self.log(stack)  # Optional: write full trace to logs
-
-        return []
-
-    def alert_operator(self, title, message):
-        pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": "cmd_send_alert_msg"})
-
-        pk2 = self.get_delivery_packet("notify.alert.general")
-        pk2.set_data({
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "universal_id": self.command_line_args.get("universal_id", "unknown"),
-            "level": "warning",
-            "msg": message,
-            "formatted_msg": f"🌩 {title}\n{message}",
-            "cause": "StormCrow Severe Weather Alert",
-            "origin": self.command_line_args.get("universal_id", "unknown")
-        })
-
-        pk1.set_packet(pk2, "content")
-
-        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
-        if not alert_nodes:
-            self.log("[STORMCROW][ALERT] No alert-compatible agents found.")
-            return
-
-        for node in alert_nodes:
-            da = self.get_delivery_agent("file.json_file", new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-              .set_address([node["universal_id"]]) \
-              .set_drop_zone({"drop": "incoming"}) \
-              .set_packet(pk1) \
-              .deliver()
-
-            if da.get_error_success() != 0:
-                self.log(f"[STORMCROW][ALERT][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
-            else:
-                self.log(f"[STORMCROW][ALERT] Delivered to {node['universal_id']}")
+        self.log("Agent is live and scanning the sky.")
+        self.log("╔════════════════════════════════════════════════╗")
+        self.log("║ 🤡 CAPTAIN HOWDY IS WATCHING THE WEATHER       ║")
+        self.log("║ 🛰️  StormCrow is deployed. Sky tracking is HOT ║")
+        self.log("║ 🧠 Reflexes armed. Sirens ready.               ║")
+        self.log("╚════════════════════════════════════════════════╝")
 
     def worker(self, config: dict = None):
         try:
-            self.log("[STORMCROW] Worker loop scanning for severe weather alerts...")
+
+            if config and isinstance(config, dict):
+
+                self.log(f"config loaded: {config}")
+                self._private_config = config
+                self.log("[WORKER] 🔁 Full config applied.")
+                self._initialized_from_tree = False
+
+            if not self._initialized_from_tree:
+                self.cmd_update_agent_config()
+
+
             alerts = self.fetch_alerts()
             if not alerts:
                 self.log("[STORMCROW] ✅ NWS returned no alerts.")
@@ -109,11 +87,82 @@ class Agent(BootAgent):
             interruptible_sleep(self, 900)
 
         except Exception as e:
-            err = str(e)
-            stack = traceback.format_exc()
-            self.log(f"[STORMCROW] Worker crashed mid-cycle: {err}")
-            self.log(stack)  # Optional: write full trace to logs
+            self.log(error=e, block="main_try")
             interruptible_sleep(self, 60)
+
+
+    def fetch_alerts(self):
+        try:
+            resp = requests.get(self.alert_endpoint, headers={"User-Agent": "StormCrow-Agent"}, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            features = data.get("features")
+            if not isinstance(features, list):
+                self.log(f"Unexpected response shape: {data}")
+                return []
+            return features
+        except requests.exceptions.RequestException as e:
+            self.log(error=e, block="main_try")
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
+        return []
+
+    def alert_operator(self, title, message):
+        pk1 = self.get_delivery_packet("standard.command.packet")
+        pk1.set_data({"handler": "cmd_send_alert_msg"})
+
+        pk2 = self.get_delivery_packet("notify.alert.general")
+        pk2.set_data({
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "universal_id": self.command_line_args.get("universal_id", "unknown"),
+            "level": "warning",
+            "msg": message,
+            "formatted_msg": f"🌩 {title}\n{message}",
+            "cause": "StormCrow Severe Weather Alert",
+            "origin": self.command_line_args.get("universal_id", "unknown")
+        })
+
+        pk1.set_packet(pk2, "content")
+
+        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
+        if not alert_nodes:
+            self.log("No alert-compatible agents found.")
+            return
+
+        for node in alert_nodes:
+            da = self.get_delivery_agent("file.json_file", new=True)
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+              .set_address([node["universal_id"]]) \
+              .set_drop_zone({"drop": "incoming"}) \
+              .set_packet(pk1) \
+              .deliver()
+
+            if da.get_error_success() != 0:
+                self.log(f"{node['universal_id']}: {da.get_error_success_msg()}")
+            else:
+                self.log(f"Delivered to {node['universal_id']}")
+
+    def resolve_zip_to_latlon(self, zip_code):
+        try:
+            url = f"http://api.zippopotam.us/us/{zip_code}"
+            resp = requests.get(url, timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+            coords = data["places"][0]
+            lat = coords["latitude"]
+            lon = coords["longitude"]
+            self.log(f"[STORMCROW] ZIP {zip_code} resolved to {lat},{lon}")
+            return lat, lon
+        except Exception as e:
+            self.log(f"Could not resolve ZIP {zip_code}", error=e, block="main_try")
+            return os.getenv("WEATHER_LAT", "37.7749"), os.getenv("WEATHER_LON", "-122.4194")
+
+    def worker_post(self):
+        self.log("[STORMCROW] Worker loop scanning for severe weather alerts...")
+
+
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ class Agent(BootAgent):
         try:
             self.scavenger_sweep()
         except Exception as e:
-            self.log(f"[SCAVENGER][SWEEP CRASH] {e}")
+            self.log(error=e)
 
     def command_listener(self):
         while self.running:
@@ -71,7 +71,7 @@ class Agent(BootAgent):
                     os.remove(full_path)
             except Exception as e:
                 self.log(f"[SCAVENGER][COMMAND ERROR] {e}")
-            time.sleep(2)
+            interruptible_sleep(self, 2)
 
     def execute_stop(self, universal_id, annihilate=True):
         comm_path = os.path.join(self.path_resolution['comm_path'], universal_id)
