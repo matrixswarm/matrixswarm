@@ -140,70 +140,95 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
     def create_alert_card(self, alert):
         card = QGroupBox(alert.get("name") or f"{alert.get('pair')} | {alert.get('trigger_type').upper()}")
         layout = QVBoxLayout(card)
-        layout.addWidget(self.build_alert_summary_bar(alert))
 
         card.setStyleSheet("""
             QGroupBox {
-                background-color: #111;
-                border: 1px solid #00aa66;
+                border: 1px solid #00ff66;
                 border-radius: 6px;
+                background-color: #111;
+                margin: 6px;
                 padding: 10px;
-                margin: 4px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 6px;
-                color: #00ff66;
             }
         """)
+        card.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        # Price & trigger summary bar
+        summary_bar = QWidget()
+        summary_layout = QVBoxLayout(summary_bar)
+        summary_layout.setContentsMargins(0, 0, 0, 0)
+        summary_layout.setSpacing(6)
 
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        pill_container = QWidget()
+        pill_layout = QHBoxLayout(pill_container)
+        pill_layout.setContentsMargins(0, 0, 0, 0)
+        pill_layout.setSpacing(6)
 
-        card.setMaximumWidth(420)
-        card.setMinimumWidth(300)
-        card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        # Status dot
+        status = "🟢" if alert.get("active", True) else "🔴"
+        pill_layout.addWidget(QLabel(status))
 
-        # Pair
-        pair_input = QComboBox()
-        pair_input.setEditable(True)
-        pair_input.addItems(self.supported_pairs)
-        pair_input.setCurrentText(alert.get("pair", ""))
+        # Title label (not dynamic, just descriptor)
+        title_label = QLabel(f"{alert.get('pair')} | {alert.get('trigger_type', '').replace('_', ' ').upper()}")
+        pill_layout.addWidget(title_label)
+
+        # Price pill (this will be updated on combo change)
+        price = self.get_price(alert.get("pair", ""))
+        price_pill = self._pill(f"{alert.get('pair').split('/')[0]}  ${price:,.2f}" if price else "--")
+        pill_layout.addWidget(price_pill)
+
+        # Optional: conversion/change pill
+        if "change_percent" in alert:
+            pill_layout.addWidget(self._pill(f"Δ {alert['change_percent']}%"))
+
+        pill_layout.addStretch()
+        summary_layout.addWidget(pill_container)
+        layout.addWidget(summary_bar)
+
+        # Pair Selector
         layout.addWidget(QLabel("Pair:"))
+        pair_input = QComboBox()
+        pair_input.addItems(self.supported_pairs)
+        pair_input.setCurrentText(alert.get("pair", "BTC/USDT"))
         layout.addWidget(pair_input)
 
-        # Trigger type (read-only to match spec)
-        trigger_label = QLabel(alert.get("trigger_type").replace("_", " ").title())
-        trigger_label.setContentsMargins(0, 0, 0, 10)
-        trigger_label.setStyleSheet("font-weight: bold; color: #33ff33;")
-        layout.addWidget(QLabel("Trigger Type:"))
+        # === Triggered Update Logic ===
+        def update_price_display():
+            pair = pair_input.currentText().strip()
+            alert["pair"] = pair
+            price = self.get_price(pair)
+            price_pill.setText(f"{pair.split('/')[0]}  ${price:,.2f}" if price else "--")
+
+        pair_input.currentTextChanged.connect(update_price_display)
+
+        # Trigger Type Display
         trigger_box = QHBoxLayout()
+        trigger_box.addWidget(QLabel("Trigger Type:"))
+        trigger_label = QLabel(alert.get("trigger_type", "???").replace("_", " ").title())
         trigger_box.addWidget(trigger_label)
         layout.addLayout(trigger_box)
 
         # Threshold
-        threshold_input = QLineEdit(str(alert.get("threshold", "")))
         layout.addWidget(QLabel("Threshold:"))
+        threshold_input = QLineEdit(str(alert.get("threshold", "")))
         layout.addWidget(threshold_input)
 
         # Cooldown
-        cooldown_input = QSpinBox()
-        cooldown_input.setRange(60, 86400)
-        cooldown_input.setValue(alert.get("cooldown", 300))
         layout.addWidget(QLabel("Cooldown (sec):"))
+        cooldown_input = QSpinBox()
+        cooldown_input.setRange(30, 86400)
+        cooldown_input.setValue(alert.get("cooldown", 300))
         layout.addWidget(cooldown_input)
 
-        # Active checkbox
+        # Active toggle
         active_checkbox = QCheckBox("Active")
         active_checkbox.setChecked(alert.get("active", True))
         layout.addWidget(active_checkbox)
 
         # Name
-        name_input = QLineEdit(alert.get("name", ""))
         layout.addWidget(QLabel("Alert Name:"))
+        name_input = QLineEdit(alert.get("name", ""))
         layout.addWidget(name_input)
 
-        # Save + Delete buttons
+        # Save/Delete
         btn_row = QHBoxLayout()
         save_btn = QPushButton("💾 Save")
         delete_btn = QPushButton("🗑 Delete")
@@ -215,14 +240,13 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
                 "cooldown": cooldown_input.value(),
                 "active": active_checkbox.isChecked(),
                 "name": name_input.text().strip(),
-                "trigger_type": alert.get("trigger_type", "price_above"),
-                "type": alert.get("trigger_type", "price_above"),
+                "trigger_type": alert.get("trigger_type"),
+                "type": alert.get("trigger_type"),
                 "exchange": alert.get("exchange", "coingecko"),
                 "poll_interval": 60,
                 "notify": ["gui"],
                 "universal_id": alert["universal_id"]
             }
-            # replace the alert in memory
             for i, a in enumerate(self.alerts):
                 if a.get("universal_id") == alert["universal_id"]:
                     self.alerts[i] = updated
@@ -230,18 +254,20 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
             self.save_alerts()
             self.send_agent_payload(updated, partial=True)
             self.refresh_cards()
-            QMessageBox.information(self, "Agent Saved", f"{alert['name']} was pushed to Matrix.")
 
         def delete_alert():
             self.delete_selected_alert(alert)
 
         save_btn.clicked.connect(save_changes)
         delete_btn.clicked.connect(delete_alert)
+
         btn_row.addWidget(save_btn)
         btn_row.addWidget(delete_btn)
         layout.addLayout(btn_row)
 
+        card.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         return card
+
 
     def build_alert_summary_bar(self, alert):
         from PyQt5.QtWidgets import QLabel, QHBoxLayout, QWidget
@@ -707,27 +733,35 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, 
 
     def get_price(self, pair):
         now = time.time()
-        if now - self.price_last_fetch < 15:
+        if now - self.price_last_fetch < 15 and pair in self.price_cache:
             return self.price_cache.get(pair)
+
+        exchange_name = "coinbase"  # Change this if you want another default like "coingecko"
         try:
-            url = "https://api.coingecko.com/api/v3/simple/price"
-            ids = {
-                "BTC/USDT": "bitcoin",
-                "ETH/USDT": "ethereum"
-            }
-            token_id = ids.get(pair.upper())
-            if not token_id:
-                return None
-            resp = requests.get(url, params={"ids": token_id, "vs_currencies": "usd"}, timeout=5)
-            if resp.status_code == 200:
-                price = resp.json().get(token_id, {}).get("usd")
-                if price:
-                    self.price_cache[pair] = price
-                    self.price_last_fetch = now
-                    return price
+            ExchangeClass = load_exchange_class("coinbase")
+            exchange = ExchangeClass(agent=self)
+            price = exchange.get_price(pair)
+            if price:
+                self.price_cache[pair] = price
+                self.price_last_fetch = now
+                return price
+            else:
+                print(f"[PRICE] ⚠️ No price returned for {pair} via {exchange_name}")
         except Exception as e:
-            print(f"[PRICE][ERROR] Failed to fetch price")
+            print(f"[PRICE][ERROR] {e}")
+
         return None
+
+import importlib.util
+import os
+
+def load_exchange_class(exchange_name):
+    base_path = os.path.join(os.getcwd(), "agent", "crypto_alert", "factory", "cryptocurrency", "exchange", exchange_name, "price", "__init__.py")
+    spec = importlib.util.spec_from_file_location("exchange_module", base_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, "Exchange")
+
 class FlowLayout(QLayout):
     def __init__(self, parent=None, margin=0, spacing=10):
         super(FlowLayout, self).__init__(parent)
