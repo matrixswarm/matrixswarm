@@ -26,7 +26,7 @@ class Agent(BootAgent):
         try:
             self._initialized_from_tree = True
             exchange_name = self._private_config.get("exchange", "coingecko")
-            mod_path = f"crypto_alert.factory.cryptocurrency.exchange.{exchange_name}"
+            mod_path = f"crypto_alert.factory.cryptocurrency.exchange.{exchange_name}.price"
 
             self.log(f"Attempting to load: {mod_path}", block="exchange_loader")
             try:

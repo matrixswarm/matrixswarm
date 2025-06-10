@@ -13,5 +13,20 @@
       "gui"
     ],
     "universal_id": "crypto-btcusdt-5c6826"
+  },
+  {
+    "pair": "AVAX/USDT",
+    "threshold": 2400.0,
+    "cooldown": 300,
+    "active": true,
+    "name": "New Price Change Below",
+    "trigger_type": "price_change_below",
+    "type": "price_change_below",
+    "exchange": "coingecko",
+    "poll_interval": 60,
+    "notify": [
+      "gui"
+    ],
+    "universal_id": "crypto-14e47d"
   }
 ]
