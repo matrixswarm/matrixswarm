@@ -1,5 +1,4 @@
 # 🧭 UpdateSentinelAgent
-# Author: ChatGPT (under orders from General Daniel F. MacDonald)
 # ╔════════════════════════════════════════════════════════╗
 # ║                    🛡 SENTINEL AGENT 🛡                 ║
 # ║     Heartbeat Monitor · Resurrection Watch · Sentinel  ║
@@ -28,9 +27,11 @@ class Agent(BootAgent):
         config = self.tree_node.get("config", {})
         self.matrix_secure_verified=bool(config.get("matrix_secure_verified",0))
         self.watching = config.get("watching", "the Matrix")
-        self.universal_id = config.get("universal_id", None)
+        self.universal_id_under_watch = config.get("universal_id_under_watch", False)
         self.target_node = None
-        self.time_delta_timeout = config.get("timeout", 30)  # Default 5 min if not set
+        self.time_delta_timeout = config.get("timeout", 60)  # Default 5 min if not set
+
+
 
     def post_boot(self):
         self.log(f"[SENTINEL] Sentinel booted. Monitoring: {self.watching}")
@@ -45,30 +46,27 @@ class Agent(BootAgent):
         self.log("[SENTINEL] Sentinel down. Final watch cycle complete.")
 
     def watch_cycle(self):
-        self.log("[SENTINEL] Watch cycle started.")
-        while self.running:
 
-            if self.universal_id:
+        self.log("[SENTINEL] Watch cycle started.")
+
+        if self.universal_id_under_watch:
+
+            while self.running:
 
                 try:
-                    if self.target_node is None:
-                        response = self.receive_node_response(self.universal_id)
-                        if response is not None:
-                            self.target_node = {k: v for k, v in response.items()}
-                        interruptible_sleep(self, 5)
-                        continue
+                    if len(self.security_box)==0:
+                        break
 
-                    universal_id = self.target_node.get("universal_id")
+                    universal_id = self.security_box.get('node').get("universal_id")
 
                     if not universal_id:
-                        self.log("[SENTINEL][WATCH] Target node missing universal_id. Breathing idle.")
-                        interruptible_sleep(self, 5)
-                        continue
+                        self.log("Target node missing universal_id. Breathing idle.", block="WATCHING")
+                        break
 
                     die_file = os.path.join(self.path_resolution['comm_path'], universal_id, 'incoming', 'die')
 
                     if os.path.exists(die_file):
-                        self.log(f"[SENTINEL][BLOCKED] {universal_id} has die file.")
+                        self.log(f"{universal_id} has die file. Skipping Loop.", block="WATCHING_DIE_FILE")
                         interruptible_sleep(self, 10)
                         continue
 
@@ -77,54 +75,37 @@ class Agent(BootAgent):
                         interruptible_sleep(self, 10)
                         continue
 
-                    keychain={}
+                    try:
 
-                    keychain["priv"] = self.matrix_priv
-                    keychain["pub"] = self.matrix_pub
-                    if not self.matrix_secure_verified:
-                        keychain = generate_agent_keypair()
+                        keychain = {}
 
-                    keychain["encryption_enabled"] = int(self.encryption_enabled)
-                    keychain["swarm_key"] = self.swarm_key
-                    keychain["matrix_pub"] = self.matrix_pub
-                    keychain["matrix_priv"] = self.matrix_priv
+                        node = self.security_box.get('node', {})
+                        keychain["priv"] = node.get("vault", {}).get("priv", {})
+                        keychain["pub"] = node.get("vault", {}).get("identity", {}).get('pub', {})
+                        keychain["swarm_key"] = self.swarm_key
+                        keychain['private_key'] = node.get("vault", {}).get("private_key")
+                        keychain["matrix_pub"] = self.matrix_pub
+                        keychain["matrix_priv"] = self.security_box["matrix_priv"]
+                        keychain["encryption_enabled"] = int(self.encryption_enabled)
+                        keychain["security_box"] = self.security_box.copy()
 
-                    self.spawn_agent_direct(
-                        universal_id=universal_id,
-                        agent_name=self.target_node.get("name"),
-                        tree_node=self.target_node,
-                        keychain=keychain,
-                    )
-                    self.log(f"[SENTINEL][SPAWNED] {universal_id} respawned successfully.")
+                        self.spawn_agent_direct(
+                            universal_id=universal_id,
+                            agent_name=node.get("name"),
+                            tree_node=node,
+                            keychain=keychain,
+                        )
+                        self.log(f"{universal_id} respawned successfully.")
 
+                    except Exception as e:
+                        self.log(f"failed to spawn agent", error=e, block="keep_alive", level="error")
 
 
                 except Exception as e:
-                    tb = traceback.format_exc()
-                    self.log(f"[SENTINEL][WATCH-ERROR] {e}")
-                    self.log(f"[SENTINEL][TRACEBACK]\n{tb}")
-                    interruptible_sleep(self, 30)
+                    self.log(f"failed to spawn agent", error=e, block="main_try", level="error")
 
-            interruptible_sleep(self, 10)
+                interruptible_sleep(self, 10)
 
-    def receive_node_response(self, universal_id):
-        incoming_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args.get("universal_id", "sentinel"), "incoming")
-        if not os.path.exists(incoming_path):
-            return None
-
-        # 🔥 If no Matrix response, check local tree file
-        agent_tree_file = os.path.join(self.path_resolution['comm_path'], universal_id, "agent_tree.json")
-        if os.path.exists(agent_tree_file):
-            try:
-                with open(agent_tree_file, "r") as f:
-                    node = json.load(f)
-                #self.log(f"[SENTINEL] Loaded agent_tree.json for {universal_id}.")
-                return node
-            except Exception as e:
-                self.log(f"[SENTINEL][TREE-ERROR] {e}")
-                return None
-
-        return None
 
 if __name__ == "__main__":
     agent = Agent()

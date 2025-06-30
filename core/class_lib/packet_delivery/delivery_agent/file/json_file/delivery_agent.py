@@ -5,8 +5,8 @@ import time
 import tempfile
 from core.class_lib.packet_delivery.interfaces.base_delivery_agent import BaseDeliveryAgent
 from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
-
-class DeliveryAgent(BaseDeliveryAgent):
+from core.mixin.log_method import LogMixin
+class DeliveryAgent(BaseDeliveryAgent, LogMixin):
     def __init__(self):
         self._location = None
         self._address = []
@@ -19,7 +19,6 @@ class DeliveryAgent(BaseDeliveryAgent):
         self._crypto=None
         self._filename_override = None
         self._save_filename=""
-        self._logger = None
         self._sent_packet = "PACKET_NOT_SENT"
 
     def set_crypto_handler(self, crypto_handler: PacketProcessorBase):
@@ -81,15 +80,6 @@ class DeliveryAgent(BaseDeliveryAgent):
     def get_saved_filename(self) -> str:
         return self._save_filename
 
-    def set_logger(self, logger):
-        self._logger = logger
-
-    def log(self, msg):
-        if self._logger:
-            self._logger.log(msg)
-        else:
-            print(msg)
-
     def deliver(self, create=True):
 
         if create:
@@ -101,6 +91,7 @@ class DeliveryAgent(BaseDeliveryAgent):
         try:
             if not self._packet:
                 self._error = "[JSON_FILE][DELIVER] No packet assigned"
+
                 return self
 
             data = self._packet.get_packet()
@@ -108,8 +99,12 @@ class DeliveryAgent(BaseDeliveryAgent):
             if not isinstance(data, dict):
                 self._error = "[JSON_FILE][DELIVER] Packet data invalid"
 
-
                 return self
+
+            try:
+                self._crypto.set_logger(self.get_logger())
+            except Exception as e:
+                pass
 
             uids = self._address if self._address else [None]
             for uid in uids:
@@ -134,8 +129,11 @@ class DeliveryAgent(BaseDeliveryAgent):
 
                     if atomic:
                         self._sent_packet = data
+
                         with tempfile.NamedTemporaryFile("w", delete=False, dir=output_dir,
                                                          suffix=self._file_ext) as temp_file:
+
+
                             json.dump(data, temp_file, indent=indent)
                             temp_file.flush()
                             os.fsync(temp_file.fileno())
@@ -144,6 +142,8 @@ class DeliveryAgent(BaseDeliveryAgent):
                         os.replace(temp_path, full_path)
 
                     else:
+
+
                         with open(full_path, "w") as f:
                             self._sent_packet=data
                             json.dump(data, f, indent=indent)
@@ -151,15 +151,15 @@ class DeliveryAgent(BaseDeliveryAgent):
                     self._save_filename = full_path
 
                 except Exception as e:
-
                     self._error = f"[DELIVER][WRITE] Failed to write packet: {e}"
-                    self.log(self._error)
+                    self.log("Failed to write packet", error=e)
 
                 return self
 
         except Exception as e:
+
             self._error = f"[JSON_FILE][DELIVER] Failed: {e}"
-            self.log(self._error)
+            self.log("Failed", error=e)
         return self
 
     def get_sent_packet(self):

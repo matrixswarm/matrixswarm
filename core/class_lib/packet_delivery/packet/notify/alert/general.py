@@ -16,6 +16,7 @@ class Packet(BasePacket):
                 return
 
             self._payload = {
+                "server_ip": data.get("server_ip"),
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "universal_id": data.get("universal_id", "unknown"),
                 "level": data.get("level", "info"),

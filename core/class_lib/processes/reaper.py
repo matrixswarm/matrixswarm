@@ -56,6 +56,7 @@ class Reaper:
             self.logger.log(message)
         else:
             print(message)
+            #print(traceback.format_exc())
 
     def pass_out_die_cookies(self, agent_paths):
         self.log_info("[REAPER][info] Distributing `die` cookies to agents...")
@@ -90,17 +91,29 @@ class Reaper:
                 self.log_info(f"[REAPER][info] `die` cookie distributed for {universal_id}.")
 
                 if self.tombstone_mode:
+
+                    # Drop tombstone in comm path if it doesn't already exist
                     if getattr(self, "tombstone_comm", True):
                         tombstone_comm_path = os.path.join(comm_path, "tombstone")
-                        JsonSafeWrite.safe_write(tombstone_comm_path, "true")
+                        if not os.path.exists(tombstone_comm_path):
+                            JsonSafeWrite.safe_write(tombstone_comm_path, "true")
+                            self.log_info(f"[REAPER] Tombstone (comm) dropped for {universal_id}")
+                        else:
+                            self.log_info(
+                                f"[REAPER] Tombstone (comm) already exists for {universal_id} — skipping overwrite.")
 
+                    # Drop tombstone in pod path if it doesn't already exist
                     if getattr(self, "tombstone_pod", True):
                         pod_tombstone_path = os.path.join(agent_path, "tombstone")
-                        try:
-                            Path(pod_tombstone_path).write_text("true")
-                            self.log_info(f"[REAPER][info] Pod tombstone dropped for {universal_id}.")
-                        except Exception as e:
-                            self.log_info(f"[REAPER][error] Failed to drop pod tombstone for {universal_id}: {e}")
+                        if not os.path.exists(pod_tombstone_path):
+                            try:
+                                Path(pod_tombstone_path).write_text("true")
+                                self.log_info(f"[REAPER] Pod tombstone dropped for {universal_id}.")
+                            except Exception as e:
+                                self.log_info(f"[REAPER][error] Failed to drop pod tombstone for {universal_id}: {e}")
+                        else:
+                            self.log_info(
+                                f"[REAPER] Pod tombstone already exists for {universal_id} — skipping overwrite.")
 
                 # Track agent
                 self.agents[universal_id] = {
@@ -309,6 +322,7 @@ class Reaper:
                         survivors.add(pid)
                 except Exception as e:
                     self.log_info(f"[MEM-KILL][WARN] Scan error: {e}")
+
 
             time.sleep(3)  # short delay for agents to shut down
 

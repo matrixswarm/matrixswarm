@@ -22,7 +22,6 @@ import json
 import time
 import subprocess
 import traceback
-from datetime import datetime
 from core.boot_agent import BootAgent
 
 class Agent(BootAgent):

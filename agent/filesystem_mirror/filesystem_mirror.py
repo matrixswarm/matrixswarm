@@ -9,6 +9,7 @@ import json
 
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -27,7 +28,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log(f"[MIRROR] Mission start. Watching {self.watch_path} [mode: {self.mode}]")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         if self.mode != "cycle" and self.cycle_index > 0:
             interruptible_sleep(self, 10)
             return

@@ -1,11 +1,10 @@
-#Authored by Daniel F MacDonald and ChatGPT
+#Authored by Daniel F MacDonald and ChatGPT 4
 # ╔═══════════════════════════════════════════════╗
 # ║              ☠ REAPER AGENT ☠                ║
 # ║   Tactical Cleanup · Wipe Authority · V2.5    ║
 # ║        Forged in the halls of Matrix          ║
 # ║  Accepts: .cmd / .json  |  Modes: soft/full   ║
 # ╚═══════════════════════════════════════════════╝
-
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
@@ -15,11 +14,11 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 import json
 import time
 import threading
+from pathlib import Path
 
 from core.boot_agent import BootAgent
-#from core.class_lib.processes.reaper import Reaper  # Import Big Reaperfrom core.class_lib.processes.reaper import Reaper  # Big Reaper
 from core.class_lib.processes.reaper_universal_id_handler import ReaperUniversalHandler  # PID Handler
-
+from core.utils.swarm_sleep import interruptible_sleep
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
@@ -27,7 +26,7 @@ class Agent(BootAgent):
 
         # Load targets, kill ID, and initialize paths
         config = self.tree_node.get("config", {})
-
+        self.is_mission = bool(config.get("is_mission", False))
         self.targets = self.command_line_args.get("targets") or config.get("kill_list", [])
         self.universal_ids = self.command_line_args.get("universal_ids") or config.get("universal_ids", {})
         self.kill_id = self.command_line_args.get("kill_id") or config.get("kill_id") or f"reap-{int(time.time())}"
@@ -35,8 +34,6 @@ class Agent(BootAgent):
         self.tombstone_comm = config.get("tombstone_comm", True)
         self.tombstone_pod = config.get("tombstone_pod", True)
         self.cleanup_die = config.get("cleanup_die", False)
-        self.outbox_path = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox")
-        os.makedirs(self.outbox_path, exist_ok=True)
 
         self.universal_id_handler = ReaperUniversalHandler(self.path_resolution['pod_path'], self.path_resolution['comm_path'], logger=self.logger)
 
@@ -44,8 +41,10 @@ class Agent(BootAgent):
         """
         Logs the mission details and starts the mission in a separate thread.
         """
-        self.log(f"[DISPOSABLE-REAPER] Mission {self.kill_id} received with targets: {self.targets}")
-        threading.Thread(target=self.mission, daemon=True).start()
+        if self.is_mission:
+            self.mission()
+        else:
+            threading.Thread(target=self.patrol_comm_for_hit_cookies, daemon=True).start()
 
     def worker_pre(self):
         self.log("[REAPER] Agent entering execution mode. Targets loaded. Blades sharp.")
@@ -99,6 +98,72 @@ class Agent(BootAgent):
         self.running = False  # Mark the agent as stopped
         self.log("[INFO] Mission completed and the agent is now stopping.")
         self.leave_tombstone_and_die()
+
+    #TODO verify Matrix sig
+    def verify_hit_cookie(self, payload, signature):
+        try:
+            pass
+        except Exception as e:
+            #self.log(f"[ERROR] Failed to complete mission: {str(e)}")
+            pass
+
+        return True
+
+    def patrol_comm_for_hit_cookies(self):
+        self.log("[REAPER] 🛰 Patrol mode active. Scanning for hit cookies...")
+        comm_root = Path(self.path_resolution["comm_path"])
+        while True:
+            try:
+                for agent_dir in comm_root.iterdir():
+                    hello_path = agent_dir / "hello.moto"
+                    cookie_path = hello_path / "hit.cookie"
+
+                    if not cookie_path.exists():
+                        continue
+
+                    payload = {}
+                    uid=None
+                    with open(cookie_path, "r") as f:
+                        try:
+                            payload = json.load(f)
+                            uid = payload.get("target")
+                        except Exception as e:
+                            self.log(f"[REAPER][WARN] Malformed cookie in {cookie_path}: {e}")
+                            continue
+
+                    # Optional: verify signature
+                    signature = "sig"  # payload.get("signature")
+                    if not self.verify_hit_cookie(payload, signature):
+                        if not uid:
+                            uid = "[not set]"
+                        self.log(f"[REAPER][WARN] Invalid or unsigned kill cookie for {uid}, skipping.")
+                        continue
+
+
+                    if not uid:
+                        continue
+
+                    # TODO: Verify signature if encryption is enabled (hook here)
+                    self.log(f"[REAPER] ☠ Target marked: {uid} — executing...")
+
+                    # Execute: reuse universal_id handler
+                    self.process_universal_id(uid)
+
+                    #cookie_path.unlink()  # Remove cookie after execution - scavenger will do it
+            except Exception as e:
+                self.log(f"[REAPER][ERROR] Patrol loop failed: {e}")
+
+            interruptible_sleep(self, 15)
+
+    def process_universal_id(self, uid):
+        handler = ReaperUniversalHandler(self.path_resolution["pod_path"], self.path_resolution["comm_path"], logger=self.logger)
+        handler.process_all_universal_ids(
+            [uid],
+            tombstone_mode=True,
+            wait_seconds=15,
+            tombstone_comm=True,
+            tombstone_pod=True
+        )
 
     def leave_tombstone_and_die(self):
         """

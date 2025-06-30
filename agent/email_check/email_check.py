@@ -4,9 +4,12 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 import socket
 socket.setdefaulttimeout(10)  # Set a 10-second global timeout for sockets
+import email
+from email.header import decode_header
 from dotenv import load_dotenv
 load_dotenv()
 from core.boot_agent import BootAgent
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -20,8 +23,6 @@ class Agent(BootAgent):
         self.mail_user = config.get("email") or os.getenv("EMAILCHECKAGENT_EMAIL")
         self.mail_pass = config.get("password") or os.getenv("EMAILCHECKAGENT_PASSWORD")
         self.report_to = config.get("report_to") or os.getenv("EMAILCHECKAGENT_REPORT_TO", "mailman-1")
-        self.payload_dir = os.path.join(self.path_resolution["comm_path"], self.report_to, "payload")
-        os.makedirs(self.payload_dir, exist_ok=True)
 
     def worker_pre(self):
         import socket
@@ -38,9 +39,8 @@ class Agent(BootAgent):
             self.log(f"[EMAIL][ERROR][LOGIN] {e}")
             self.mail = None
 
-    def worker(self, config:dict = None):
-        import email
-        from email.header import decode_header
+    def worker(self, config:dict = None, identity:IdentityObject = None):
+
 
         if not self.mail:
             return  # Connection failed during pre

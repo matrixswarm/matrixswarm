@@ -10,7 +10,7 @@ from core.boot_agent import BootAgent
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from core.utils.swarm_sleep import interruptible_sleep
-
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
@@ -24,7 +24,7 @@ class Agent(BootAgent):
         self.scan_tree_once()
         threading.Thread(target=self.watch_files, daemon=True).start()
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         while self.running:
             interruptible_sleep(self, 600)
 
@@ -83,7 +83,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[RESOLVER][SNAPSHOT] Failed: {e}")
 
-    def cmd_resolve(self, command, packet):
+    def cmd_resolve(self, command, packet, identity:IdentityObject = None):
         try:
             payload = packet.get("payload", {})
             role = payload.get("role", "").lower()

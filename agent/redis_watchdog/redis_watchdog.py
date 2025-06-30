@@ -4,7 +4,8 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 import subprocess
 import time
-import json
+import requests
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 from datetime import datetime
@@ -106,8 +107,14 @@ class Agent(BootAgent, AgentSummaryMixin):
         pk1 = self.get_delivery_packet("standard.command.packet")
         pk1.set_data({"handler": "cmd_send_alert_msg"})
 
+        try:
+            server_ip = requests.get("https://api.ipify.org").text.strip()
+        except Exception:
+            server_ip = "Unknown"
+
         pk2 = self.get_delivery_packet("notify.alert.general")
         pk2.set_data({
+            "server_ip": server_ip,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "universal_id": self.command_line_args.get("universal_id", "unknown"),
             "level": "critical",
@@ -125,7 +132,9 @@ class Agent(BootAgent, AgentSummaryMixin):
             return
 
         for node in alert_nodes:
-            da = self.get_delivery_agent("file.json_file", new=True)
+            football = self.get_football(type=self.FootballType.PASS)
+            football.load_identity_file(universal_id=node["universal_id"])
+            da = self.get_delivery_agent("file.json_file", football=football, new=True)
             da.set_location({"path": self.path_resolution["comm_path"]}) \
               .set_address([node["universal_id"]]) \
               .set_drop_zone({"drop": "incoming"}) \
@@ -137,7 +146,7 @@ class Agent(BootAgent, AgentSummaryMixin):
             else:
                 self.log(f"[ALERT] Delivered to {node['universal_id']}")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.maybe_roll_day('redis')
         running = self.is_redis_running()
         accessible = self.is_port_open() or self.is_socket_up()

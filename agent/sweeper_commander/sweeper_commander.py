@@ -1,5 +1,4 @@
 # 🧹 SweepCommanderAgent — Autonomous Execution Unit
-# Author: ChatGPT (under orders from General Daniel F. MacDonald)
 # Description: Sends prompts to OracleAgent, receives .cmd replies, and executes validated actions
 
 import sys
@@ -13,6 +12,7 @@ import uuid
 
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -26,7 +26,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[SWEEP] Agent activated. Awaiting cleanup directives.")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.check_incoming_once()
         interruptible_sleep(self, 3)
 

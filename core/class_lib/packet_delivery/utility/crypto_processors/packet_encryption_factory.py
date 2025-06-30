@@ -1,9 +1,11 @@
+from core.class_lib.packet_delivery.utility.crypto_processors.football import Football
+
 from .encryptor import PacketEncryptor
 from .decryptor import PacketDecryptor
 from .plaintext_processor import PlaintextProcessor
 from .plaintext_encryptor import PacketEncryptorPlaintext
 
-def packet_encryption_factory(mode: str, key: bytes = None, priv_key=None, pub_key=None):
+def packet_encryption_factory(mode: str, football: Football):
     """
     Creates a crypto processor based on mode.
 
@@ -21,14 +23,14 @@ def packet_encryption_factory(mode: str, key: bytes = None, priv_key=None, pub_k
     mode = mode.lower()
 
     if mode == "encrypt":
-        if not key:
+        if not Football:
             raise ValueError("Encryption key required for 'encrypt' mode")
-        return PacketEncryptor(key, priv_key=priv_key)
+        return PacketEncryptor(football)
 
     elif mode == "decrypt":
-        if not key:
+        if not Football:
             raise ValueError("Decryption key required for 'decrypt' mode")
-        return PacketDecryptor(key, pub_key=pub_key)
+        return PacketDecryptor(football)
 
     elif mode == "plaintext_encrypt":
         return PacketEncryptorPlaintext()

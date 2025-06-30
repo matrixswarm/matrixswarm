@@ -15,6 +15,7 @@ from collections import OrderedDict
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 from core.mixin.reflex_alert import ReflexAlertMixin
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent, ReflexAlertMixin):
     def __init__(self):
@@ -49,7 +50,7 @@ class Agent(BootAgent, ReflexAlertMixin):
         self.enforce_prompt_command_once()
         threading.Thread(target=self.watch_file_changes, daemon=True).start()
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.track_active_users()
         self.poll_shell_history()
         interruptible_sleep(self, self.tick_rate)
@@ -197,8 +198,8 @@ class Agent(BootAgent, ReflexAlertMixin):
                 self.persist(user, self.sessions[user])  # Still persist session
                 continue
             last_seen_cmd = session.get("last_command_timestamp", 0)
-            if time.time() - last_seen_cmd > 120:
-                self.log(f"[GHOSTWIRE][{user}] 🕒 Warning: Shell history appears stale. PROMPT_COMMAND may be missing.")
+            if time.time() - last_seen_cmd > 600:
+                self.log(f"[GHOSTWIRE][{user}] 🕒 History inactive >10 min. May need PROMPT_COMMAND='history -a'")
 
             if os.path.exists(history_path):
                 try:

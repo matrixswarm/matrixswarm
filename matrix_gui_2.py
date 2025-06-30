@@ -24,8 +24,7 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import QListWidget
 import os
 import json
-from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
-from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
+
 from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 
 
@@ -60,10 +59,13 @@ def run_in_thread(callback=None, error_callback=None):
     return decorator
 
 
-MATRIX_HOST = "https://147.135.68.135:65431/matrix" #put your own ip here, not mine
-CLIENT_CERT = ("https_certs/server.fullchain.crt", "https_certs/server.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
+#MATRIX_HOST = "https://147.135.68.135:65431/matrix" #put your own ip here, not mine
+MATRIX_HOST = "https://147.135.112.25:65431/matrix"
+CLIENT_CERT = ("https_certs/client.crt", "https_certs/client.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
 REQUEST_TIMEOUT = 5
-MATRIX_WEBSOCKET_HOST = "wss://147.135.68.135:8765"
+#MATRIX_WEBSOCKET_HOST = "wss://147.135.68.135:8765"
+MATRIX_WEBSOCKET_HOST = "wss://147.135.112.25:8765"
+
 
 import asyncio
 import websockets
@@ -75,7 +77,7 @@ class NodeSelectionEventBus(QObject):
 node_event_bus = NodeSelectionEventBus()
 
 
-class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin):
+class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
     message_received = pyqtSignal(str)
     log_ready = pyqtSignal(dict, str)
@@ -551,6 +553,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         if hasattr(self, "status_label_matrix") and "Connected" in self.status_label_matrix.text():
             dot = "🟢" if self.pulse_state else "⚫"
             self.status_label_matrix.setText(f"{dot} Matrix: Connected")
+
     def build_command_view(self):
         container = QWidget()
         layout = QHBoxLayout(container)
@@ -863,11 +866,13 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
         box.setLayout(layout)
         return box
 
+    #REFRESH AGENT TREE EVER 10 sec's
     def start_tree_autorefresh(self, interval=10):
         self.tree_timer = QTimer(self)
         self.tree_timer.timeout.connect(self.request_tree_from_matrix)
         self.tree_timer.start(interval * 1000)
 
+    #Retreive the agent Tree
     def request_tree_from_matrix(self):
 
         self.tree_stack.setCurrentIndex(0)  # Show loading
@@ -937,8 +942,12 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixi
     def render_tree(self, node, indent="", is_last=True):
         output = []
         if not isinstance(node, dict):
-            output.append((f"{indent}└─ [INVALID NODE STRUCTURE: {node}]", "none", "red"))
+            output.append((f"{indent} Retrieving Agent Listing...", "none", "red"))
             return output
+        #hide deleted nodes
+        deleted = bool(node.get('deleted', False))
+        if deleted:
+            return ""
 
         universal_id = node.get("universal_id") or node.get("name") or "unknown"
         agent_type = (node.get("name") or node.get("universal_id", "")).split("-")[0].lower()

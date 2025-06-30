@@ -1,13 +1,14 @@
 # 📡 TelegramRelayAgent — Forwards Swarm Logs to Telegram
-# Author: ChatGPT, under General Daniel F. MacDonald
+# Author: Daniel F. MacDonald
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
-import json
+
 import requests
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -26,13 +27,13 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[TELEGRAM] Telegram relay activated. Awaiting message drops...")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         interruptible_sleep(self, 230)
 
     def worker_post(self):
         self.log("[TELEGRAM] Relay shutting down. No more echoes for now.")
 
-    def cmd_send_alert_msg(self, content, packet):
+    def cmd_send_alert_msg(self, content, packet, identity:IdentityObject = None):
         try:
             message = self.format_message(content)
             self.send_to_telegram(message)

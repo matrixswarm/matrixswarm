@@ -1,4 +1,4 @@
-#Authored by Daniel F MacDonald and ChatGPT
+#Authored by Daniel F MacDonald
 # ╔════════════════════════════════════════════════════════╗
 # ║               🧹 SCAVENGER AGENT 🧹                    ║
 # ║   Runtime Sweeper · Pod Watchdog · Tombstone Handler   ║
@@ -17,6 +17,7 @@ import json
 import shutil
 import threading
 import psutil
+from pathlib import Path
 
 from core.boot_agent import BootAgent
 from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
@@ -26,15 +27,10 @@ class Agent(BootAgent):
     def __init__(self):
         super().__init__()
 
-        self.orbits = {}
-        self.watch_path = os.path.join(self.path_resolution['comm_path'], self.command_line_args['universal_id'], "payload")
-        os.makedirs(self.watch_path, exist_ok=True)
-
     def post_boot(self):
         try:
             self.log("[SCAVENGER] Online. Scanning the battlefield for tombstones...")
-            threading.Thread(target=self.safe_command_listener, daemon=True).start()
-            threading.Thread(target=self.safe_scavenger_sweep, daemon=True).start()
+            threading.Thread(target=self.scavenger_sweep, daemon=True).start()
         except Exception as e:
             self.log(f"[SCAVENGER][POST-BOOT ERROR] {e}")
 
@@ -43,44 +39,6 @@ class Agent(BootAgent):
 
     def worker_post(self):
         self.log("[SCAVENGER] Shutdown confirmed. Sweep logs complete.")
-
-    def safe_command_listener(self):
-        try:
-            self.command_listener()
-        except Exception as e:
-            self.log(f"[SCAVENGER][COMMAND LISTENER CRASH] {e}")
-
-    def safe_scavenger_sweep(self):
-        try:
-            self.scavenger_sweep()
-        except Exception as e:
-            self.log(error=e)
-
-    def command_listener(self):
-        while self.running:
-            try:
-                if not os.path.exists(self.watch_path):
-                    time.sleep(2)
-                    continue
-                for fname in os.listdir(self.watch_path):
-                    if not fname.endswith(".cmd"):
-                        continue
-                    universal_id = fname.replace("scavenge_", "").replace("kill_", "").replace(".cmd", "")
-                    full_path = os.path.join(self.watch_path, fname)
-                    self.execute_stop(universal_id, annihilate="scavenge" in fname)
-                    os.remove(full_path)
-            except Exception as e:
-                self.log(f"[SCAVENGER][COMMAND ERROR] {e}")
-            interruptible_sleep(self, 2)
-
-    def execute_stop(self, universal_id, annihilate=True):
-        comm_path = os.path.join(self.path_resolution['comm_path'], universal_id)
-        die_path = os.path.join(comm_path, "incoming", "die")
-        JsonSafeWrite.safe_write(die_path, "terminate")
-        self.log(f"[SCAVENGER] Sent die signal to {universal_id}")
-        status = "pause_requested"
-        self.send_confirmation(universal_id, status)
-        self.notify_matrix_to_verify(universal_id)
 
     def scavenger_sweep(self):
         self.log("[SCAVENGER] Background sweep active. Scanning every 5 minutes...")
@@ -96,8 +54,11 @@ class Agent(BootAgent):
                     continue
 
                 #Loop through the pod looking for boot.json to extract --job [identity train]
+                self.log("[SCAVENGER] 🧹 Running sweep at " + time.strftime('%H:%M:%S'))
                 for uuid in os.listdir(pod_root):
+
                     try:
+
                         pod_path = os.path.join(pod_root, uuid)
                         boot_path = os.path.join(pod_path, "boot.json")
 
@@ -113,32 +74,48 @@ class Agent(BootAgent):
                             continue
 
                         comm_path = os.path.join(comm_root, universal_id)
+
+                        die_path = os.path.join(comm_path, "incoming", "die")
                         tombstone_comm = os.path.join(comm_path, "incoming", "tombstone")
                         tombstone_pod = os.path.join(pod_path, "tombstone")
 
                         tombstone_paths = [tombstone_comm, tombstone_pod]
                         tombstone_found = False
                         tombstone_age_ok = False
+                        now = time.time()
+
+                        #self.log(f"[DEBUG] 🔍 Checking cleanup readiness for '{universal_id}'")
+                        #self.log(f"         ⛓️  die path: {die_path}")
+                        #self.log(f"         ⛓️  tombstone_comm: {tombstone_comm}")
+                        #self.log(f"         ⛓️  tombstone_pod: {tombstone_pod}")
 
                         for tomb in tombstone_paths:
                             if os.path.exists(tomb):
-                                tombstone_found = True
                                 age = now - os.path.getmtime(tomb)
-                                if age >= 300:
+                                self.log(f"[DEBUG] ⏱️ Tombstone '{tomb}' age: {age:.2f}s")
+                                tombstone_found = True
+                                if age >= 50:  # Change to 0 to force
                                     tombstone_age_ok = True
                                     break
 
-                        if not tombstone_found or not tombstone_age_ok:
+                        die_exists = os.path.exists(die_path)
+
+                        # Log result before decision
+                        #self.log(f"[DEBUG] ✅ tombstone_found={tombstone_found}, tombstone_age_ok={tombstone_age_ok}, die_exists={die_exists}")
+
+                        if not tombstone_found or not tombstone_age_ok or not die_exists:
+                            self.log(f"[SCAVENGER] ⚠️ Skipping {universal_id} — check failed.")
                             continue
 
+                        self.log(f"[SCAVENGER] 🧼 Cleaning up {universal_id} now.")
+
                         still_alive = False
-                        for proc in psutil.process_iter(['cmdline']):
-                            try:
-                                if proc.info['cmdline'] == cmdline_target:
+                        for proc in psutil.process_iter(["pid", "cmdline", "status"]):
+                            if proc.info['cmdline'] == cmdline_target:
+                                if proc.info.get("status") == psutil.STATUS_ZOMBIE:
+                                    self.log(f"[SCAVENGER] PID {proc.info['pid']} is a zombie. Allowing cleanup.")
+                                else:
                                     still_alive = True
-                                    break
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                continue
 
                         if still_alive:
                             self.log(f"[SCAVENGER][WARNING] Agent {universal_id} still breathing by cmdline. Delaying sweep.")
@@ -157,34 +134,42 @@ class Agent(BootAgent):
 
             except Exception as e:
                 self.log(f"[SCAVENGER][SWEEP-MAIN-ERROR] {e}")
+
             interruptible_sleep(self, 120)
 
-    def send_confirmation(self, universal_id, status):
-        outbox = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox")
-        os.makedirs(outbox, exist_ok=True)
-        payload = {
-            "status": status,
-            "universal_id": universal_id,
-            "timestamp": time.time(),
-            "message": f"{universal_id} {status} by Scavenger."
-        }
-        fpath = os.path.join(outbox, f"reaper_{universal_id}.json")
-        with open(fpath, "w") as f:
-            json.dump(payload, f, indent=2)
-        self.log(f"[SCAVENGER] Confirmed: {universal_id} ➔ {status}")
 
-    def notify_matrix_to_verify(self, universal_id):
-        verify_path = os.path.join(self.path_resolution['comm_path'], "matrix", "outbox", f"verify_{universal_id}.json")
-        payload = {
-            "type": "verify_branch",
-            "universal_id": universal_id,
-            "origin": self.command_line_args.get("universal_id", "unknown"),
-            "timestamp": time.time(),
-            "status": "post_kill"
-        }
-        with open(verify_path, "w") as f:
-            json.dump(payload, f, indent=2)
-        self.log(f"[SCAVENGER] Verification request sent for: {universal_id}")
+    def send_confirmation(self, universal_id, status="terminated"):
+        try:
+
+            target = "matrix"
+
+            if not universal_id:
+                return
+
+            # request the agent_tree_master from Matrix
+            pl = {"origin": self.command_line_args['universal_id'],
+                  "handler": "cmd_deletion_confirmation",
+                  "content": {"universal_id": universal_id, status: status},
+                  "timestamp": time.time()}
+
+            pk = self.get_delivery_packet("standard.command.packet", new=True)
+            pk.set_data(pl)
+
+            football = self.get_football(type=self.FootballType.PASS)
+            football.load_identity_file(universal_id=target)
+            da = self.get_delivery_agent("file.json_file", football=football, new=True)
+
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([target]) \
+                .set_drop_zone({"drop": "incoming"}) \
+                .set_packet(pk) \
+                .deliver()
+
+            self.log("[SCAVENGER] Sent agent_tree_master sync request to Matrix.")
+
+        except Exception as e:
+            self.log(f"[SCAVENGER][ERROR] Sync request failed: {e}")
+
 
 if __name__ == "__main__":
     agent = Agent()

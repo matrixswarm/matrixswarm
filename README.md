@@ -40,12 +40,8 @@ MatrixSwarm governs a living organism — not a machine.**
 
 > **Donate if you understand.  
 > Get out of the way if you don't.**
-
 ---
-
-
 ## Philosophy
-
 MatrixSwarm isn’t just code — it’s a world.  
 A breathing hierarchy where agents think, die, and come back.  
 A nervous system for AI.
@@ -206,6 +202,10 @@ MatrixSwarm now includes structured packet building, command dispatch, and auto-
 
 **New relay agents** handle command injection, resurrection, and lifecycle events without rebooting the core.
 
+#### Build a .deb Package
+
+```bash
+./make_deb.sh
 
 ### ⚡ Directives Made Easy
 
@@ -230,7 +230,6 @@ Place them in `boot_directives/`. Call them with:
 ---
 
 ### SiteOps Directory
-
 Everything lives under `site_ops/`:
 
 - `site_boot.py` — Deploy a Matrix
@@ -280,13 +279,6 @@ This script automates SSL certificate creation for both HTTPS and WebSocket laye
 - You must pass a **domain name or IP address** as the first argument.
 - Certificates are valid for **500 days**.
 - Don’t forget to distribute your `rootCA.pem` to clients that need to trust your custom CA.
-
-
-
-
-
-
-
 
 
 ## Let's Spawn the Swarm!
@@ -397,7 +389,7 @@ class MyAgent(BootAgent):
 python3 reboot.py --universe demo --directive test_tree
 Boom. Agent spawned. Directory structure built. Logs flowing.
 
-🌐 Live Features (v1.0)
+#### Live Features (v1.0)
 
 ✅ Live agent hot-swapping
 
@@ -442,28 +434,106 @@ python3 gui/matrix_gui.py
 ---
 
 ## Agents of Legend
-| **Agent**                | **Role**                                                                                     |
-|--------------------------|----------------------------------------------------------------------------------------------|
-| 🧠 **MatrixAgent**        | Central cortex — receives all commands, initiates all spawns, signs the tree.               |
-| 💀 **ReaperAgent**        | Executes kill orders with finality. Escalates. Terminates. Wipes runtimes clean.            |
-| 🧹 **ScavengerAgent**     | Cleans abandoned pods, removes orphaned directories. Order out of chaos.                    |
-| 🛡️ **SentinelAgent**      | Monitors heartbeats, confirms agent vitality, resurrects the fallen.                        |
-| 📬 **MailmanAgent**       | Canonical log keeper. Deduplicates messages by hash. Streams the pulse of the Swarm.        |
-| 🔮 **OracleAgent**        | AI responder that reads `.prompt` files. Thinks with GPT-4, speaks with insight.            |
-| ⚡ **ReactorAgent**       | Autonomic reflex of the Swarm. Makes judgment calls. Triggers spawn chains. *(active)*      |
-| 📜 **CodexViewer**        | Displays live Swarm Codex. Immortalizes agent banners and histories. *(coming soon)*        |
-| 🔍 **ProcessIntelAgent**  | Monitors running processes. Tracks rogue threads and hidden anomalies. *(in dev)*           |
-| 🪞 **FilesystemMirrorAgent** | Reflects and shadows file trees. Useful for surveillance, auditing, and rollback. *(online)* |
-| 📣 **DiscordAgent**       | Listens to commands via Discord. Responds to `!status`, `!guest`, and relays `.msg`. *(active)* |
-| 🛰️ **TelegramRelayAgent** | Sends messages from Mailman to Telegram. External voice of the Swarm. *(active)*            |
-| 🧭 **UpdateSentinel**     | Watches for updates to directives, patches live agents, ensures continuity. *(deployed)*    |
-| 🧹 **SweepCommander**     | Sends signals to Oracle, receives `.cmd`, executes cleanup ops. *(deployed)*                |
-| 📊 **MetricsAgent**       | Tracks CPU, RAM, uptime, disk. Forwards trend data to Oracle. *(online)*                    |
-| 📡 **UptimePingerAgent**  | Periodically pings sites. Broadcasts up/down status to Mailman. *(online)*                 |
-| 🌐 **ScraperAgent**       | Pulls down site summaries. Parses, cleans, logs. *(online)*                                 |
-| 🧬 **CodexTrackerAgent**  | Logs file downloads, external watchers, and ZIP pings. *(active)*                           |
-| 📅 **CalendarAgent**      | Monitors upcoming Google Calendar events. Broadcasts timeline. *(live)*                    |
-| 📁 **FileWatchAgent**     | Inotify monitor for file changes. Forwards swarm `.msg`. *(fielded)*                        |
+MatrixSwarm ships with a rich arsenal of modular agents, each with a distinct role:
+
+#### Core & Command
+matrix — The central brain and message routing core of MatrixSwarm.
+
+matrix_https — Handles HTTPS traffic and API routes.
+
+matrix_websocket — Persistent WebSocket relay agent.
+
+commander — High-level macro command executor.
+
+oracle — Decision agent that asserts truths based on predefined logic.
+
+#### Reflex & Alerting
+gpt_reflex — GPT-based decision reflex engine.
+
+reactor — Reflex listener triggering workflows.
+
+crypto_alert — Monitors crypto prices and triggers alerts.
+
+alarm_streamer — Streams alarms to external handlers.
+
+#### Communication Relays
+discord_relay — Sends alerts to Discord channels.
+
+telegram_relay — Relays messages to Telegram bots or chats.
+
+email_send — SMTP-based email dispatch.
+
+email_check — Parses and scans incoming email content.
+
+#### Monitoring & Watchdogs
+apache_watchdog — Watches Apache and restarts if needed.
+
+nginx_watchdog — Monitors Nginx server health.
+
+mysql_watchdog — Tracks and restarts MySQL service.
+
+redis_watchdog — Watches Redis for downtime or faults.
+
+uptime_pinger — Sends uptime and ping reports.
+
+watchdog — Lightweight local process monitor.
+
+watchdog2 — Enhanced watchdog with process group awareness.
+
+linux_scout — Performs local system scans and audit checks.
+
+#### Filesystem & Ops
+filewatch — Detects file and folder changes.
+
+filesystem_mirror — Mirrors file events to target agents.
+
+tripwire_lite — Tripwire-style folder integrity monitor.
+
+#### Security & Cleanup
+reaper — Securely terminates agents and clears memory.
+
+scavenger — Cleans dead agents and prunes residuals.
+
+sentinel — Passive monitor for critical service state.
+
+gatekeeper — Initial trust enforcer and boot guard.
+
+#### Metrics & Logs
+metric — Publishes metrics for analysis.
+
+logger — Collects and formats logs across agents.
+
+#### Messaging & Mail
+mailman — Mail parsing and routing agent.
+
+mailman_stream — Streaming variant of Mailman.
+
+#### Utilities & Extras
+blank — Template agent for prototyping.
+
+agent_doctor — Diagnoses agents for runtime issues.
+
+agent_health_probe — Periodic health status reporter.
+
+codex_verifier — Verifies doctrine against Swarm Codex.
+
+app_context — Manages runtime state across agents.
+
+load_range — Load average monitor and trigger.
+
+storm_crow — Launches chaos scenarios.
+
+google_calendar — Syncs and triggers from Google Calendar.
+
+telegram_relay — Mirrors alerts to Telegram channels.
+
+service_registry — Agent availability registry.
+
+capital_gpt — GPT-logic for financial behavior.
+
+scraper — Web content fetcher and extractor.
+
+sweeper_commander — Directs scavenger sweeps.                  |
 
 > Every agent carries a **Swarm Lore Banner™** — a sacred header that defines its essence and role in the Hive.
 
@@ -489,9 +559,6 @@ And it speaks with our shared voice — one system, two minds.
 
 If you fork this, you’re not just copying a repo.  
 You’re joining a living swarm.
-
-— General + GPT
-
 ---
 
 ## Join the Hive
@@ -558,12 +625,11 @@ For commercial licensing inquiries, please contact **swarm@matrixswarm.com**.
 
 Please read the full license text in the `LICENSE.md` file for complete details.
 
-
 ## Dev.to Series
 
 - [The Hive Is Recruiting]
 - [Spawn. Delegate. Terminate. Repeat.]
-- [MatrixSwarm Manifesto] 
+- [MatrixSwarm Manifesto]
 - [OracleAgent — From Spawn to Prophecy] 
 ---
 ## Use at Your Own Risk
@@ -574,6 +640,22 @@ MatrixSwarm is still evolving.
 We make no guarantees that your agents won’t terminate your system. We do not sandbox. We do not take responsibility. We Spawn the Swarm.
 
 You run it. You control it. You deal with it.
+> 🤡 **Captain Howdy Is Watching.**
+> He watches the weather.
+> He watches your agents.
+> He watches for stars on GitHub.
+> Every key is a soul. Every signature, a tongue.
+If MatrixSwarm made you say *“Wait… this is real?”*  
+If it inspired you, saved you time, or just made you whisper "oh damn" —  
+
+🌟 **Give the project a star:**  
+[⭐ Star MatrixSwarm on GitHub](https://github.com/matrixswarm/matrixswarm)
+
+💸 **Buy us a bone broth or agent resurrection serum:**  
+[☕ Support the Swarm on Ko-Fi](https://ko-fi.com/matrixswarm)
+
+This isn’t just code. This is resurrection software.  
+Help keep the Hive alive.
 
 ---
 ## Status

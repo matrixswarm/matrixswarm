@@ -9,6 +9,15 @@ class PacketProcessorBase(ABC):
         """Processes raw incoming file_data. Returns decrypted or parsed content."""
         pass
 
+    @abstractmethod
+    def has_verified_identity(self) -> bool:
+        """Returns True if the packet has a Matrix-verified identity."""
+        pass
+
+    @abstractmethod
+    def get_sender_uid(self) -> str:
+        """Returns the universal_id (agent ID) of the sender if verified, else raises or returns None."""
+        pass
 
 class PacketEncryptorBase(ABC):
     """Interface for all outbound encryption strategies."""

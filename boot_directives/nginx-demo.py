@@ -44,7 +44,7 @@ matrix_directive = {
                                     "filesystem": {},
                                     "config": {
                                         "watching": "the Queen",
-                                        "universal_id": "matrix"
+                                        "universal_id_under_watch": "matrix"
                                     }
                                 }
                             ]
@@ -106,7 +106,7 @@ matrix_directive = {
 
                 {
                     "universal_id": "discord-delta",
-                    "name": "discord",
+                    "name": "discord_relay",
                     "app": "mysql-demo",
                     "filesystem": {
                         "folders": []
@@ -171,7 +171,7 @@ matrix_directive = {
 
                 {
                     "universal_id": "discord-delta-5",
-                    "name": "discord",
+                    "name": "discord_relay",
                     "app": "mysql-demo",
                     "filesystem": {
                         "folders": []
@@ -242,7 +242,7 @@ matrix_directive = {
 
                 {
                     "universal_id": "discord-delta-6",
-                    "name": "discord",
+                    "name": "discord_relay",
                     "app": "mysql-demo",
                     "filesystem": {
                         "folders": []

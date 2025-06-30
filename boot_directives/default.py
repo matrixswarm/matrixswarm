@@ -45,7 +45,7 @@ matrix_directive = {
                                     "config": {
                                         "matrix_secure_verified": 1,
                                         "watching": "the Queen",
-                                        "universal_id": "matrix"
+                                        "universal_id_under_watch": "matrix"
                                     }
                                 }
                             ]
@@ -70,7 +70,7 @@ matrix_directive = {
             "name": "scavenger",
             "app": "matrix-core",
             "filesystem": {
-                "folders": []
+                "folders": [],
             },
             "config": { }
         },
@@ -98,7 +98,7 @@ matrix_directive = {
 
                         {
                           "universal_id": "discord-relay-1",
-                          "name": "discord",
+                          "name": "discord_relay",
                           "filesystem": {
                             "folders": []
                           },

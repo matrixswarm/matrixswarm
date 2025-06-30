@@ -1,5 +1,5 @@
 # Matrix: An AI OS System
-# Copyright (c) 2025 Daniel MacDonald and ChatGPT aka The Generals
+# Copyright (c) 2025 Daniel MacDonald
 # Licensed under the MIT License. See LICENSE file in project root for details.
 from core.tree_parser import TreeParser
 from core.class_lib.logging.logger import Logger

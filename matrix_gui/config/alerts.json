@@ -1,7 +1,7 @@
 [
   {
     "pair": "BTC/USDT",
-    "threshold": 111000.0,
+    "threshold": 110500.0,
     "cooldown": 300,
     "active": true,
     "name": "Captain Howdy Price Change",
@@ -15,8 +15,8 @@
     "universal_id": "crypto-btcusdt-5c6826"
   },
   {
-    "pair": "AVAX/USDT",
-    "threshold": 2400.0,
+    "pair": "ETH/USDT",
+    "threshold": 3000.0,
     "cooldown": 300,
     "active": true,
     "name": "New Price Change Below",
