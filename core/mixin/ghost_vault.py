@@ -91,8 +91,6 @@ def encrypt_vault(payload_dict, output_path=None):
         raise RuntimeError(f"[VAULT][ERROR] Failed to write vault to disk: {e}")
 
 
-
-
 def decrypt_vault(log=None):
 
     try:
@@ -145,6 +143,9 @@ def decrypt_vault(log=None):
 
         # 🧬 Swarm AES Key
         payload_dict["swarm_key"] = payload_dict.get("swarm_key")
+
+        # Agent personal AES key or maybe not ;)
+        payload_dict["private_key"] = payload_dict.get("private_key")
 
         payload_dict["encryption_enabled"] = payload_dict.get("encryption_enabled")
 

@@ -9,6 +9,7 @@ import inotify.adapters
 import threading
 
 from core.boot_agent import BootAgent
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -28,7 +29,7 @@ class Agent(BootAgent):
         self.log(f"[FILEWATCH] Booted. Watching: {self.watch_path}, Reporting: {self.send_to}")
         threading.Thread(target=self.start_filewatch_loop, daemon=True).start()
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         pass  # Not used — all work happens in filewatch thread
 
     def worker_pre(self):

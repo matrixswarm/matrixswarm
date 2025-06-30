@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 import hashlib
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -25,7 +26,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[SCRAPER] Cold metal online. Awaiting targets...")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.check_jobs_once()
         interruptible_sleep(self, 2)
 

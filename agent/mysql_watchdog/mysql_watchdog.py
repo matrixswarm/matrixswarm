@@ -3,12 +3,14 @@ import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
+import requests
 import subprocess
 import time
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 from datetime import datetime
 from core.mixin.agent_summary_mixin import AgentSummaryMixin
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
@@ -114,7 +116,7 @@ class Agent(BootAgent, AgentSummaryMixin):
     def worker_pre(self):
         self.log(f"[WATCHDOG] Watching systemd unit: {self.service_name}")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
 
         self.maybe_roll_day("mysql")
         running = self.is_mysql_running()
@@ -161,15 +163,21 @@ class Agent(BootAgent, AgentSummaryMixin):
         pk1 = self.get_delivery_packet("standard.command.packet")
         pk1.set_data({"handler": "cmd_send_alert_msg"})
 
-        pk2 = self.get_delivery_packet("notify.alert.general", new=True)
+        try:
+            server_ip = requests.get("https://api.ipify.org").text.strip()
+        except Exception:
+            server_ip = "Unknown"
+
+        pk2 = self.get_delivery_packet("notify.alert.general")
         pk2.set_data({
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "universal_id": self.command_line_args.get("universal_id", "unknown"),
-                "level": "critical",
-                "msg": message,
-                "formatted_msg": f"📣 Swarm Message\n{message}",
-                "cause": "Mysql Sentinel Alert",
-                "origin": self.command_line_args.get("universal_id", "unknown")
+            "server_ip": server_ip,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "universal_id": self.command_line_args.get("universal_id", "unknown"),
+            "level": "critical",
+            "msg": message,
+            "formatted_msg": f"📣 Swarm Message\n{message}",
+            "cause": "Mysql Sentinel Alert",
+            "origin": self.command_line_args.get("universal_id", "unknown")
         })
 
         pk1.set_packet(pk2, "content")
@@ -180,7 +188,9 @@ class Agent(BootAgent, AgentSummaryMixin):
             return
 
         for node in alert_nodes:
-            da = self.get_delivery_agent("file.json_file", new=True)
+            football = self.get_football(type=self.FootballType.PASS)
+            football.load_identity_file(universal_id=node["universal_id"])
+            da = self.get_delivery_agent("file.json_file", football=football, new=True)
             da.set_location({"path": self.path_resolution["comm_path"]}) \
                 .set_address([node["universal_id"]]) \
                 .set_drop_zone({"drop": "incoming"}) \

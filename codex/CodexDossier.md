@@ -1,7 +1,7 @@
 # CodexDossier.md
 MatrixSwarm Intelligence Ledger
 
-Created by Daniel F. MacDonald + ChatGPT-4  
+Created by Daniel F. MacDonald
 This file captures the architecture, doctrine, revelations, and system design milestones of the swarm.
 
 ---

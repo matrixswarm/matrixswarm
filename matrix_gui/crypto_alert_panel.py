@@ -2,18 +2,13 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                              QSizePolicy, QComboBox, QSpinBox, QMessageBox, QScrollArea, QGroupBox, QCheckBox, QLayout)
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import QRect, QSize, Qt, QPoint, QTimer
-import os
 import json
-import requests
 import time
 import uuid
-import traceback
-from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
-from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 
 
-class CryptoAlertPanel(QWidget, PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin):
+class CryptoAlertPanel(QWidget, PacketFactoryMixin):
 
     def __init__(self, alert_path, back_callback=None):
         super().__init__()

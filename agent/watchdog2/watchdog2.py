@@ -5,15 +5,13 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 import time
 import json
-
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.mixin.delegation import DelegationMixin
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent, DelegationMixin):
-    def __init__(self):
-        super().__init__()
 
     def __init__(self, path_resolution, command_line_args):
         super().__init__(path_resolution, command_line_args)
@@ -24,7 +22,7 @@ class Agent(BootAgent, DelegationMixin):
     def worker_pre(self):
         self.log("[WATCHDOG-2] Agent initialized. Resurrection monitoring engaged.")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.scan_once()
         interruptible_sleep(self, 5)
 

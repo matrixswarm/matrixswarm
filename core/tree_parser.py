@@ -1,10 +1,20 @@
 #Authored by Daniel F MacDonald and ChatGPT
-import json
-import os
 import time
 import tempfile
+import base64
+import os
+import copy
+import json
+from core.utils.crypto_utils import generate_aes_key
+from core.mixin.log_method import LogMixin
 
-class TreeParser:
+from Crypto.PublicKey import RSA
+from Crypto.Signature import pkcs1_15
+
+from Crypto.Hash import SHA256
+
+
+class TreeParser(LogMixin):
     CHILDREN_KEY = "children"
     UNIVERSAL_ID_KEY = "universal_id"
 
@@ -14,11 +24,12 @@ class TreeParser:
         """
         self.root = root  # Root of the JSON tree
         self.nodes = {}  # Dictionary to store all parsed nodes
-        self.duplicates = []  # To track any duplicate permanent IDs
+        self._duplicate_nodes = []  # To track any duplicate permanent IDs
         self.delegated = {}  # Any delegated data (not relevant here)
         self.tree_path = tree_path
         self._rejected_nodes = []  # Track rejected universal_ids
         self._added_nodes = []
+
 
     def _initialize_data(self, data):
         """
@@ -45,7 +56,7 @@ class TreeParser:
 
         if universal_id in self.nodes:
             print(f"[TREE-REJECT] ❌ Duplicate universal_id '{universal_id}' — rejecting this subtree and all children.")
-            self.duplicates.append(universal_id)
+            self._duplicate_nodes.append(universal_id)
             self._rejected_nodes.append(universal_id)
             return  # Skip entire subtree
 
@@ -79,7 +90,7 @@ class TreeParser:
             self.nodes[universal_id] = node
             self._added_nodes.append(universal_id)
         else:
-            self.duplicates.append(universal_id)
+            self._duplicate_nodes.append(universal_id)
             return
 
         # Ensure children is properly initialized
@@ -144,14 +155,23 @@ class TreeParser:
 
         self._added_nodes.clear()
         self._rejected_nodes.clear()
+        self._duplicate_nodes.clear()
 
         new_universal_id = new_node.get(self.UNIVERSAL_ID_KEY)
         if not new_universal_id:
             raise ValueError("New node must have a `universal_id`.")
 
+        # 🧼 Clean up invalid fields
         new_node = TreeParser.strip_invalid_nodes(new_node)
         if not new_node:
             raise ValueError("New node rejected due to missing name or universal_id.")
+
+        # 🚫 Check for existing node with same UID
+        if self.has_node(new_universal_id):
+            print(f"[TREE-INSERT] ❌ Node with universal_id '{new_universal_id}' already exists. Rejecting insertion.")
+            self._duplicate_nodes.append(new_universal_id)
+            self._rejected_nodes.append(new_universal_id)
+            return []
 
         self._validate_and_store_node(new_node)
 
@@ -227,7 +247,7 @@ class TreeParser:
             output_path = self.tree_path
 
         if not output_path:
-            self.log("[TREE] No output path specified for save().")
+            self.log("No output path specified for save().")
             return False
 
         try:
@@ -239,26 +259,21 @@ class TreeParser:
             os.replace(temp_path, output_path)
             return True
         except Exception as e:
-            self.log(f"[TREE] Failed to save tree: {e}")
+            self.log(f"Failed to save tree: {e}")
             return False
 
     def is_valid_tree(self):
         """
         Validates the tree by checking for duplicate universal_ids.
         """
-        return len(self.duplicates) == 0
+        return len(self._duplicate_nodes) == 0
 
     def get_duplicates(self):
         """
         Retrieves a list of duplicate nodes.
         """
-        return self.duplicates
+        return self._duplicate_nodes
 
-    def get_child_count_by_id(self, universal_id):
-        """
-        Returns the count of direct children for a node by `universal_id`.
-        """
-        return len(self.query_children_by_id(universal_id))
 
     def dump_all_nodes(self):
         """
@@ -280,7 +295,6 @@ class TreeParser:
         Extract a full subtree rooted at the given `universal_id`, including all children.
         Returns a deep copy of the node structure.
         """
-        import copy
         root_node = self._find_node(self.root, universal_id)
         if not root_node:
             return None
@@ -295,7 +309,7 @@ class TreeParser:
             output_path = self.tree_path
 
         if not output_path:
-            #self.log("[TREE] No output path specified for save().")
+            self.log("No output path specified for save().")
             return False
 
         try:
@@ -307,14 +321,13 @@ class TreeParser:
             os.replace(temp_path, output_path)
             return True
         except Exception as e:
-            #self.log(f"[TREE] Failed to save tree: {e}")
+            self.log(f"Failed to save tree: {e}")
             return False
 
     def remove_exact_node(self, target_node):
         """
         Recursively remove the exact instance of a node from the tree by identity.
         """
-
         def recurse(node):
             if not isinstance(node, dict):
                 return False
@@ -461,7 +474,7 @@ class TreeParser:
         collision = new_ids.intersection(set(self.nodes.keys()))
         if collision:
             print(f"[MERGE-REJECT] ❌ Subtree rejected due to duplicate IDs: {list(collision)}")
-            self.duplicates.extend(collision)
+            self._duplicate_nodes.extend(collision)
             self._rejected_nodes.extend(collision)
             return False
 
@@ -568,10 +581,15 @@ class TreeParser:
         return result
 
     def walk_tree(self, node):
-        nodes = [node]
+        if not node or not isinstance(node, dict):
+            return []
+
+        results = [node]
+
         for child in node.get("children", []):
-            nodes.extend(self.walk_tree(child))
-        return nodes
+            results.extend(self.walk_tree(child))
+
+        return results
 
     def all_universal_ids(self):
         return [n["universal_id"] for n in self.walk_tree(self.root)]
@@ -622,3 +640,93 @@ class TreeParser:
         recurse(self.root, [])
         return service_nodes
 
+    def assign_identity_to_all_nodes(self, matrix_priv_obj, encryption_enabled=True, force=False):
+
+        #if not encryption_enabled:
+        #    return
+
+        for uid in self.nodes:
+            self.assign_identity_token_to_node(uid, matrix_priv_obj, encryption_enabled, force=force)
+
+    def assign_identity_token_to_node(self, uid, matrix_priv_obj, encryption_enabled=True, force=False, replace_keys:dict={}):
+        #if not encryption_enabled:
+        #    return
+
+        node = self.nodes.get(uid)
+        if not node:
+            print(f"[ASSIGN-ID] ❌ No node found for UID: {uid}")
+            raise RuntimeError(f"[ASSIGN-ID] ❌ No node found for UID: {uid}")
+
+        if "vault" in node and not force and not replace_keys:
+            print(f"[ASSIGN-ID] ⏭️ Vault already exists for '{uid}', skipping (use force=True to overwrite)")
+            return False
+
+        try:
+            # Ensure matrix_priv_obj is in proper RSA format
+            if isinstance(matrix_priv_obj, str):
+                matrix_priv_obj = RSA.import_key(matrix_priv_obj.encode())
+            elif isinstance(matrix_priv_obj, bytes):
+                matrix_priv_obj = RSA.import_key(matrix_priv_obj)
+            elif not isinstance(matrix_priv_obj, RSA.RsaKey):
+                raise TypeError("❌ matrix_priv_obj must be an RSA key or PEM string/bytes.")
+
+            if bool(replace_keys.get('priv_key', False)) and (replace_keys.get('pub_key', False)):
+                priv_pem = replace_keys.get('priv_key')
+                pub_pem = replace_keys.get('pub_key')
+                private_key = replace_keys.get('private_key')
+            else:
+                # Generate new identity keypair
+                key = RSA.generate(2048)
+                priv_pem = key.export_key().decode()
+                pub_pem = key.publickey().export_key().decode()
+                private_key = generate_aes_key()
+
+            # Create signed identity token
+            token = {
+                "universal_id": uid,
+                "pub": pub_pem,
+                "timestamp": int(time.time())
+            }
+
+            digest = SHA256.new(json.dumps(token, sort_keys=True).encode())
+            sig = pkcs1_15.new(matrix_priv_obj).sign(digest)
+            sigg = base64.b64encode(sig).decode()
+
+            # Assign vault
+            node["vault"] = {
+                "priv": priv_pem,
+                "private_key": private_key, #aes encryption key
+                "sig": sigg, #Matrix Sig
+                "identity": token
+            }
+
+            print(f"[ASSIGN-ID] ✅ Identity token assigned for '{uid}'")
+            return True
+
+        except Exception as e:
+            raise RuntimeError(f"[GOSPEL-KEY] Failed to assign identity token for '{uid}': {e}")
+
+    def mark_deleted_and_get_kill_list(self, target_uid):
+        """
+        Marks the given node and all its children as 'deleted': True.
+        Returns a flat list of all affected universal_ids.
+        """
+        kill_list = []
+
+        def recurse_mark(node):
+            if not node or not isinstance(node, dict):
+                return
+            uid = node.get(self.UNIVERSAL_ID_KEY)
+            if uid:
+                node["deleted"] = True
+                kill_list.append(uid)
+            for child in node.get(self.CHILDREN_KEY, []):
+                recurse_mark(child)
+
+        target_node = self.get_node(target_uid)
+        if target_node:
+            recurse_mark(target_node)
+        else:
+            print(f"[TREE-KILL] ❌ Node '{target_uid}' not found.")
+
+        return kill_list

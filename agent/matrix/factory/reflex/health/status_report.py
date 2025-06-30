@@ -1,4 +1,4 @@
-from agent.core.tree_parser import TreeParser
+from core.tree_parser import TreeParser
 def attach(agent, config):
     def msg_health_report(content, packet):
         target_uid = content.get("target_universal_id")

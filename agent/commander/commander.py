@@ -11,6 +11,7 @@ import json
 
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -22,7 +23,7 @@ class Agent(BootAgent):
     def post_boot(self):
         self.log("[COMMANDER] Active swarm dashboard engaged.")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.track_agents()
         self.thread_registry["worker"]["timeout"] = 15
         interruptible_sleep(self, 10)

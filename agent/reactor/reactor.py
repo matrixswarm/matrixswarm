@@ -7,6 +7,7 @@ import json
 import time
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -22,7 +23,7 @@ class Agent(BootAgent):
         print(msg)
         self.broadcast(msg)
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.check_oracle_triggers_once()
         interruptible_sleep(self, 2)
 
@@ -62,9 +63,9 @@ class Agent(BootAgent):
         }
         fname = f"reactor_spawn_{int(time.time())}.json"
         path = os.path.join(self.spawn_target, fname)
-        with open(path, "w") as f:
-            json.dump(spawn_payload, f, indent=2)
-        self.log(f"[REACTOR] Dispatched spawn request for {agent_name} as {universal_id}.")
+        #with open(path, "w") as f:
+        #    json.dump(spawn_payload, f, indent=2)
+        #self.log(f"[REACTOR] Dispatched spawn request for {agent_name} as {universal_id}.")
 
     def broadcast(self, message):
         try:
@@ -77,8 +78,8 @@ class Agent(BootAgent):
                 "msg": message
             }
             fname = f"reactor_boot_{int(time.time())}.json"
-            with open(os.path.join(mailman_dir, fname), "w") as f:
-                json.dump(payload, f, indent=2)
+            #with open(os.path.join(mailman_dir, fname), "w") as f:
+            #    json.dump(payload, f, indent=2)
         except Exception as e:
             self.log(f"[REACTOR][ERROR] {e}")
 

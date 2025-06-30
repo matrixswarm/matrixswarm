@@ -8,8 +8,7 @@ import time
 from openai import OpenAI
 from string import Template
 from core.boot_agent import BootAgent
-from core.utils.swarm_sleep import interruptible_sleep
-
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
@@ -37,7 +36,7 @@ class Agent(BootAgent):
         self.log(f"[GPT][BOOT] Inbox path: {self.inbox}")
         self.log(f"[GPT][BOOT] Outbox path: {self.outbox}")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.log("[GPT][DEBUG] Entered worker() loop.")
         processed = 0
         try:

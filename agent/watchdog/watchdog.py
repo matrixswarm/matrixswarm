@@ -1,4 +1,4 @@
-#Authored by Daniel F MacDonald and ChatGPT
+#Authored by Daniel F MacDonald
 # ╔════════════════════════════════════════════════════════╗
 # ║                   🧠 WATCHDOG AGENT 🧠                ║
 # ║   Central Cortex · Tree Dispatcher · Prime Director    ║
@@ -12,6 +12,7 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 import time
 import requests
 import json
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 from core.utils.swarm_sleep import interruptible_sleep
 from core.boot_agent import BootAgent
@@ -33,7 +34,7 @@ class Agent(BootAgent):
         self.log(f"[WATCHDOG][CONFIG] Loaded: ping={self.ping_url}, interval={self.check_interval}s, timeout={self.timeout}s, max_failures={self.max_failures}, action={self.alert_action}")
         self.log("[WATCHDOG] WatchdogAgent initialized and watching.")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.check_ping_once()
         interruptible_sleep(self, self.check_interval)
 

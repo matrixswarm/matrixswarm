@@ -9,7 +9,7 @@ import threading
 import asyncio
 import websockets
 import json
-import traceback
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 from core.boot_agent import BootAgent
 
@@ -25,13 +25,13 @@ class Agent(BootAgent):
         self.clients = set()
         self.loop = None
         self.websocket_ready = False
-        self.cert_dir = "socket_certs"
+        self.cert_dir = os.path.join(self.path_resolution['root_path'], "socket_certs")
         self._stop_event = None
         self._thread = None
         self._config = None
         self._lock = threading.Lock()
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         """
         Starts or restarts the WebSocket thread if config changes or thread is dead.
         """
@@ -88,7 +88,7 @@ class Agent(BootAgent):
                 )
 
                 self.websocket_ready = True
-                self.log(f"[WS] ✅ SECURE WebSocket bound on port {self.port} (TLS enabled)")
+                self.log(f"[WS] SECURE WebSocket bound on port {self.port} (TLS enabled)")
                 await server.wait_closed()
 
             loop.run_until_complete(launch())
@@ -109,13 +109,13 @@ class Agent(BootAgent):
 
 
         except Exception as e:
-            self.log(f"[WS][FATAL] WebSocket startup failed: {e}")
+            self.log(f"[WS][FATAL] WebSocket startup failed", error=e, block="main_try")
             self.running = False
 
-    def cmd_health_report(self, content, packet):
+    def cmd_health_report(self, content, packet, identity:IdentityObject = None):
         self.log(f"[RELAY] Received health report for {content.get('target_universal_id', '?')}")
 
-    async def websocket_handler(self, websocket, path):
+    async def websocket_handler(self, websocket):
 
         ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
         self.log(f"[WS][CONNECT] Client connected from IP: {ip}")
@@ -132,7 +132,7 @@ class Agent(BootAgent):
                 try:
                     # Await a message from the client
                     message = await websocket.recv()
-                    self.log(f"[WS][RECEIVED] {repr(message)}")
+                    self.log(f"{repr(message)}")
 
                     # Attempt to decode JSON (if applicable)
                     try:
@@ -169,7 +169,7 @@ class Agent(BootAgent):
             self.clients.discard(websocket)
             self.log(f"[WS] Client disconnected and removed. Active clients: {len(self.clients)}")
 
-    def cmd_rpc_route(self, content, packet):
+    def cmd_rpc_route(self, content, packet, identity:IdentityObject = None):
         try:
             self.log("Incoming routed RPC packet.")
 
@@ -178,7 +178,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e)  # Optional: write full trace to logs
 
-    def cmd_send_alert_msg(self, content, packet):
+    def cmd_send_alert_msg(self, content, packet, identity:IdentityObject = None):
         try:
             # Format the alert message
             msg = content.get("formatted_msg") or content.get("msg") or "[SWARM] Alert received."
@@ -203,11 +203,11 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e)  # Optional: write full trace to logs
 
-    def cmd_alert_to_gui(self, content, packet):
+    def cmd_alert_to_gui(self, content, packet, identity:IdentityObject = None):
         self.log(f"Dispatching alert to GUI: {content}")
         self.cmd_broadcast(content, packet)
 
-    def cmd_broadcast(self, content, packet):
+    def cmd_broadcast(self, content, packet, identity:IdentityObject = None):
         if not hasattr(self, "loop") or self.loop is None:
             self.log("[WS][REFLEX][SKIP] Event loop not ready.")
             return
@@ -229,7 +229,7 @@ class Agent(BootAgent):
             for c in dead:
                 self.clients.discard(c)
 
-            self.log(f"[WS][REFLEX] Broadcasted to {len(self.clients)} clients.")
+            self.log(f"Broadcasted to {len(self.clients)} clients.")
         except Exception as e:
             self.log(error=e)
 

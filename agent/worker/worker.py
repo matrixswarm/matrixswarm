@@ -9,6 +9,7 @@ import json
 import psutil
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -19,7 +20,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[WORKER] Booted. WorkerAgent is awake and ready.")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.do_task_once()
         interruptible_sleep(self, 10)
 

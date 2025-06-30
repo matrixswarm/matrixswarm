@@ -6,6 +6,7 @@ import json
 from dotenv import load_dotenv
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 load_dotenv()
 
 class Agent(BootAgent):
@@ -21,7 +22,7 @@ class Agent(BootAgent):
         self.email_addr = config.get("email") or os.getenv("EMAILSENDAGENT_SMTP_EMAIL")
         self.email_pass = config.get("password") or os.getenv("EMAILSENDAGENT_PASSWORD")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
 
         for fname in os.listdir(self.watch_path):
             if not fname.endswith(".json"):

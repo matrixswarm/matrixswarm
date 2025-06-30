@@ -5,9 +5,9 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 import importlib
 import time
-import traceback
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
 
@@ -41,7 +41,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log("Failed to initialize config", error=e)
 
-    def worker(self,config:dict=None):
+    def worker(self,config:dict=None, identity:IdentityObject = None):
 
         try:
 
@@ -91,7 +91,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main_try")
 
-        interval = int(self._private_config.get("poll_interval", 60))
+        interval = int(self._private_config.get("poll_interval", 20))
         interruptible_sleep(self, interval)
 
     def _run_price_change_monitor(self, direction="above"):

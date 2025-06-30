@@ -1,8 +1,6 @@
-# At the top of your script
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
 import sys
 import os
-import site
-import base64
 # Add the directory containing this script to the PYTHONPATH
 current_directory = os.path.dirname(os.path.abspath(__file__))  # Directory of the current script
 if current_directory not in sys.path:
@@ -18,8 +16,7 @@ from class_lib.file_system.file_system_builder import FileSystemBuilder
 from path_manager import PathManager
 from core.class_lib.logging.logger import Logger
 from core.mixin.core_spawn_secure import CoreSpawnerSecureMixin
-from core.mixin.ghost_vault import build_encrypted_spawn_env, generate_agent_keypair
-
+from core.mixin.ghost_vault import build_encrypted_spawn_env
 class CoreSpawner(CoreSpawnerSecureMixin):
     def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path', python_site=None, detected_python=None):
         super().__init__()
@@ -36,6 +33,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             {"name": "hello.moto", "type": "d", "content": None},
             {"name": "payload", "type": "d", "content": None},
             {"name": "incoming", "type": "d", "content": None},
+            {"name": "codex", "type": "d", "content": None},
             {"name": "queue", "type": "d", "content": None},
             {"name": "stack", "type": "d", "content": None, "meta": "Long - term mission chaining"},
             {"name": "replies", "type": "d", "content": None, "meta": "stack / Long - term mission chaining"},
@@ -215,6 +213,9 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             base_name = agent_name.split("_bp_")[0] if "_bp_" in agent_name else agent_name
             source_path = os.path.join(self.agent_path, base_name, f"{base_name}.py")
 
+            session_path = os.path.dirname(self.pod_path.rstrip("/"))
+            archive_path = os.path.join(session_path, 'archive')
+            os.makedirs(archive_path, exist_ok=True)
             path_dict = {
                 "root_path": self.root_path,
                 "pod_path": self.pod_path,
@@ -222,7 +223,8 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 "agent_path": self.agent_path,
                 "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
                 "comm_path_resolved": os.path.join(self.comm_path, universal_id),
-                "session_path": os.path.dirname(self.pod_path.rstrip("/"))
+                "session_path": session_path,
+                "archive_path": archive_path
             }
 
 
@@ -244,7 +246,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 for path in paths:
                     if os.path.exists(path):
                         source_path = path
-                        logger.log(f"[SPAWN] ✅ Loaded agent: {agent_name} from: {source_path}")
+                        logger.log(f"Loaded agent: {agent_name} from: {source_path}")
                         break
 
 
@@ -252,28 +254,14 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             vault_path = os.path.join(spawn_path, "vault")
 
             if not source_path or not os.path.exists(source_path):
-                logger.log(f"[SPAWN-ERROR] Source path not resolved or file missing. Cannot boot agent: {agent_name}")
+                logger.log(f"Source path not resolved or file missing. Cannot boot agent: {agent_name}")
                 return
-
-            #when the process is spawned it has no way to find the root and the lib path
-            #so prepend it with these facts
-
-            tree_node_blob = ""
-            if tree_node:
-                try:
-                    tree_node_blob = f"tree_node = {repr(tree_node)}\n"
-                except Exception as e:
-                    print(f"[SPAWN-ERROR] Could not encode tree_node for {universal_id}: {e}")
-
-            #data = inject_spawn_landing_zone(file_content, path_dict, cmd_args, tree_node)
 
             with open(source_path, "r") as f:
                 file_content = f.read()
 
             with open(run_path, "w") as f:
                 f.write(file_content)
-
-
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
 
@@ -315,15 +303,13 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 stderr = subprocess.DEVNULL
                 stdin = subprocess.DEVNULL
 
-            required_keys = ["pub", "priv", "swarm_key", "matrix_pub", "matrix_priv"]
+            required_keys = ["pub", "priv", "swarm_key", "matrix_pub", "matrix_priv", "security_box"]
             missing = [k for k in required_keys if k not in self._keychain]
 
             if missing:
                 logger.log(f"[SPAWN-FAIL] Missing keys: {', '.join(missing)} in self._keychain")
 
                 exit(self._keychain)
-
-                raise RuntimeError(f"[SPAWN] Cannot spawn {universal_id} — incomplete keychain.")
 
             payload = {
                 "path_resolution": {
@@ -354,18 +340,20 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "priv": self._keychain["priv"]
                 },
                 "swarm_key": self._keychain["swarm_key"],
+                "private_key": self._keychain["private_key"],
                 "matrix_pub": self._keychain["matrix_pub"],
                 "matrix_priv": self._keychain["matrix_priv"],
+                "security_box": self._keychain["security_box"],
                 "encryption_enabled": self._keychain["encryption_enabled"],
             }
 
-            python_site_path = site.getsitepackages()[0]
             env = build_encrypted_spawn_env(payload, vault_path)
 
             env.update({
                 "SITE_ROOT": self.site_root_path,
                 "AGENT_PATH": self.agent_path,
-                "PYTHON_SITE": python_site_path
+                "PYTHON_SITE": self.python_site,
+
             })
 
             process = subprocess.Popen(
@@ -374,7 +362,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 stderr=stderr,
                 stdin=stdin,
                 preexec_fn=os.setsid,
-                env=env
+                env=env,
             )
 
             pid = process.pid

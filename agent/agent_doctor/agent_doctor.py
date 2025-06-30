@@ -5,7 +5,7 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 import time
 import json
-
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 
@@ -88,7 +88,7 @@ class Agent(BootAgent):
 
         return status_report
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.log("[DOCTOR] Beginning swarm scan...")
         agents = self.get_agents_list()
 

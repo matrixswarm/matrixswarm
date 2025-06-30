@@ -12,6 +12,7 @@ from flask import Flask
 from flask_socketio import SocketIO
 from core.utils.swarm_sleep import interruptible_sleep
 from core.boot_agent import BootAgent
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 # Flask + SocketIO app
 app = Flask(__name__)
@@ -44,7 +45,7 @@ class Agent(BootAgent):
         os.makedirs(self.alarm_path, exist_ok=True)
         threading.Thread(target=self.alarm_watcher, daemon=True).start()
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         interruptible_sleep(self, 20)
 
     def post_boot(self):

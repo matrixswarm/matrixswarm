@@ -7,6 +7,7 @@ import json
 import time
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -15,7 +16,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[LOGGER] Booted and ready for timestamp duty.")
 
-    def worker(self):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         self.log(f"[LOGGER] Log cycle at {now}")
         interruptible_sleep(self, 10)

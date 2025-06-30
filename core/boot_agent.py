@@ -1,4 +1,3 @@
-#Authored by Daniel F MacDonald and ChatGPT
 import os
 import time
 import traceback
@@ -7,8 +6,11 @@ import json
 import hashlib
 import fnmatch
 import inspect
-from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
+import copy
+from enum import Enum
 
+from core.class_lib.packet_delivery.utility.crypto_processors.identity import IdentityObject
+from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.core_spawner import CoreSpawner
 from core.path_manager import PathManager
@@ -22,14 +24,15 @@ from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFact
 from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
 from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
 from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
-
 from core.class_lib.packet_delivery.utility.encryption.config import EncryptionConfig
+from cryptography.hazmat.primitives import serialization
 from core.mixin.ghost_vault import decrypt_vault
 from core.utils.trust_log import log_trust_banner
-from core.mixin.ghost_vault import generate_agent_keypair
 from core.boot_agent_thread_config import get_default_thread_registry
 from core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
 from core.tree_parser import TreeParser
+from core.class_lib.packet_delivery.utility.crypto_processors.football import Football
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin, GhostRiderUltraMixin, IdentityRegistryMixin):
 
@@ -52,18 +55,24 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.command_line_args = payload["args"]
         self.tree_node = payload["tree_node"]
 
-        self.swarm_key = payload.get("swarm_key")
+        #used by the swarm to encrypt packets
+        self.swarm_key = payload.get("swarm_key")  #swarm AES Key
+        #this is for Matrix only and maybe a bogus key, only the real Matrix gets this and her Sentinels
+        self.private_key = payload.get("private_key") #private AES Key
+
+        #these 2 guys are aux and are created by the parent
         self.matrix_pub = payload.get("matrix_pub")
         self.matrix_priv = payload.get("matrix_priv")  # Fallback already handled by decrypt_vault()
 
-        self.matrix_pub_obj = None
-        self.matrix_priv_obj = None
-
+        #these are the same 2 guys that have been converted in the vault
         self.public_key_obj = payload["public_key_obj"]
         self.private_key_obj = payload["private_key_obj"]
         self.pub_fingerprint = payload["pub_fingerprint"]
         self.secure_keys = payload.get("secure_keys", {})
         self.cached_pem = payload.get("cached_pem", {})
+        #hold Matrix credentials, encase of her going down
+        self.security_box = payload.get("security_box", {})
+
         config = EncryptionConfig()
 
         self.logger = Logger(self.path_resolution["comm_path_resolved"], "logs", "agent.log")
@@ -71,6 +80,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.encryption_enabled=bool(payload.get("encryption_enabled",0))
         if self.encryption_enabled:
             config.set_swarm_key(self.swarm_key)
+            config.set_private_key(self.private_key)
             config.set_enabled(True)
             self.logger.set_encryption_key(self.swarm_key)
 
@@ -82,14 +92,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
 
         # Convert to objects
-        from cryptography.hazmat.primitives import serialization
 
         try:
             self.matrix_pub_obj = serialization.load_pem_public_key(self.matrix_pub.encode())
         except Exception as e:
             self.matrix_pub_obj = None
             self.log(f"[BOOT] matrix_pub is missing. Trust cannot be verified.", error=e, block="serialize_public_key")
-
             exit()
 
         try:
@@ -108,6 +116,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             matrix_pub=self.matrix_pub,
             matrix_priv=self.matrix_priv,
             swarm_key=self.swarm_key,
+            private_key=self.private_key
         )
 
         #this option will be pulled from the command line as debug
@@ -120,10 +129,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.thread_registry = get_default_thread_registry()
 
         if self.encryption_enabled:
-            config.set_public_key(self.public_key_obj)
-            config.set_private_key(self.private_key_obj)
-            config.set_matrix_public_key(self.matrix_pub_obj)
-            config.set_matrix_private_key(self.matrix_priv_obj)
+            config.set_pub(self.public_key_obj)
+            config.set_priv(self.private_key_obj)
+            config.set_matrix_pub(self.matrix_pub_obj)
+            config.set_matrix_priv(self.matrix_priv_obj)
 
         self.verbose = bool(self.command_line_args.get('verbose',0))
         self._loaded_tree_nodes={}
@@ -131,26 +140,96 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         self.running = False
 
-    def log(self, msg="", error: Exception = None, block=None, include_stack=True, level="INFO"):
+        '''
+        fb.add_identity(matrix_node['vault'],
+                identity_name="agent_owner",    #owner identity
+                verify_universal_id=True,       #make sure the universal_id of the agent is the same as the one in the identity
+                universal_id="matrix",          #compare universal_id to the one stored in the identity, sanity check
+                is_payload_identity=True,         #yes, this payload is an identity, if identity embedding is turned on this will be the identity that will be embeded, since it will be the identity of the user sending the packet
+                sig_verifier_pubkey=matrix_pub,   #this pubkey is used to verify the identity, always Matrix's pubkey
+                is_pubkey_for_encryption=False,    #if you turn on asymmetric encryption the pubkey in the identity will encrypt, check payload size
+                is_privkey_for_signing=True,       #use the privkey that belongs to the identity pubkey to sign the whole subpacket
+                )
+        '''
+
+        #cache the identity, no need to do the calculations every instantiation
+        #basic identity template to send a packet
+        self._pass_football= Football()
+        self._pass_football.set_identity_sig_verifier_pubkey(self.matrix_pub)  # this is used to verify the agent's own identity, sanity check
+        self._pass_football.add_identity(self.tree_node["vault"],
+                                    identity_name="agent_owner",
+                                    universal_id=self.command_line_args.get("universal_id"), #verify the agents own universal_id,
+                                    is_payload_identity=True,
+                                    is_privkey_for_signing=True
+                                    )
+        self._pass_football.set_pubkey_verifier(self.matrix_pub) #Matrix pubkey to verify the inner-identity
+        self._pass_football.set_identity_base_path(self.path_resolution['comm_path'])
+        #self._pass_football.set_aes_key(self.swarm_key)
+        #self._pass_football.set_aes_encryption_pubkey() #used for sending the aes encryption key using targets, pubkey
+        #self._pass_football.set_aes_encryption_privkey() #used by the receiving target to decrypt the aes key and decrypt the payload
+
+
+        # basic identity template to receive a packet
+        self._catch_football = Football()
+        self._catch_football.set_identity_sig_verifier_pubkey(self.matrix_pub)  # this is used to verify the agent's own identity, sanity check
+        self._catch_football.add_identity(
+                                         self.tree_node["vault"],
+                                         identity_name="agent_owner",
+                                         universal_id=self.command_line_args.get("universal_id"),
+                                         )
+        self._catch_football.set_pubkey_verifier(self.matrix_pub)  # Matrix pubkey to verify the inner-identity
+        self._catch_football.set_aes_encryption_privkey(self.secure_keys.get("priv"))  #used by the receiving agent to decrypt the aes key that wa
+        # s encrypted with the paired pubkey, then using the aes key to decrypt the payload
+        self._catch_football.set_identity_base_path(self.path_resolution['comm_path'])
+    class FootballType(Enum):
+        PASS = 1
+        CATCH = 2
+
+    def get_football(self, type: FootballType = FootballType.PASS ):
+
         try:
-            import inspect
-            frame = inspect.currentframe()
-            outer_frames = inspect.getouterframes(frame)
-
-            if len(outer_frames) > 1:
-                outer = outer_frames[1]
+            if type == self.FootballType.CATCH:
+                fb = copy.deepcopy(self._catch_football)
+            elif type == self.FootballType.PASS:
+                fb = copy.deepcopy(self._pass_football)
             else:
-                outer = outer_frames[0]
+                raise ValueError("Unknown football type or type not provided")
 
-            method_name = outer.function.upper()
-            lineno = outer.lineno
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
+        return fb
+
+    def log(self, msg="", error: Exception = None, block=None, include_stack=True, level="INFO", custom_tail=None):
+        try:
 
 
-            if not isinstance(error, (BaseException, type(None))):
-                raise TypeError(f"'error' must be an Exception, not {type(error).__name__}")
+            if custom_tail:
 
-            agent = self.command_line_args.get("agent_name", "UNKNOWN").upper()
-            prefix = f"[{agent}][{method_name}][L{lineno}]"
+                agent = self.command_line_args.get("agent_name", "UNKNOWN").upper()
+
+                prefix = f"[{agent}]{custom_tail}"
+
+            else:
+
+                frame = inspect.currentframe()
+                outer_frames = inspect.getouterframes(frame)
+
+                if len(outer_frames) > 1:
+                    outer = outer_frames[1]
+                else:
+                    outer = outer_frames[0]
+
+                method_name = outer.function.upper()
+                lineno = outer.lineno
+
+                if not isinstance(error, (BaseException, type(None))):
+                    raise TypeError(f"'error' must be an Exception, not {type(error).__name__}")
+
+                agent = self.command_line_args.get("agent_name", "UNKNOWN").upper()
+
+                prefix = f"[{agent}][{method_name}][L{lineno}]"
+
             if block:
                 prefix += f"[{block.upper()}]"
 
@@ -221,7 +300,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             if count > 0:
                 self.running = False
                 print(
-                    f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args["universal_id"]} die cookie ingested, going down easy...")
+                    f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args['universal_id']} die cookie ingested, going down easy...")
 
             # within 20secs if another instance detected, and this is the younger of the die
 
@@ -238,28 +317,26 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             time.sleep(3)
 
     def resolve_factory_injections(self):
-        self.log("[FACTORY] Starting factory injection from 'factories' block only.")
+        self.log("Starting factory injection from 'factories' block only.")
 
         config = self.tree_node.get("config", {})
         factories = config.get("factories", {})
 
-        self.log(f"[FACTORY-INJECT] Found factories: {list(factories.keys())}")
+        self.log(f"Found factories: {list(factories.keys())}")
 
         for dotted_path, factory_config in factories.items():
             if not isinstance(dotted_path, str) or "." not in dotted_path:
-                self.log(f"[FACTORY-SKIP] Invalid factory path: {dotted_path}")
+                self.log(f"Invalid factory path: {dotted_path}")
                 continue
 
             try:
                 full_module_path = f"agent.{self.command_line_args['agent_name']}.factory.{dotted_path}"
-                self.log(f"[FACTORY] Attempting: {full_module_path}")
+                self.log(f"Attempting: {full_module_path}")
                 mod = __import__(full_module_path, fromlist=["attach"])
                 mod.attach(self, factory_config)
-                self.log(f"[FACTORY] Loaded: {full_module_path}")
+                self.log(f"Loaded: {full_module_path}")
             except Exception as e:
                 self.log(f"{dotted_path} → {e}", error=e, block="main-try")
-
-
 
     def is_worker_overridden(self):
         return self.__class__.worker != BootAgent.worker
@@ -297,7 +374,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as e:
             self.log(error=e, block="main-try")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject=None):
         self.log("[BOOT] Default worker loop running. Override me.")
         while self.running:
             interruptible_sleep(self, 5)
@@ -310,7 +387,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.log("[BOOT] Default post_boot (override me if needed)")
 
     def packet_listener(self):
-        self.log("[UNIFIED-LISTENER] Monitoring incoming packets...")
+        self.log("Monitoring incoming packets...")
         incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(incoming_path, exist_ok=True)
         emit_beacon = self.check_for_thread_poke("packet_listener", 5)
@@ -318,7 +395,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         #TOP TRY
         try:
 
-            ra = self.get_reception_agent("file.json_file", new=True)
+            football = self.get_football(type=self.FootballType.CATCH)
+            ra = self.get_reception_agent("file.json_file", new=True, football=football)
             ra.set_location({"path": self.path_resolution["comm_path"]}) \
                 .set_address([self.command_line_args["universal_id"]]) \
                 .set_drop_zone({"drop": "incoming"})
@@ -338,11 +416,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     last_dir_mtime = current_dir_mtime
 
                     for fname in os.listdir(incoming_path):
-                        if not fname.endswith(".json"):
-                            continue
-
                         #dynamic config packet
                         try:
+                            if not fname.endswith(".json"):
+                                continue
 
                             pk = self.get_delivery_packet("standard.command.packet", new=True)
                             pk2 = self.get_delivery_packet("standard.general.json.packet", new=True)
@@ -353,7 +430,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                        .receive()
 
                             fpath = os.path.join(incoming_path, fname)  # get the file's path
-                            os.remove(fpath)
+
+                            try:
+                                os.remove(fpath)
+                                identity=ra.get_identity()
+                            except Exception as e:
+                                identity=None
 
                             try:
                                 pk = packet.get_packet()
@@ -365,12 +447,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                 pk={}
                                 self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
 
+                            #self.log(f"processing packet: {fname}")
+
                             handler = pk.get("handler")
                             if not handler:
-                                self.log(f"[UNIFIED][SKIP] No 'call' in: {fname}")
+                                self.log(f"[UNIFIED][SKIP] No 'call' in: {fname} packet: {pk}")
                                 continue
-
-                            #self.log(f"#########{pk}xxxxxxxxxxxxxxxx")
 
                             handler_name = pk.get("handler")
                             content = pk.get("content", {})
@@ -381,7 +463,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                             #factory handler check
                             if callable(handler_fn):
                                 try:
-                                    handler_fn(content, pk)
+                                    handler_fn(content, pk, identity)
                                     self.log(f"[UNIFIED] ✅ Executed handler: {handler_name}")
                                     continue
                                 except Exception as e:
@@ -396,20 +478,21 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                 handler_id = handler_name.split(".")[-1]  # e.g. cmd_example
                                 full_module_path = f"agent.{self.command_line_args['agent_name']}.factory.{handler_id}"
 
-                                self.log(f"[FACTORY] Attempting: {full_module_path}")
+                                self.log(f"Attempting: {full_module_path}")
 
                                 mod = __import__(full_module_path, fromlist=["attach"])
-                                mod.attach(self, {"packet": pk, "content": content})
+                                mod.attach(self, {"packet": pk, "content": content, "identity": identity})
 
-                                self.log(f"[FACTORY] ✅ Loaded and attached: {full_module_path}")
+                                self.log(f"✅ Loaded and attached: {full_module_path}")
 
                             except Exception as fallback_error:
-                                self.log( f"[FACTORY][FAIL] Could not dynamically load handler '{handler_name}': {fallback_error}", error=fallback_error, block="dynamic_config_packet")
+                                self.log( f"Could not dynamically load handler '{handler_name}': {fallback_error}", error=fallback_error, block="dynamic_config_packet")
 
                         except Exception as e:
                             self.log(f"Failed to process {fname}", error=e)
+                            if fpath and os.path.isfile(fpath):
+                                os.remove(fpath)
                             continue
-
 
             except Exception as loop_error:
 
@@ -419,7 +502,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             try:
                 handler_fn = getattr(self, "packet_listener_post", None)
                 if callable(handler_fn):
-                    self.packet_listener_post() #used as hook or cron, so any operation that effect the agent_tree for instance stay on same thread
+                    self.packet_listener_post() #used as hook or cron, so any operation that effects the agent_tree for instance stay on same thread
 
             except Exception as e:
                 self.log(error=e, block="packet_listener_post")
@@ -427,8 +510,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             interruptible_sleep(self, 2)
 
 
-
-    def save_directive(self, path: dict, node_tree :dict):
+    def save_directive(self, path: dict, node_tree :dict, football:Football):
         """
         Encrypt and deliver the directive tree using a structured path dictionary.
 
@@ -445,12 +527,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             pk1.set_data(node_tree)
 
-            priv_key=None
-
-            if ENCRYPTION_CONFIG.is_enabled():
-               priv_key = ENCRYPTION_CONFIG.get_matrix_private_key()
-
-            ra = self.get_delivery_agent("file.json_file", new=True, priv_key=priv_key)
+            ra = self.get_delivery_agent("file.json_file", new=True, football=football)
 
             ra.set_location({"path": path["path"]}) \
                 .set_identifier(path['name']) \
@@ -467,17 +544,15 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌", error=e, block="main_try")
             return False
 
-    def load_directive(self,path :dict):
+    def load_directive(self, path :dict, football:Football):
         try:
 
-            pub_key=None
-
             if ENCRYPTION_CONFIG.is_enabled():
-                pub_key = ENCRYPTION_CONFIG.get_matrix_public_key()
+                football.set_allowed_sender_ids(["matrix"])
 
             pk1 = self.get_delivery_packet("standard.tree.packet", new=True)
 
-            packet = self.get_reception_agent("file.json_file", new=True, pub_key=pub_key) \
+            packet = self.get_reception_agent("file.json_file", football=football) \
                 .set_location({"path": path["path"]}) \
                 .set_identifier(path["name"]) \
                 .set_address(path["address"]) \
@@ -494,9 +569,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         except Exception as e:
             self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌", error=e, block="main_try")
-            return None
-
-
+            return TreeParser.load_tree_direct({})
 
     def save_to_trace_session(self, packet, msg_type="msg"):
         tracer_id = packet.get("tracer_session_id")
@@ -526,23 +599,24 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         #    self.log(f"[TRACE][ERROR] Failed to write trace packet {fname}: {e}")
 
     def _throttled_worker_wrapper(self):
-        self.log("[BOOT] Throttled worker wrapper engaged.")
+        self.log("Throttled worker wrapper engaged.")
         config_path = os.path.join(self.path_resolution["comm_path_resolved"], "config")
         os.makedirs(config_path, exist_ok=True)
+        fpath=None
+        identity=None
         emit_beacon = self.check_for_thread_poke("worker", 5)
         last_dir_mtime = os.path.getmtime(config_path)
         last_worker_cycle_execution = 0
         try:
 
-            pub_key = None
 
-            if ENCRYPTION_CONFIG.is_enabled():
-                pub_key = ENCRYPTION_CONFIG.get_matrix_public_key()
 
-            ra = self.get_reception_agent("file.json_file", new=True, pub_key=pub_key)
+            football = self.get_football( type = self.FootballType.CATCH)
+            ra = self.get_reception_agent("file.json_file", new=True, football=football)
             ra.set_location({"path": self.path_resolution["comm_path"]}) \
                 .set_address([self.command_line_args["universal_id"]]) \
                 .set_drop_zone({"drop": "config"})
+
 
         except Exception as e:
             self.log(f"Failed to process", error=e, block="main_try")
@@ -553,7 +627,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 self.worker_pre()
                 self.resolve_factory_injections()
             except Exception as e:
-                self.log(f"[WORKER_PRE][ERROR] {e}")
+                self.log(error=e)
 
         while self.running:
 
@@ -565,15 +639,19 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                     if self.is_worker_overridden():
 
-                        config=None
-
+                        config={}
+                        _config = {} #temp config
                         try:
 
+                            #ON EXECUTION, THIS WILL SCOOP UP ALL THE CONFIG PACKETS
+                            #BUT  ONLY SEND THE LAST ONE TO THE WORKER METHOD
+                            #AND DELETE THE REST OF THE PACKETS
                             current_dir_mtime = os.path.getmtime(config_path)
                             if current_dir_mtime != last_dir_mtime:
                                 last_dir_mtime = current_dir_mtime
 
                                 for fname in os.listdir(config_path):
+
                                     if not fname.endswith(".json"):
                                         continue
 
@@ -585,32 +663,38 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                         .receive()
 
                                     fpath = os.path.join(config_path, fname)  # get the file's path
-                                    os.remove(fpath)
 
-                                    config = packet.get_packet()
+                                    _config = packet.get_packet()
 
                                     if ra.get_error_success() or packet is None:
                                         self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
 
-                        except Exception as e:
-                            self.log(error=e)
+                                    #self.log(f"config: path: {fpath} {config}")
 
-                        if not isinstance(config, dict):
-                            config=None
-                        else:
-                            pass
-                            #self.log(f"[WORKER]['CONFIG'] loaded config: {config}")
+                                    os.remove(fpath)
+
+                                    identity = ra.get_identity()
+
+                                    if isinstance(_config, dict):
+                                        config = _config.copy()
+
+                        except Exception as e:
+                            if fpath and os.path.isfile(fpath):
+                                os.remove(fpath)
+                            self.log(f"config {config}", error=e)
 
                         now = time.time()
                         if (last_worker_cycle_execution + 30) < now:
                             last_worker_cycle_execution = now
                             self.log(f"Executing worker cycle...")
 
-                        self.worker(config)
+                        #REMEMBER THIS ISN'T ENTERED LIKE PACKET_LISTENER
+                        #THERE MAY BE A LARGE TIMEOUT IN WORKER
+                        self.worker(config, identity)
 
                     else:
                         if not hasattr(self, "_worker_skip_logged"):
-                            self.log("[BOOT] No worker() override detected — skipping worker loop.")
+                            self.log("No worker() override detected — skipping worker loop.")
                             self._worker_skip_logged = True
 
                     emit_beacon()
@@ -720,11 +804,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             else:
                 depth_limit = 1
 
-            matches = []
-
             nodes = self.get_cached_service_managers()
 
             seen_uids = set()
+
             matches = []
 
             for node in nodes:
@@ -760,12 +843,59 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.log(f"[INTEL][ERROR] get_nodes_by_role failed: {e}")
             return []
 
+    def get_nodes_by_subscription(self, topic: str, scope: str = "child", return_count: int = 0):
+        """
+        Retrieves all agent nodes subscribed to a given topic via their service-manager config.
+
+        topic: subscription topic (e.g., "agent_tree_updates")
+        scope: "child", "child(1)", "any", or "child(0)"
+        return_count: 0 = return all, 1 = first match, etc.
+        """
+        try:
+            topic = topic.strip()
+            if not topic:
+                return []
+
+            depth_limit = None
+            if scope.startswith("child("):
+                try:
+                    depth_limit = int(scope.split("(")[1].split(")")[0])
+                except:
+                    depth_limit = 1
+            elif scope == "child":
+                depth_limit = 1
+            elif scope in ("any", "child(0)"):
+                depth_limit = None
+            else:
+                depth_limit = 1
+
+            nodes = self.get_cached_service_managers()
+
+            seen_uids = set()
+            matches = []
+
+            for node in nodes:
+                for svc in node.get("config", {}).get("service-manager", []):
+                    subscriptions = svc.get("subscribe", [])
+                    if isinstance(subscriptions, str):
+                        subscriptions = [subscriptions]
+                    for sub in subscriptions:
+                        if sub.strip() == topic and node.get("universal_id") not in seen_uids:
+                            seen_uids.add(node.get("universal_id"))
+                            matches.append(node)
+                            break  # one match per node is enough
+
+            return matches if return_count <= 0 else matches[:return_count]
+
+        except Exception as e:
+            self.log(f"[INTEL][ERROR] get_nodes_by_subscription failed: {e}")
+            return []
+
     def get_cached_service_managers(self):
         if hasattr(self, "_service_manager_services") and self._service_manager_services:
             return self._service_manager_services
         else:
             return []
-
 
     #orginizes level one children by role
     def track_direct_subordinates(self):
@@ -779,8 +909,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
     def spawn_manager(self):
 
         time_delta_timeout = 60
-
-        from core.tree_parser import TreeParser
 
         last_tree_mtime = 0
         tree = None  # Initial tree holder
@@ -805,7 +933,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 mtime = os.path.getmtime(tree_path_resolved)
                 if mtime != last_tree_mtime:
 
-                    tp = self.load_directive(tree_path)
+                    football = self.get_football(type=self.FootballType.CATCH)
+                    tp = self.load_directive(tree_path, football=football)
                     self._service_manager_services = getattr(tp, "_service_manager_services", [])
 
                     if not tp or not hasattr(tp, "root"):
@@ -829,6 +958,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         self.log(f"[SPAWN] Could not find node for {child_id}")
                         continue
 
+                    # Skip deleted nodes
+                    if node.get("deleted", False) is True:
+                        # self.log(f"[SPAWN-BLOCKED] {node.get('universal_id')} is marked deleted.")
+                        continue
+
                     # Skip if die token exists
                     die_file = os.path.join(self.path_resolution['comm_path'], node.get("universal_id"), 'incoming', 'die')
                     if os.path.exists(die_file):
@@ -840,21 +974,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     if time_delta is not None and time_delta < time_delta_timeout:
                         continue
 
-                    keychain = generate_agent_keypair()
-                    keychain["swarm_key"] = self.swarm_key
-                    keychain["matrix_pub"] = self.matrix_pub
-                    keychain["matrix_priv"]=DUMMY_MATRIX_PRIV
-                    keychain["encryption_enabled"]=int(self.encryption_enabled)
-                    if node.get("universal_id") == 'matrix':
-                        keychain["matrix_priv"] = self.matrix_priv
-
-                    cfg = node.get("config", {})
-                    if bool(cfg.get("matrix_secure_verified")) is True:
-                        self.log("[TRUST] matrix_secure_verified: TRUE → injecting real Matrix private key.")
-                        keychain["matrix_priv"] = self.matrix_priv
-
-
-
                     #TODO: verify if the agent is in memory first, before spawning, if it is, launch a reaper
                     #      wait for reaper to give all clear, removing die cookie to signal
 
@@ -863,74 +982,91 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         universal_id=node.get("universal_id"),
                         agent_name=node.get("name"),
                         tree_node=node,
-                        keychain=keychain
+                        keychain=self.ring_keychain(node)
                     )
 
             except Exception as e:
-                tb = traceback.format_exc()
-                print(f"[SPAWN] Exception occurred: {e}")
-                print(f"[SPAWN] Full traceback:\n{tb}")
+                self.log(error=e, block="main_try")
 
             interruptible_sleep(self, 10)
 
+    def ring_keychain(self, node:dict)->dict:
+
+        try:
+            if not isinstance(node, dict):
+                return {}
+
+            keychain={}
+            keychain["priv"] = node.get("vault",{}).get("priv",{})
+            keychain["pub"] = node.get("vault",{}).get("identity",{}).get('pub',{})
+            keychain["swarm_key"] = self.swarm_key
+            keychain['private_key'] = node.get("vault",{}).get("private_key")
+            keychain["matrix_pub"] = self.matrix_pub
+            keychain["matrix_priv"]=DUMMY_MATRIX_PRIV
+            keychain["encryption_enabled"]=int(self.encryption_enabled)
+            keychain["security_box"] = self.security_box.copy()
+            #Matrix is running, and currently spawning
+            if node.get("universal_id") == 'matrix':
+                keychain["matrix_priv"] = self.matrix_priv
+                keychain["private_key"] = self.private_key
+
+            cfg = node.get("config", {})
+            #these items will be returned to Matrix encase of her early demise
+            if bool(cfg.get("matrix_secure_verified")) and len(keychain["security_box"])==0:
+                self.log("[TRUST] matrix_secure_verified: TRUE → injecting real Matrix private key.")
+                keychain["security_box"]["encryption_enabled"] = int(self.encryption_enabled)
+                keychain["security_box"]["matrix_priv"] = self.matrix_priv
+                keychain["security_box"]["matrix_pub"] = self.matrix_pub
+                #keychain["security_box"]["priv"] = self.secure_keys['priv'] in tree_node
+                #keychain["security_box"]["pub"] = self.secure_keys['pub']   in tree_node
+                #keychain["security_box"]["private_key"] = self.private_key   in tree_node
+                keychain["security_box"]["swarm_key"] = self.swarm_key
+                keychain["security_box"]["node"] = self.tree_node.copy()
+
+            return keychain
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
+        return {}
+
     def spawn_agent_direct(self, universal_id, agent_name, tree_node, keychain=None):
 
-        spawner = CoreSpawner(
-            site_root_path=self.path_resolution["site_root_path"],
-            python_site=self.path_resolution["python_site"],
-            detected_python=self.path_resolution["python_exec"]
-        )
-
-        if keychain and len(keychain)>0:
-            spawner.set_keys(keychain)
-
-        comm_file_spec = []
-        spawner.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))
-        new_uuid, pod_path = spawner.create_runtime(universal_id)
-
-        spawner.set_verbose(self.verbose)
-
-        result = spawner.spawn_agent(
-            spawn_uuid=new_uuid,
-            agent_name=agent_name,
-            universal_id=universal_id,
-            spawner=self.command_line_args["universal_id"],
-            tree_node=tree_node,
-            universe_id=self.command_line_args.get("universe", "unknown")
-        )
-
-        if result is None:
-            self.log(f"[MATRIX][KILL] ERROR: Failed to spawn agent {universal_id}.")
-            return
-
-        return result
-
-    #gives a given agent its agent_tree.json
-    def delegate_tree_to_agent(self, universal_id, tree_path):
         try:
 
-            tp = self.load_directive(tree_path)
-            if not tp:
-                self.log(f"[DELEGATE] Failed to load master tree for {universal_id}")
+            if tree_node.get("deleted", False):
+                self.log(f"[SPAWN-ERROR] Attempted to spawn deleted agent {universal_id}. Blocking.")
                 return
 
-            subtree = tp.extract_subtree_by_id(universal_id)
-            if not subtree:
-                self.log(f"[DELEGATE] No subtree found for {universal_id}, sending empty tree.")
-                subtree = {}
+            spawner = CoreSpawner(
+                site_root_path=self.path_resolution["site_root_path"],
+                python_site=self.path_resolution["python_site"],
+                detected_python=self.path_resolution["python_exec"]
+            )
 
-            # define structured path dict for saving
-            path = {
-                "path": self.path_resolution["comm_path"],
-                "address": universal_id,
-                "drop": "directive",
-                "name": "agent_tree.json"
-            }
+            if keychain and len(keychain) > 0:
+                spawner.set_keys(keychain)
 
-            data={"agent_tree": subtree, 'services': tp.get_service_managers(universal_id)}
-            self.save_directive(path, data)
+            comm_file_spec = []
+            spawner.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))
+            new_uuid, pod_path = spawner.create_runtime(universal_id)
 
-            self.log(f"[DELEGATE] Tree delivered to {universal_id}")
+            spawner.set_verbose(self.verbose)
+
+            result = spawner.spawn_agent(
+                spawn_uuid=new_uuid,
+                agent_name=agent_name,
+                universal_id=universal_id,
+                spawner=self.command_line_args["universal_id"],
+                tree_node=tree_node,
+                universe_id=self.command_line_args.get("universe")
+            )
+
+            if result is None:
+                self.log(f"[MATRIX][KILL] ERROR: Failed to spawn agent {universal_id}.")
+                return
+
+            return result
+
         except Exception as e:
-            self.log(error=e, block="main-try")
-
+            self.log(error=e, block="main_try")

@@ -2,8 +2,10 @@ import os
 import json
 from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
 from core.class_lib.packet_delivery.interfaces.base_reception_agent import BaseReceptionAgent
+from core.mixin.log_method import LogMixin
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
-class ReceptionAgent(BaseReceptionAgent):
+class ReceptionAgent(BaseReceptionAgent, LogMixin):
     def __init__(self):
         self._location = None
         self._address = []
@@ -15,7 +17,6 @@ class ReceptionAgent(BaseReceptionAgent):
         self._custom_metadata = {}
         self._crypto = None
         self._filename_override = None
-        self._logger = None
 
     def set_crypto_handler(self, crypto_handler: PacketProcessorBase):
         self._crypto = crypto_handler
@@ -65,23 +66,47 @@ class ReceptionAgent(BaseReceptionAgent):
 
     def get_error_success_msg(self):
         return self._error or "OK"
+    def get_identity(self):
+        try:
+            return IdentityObject(self.has_verified_identity(), self.get_sender_uid() )
+        except Exception:
+            pass
 
-    def set_logger(self, logger):
-        self._logger = logger
+    def has_verified_identity(self) -> bool:
+        """Returns True if the packet has a Matrix-verified identity."""
+        r = False
+        try:
+            r = self._crypto.has_verified_identity()
+        except Exception as e:
+            pass
 
-    def log(self, msg):
-        if self._logger:
-            self._logger.log(msg)
-        else:
-            print(msg)
+        return r
+
+    def get_sender_uid(self) -> str:
+        """Returns the universal_id (agent ID) of the sender if verified, else raises or returns None."""
+        r = None
+        try:
+
+            r = self._crypto.get_sender_uid()
+
+        except Exception as e:
+            pass
+
+        return r
 
     def receive(self):
         try:
 
             if self._error:
+                self.log(f"{self._error}")
                 return None
 
             uids = self._address if self._address else [None]
+
+            try:
+                self._crypto.set_logger(self.get_logger())
+            except Exception as e:
+                pass
 
             for uid in uids:
 
@@ -94,6 +119,7 @@ class ReceptionAgent(BaseReceptionAgent):
 
                     # Enforce file extension
                     if not fname.endswith(self._file_ext):
+                        self.log(f"if not fname.endswith(self._file_ext):{self._file_ext}")
                         continue
 
                     # Enforce exact filename match if an override is set
@@ -112,15 +138,14 @@ class ReceptionAgent(BaseReceptionAgent):
                         return self._packet
 
                     except Exception as e:
-                        print(f"[RECEPTION][DECRYPT] Exception while decrypting '{fname}': {e}")
-                        import traceback
-                        traceback.print_exc()
-                        self._error = f"[RECEPTION][DECRYPT] Failed: {e}"
-                        self.log(self._error)
+                        self.log(f"[RECEIVE][DEBUG] Failed to load packet for UID: {uid}, drop: {self._drop_zone}")
+                        self.log(f"[RECEIVE][DEBUG] Crypto handler: {self._crypto}")
+                        self.log(f"[RECEIVE][DEBUG] Filename override: {self._filename_override}")
+                        self.log(f"Exception while decrypting '{fname}'")
+                        self.log("", error=e)
                         return None
 
 
         except Exception as e:
-            self._error = f"[RECEPTION][RECEIVE] Failed: {e}"
-            self.log(self._error)
+            self.log(error=e)
             return None

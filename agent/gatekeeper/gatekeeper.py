@@ -10,6 +10,8 @@ from datetime import datetime
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
 import geoip2.database
+import requests
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -71,9 +73,15 @@ class Agent(BootAgent):
 
         pk2 = self.get_delivery_packet("notify.alert.general")
 
+        try:
+            server_ip = requests.get("https://api.ipify.org").text.strip()
+        except Exception:
+            server_ip = "Unknown"
+
         # Force inject message
         msg_text = (
             f"🛡️ SSH Login Detected\n\n"
+            f"• Server IP: {server_ip}\n"
             f"• User: {info.get('user')}\n"
             f"• IP: {info.get('ip')}\n"
             f"• Location: {info.get('city')}, {info.get('country')}\n"
@@ -98,7 +106,9 @@ class Agent(BootAgent):
             return
 
         for node in alert_nodes:
-            da = self.get_delivery_agent("file.json_file")
+            football = self.get_football(type=self.FootballType.PASS)
+            football.load_identity_file(universal_id=node["universal_id"])
+            da = self.get_delivery_agent("file.json_file", football=football)
             da.set_location({"path": self.path_resolution["comm_path"]}) \
                 .set_address([node["universal_id"]]) \
                 .set_drop_zone({"drop": "incoming"}) \
@@ -161,7 +171,7 @@ class Agent(BootAgent):
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.tail_log()
         interruptible_sleep(self, 10)
 

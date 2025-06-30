@@ -14,7 +14,7 @@ import hashlib
 
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
-
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
@@ -26,7 +26,8 @@ class Agent(BootAgent):
     def post_boot(self):
         self.log("[CodexVerifier] Active swarm dashboard engaged.")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
+
         if not os.path.exists(self.auth_file) or not os.path.exists(self.ots_file):
             self.log("[VERIFIER][SKIP] Auth file or .ots missing.")
             return

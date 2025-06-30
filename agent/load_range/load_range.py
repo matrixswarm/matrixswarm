@@ -12,6 +12,7 @@ import traceback
 from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 from core.boot_agent import BootAgent
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):
@@ -124,7 +125,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[SUMMARY][ERROR] Failed to write loadrange summary: {e}")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         try:
                 if self.today() != self.current_day:
                     # new day, flush report

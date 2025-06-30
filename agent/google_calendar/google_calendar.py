@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
-
+from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
@@ -32,7 +32,7 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[CALENDAR] Calendar scout initialized.")
 
-    def worker(self, config:dict = None):
+    def worker(self, config:dict = None, identity:IdentityObject = None):
         self.check_upcoming_events()
         interruptible_sleep(self, self.interval)
 

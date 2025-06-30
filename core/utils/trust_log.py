@@ -12,21 +12,24 @@ def get_fp(key):
     except Exception:
         return "ERR"
 
-def log_trust_banner(agent_name, logger, pub, matrix_pub=None, swarm_key=None, matrix_priv=None):
+def log_trust_banner(agent_name, logger, pub, matrix_pub=None, swarm_key=None, matrix_priv=None, private_key=None):
     self_fp     = get_fp(pub)
     matrix_fp   = get_fp(matrix_pub)
     swarm_fp    = get_fp(swarm_key)
     matrix_pvfp = get_fp(matrix_priv)
+    private_kp  = get_fp(private_key)
 
     box = [
-        "╔═══════════════════════════════════════╗",
-        f"║ 🔐 TRUST LINEAGE - {agent_name:<21}║",
-        f"║ 🧬 SELF:   {self_fp:<12}              ║",
-        f"║ 🧠 MATRIX: {matrix_fp:<12}              ║",
-        f"║ 🔑 M-PRIV: {matrix_pvfp:<12}              ║",
-        f"║ 🧊 SWARM:  {swarm_fp:<12}              ║",
-        "╚═══════════════════════════════════════╝"
+        "╔════════════════════════════════════════════╗",
+        f"║ 🔐 TRUST LINEAGE - {agent_name:<25}       ║",
+        f"║ 🧬 SELF:     {self_fp:<12}                ║",
+        f"║ 🧠 MATRIX:   {matrix_fp:<12}              ║",
+        f"║ 🔑 M-PRIV:   {matrix_pvfp:<12}            ║",
+        f"║ 🧊 SWARM:    {swarm_fp:<12}               ║",
+        f"║ 🗝️ PRIV-KEY: {private_kp:<12}            ║",
+        "╚════════════════════════════════════════════╝"
     ]
+
 
     for line in box:
         logger.log(line)

@@ -1,5 +1,4 @@
-#Authored by Daniel F MacDonald and ChatGPT
-
+#Authored by Daniel F MacDonald
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
@@ -16,8 +15,7 @@ import base64
 from core.boot_agent import BootAgent
 from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 
-from Cryptodome.Cipher import AES
-
+from Crypto.Cipher import AES
 
 class Agent(BootAgent):
     def __init__(self):
@@ -26,9 +24,11 @@ class Agent(BootAgent):
         self.app = Flask(__name__)
         self.port = 65431
         self.payload_dir = os.path.join(self.path_resolution['comm_path'], "matrix", "payload")
-        self.cert_path = os.path.join(self.path_resolution['root_path'], "certs", "server.crt")
-        self.key_path = os.path.join(self.path_resolution['root_path'], "certs", "server.key")
-        self.client_ca = os.path.join(self.path_resolution['root_path'], "certs", "client.crt")
+        self.cert_path = os.path.join(self.path_resolution['root_path'], "https_certs", "server.fullchain.crt")
+        self.key_path = os.path.join(self.path_resolution['root_path'], "https_certs", "server.key")
+        self.client_ca = os.path.join(self.path_resolution['root_path'], "https_certs", "rootCA.pem")
+        self.local_tree_root = None
+        self._last_dir_request = 0
         self.configure_routes()
 
     def pre_boot(self):
@@ -128,7 +128,9 @@ class Agent(BootAgent):
 
                             output = "\n".join(rendered_lines[-250:])
                             #output = "\n".join(rendered_lines)
+
                             self.log(f"[LOG-DELIVERY] ✅ Sent {len(rendered_lines)} lines for {uid}")
+
                             return Response(
                                 json.dumps({"status": "ok", "log": output}, ensure_ascii=False),
                                 status=200,
@@ -139,31 +141,61 @@ class Agent(BootAgent):
                             self.log(f"[HTTPS-LOG][ERROR] Could not process log for {uid}", error=e)
                             return jsonify({"status": "error", "message": str(e)}), 500
 
-
+                    return #dir doesn't exist, yet
 
                 elif ctype == "cmd_list_tree":
 
                     try:
 
-                        tree_path = {
+                        target = "matrix"
 
-                            "path": self.path_resolution["comm_path"],
+                        #request a refresh of agent_tree_master after 5mins
+                        if time.time() - self._last_dir_request > 60:  # 5-minute window
+                            self._last_dir_request = time.time()
 
-                            "address": "matrix",
+                            # request the agent_tree_master from Matrix
+                            pl = {"origin": self.command_line_args['universal_id'],
+                                  "handler": "cmd_deliver_agent_tree",
+                                  "content": {"none": "none"},
+                                  "timestamp": time.time()}
 
-                            "drop": "directive",
+                            pk = self.get_delivery_packet("standard.command.packet", new=True)
+                            pk.set_data(pl)
 
-                            "name": "agent_tree_master.json"
+                            football = self.get_football(type=self.FootballType.PASS)
+                            football.load_identity_file(universal_id=target)
+                            da = self.get_delivery_agent("file.json_file", football=football, new=True)
 
-                        }
+                            da.set_location({"path": self.path_resolution["comm_path"]}) \
+                                .set_address([target]) \
+                                .set_drop_zone({"drop": "incoming"}) \
+                                .set_packet(pk) \
+                                .deliver()
 
-                        tp = self.load_directive(tree_path)
+                        football = self.get_football(type=self.FootballType.CATCH)
+                        try:
 
-                        if not tp or not hasattr(tp, "root"):
-                            return jsonify(
-                                {"status": "error", "message": "Failed to load directive or invalid tree."}), 500
+                            fpath = os.path.join(self.path_resolution["comm_path_resolved"], 'directive', 'agent_tree_master.json')
 
-                        return jsonify({"status": "ok", "tree": tp.root}), 200
+                            if os.path.exists(fpath):
+                                tree_path = {
+
+                                    "path": self.path_resolution["comm_path"],
+                                    "address": "matrix-https",
+                                    "drop": "directive",
+                                    "name": "agent_tree_master.json"
+
+                                }
+
+                                tp = self.load_directive(tree_path, football)
+                                self.local_tree_root = tp.root.copy()
+
+
+                            return jsonify({"status": "ok", "tree": self.local_tree_root}), 200
+
+                        except Exception as e:
+
+                            return jsonify( {"status": "error", "message": "Failed to load directive or invalid tree."}), 500
 
 
                     except Exception as e:
@@ -171,6 +203,8 @@ class Agent(BootAgent):
                         self.log(f"[LIST_TREE][ERROR] {str(e)}")
 
                         return jsonify({"status": "error", "message": str(e)}), 500
+
+                    return
 
                 elif ctype == "cmd_ping":
                     return jsonify({"status": "ok"}), 200
@@ -187,16 +221,15 @@ class Agent(BootAgent):
 
                 pk.set_packet(pk2,"content")
 
-                da = self.get_delivery_agent("file.json_file", new=True)
+                football = self.get_football(type=self.FootballType.PASS)
+                football.load_identity_file(universal_id='matrix')
+                da = self.get_delivery_agent("file.json_file", new=True, football=football)
 
                 da.set_location({"path": self.path_resolution["comm_path"]}) \
                     .set_address([target]) \
                     .set_drop_zone({"drop": "incoming"}) \
                     .set_packet(pk) \
                     .deliver()
-
-                self.log(f"##################{da.get_saved_filename()}{pk.get_packet()}***********************")
-
 
                 self.log(f"[MATRIX-HTTPS][FORWARDED] {ctype} → {da.get_saved_filename()}")
                 return jsonify({"status": "ok", "message": f"{ctype} routed to Matrix"})
@@ -250,13 +283,24 @@ class Agent(BootAgent):
                 return f"[DECRYPT-FAIL] {str(e)}"
 
     def run_server(self):
-        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
 
-        context.load_verify_locations(cafile="https_certs/rootCA.pem")
-        context.verify_mode = ssl.CERT_REQUIRED
-        context.load_cert_chain(certfile="https_certs/server.fullchain.crt", keyfile="https_certs/server.key")
-        self.log(f"[HTTPS] Listening on port {self.port}")
-        self.app.run(host="0.0.0.0", port=self.port, ssl_context=context)
+        try:
+            self.log("[HTTPS] Starting run_server()...")
+
+            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+
+            context.verify_mode = ssl.CERT_REQUIRED
+            context.load_verify_locations(cafile=self.client_ca)
+            context.load_cert_chain(
+                certfile=self.cert_path,
+                keyfile=self.key_path,
+            )
+            self.log(f"[HTTPS] Listening on port {self.port}")
+            self.app.run(host="0.0.0.0", port=self.port, ssl_context=context)
+
+        except Exception as e:
+            self.log(f"Server failed to start", error=e, block="main_try")
+
 
 if __name__ == "__main__":
     agent = Agent()
