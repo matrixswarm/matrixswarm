@@ -11,7 +11,6 @@ import inspect
 import copy
 from enum import Enum
 
-from core.class_lib.packet_delivery.utility.crypto_processors.identity import IdentityObject
 from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.core_spawner import CoreSpawner
@@ -27,6 +26,8 @@ from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import P
 from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
 from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 from core.class_lib.packet_delivery.utility.encryption.config import EncryptionConfig
+from core.utils.debug.config import DEBUG_CONFIG
+from core.utils.debug.config import DebugConfig
 from cryptography.hazmat.primitives import serialization
 from core.mixin.ghost_vault import decrypt_vault
 from core.utils.trust_log import log_trust_banner
@@ -103,6 +104,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         config = EncryptionConfig()
 
+
+        self.debug = DebugConfig()
+
         self.logger = Logger(self.path_resolution["comm_path_resolved"], "logs", "agent.log")
 
         self.encryption_enabled=bool(payload.get("encryption_enabled",0))
@@ -163,6 +167,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             config.set_matrix_priv(self.matrix_priv_obj)
 
         self.verbose = bool(self.command_line_args.get('verbose',0))
+        debug = bool(self.command_line_args.get('debug',0))
+
+        self.debug.set_enabled(debug)
+        
         self._loaded_tree_nodes={}
         self._service_manager_services = {}
 
@@ -310,7 +318,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 with open(ping_file, "w") as f:
                     now = time.time()
                     f.write(str(now))
-                    print(f"[HEARTBEAT] Touched poke.heartbeat for {ping_file} -> {now}")
+                    if self.debug.is_enabled():
+                        print(f"[HEARTBEAT] Touched poke.heartbeat for {ping_file} -> {now}")
             except Exception as e:
                 print(f"[HEARTBEAT][ERROR] Failed to write ping: {e} -> {ping_file} -> {now}")
             time.sleep(10)
@@ -326,11 +335,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             if DuplicateProcessCheck.check_all_duplicate_risks(job_label=job_label, check_path=False):
                 self.running = False
-                print(
-                    f"[ENFORCE] {self.command_line_args['universal_id']} detected a newer process with job label: --job {job_label} — standing down.")
+                if self.debug.is_enabled():
+                    print(f"[ENFORCE] {self.command_line_args['universal_id']} detected a newer process with job label: --job {job_label} — standing down.")
             else:
-                print(
-                    f"[ENFORCE] {self.command_line_args['universal_id']} verified as primary instance for --job {job_label} — proceeding with mission.")
+                if self.debug.is_enabled():
+                    print(f"[ENFORCE] {self.command_line_args['universal_id']} verified as primary instance for --job {job_label} — proceeding with mission.")
             # incoming:   die
             # example: change {root}/comm/{universal_id}/incoming = {root}/comm/worker-1/incoming
             #     look for die file in incoming only be 1 at anytime, and matrix command_thread will add/remove, spawn thread will
@@ -346,8 +355,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             count, file_list = FileFinderGlob.find_files_with_glob(path, pattern="die")
             if count > 0:
                 self.running = False
-                print(
-                    f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args['universal_id']} die cookie ingested, going down easy...")
+                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args['universal_id']} die cookie ingested, going down easy...")
 
             # within 20secs if another instance detected, and this is the younger of the die
 
@@ -369,7 +377,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         config = self.tree_node.get("config", {})
         factories = config.get("factories", {})
 
-        self.log(f"Found factories: {list(factories.keys())}")
+        if self.debug.is_enabled():
+            self.log(f"Found factories: {list(factories.keys())}")
 
         for dotted_path, factory_config in factories.items():
             if not isinstance(dotted_path, str) or "." not in dotted_path:
@@ -532,7 +541,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                 pk={}
                                 self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
 
-                            #self.log(f"processing packet: {fname}")
+                            if self.debug.is_enabled():
+                                self.log(f"processing packet: {fname}")
 
                             handler = pk.get("handler")
                             if not handler:
@@ -549,7 +559,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                             if callable(handler_fn):
                                 try:
                                     handler_fn(content, pk, identity)
-                                    self.log(f"[UNIFIED] ✅ Executed handler: {handler_name}")
+                                    if self.debug.is_enabled():
+                                        self.log(f"[UNIFIED] ✅ Executed handler: {handler_name}")
                                     continue
                                 except Exception as e:
                                     self.log(f"[UNIFIED][ERROR] Handler '{handler_name}' failed: {e}")
@@ -622,7 +633,13 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 .set_packet(pk1) \
                 .deliver()
 
-            self.log(f"[SAVE] ✅ Encrypted directive delivered to {path['address']}/{path['drop']}/{path['name']}")
+            if self.encryption_enabled:
+                if self.debug.is_enabled():
+                    self.log(f"[SAVE] ✅ Encrypted directive delivered to {path['address']}/{path['drop']}/{path['name']}")
+            else:
+                if self.debug.is_enabled():
+                    self.log(f"[SAVE] ✅ Directive delivered to {path['address']}/{path['drop']}/{path['name']}")
+
             return True
 
         except Exception as e:
@@ -705,14 +722,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         last_worker_cycle_execution = 0
         try:
 
-
-
             football = self.get_football( type = self.FootballType.CATCH)
             ra = self.get_reception_agent("file.json_file", new=True, football=football)
             ra.set_location({"path": self.path_resolution["comm_path"]}) \
                 .set_address([self.command_line_args["universal_id"]]) \
                 .set_drop_zone({"drop": "config"})
-
 
         except Exception as e:
             self.log(f"Failed to process", error=e, block="main_try")
@@ -765,7 +779,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                     if ra.get_error_success() or packet is None:
                                         self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
 
-                                    #self.log(f"config: path: {fpath} {config}")
+                                    if self.debug.is_enabled():
+                                        self.log(f"config: path: {fpath} {config}")
 
                                     os.remove(fpath)
 
@@ -782,7 +797,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         now = time.time()
                         if (last_worker_cycle_execution + 30) < now:
                             last_worker_cycle_execution = now
-                            self.log(f"Executing worker cycle...")
+                            if self.debug.is_enabled():
+                                self.log(f"Executing worker cycle...")
 
                         #REMEMBER THIS ISN'T ENTERED LIKE PACKET_LISTENER
                         #THERE MAY BE A LARGE TIMEOUT IN WORKER
@@ -790,7 +806,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                     else:
                         if not hasattr(self, "_worker_skip_logged"):
-                            self.log("No worker() override detected — skipping worker loop.")
+                            if self.debug.is_enabled():
+                                self.log("No worker() override detected — skipping worker loop.")
                             self._worker_skip_logged = True
 
                     emit_beacon()
@@ -826,7 +843,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         "comment": f"Thread beacon from {thread_token}"
                     }, f, indent=2)
                 last_emit[0] = now
-                print(f"[BEACON] {thread_token} emitted at {now}")
+                if self.debug.is_enabled():
+                    print(f"[BEACON] {thread_token} emitted at {now}")
 
         return emit
 
@@ -853,7 +871,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         #avoid all the throttle print statements, uses outer else
                         if not last_throttle_cycle_execution:
                             last_throttle_cycle_execution = True
-                            self.log(f"[THROTTLE_STARTED] Load: {load_avg:.2f} → delay: {delay}s")
+                            if self.debug.is_enabled():
+                                self.log(f"[THROTTLE_STARTED] Load: {load_avg:.2f} → delay: {delay}s")
 
                         if load_avg>greatest_load:
                             greatest_load = load_avg
@@ -861,7 +880,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     else:
                         if last_throttle_cycle_execution:
                             last_throttle_cycle_execution = False
-                            self.log(f"[THROTTLE_ENDED] Highest Load: {greatest_load:.2f}")
+                            if self.debug.is_enabled():
+                                self.log(f"[THROTTLE_ENDED] Highest Load: {greatest_load:.2f}")
                             greatest_load = 0
 
                     self.can_proceed = True
@@ -1031,7 +1051,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         while self.running:
             try:
-                print(f"[SPAWN] Checking for delegated children of {self.command_line_args['universal_id']}")
+                if self.debug.is_enabled():
+                    print(f"[SPAWN] Checking for delegated children of {self.command_line_args['universal_id']}")
 
                 if not os.path.exists(tree_path_resolved):
                     interruptible_sleep(self, 5)

@@ -32,14 +32,13 @@ import hashlib
 import json
 import base64
 from datetime import datetime
+from Crypto.PublicKey import RSA
 
+# Assuming self.matrix_priv is currently a string with PEM content:
 from core.boot_agent import BootAgent
-from core.mixin.ghost_vault import generate_agent_keypair
 from core.tree_parser import TreeParser
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
-from core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
-from core.utils.crypto_utils import generate_aes_key
 from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.agent_factory.reaper.reaper_factory import make_reaper_node
 from core.agent_factory.scavenger.scavenger_factory import make_scavenger_node
@@ -62,18 +61,25 @@ class Agent(BootAgent):
 
         self._agent_tree_master = None
 
+        #no need to delegate any agents at start
+        self._last_tree_verify = time.time()
+
         self.tree_path = os.path.join(
             self.path_resolution["comm_path_resolved"],
             "directive",
             "agent_tree_master.json"
         )
 
-        self.tree_path_dict={
-                             "path": self.path_resolution["comm_path"],
-                             "address": self.command_line_args.get("universal_id"),
-                             "drop": "directive",
-                             "name": "agent_tree_master.json"
-                             }
+
+        self.tree_path_dict = {
+             "path": self.path_resolution["comm_path"],
+             "address": self.command_line_args.get("universal_id"),
+             "drop": "directive",
+             "name": "agent_tree_master.json"
+        }
+
+        # delegate Matrix her Tree
+        self.delegate_tree_to_agent("matrix", self.tree_path_dict)
 
         # Inject payload_path if it's not already present
         if "payload_path" not in self.path_resolution:
@@ -86,12 +92,12 @@ class Agent(BootAgent):
     def pre_boot(self):
         message = "Knock... Knock... Knock... The Matrix has you..."
         print(message)
+        self.canonize_gospel()
 
     def post_boot(self):
         message = "I'm watching..."
         # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
         universal_id = self.command_line_args.get("universal_id", "matrix")
-        self.delegate_tree_to_agent(universal_id, self.tree_path_dict)
         threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
 
@@ -105,6 +111,7 @@ class Agent(BootAgent):
     def packet_listener_post(self):
         #sanity check
         self.perform_tree_master_validation()
+
 
     def canonize_gospel(self, output_path="codex/gospel_of_matrix.sig.json"):
         gospel = {
@@ -123,19 +130,25 @@ class Agent(BootAgent):
                 "No agent may speak unless its public key is signed by Matrix.",
                 "Any agent without a valid signature is to be silenced by the swarm.",
                 "Private keys are never regenerated. Resurrection requires memory.",
-                "Every signature is a tongue. Every key is a soul. Every directive is a scroll."
+                "Every signature is a tongue. Every key is a soul. Every directive is a scroll.",
             ]
         }
 
-        digest = SHA256.new(json.dumps(gospel, sort_keys=True).encode())
-        sig = pkcs1_15.new(self.matrix_priv).sign(digest)
-        gospel["sig"] = base64.b64encode(sig).decode()
-        output_path=os.path.join(self.path_resolution['comm_path_resolved'], "codex" ,"gospel_of_matrix.sig.json")
-        with open(output_path, "w") as f:
-            json.dump(gospel, f, indent=2)
+        try:
 
-        print("[GOSPEL] 📜 Gospel of Matrix signed and written to codex.")
+            matrix_priv = RSA.import_key(self.matrix_priv)
 
+            digest = SHA256.new(json.dumps(gospel, sort_keys=True).encode())
+            sig = pkcs1_15.new(matrix_priv).sign(digest)
+            gospel["sig"] = base64.b64encode(sig).decode()
+            output_path=os.path.join(self.path_resolution['comm_path_resolved'], "codex" ,"gospel_of_matrix.sig.json")
+            with open(output_path, "w") as f:
+                json.dump(gospel, f, indent=2)
+
+            print("[GOSPEL] 📜 Gospel of Matrix signed and written to codex.")
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
     # watches comm for any added universal_ids, and adds the agent_tree instantly
     def comm_directory_watcher(self):
@@ -1278,8 +1291,6 @@ class Agent(BootAgent):
     def perform_tree_master_validation(self):
 
         try:
-            if not hasattr(self, "_last_tree_verify"):
-                self._last_tree_verify = 0
 
             if time.time() - self._last_tree_verify > 300:  # 5-minute window
                 self._last_tree_verify = time.time()

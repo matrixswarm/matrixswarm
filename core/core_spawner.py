@@ -25,6 +25,8 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
         self.verbose=False
 
+        self.debug = False
+
         self.python_site=python_site
         self.python_exec= detected_python
 
@@ -66,6 +68,10 @@ class CoreSpawner(CoreSpawnerSecureMixin):
     def set_verbose(self, verbose):
 
         self.verbose = bool(verbose)
+
+    def set_debug(self, debug):
+
+        self.debug = bool(debug)
 
     def get_path(self, prefix_dir=None, variable_name_dir=None, postfix_dir=None):
 
@@ -333,6 +339,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "universe": universe_id,
                     "site_root_path": self.site_root_path,
                     "verbose": int(self.verbose),
+                    "debug": int(self.debug),
                 },
                 "tree_node": tree_node,
                 "secure_keys": {

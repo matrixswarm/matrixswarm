@@ -101,7 +101,8 @@ class Agent(BootAgent):
                     if os.path.exists(log_path):
                         try:
                             key_bytes = None
-                            self.log("[DEBUG] ENCRYPTION_CONFIG is_enabled = %s" % ENCRYPTION_CONFIG.is_enabled())
+                            if self.debug.is_enabled() and ENCRYPTION_CONFIG.is_enabled():
+                                self.log("[DEBUG] ENCRYPTION_CONFIG is_enabled = %s" % ENCRYPTION_CONFIG.is_enabled())
                             if ENCRYPTION_CONFIG.is_enabled():
                                 swarm_key = ENCRYPTION_CONFIG.get_swarm_key()
                                 key_bytes = base64.b64decode(swarm_key)
@@ -129,7 +130,8 @@ class Agent(BootAgent):
                             output = "\n".join(rendered_lines[-250:])
                             #output = "\n".join(rendered_lines)
 
-                            self.log(f"[LOG-DELIVERY] ✅ Sent {len(rendered_lines)} lines for {uid}")
+                            if self.debug.is_enabled():
+                                self.log(f"[LOG-DELIVERY] ✅ Sent {len(rendered_lines)} lines for {uid}")
 
                             return Response(
                                 json.dumps({"status": "ok", "log": output}, ensure_ascii=False),
