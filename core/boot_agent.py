@@ -1,4 +1,5 @@
-
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+#Docstring Scribe Gemini.
 import os
 import time
 import traceback

@@ -1,3 +1,5 @@
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+#Docstring Scribe Gemini.
 import json
 import base64
 import os
@@ -16,8 +18,19 @@ from core.class_lib.packet_delivery.utility.crypto_processors.identity_manager i
 from core.utils.crypto_utils import generate_aes_key
 
 class Football(LogMixin):
+    """Manages the cryptographic context for sending and receiving packets.
 
+    Think of a Football as a cryptographic "briefcase" that holds all the
+    necessary keys, identities, and strategy settings for a specific
+    communication act. It tells the encryption/decryption processors how to
+    behave.
+    """
     def __init__(self):
+        """Initializes the Football with default cryptographic strategies.
+        By default, a Football is configured to use symmetric (AES) encryption,
+        embed the sender's identity in the payload, and sign the payload to
+        ensure authenticity and integrity.
+        """
 
         #identity, includes pubkey, timestamp, universal_id
         self.identities = IdentityManager() # {"identity": identity, "priv": None, "pub": None, "agent": None, "verified": False}
@@ -158,11 +171,30 @@ class Football(LogMixin):
                      is_privkey_for_signing:bool=False,         # Is priv key used to sign the subpacket
                      encrypt_aes_key_using_pub=False  # encrypt using a random aes key using the pubkey in the identity; aes key will be used to encrypt the packet
                      ):
-        """
-        Sets your agent's own identity and verifies:
-        - That the identity is signed by Matrix (if verifier is set)
-        - That the private key matches the public key in the identity
-        Stores both for future signing.
+
+        """Loads and verifies an identity from a vault, storing it for use.
+
+        This is a critical method for establishing trust. It takes an agent's
+        vault, verifies that the private key matches the public key, validates
+        the identity's signature against the master Matrix public key, and then
+        stores the verified identity for cryptographic operations.
+
+        Args:
+            vault (dict): The agent's vault, containing its private key and
+                signed identity token.
+            identity_name (str): A local name to store this identity under
+                (e.g., "agent_owner", "target_identity").
+            verify_keypair_match (bool): If True, ensures the private key
+                in the vault matches the public key in the identity token.
+            verify_universal_id (bool): If True, ensures the universal_id
+                in the identity token matches the provided universal_id.
+            universal_id (str): The expected universal_id of the agent.
+            verify_sig (bool): If True, verifies the identity token's
+                signature against the Matrix public key.
+            is_payload_identity (bool): If True, this identity will be
+                embedded in outgoing packets to identify the sender.
+            is_privkey_for_signing (bool): If True, the private key from
+                this vault will be used to sign outgoing packets.
         """
         private_key_pem = None
         id_obj = IdentityObject()
@@ -291,7 +323,34 @@ class Football(LogMixin):
                      identity_name: str = "target_identity",
                      encrypt_aes_key_using_pub:bool=True  #encrypt using a random aes key using the pubkey in the identity; aes key will be used to encrypt the packet
                      ):
+        """Loads and verifies a target agent's identity from the filesystem.
 
+        This method is used to prepare the Football for sending a packet to a
+        specific recipient. It reads the target's `signed_public_key.json`
+        from their /codex directory, which contains their public key and the
+        Matrix signature. It then calls the internal add_identity() method to
+        verify this identity and store it. The loaded public key can then be
+        used to encrypt the AES key for the outgoing packet, ensuring only the
+        target can read it.
+
+        Args:
+            vault (dict, optional): A direct vault dictionary to use instead
+                of reading from a file.
+            identity_base_path (str, optional): The root path of the /comm
+                directory. Defaults to the one set on the Football.
+            universal_id (str): The universal_id of the target agent whose
+                identity is being loaded.
+            sig_verifier_pubkey (str, optional): The Matrix public key used
+                to verify the identity's signature.
+            identity_name (str): A local name to store this identity under
+                (e.g., "target_identity").
+            encrypt_aes_key_using_pub (bool): If True, sets the loaded public
+                key as the key to be used for encrypting the AES session key.
+
+        Returns:
+            bool: True if the identity was loaded and verified successfully,
+                  False otherwise.
+        """
         try:
 
             universal_id.strip().lower()
@@ -328,6 +387,23 @@ class Football(LogMixin):
 
     #Used internally to the class to verify the Matrix sig on the indentity
     def verify_sig(self, payload: SigPayload, sig_pubkey, signature_b64: str) -> bool:
+        """Verifies a digital signature against a payload and a public key.
+
+        This method is used internally to confirm that an agent's identity
+        token was legitimately signed by the master Matrix agent. It uses the
+        provided public key (sig_pubkey) to check if the signature matches the
+        hash of the payload.
+
+        Args:
+            payload (SigPayload): The data object that was signed, typically
+                an agent's identity token.
+            sig_pubkey: The public key of the authority that signed the data
+                (i.e., the Matrix agent's public key).
+            signature_b64 (str): The base64-encoded signature to be verified.
+
+        Returns:
+            bool: True if the signature is valid, False otherwise.
+        """
         try:
             if not sig_pubkey:
                 raise ValueError("Verifier key not set")
