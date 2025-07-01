@@ -61,6 +61,97 @@ Agents do not communicate through traditional network sockets or APIs. Instead, 
     * Use its own "Football" to decrypt the content and, most importantly, cryptographically verify the sender's signature against the master Matrix public key.
     * If the signature is valid, it passes the packet's `handler` and `content` to the agent's main logic for processing.
  ---
+## The Service Manager: Role-Based Service Discovery
+
+To prevent agents from being tightly coupled (e.g., forcing the `apache_watchdog` to know the specific `universal_id` of a `discord_relay`), MatrixSwarm uses a **role-based service discovery** system. Agents don't need to know about each other by name; they only need to know about the *role* or *function* they require.
+
+This system is defined by the `service-manager` block within an agent's `config` in a directive.
+
+### The Service Provider
+
+## The Service Manager: Advanced Role-Based Service Discovery
+
+To prevent agents from being tightly coupled (e.g., forcing the `apache_watchdog` to know the specific `universal_id` of a `discord_relay`), MatrixSwarm uses a **role-based service discovery** system. Agents don't need to know about each other by name; they only need to know about the *role* or *function* they require.
+
+This system is defined by the `service-manager` block within an agent's `config` in a directive.
+
+---
+### The Service Provider
+
+An agent that can perform a specific task "advertises" its capabilities by defining them in its `service-manager` block.
+
+For example, the `discord_relay` agent in the `gatekeeper-demo.py` directive advertises that it can handle communication and alerts.
+
+```python
+# From gatekeeper-demo.py
+"config": {
+    "bot_token": os.getenv("DISCORD_TOKEN"),
+    "channel_id": os.getenv("DISCORD_CHANNEL_ID"),
+    "service-manager": [{
+        "role": ["comm", "comm.security", "hive.alert.send_alert_msg", "comm.*"],
+        "scope": ["parent", "any"],
+        "auth": {"sig": True},
+        "priority": 10,
+        "exclusive": False
+    }]
+}
+```
+
+role: A list of function names this agent can perform. hive.alert.send_alert_msg is a role that means "able to send an alert."
+
+scope: Defines which other agents this service is available to.
+
+The Service Consumer
+An agent that needs a function performed (like sending an alert) does not look for a specific agent. Instead, it asks the swarm for any agent that can fulfill the required role.
+
+The apache_watchdog agent does exactly this in its alert_operator function.
+Python
+
+### From apache_watchdog.py
+def alert_operator(self, message=None):
+    # ... (packet creation code) ...
+
+    # Ask the swarm: "Find all agents that can handle this role."
+    alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
+    if not alert_nodes:
+        self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
+        return
+
+    # Send the packet to every agent that responded.
+    for node in alert_nodes:
+        # ... (delivery agent code) ...
+        
+### The Benefit: A Decoupled and Flexible Swarm
+This architecture is incredibly flexible. If you decide you want alerts to go to Telegram instead of Discord, you don't need to modify the apache_watchdog agent's code. You simply update your directive: remove the service-manager block from the Discord agent and add it to the telegram_relay agent.
+
+The watchdog will continue to ask for the "hive.alert.send_alert_msg" role, and the swarm will now direct its request to the Telegram agent. This allows you to hot-swap service providers and reconfigure the swarm's behavior without ever touching the underlying agent code.
+
+---
+## Dynamic Agent Configuration (Real-Time Updates)
+A standout feature of MatrixSwarm is the ability to change an agent's configuration while it is running. This is handled by the _throttled_worker_wrapper method in BootAgent, which every agent inherits.
+
+How it Works
+Config Directory: Every agent has a dedicated /comm/{universal_id}/config/ directory.
+
+Monitoring: The _throttled_worker_wrapper function constantly monitors this directory for new .json files.
+
+Update Trigger: To update an agent, you simply drop a new JSON file into its /config directory. This file contains the new configuration dictionary.
+
+Secure Loading: The wrapper detects the new file, securely decrypts it using the swarm's encryption protocols, and loads its content.
+
+Injection into Worker: This new config dictionary is then passed as the config argument into the very next execution of the agent's worker() method.
+
+Cleanup: After the new configuration is loaded, the .json file is deleted from the /config directory.
+
+This allows for live, dynamic tuning of the entire swarm. For example, you could drop a new config file into a redis_watchdog's folder to change its check_interval_sec from 10 seconds to 60 seconds without ever stopping or restarting the agent.
+
+---
+
+
+
+
+
+
 ## Universe Segregation: The Swarm Session
 
 A core feature of MatrixSwarm is its ability to run multiple, completely isolated "universes" on the same machine without conflict. This is achieved through a session-based directory structure managed by two key components: `SwarmSessionRoot` and `PathManager`.
