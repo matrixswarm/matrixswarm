@@ -444,8 +444,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.log("[BOOT] Default worker loop running. Override me.")
         while self.running:
             interruptible_sleep(self, 5)
-
-
     def pre_boot(self):
         """A one-time setup hook called before the main threads start.
         This method is intended to be overridden by child agent classes.

@@ -14,6 +14,7 @@ from core.mixin.log_method import LogMixin
 from core.class_lib.packet_delivery.utility.crypto_processors.identity import IdentityObject
 from core.class_lib.packet_delivery.utility.crypto_processors.identity_manager import IdentityManager
 from core.utils.crypto_utils import generate_aes_key
+
 class Football(LogMixin):
 
     def __init__(self):
