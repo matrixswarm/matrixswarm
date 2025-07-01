@@ -55,20 +55,23 @@ Deploys a new MatrixSwarm universe.
 
 **Usage:**
 ```bash
-python3 site_ops/site_boot.py --universe <id> --directive <name>
+  python3 site_ops/site_boot.py --universe <id> [--directive <name>] [options...]
 
 Arguments:
 
-| Argument        | Description                                                        | Required |
-| --------------- | ------------------------------------------------------------------ | -------- |
-| `--universe`    | A unique ID for the swarm universe (e.g., `ai`, `prod`).           | Yes      |
-| `--directive`   | The name of the directive file from `boot_directives/` (no `.py`). | No       |
-| `--reboot`      | If set, performs a soft reboot instead of a full teardown.         | No       |
-| `--python-site` | Overrides the Python site-packages path (advanced use).            | No       |
-| `--python-bin`  | Overrides the Python interpreter binary (advanced use).            | No       |
-
+| Argument                | Description                                                                 | Required |
+| ----------------------- | --------------------------------------------------------------------------- | -------- |
+| `--universe`            | A unique ID for the swarm universe (e.g., `ai`, `prod`).                    | ✅ Yes    |
+| `--directive`           | The name of the directive file from `boot_directives/` (no `.py`).          | ❌ No     |
+| `--reboot`              | If set, performs a soft reboot instead of a full teardown.                  | ❌ No     |
+| `--python-site`         | Overrides the Python site-packages path (advanced use).                     | ❌ No     |
+| `--python-bin`          | Overrides the Python interpreter binary (advanced use).                     | ❌ No     |
+| `--encrypted-directive` | Use an AES-GCM encrypted directive instead of plaintext.                    | ❌ No     |
+| `--swarm_key`           | Base64 swarm key used to decrypt the directive.                             | ❌ No     |
+| `--encryption-off`      | Turns encryption OFF for this boot session (not recommended in production). | ❌ No     |
+| `--debug`               | Enables debug logging for verbose diagnostic output.                        | ❌ No     |
+| `--verbose`             | Enables verbose printout in console (optional if `--debug` is used).        | ❌ No     |
 ```
-
 After termination, deletes all but the most recent boot directory.
 
 No

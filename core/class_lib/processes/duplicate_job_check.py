@@ -1,5 +1,7 @@
 import os
 import psutil
+from core.utils.debug.config import DEBUG_CONFIG
+from core.utils.debug.config import DebugConfig
 
 class DuplicateProcessCheck:
     @staticmethod
@@ -34,7 +36,10 @@ class DuplicateProcessCheck:
                 continue
 
         if not matches:
-            print(f"No processes found with the label: {target_label}")
+
+            debug = DebugConfig()
+            if debug.is_enabled():
+                print(f"No processes found with the label: {target_label}")
             return False
 
         all_procs = matches + [psutil.Process(current_pid)]

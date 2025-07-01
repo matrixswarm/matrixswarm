@@ -57,16 +57,20 @@ parser.add_argument("--python-bin", help="Override Python interpreter to use for
 parser.add_argument("--encrypted-directive", help="Path to AES-GCM encrypted directive JSON")
 parser.add_argument("--swarm_key", help="Base64-encoded swarm key used to decrypt directive")
 parser.add_argument("--encryption-off", action="store_true", help="Turn encryption off for all agents")
+parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
 args = parser.parse_args()
 
 universe_id = args.universe.strip()
 boot_name = args.directive.strip().replace(".py", "")
 reboot = args.reboot
+#show realtime log prints - be warned you will need to open another terminal to
+#terminate the swarm
 verbose = args.verbose
+#turns debugging on
+debug = args.debug
 
 encryption_enabled = not args.encryption_off
-
 
 # === ENVIRONMENT DETECTION ===
 def check_python_env(user_python_bin=None, user_site_path=None, required_module="discord"):
@@ -170,6 +174,9 @@ cp = CoreSpawner(path_manager=pm, site_root_path=SITE_ROOT, python_site=python_s
 if verbose:
     cp.set_verbose(True)
 
+if debug:
+    cp.set_debug(True)
+
 
 from core.mixin.ghost_vault import generate_agent_keypair
 from cryptography.hazmat.primitives import serialization
@@ -197,14 +204,11 @@ def decrypt_directive(encrypted_path, swarm_key_b64):
     decrypted = cipher.decrypt_and_verify(ciphertext, tag)
     return json.loads(decrypted.decode())
 
-
-
 swarm_key_b64 = generate_aes_key()
 matrix_key_b64 = generate_aes_key()
 
 # === Set up Matrix comm channel and trust ===
 comm_path =cp.ensure_comm_channel(MATRIX_UUID, [{}])
-
 
 matrix_keys = generate_agent_keypair()
 matrix_pub = matrix_keys["pub"]
@@ -214,7 +218,7 @@ _matrix_priv_obj = RSA.import_key(matrix_keys["priv"])
 
 is_encryption_on=encryption_enabled = int(encryption_enabled)
 
-#sign all the identities to the agents, priv/pub keys, private aes key, identity(which includes pubkey, universal_id, timestamp)
+#sign and assign all the identities to the agents, priv/pub keys, private aes key, identity(which includes pubkey, universal_id, timestamp)
 tp.assign_identity_to_all_nodes(_matrix_priv_obj)
 
 #encryption is turned on here
@@ -232,7 +236,6 @@ tp.assign_identity_token_to_node('matrix',
 
 
 matrix_node = tp.nodes.get("matrix")
-
 
 fb = Football()
 fb.set_identity_sig_verifier_pubkey(matrix_pub)
@@ -286,7 +289,6 @@ trust_payload = {
 }
 
 cp.set_keys(trust_payload)
-
 
 matrix_node['children'] = []
 # 🚀 Create pod and deploy Matrix
