@@ -1,3 +1,4 @@
+
 import os
 import time
 import traceback
@@ -35,13 +36,39 @@ from core.class_lib.packet_delivery.utility.crypto_processors.football import Fo
 from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin, GhostRiderUltraMixin, IdentityRegistryMixin):
-
+    """The foundational class for all agents in the MatrixSwarm.
+    This class provides the core functionality required for an agent to operate
+    within the swarm, including secure initialization from a vault, lifecycle
+    management through multithreading, and the packet-based communication system.
+    All specific agents must inherit from BootAgent.
+    """
     if __name__ == "__main__":
 
         raise RuntimeError("Direct execution of agents is forbidden. Only Matrix may be launched via bootloader.")
 
     def __init__(self):
+        """Initializes the agent by securely decrypting its configuration.
+        This method is the entry point for a newly spawned agent. It reads the
+        SYMKEY and VAULTFILE from environment variables, decrypts the payload,
+        and uses it to set up all core attributes, including security keys,
+        path resolutions, and cryptographic handlers ("Footballs") for
+        communication.
 
+        Attributes:
+            path_resolution (dict): A dictionary of all essential filesystem paths.
+            command_line_args (dict): Arguments passed at spawn time, like universal_id.
+            tree_node (dict): The agent's specific node from the master directive.
+            swarm_key (str): The global AES key used for general packet encryption.
+            private_key (str): The agent's personal AES key.
+            matrix_pub (str): The PEM-encoded public key of the root Matrix agent.
+            matrix_priv (str): The private key of the Matrix agent (often a dummy key).
+            public_key_obj: The agent's own public key as a cryptography object.
+            private_key_obj: The agent's own private key as a cryptography object.
+            logger (Logger): An encrypted logger instance for this agent.
+            running (bool): A flag that controls the main loops of the agent's threads.
+            _pass_football (Football): A pre-configured crypto handler for sending packets.
+            _catch_football (Football): A pre-configured crypto handler for receiving packets.
+        """
         print("[BOOT] Matrix waking up...")
 
         try:
@@ -201,8 +228,20 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         return fb
 
     def log(self, msg="", error: Exception = None, block=None, include_stack=True, level="INFO", custom_tail=None):
-        try:
+        """A custom logging method that automatically injects agent context.
 
+        This wrapper around the standard logger automatically prepends a prefix
+        to every log message, including the agent's name, the calling method's
+        name, and the line number. This provides rich, contextual logging
+        across the entire swarm with zero configuration.
+
+        Args:
+            msg (str): The message to log.
+            error (Exception, optional): An exception object to log.
+            block (str, optional): An optional string to add a custom block name.
+            level (str, optional): The log level (e.g., "INFO", "ERROR").
+        """
+        try:
 
             if custom_tail:
 
@@ -253,6 +292,13 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         # sends a heartbeat to comm/{universal_id}/hello.moto of self
 
     def heartbeat(self):
+        """Periodically writes a timestamp to a file to signal liveness.
+        This method runs in a continuous loop in its own thread. It creates a
+        `poke.heartbeat` file in the agent's `/hello.moto` directory and
+        updates it with the current timestamp every 10 seconds. Other agents,
+        like Sentinels, monitor this file to determine if the agent is still
+        alive.
+        """
         hello_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto")
         ping_file = os.path.join(hello_path, "poke.heartbeat")
 
@@ -342,7 +388,13 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         return self.__class__.worker != BootAgent.worker
 
     def boot(self):
+        """Starts the agent's main operational threads.
 
+       This is the primary entry point to activate the agent after it has been
+       initialized. It sets the agent's status to 'running' and launches all
+       essential background threads for heartbeat, singleton enforcement,
+       inter-agent communication, and the main worker process.
+       """
         try:
             self.pre_boot()
 
@@ -374,6 +426,20 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as e:
             self.log(error=e, block="main-try")
 
+    """The main operational loop for the agent, intended to be overridden.
+    This method is called repeatedly by the _throttled_worker_wrapper.
+    Developers should override this method in their own agent classes to
+    define the agent's primary logic and tasks. The base implementation
+    simply logs a message and sleeps.
+
+    Args:
+        config (dict, optional): A dictionary containing the agent's
+            most recent configuration, loaded dynamically from the
+            /config directory. Defaults to None.
+        identity (IdentityObject, optional): An object containing the
+            verified identity of the sender if the worker is triggered
+            by a packet. Defaults to None.
+    """
     def worker(self, config:dict = None, identity:IdentityObject=None):
         self.log("[BOOT] Default worker loop running. Override me.")
         while self.running:
@@ -381,12 +447,32 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
 
     def pre_boot(self):
+        """A one-time setup hook called before the main threads start.
+        This method is intended to be overridden by child agent classes.
+        It runs once during the boot() sequence, after initialization but
+        before the heartbeat, worker, or listener threads are launched. It is
+        ideal for initial health checks or setup that doesn't require threads.
+        """
         self.log("[BOOT] Default pre_boot (override me if needed)")
 
     def post_boot(self):
+        """A one-time setup hook called after the main threads have started.
+        This method is intended to be overridden by child agent classes.
+        It runs once at the end of the boot() sequence after all core
+        background threads are active. It is ideal for tasks that should
+        run once the agent is fully operational.
+        """
         self.log("[BOOT] Default post_boot (override me if needed)")
 
     def packet_listener(self):
+        """Monitors the incoming directory for new command packets.
+        This method is the core of inter-agent communication. Running in a
+        continuous loop, it watches the agent's `/incoming` directory for new
+        `.json` files. When a file appears, it uses a ReceptionAgent to
+        securely decrypt and validate the packet. It then dynamically calls the
+        appropriate handler method within the agent to process the command.
+        After processing, the packet file is deleted.
+        """
         self.log("Monitoring incoming packets...")
         incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(incoming_path, exist_ok=True)
@@ -599,6 +685,17 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         #    self.log(f"[TRACE][ERROR] Failed to write trace packet {fname}: {e}")
 
     def _throttled_worker_wrapper(self):
+        """A wrapper that manages the execution of the main worker() method.
+
+        This wrapper provides two key features:
+        1.  Dynamic Throttling: It monitors the system's load average and
+            introduces a delay between worker() loop executions if the load
+            is too high, preventing the swarm from overloading the host system.
+        2.  Real-Time Configuration: It monitors the agent's /config directory
+            for new .json files. If a new config file is dropped, it is
+            securely loaded and passed into the next execution of the worker()
+            method, allowing for on-the-fly configuration changes.
+        """
         self.log("Throttled worker wrapper engaged.")
         config_path = os.path.join(self.path_resolution["comm_path_resolved"], "config")
         os.makedirs(config_path, exist_ok=True)
@@ -778,12 +875,21 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         threading.Thread(target=dynamic_throttle_loop, daemon=True).start()
 
     def get_nodes_by_role(self, role: str, scope: str = "child", return_count: int = 0):
-        """
-        Unified role matcher from both tree and cached service list.
+        """Finds other agents in the swarm based on their advertised roles.
 
-        role: comma-separated roles (e.g., "hive.alert.*, comm")
-        scope: "child", "child(1)", "any", or "child(0)"
-        return_count: 0 = return all, 1 = first match, 2 = first two, etc.
+        This method is the core of the swarm's service discovery system. It
+        searches the agent tree for any node whose 'service-manager' config
+        block contains a matching role. This allows agents to find service
+        providers (e.g., alert relays) without needing to know their specific
+        universal_id.
+
+        Args:
+            role (str): The role to search for. Supports wildcards (e.g., "comm.security.*").
+            scope (str): The search scope (e.g., "child", "any").
+            return_count (int): The maximum number of nodes to return. 0 for all.
+
+        Returns:
+            list: A list of agent node dictionaries that match the requested role.
         """
         try:
             role_list = [r.strip() for r in role.split(",") if r.strip()]
@@ -844,12 +950,14 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             return []
 
     def get_nodes_by_subscription(self, topic: str, scope: str = "child", return_count: int = 0):
-        """
-        Retrieves all agent nodes subscribed to a given topic via their service-manager config.
+        """Monitors and manages the lifecycle of this agent's direct children.
 
-        topic: subscription topic (e.g., "agent_tree_updates")
-        scope: "child", "child(1)", "any", or "child(0)"
-        return_count: 0 = return all, 1 = first match, etc.
+        Running in its own thread, this method periodically checks the agent's
+        directive for any defined children. For each child, it checks the age
+        of its heartbeat file. If the heartbeat is stale (older than the
+        timeout), this method assumes the child agent has crashed and will
+        automatically re-spawn it using the spawn_agent_direct() method. This
+        is the primary mechanism for the swarm's self-healing capability.
         """
         try:
             topic = topic.strip()
