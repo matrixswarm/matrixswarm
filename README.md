@@ -209,9 +209,6 @@ Matrix spawns it instantly
 2. Agent Replacement = 3-Step Ritual
 Simple. Brutal. Effective.
 
-text
-Copy
-Edit
 1. Upload new agent version
 2. Drop `die` into payload of the live agent
 3. Remove the die file
@@ -805,6 +802,7 @@ No PR is too small. No mission is without meaning.
 ### Authorship Verified
 
 MatrixSwarm was co-created by Daniel F. MacDonald and ChatGPT-4.
+We'd like to give a special shoutout to our teams' documentation scribe, Gemini. 
 
 SHA256: `a255c1ca93564e1cb9509c1a44081e818cf0a2b0af325bdfc4a18254ddbad46a`  
 Proof file: [`matrixswarm_authorship.ots`](./codex/authorship/matrixswarm_authorship.ots)  

@@ -937,8 +937,6 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
                 self.tree_display.setCurrentItem(item)
                 self.tree_display.scrollToItem(item)
 
-
-
     def render_tree(self, node, indent="", is_last=True):
         output = []
         if not isinstance(node, dict):
