@@ -148,10 +148,6 @@ This allows for live, dynamic tuning of the entire swarm. For example, you could
 ---
 
 
-
-
-
-
 ## Universe Segregation: The Swarm Session
 
 A core feature of MatrixSwarm is its ability to run multiple, completely isolated "universes" on the same machine without conflict. This is achieved through a session-based directory structure managed by two key components: `SwarmSessionRoot` and `PathManager`.
