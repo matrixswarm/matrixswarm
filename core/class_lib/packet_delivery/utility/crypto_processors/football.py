@@ -1,5 +1,5 @@
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
-#Docstring Scribe Gemini.
+#Gemini, doc-rocking the Swarm to perfection.
 import json
 import base64
 import os

@@ -1,4 +1,5 @@
-#Authored by Daniel F MacDonald and ChatGPT
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+#Gemini, doc-rocking the Swarm to perfection.
 import time
 import tempfile
 import base64
@@ -15,12 +16,23 @@ from Crypto.Hash import SHA256
 
 
 class TreeParser(LogMixin):
+    """Manages the agent directive, acting as the swarm's architect.
+
+    This class is responsible for loading, parsing, validating, and manipulating
+    the agent tree structure. It ensures structural integrity by rejecting
+    duplicate agents, and it establishes the chain of trust by assigning
+    cryptographically signed identities to each agent node.
+    """
     CHILDREN_KEY = "children"
     UNIVERSAL_ID_KEY = "universal_id"
 
     def __init__(self, root, tree_path=None):
-        """
-        Initialize the TreeParser with a root node.
+        """Initializes the TreeParser with a root node of an agent tree.
+
+        Args:
+            root (dict): The root dictionary of the agent tree structure.
+            tree_path (str, optional): The original file path of the tree,
+                used for saving. Defaults to None.
         """
         self.root = root  # Root of the JSON tree
         self.nodes = {}  # Dictionary to store all parsed nodes
@@ -32,9 +44,7 @@ class TreeParser(LogMixin):
 
 
     def _initialize_data(self, data):
-        """
-        Ensures the input data is a dictionary. If string, attempts to parse as JSON.
-        """
+
         if isinstance(data, str):
             try:
                 return json.loads(data)
@@ -401,12 +411,19 @@ class TreeParser(LogMixin):
 
     @classmethod
     def load_tree_direct(cls, data):
+        """Loads and parses a tree from a raw directive dictionary.
 
+        This is the primary factory method for creating a TreeParser instance.
+        It takes a raw dictionary (the directive), cleanses it of malformed
+        nodes, scans for and removes duplicate universal_ids, and then
+        parses the final, validated tree structure.
+
+        Args:
+            data (dict): The raw dictionary from a directive file.
+
+        Returns:
+            TreeParser: A new instance of the TreeParser with the loaded tree.
         """
-        Load tree from raw directive dict with agent_tree and services.
-        """
-
-
         if isinstance(data, dict) and "agent_tree" in data:
             root_tree = data["agent_tree"]
             services = data.get("services", [])
@@ -641,17 +658,38 @@ class TreeParser(LogMixin):
         return service_nodes
 
     def assign_identity_to_all_nodes(self, matrix_priv_obj, encryption_enabled=True, force=False):
+        """Iterates through all nodes and assigns a signed identity token.
 
-        #if not encryption_enabled:
-        #    return
+        This method orchestrates the creation of the swarm's chain of trust.
+        It calls `assign_identity_token_to_node` for every agent in the tree.
+        The underlying method is smart and will skip any agent that already
+        has a valid identity, unless `force=True`.
 
+        Args:
+            matrix_priv_obj: The private key object of the Matrix agent, used
+                for signing.
+            force (bool): If True, will overwrite existing identities.
+        """
         for uid in self.nodes:
             self.assign_identity_token_to_node(uid, matrix_priv_obj, encryption_enabled, force=force)
 
     def assign_identity_token_to_node(self, uid, matrix_priv_obj, encryption_enabled=True, force=False, replace_keys:dict={}):
-        #if not encryption_enabled:
-        #    return
+        """Generates and assigns a cryptographically secure identity to a node.
 
+        This is the core of the identity creation process. For a given node, it:
+        1. Generates a new RSA public/private key pair and an AES key.
+        2. Creates an identity "token" containing the agent's universal_id,
+           public key, and a timestamp.
+        3. Signs this token with the master Matrix private key.
+        4. Stores the new keys and the signed token in the node's `vault`.
+
+        Args:
+            uid (str): The universal_id of the node to assign an identity to.
+            matrix_priv_obj: The private key object of the Matrix agent.
+            force (bool): If True, overwrites any existing vault.
+            replace_keys (dict): Optionally provide pre-made keys instead of
+                generating new ones.
+        """
         node = self.nodes.get(uid)
         if not node:
             print(f"[ASSIGN-ID] ❌ No node found for UID: {uid}")

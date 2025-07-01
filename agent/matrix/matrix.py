@@ -4,6 +4,7 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
+#Gemini, doc-rocking the Swarm to perfection.
 # ╔════════════════════════════════════════════════════════╗
 # ║                   🧠 MATRIX AGENT 🧠                   ║
 # ║   Central Cortex · Tree Dispatcher · Prime Director    ║
@@ -44,7 +45,19 @@ from core.agent_factory.reaper.reaper_factory import make_reaper_node
 from core.agent_factory.scavenger.scavenger_factory import make_scavenger_node
 
 class Agent(BootAgent):
+    """The root agent and central authority of the MatrixSwarm.
+    As the first agent spawned by the bootloader, the Matrix agent acts as
+    the "queen" of the hive. It is responsible for establishing the swarm's
+    chain of trust, spawning all top-level agents defined in the directive,
+    and serving as a central hub for critical commands and state information.
+    """
     def __init__(self):
+        """Initializes the root of the swarm.
+        This method is the first to run after the bootloader. It decrypts the
+        master vault and establishes the foundational cryptographic context.
+        Its own keys are the master keys used to sign the identities of all
+        other agents in the swarm.
+        """
         super().__init__()
 
         self._agent_tree_master = None
@@ -126,6 +139,14 @@ class Agent(BootAgent):
 
     # watches comm for any added universal_ids, and adds the agent_tree instantly
     def comm_directory_watcher(self):
+        """Watches the root /comm directory for new agent folders.
+
+        This method runs in a background thread and provides a powerful way
+        to auto-provision agents. If a new directory appears in `/comm`, this
+        watcher assumes it's for a new agent and automatically calls
+        `delegate_tree_to_agent()` to deliver its personalized directive,
+        effectively bringing it into the swarm.
+        """
         print("[COMM-WATCHER] Watching /comm/ for new agents...")
         i = inotify.adapters.Inotify()
         i.add_watch(self.path_resolution["comm_path"])
@@ -146,7 +167,22 @@ class Agent(BootAgent):
 
 
     def cmd_delete_agent(self, content, packet, identity:IdentityObject = None):
+        """Handles the command to delete an agent and its entire subtree.
 
+        This is an orchestrator method. It doesn't delete the agent directly,
+        but instead:
+        1. Marks the target agent and all its children as "deleted" in the tree.
+        2. Saves the updated master agent tree.
+        3. Injects a permanent `reaper` agent to terminate the processes.
+        4. Injects a permanent `scavenger` agent to clean up the directories.
+        5. Optionally sends a response packet back to the caller via an RPC route.
+
+        Args:
+            content (dict): The command payload, containing the
+                'target_universal_id' of the agent to delete.
+            packet (dict): The raw packet data.
+            identity (IdentityObject): The verified identity of the command sender.
+        """
         try:
 
             #is a response expected
@@ -529,7 +565,28 @@ class Agent(BootAgent):
             self.log(error=e, block="main_try")
 
     def cmd_hotswap_agent(self, content, packet, identity:IdentityObject = None):
+        """Handles the command to replace a live agent with new code.
 
+        This powerful command allows for zero-downtime updates. It performs
+        the following sequence:
+        1. Validates the `new_agent` payload, which can include new source code.
+        2. If new source code is provided, it's installed to the
+           `/boot_payload` directory.
+        3. The agent's node in the master tree is updated in-memory with the
+           new configuration.
+        4. The master tree is saved, and the updated directive slice is
+           re-delegated to the parent of the target agent.
+        5. A `reaper` agent is dispatched to cleanly terminate the old version
+           of the agent.
+        6. The parent agent's `spawn_manager` will then automatically
+           re-spawn the agent using its new source code and configuration.
+
+        Args:
+            content (dict): The payload containing 'target_universal_id' and
+                'new_agent' (the new agent definition and source code).
+            packet (dict): The raw packet data.
+            identity (IdentityObject): The verified identity of the command sender.
+        """
         new_agent = content.get("new_agent", {})
         src = new_agent.get("source_payload")
 
@@ -729,6 +786,19 @@ class Agent(BootAgent):
         return False
 
     def cmd_update_agent(self, content, packet, identity:IdentityObject = None):
+        """Handles the command to update a live agent's configuration.
+
+        This command modifies the `config` block of a specified agent in the
+        master agent tree. If the `push_live_config` flag is set, it will
+        also drop the new configuration into the live agent's `/config`
+        directory, triggering an immediate, real-time update of its behavior.
+
+        Args:
+            content (dict): The payload containing 'target_universal_id' and
+                'config' (the dictionary of new config values).
+            packet (dict): The raw packet data.
+            identity (IdentityObject): The verified identity of the command sender.
+        """
         uid = content.get("target_universal_id")
         updates = content.get("config", {})
 
@@ -799,7 +869,20 @@ class Agent(BootAgent):
 
 
     def cmd_inject_agents(self, content, packet, identity:IdentityObject = None):
+        """Handler for dynamically injecting a new agent or subtree into the swarm.
 
+        This command receives a request to add a new agent under a specified
+        parent. It validates the request, updates the master agent tree in
+        memory, saves the new tree to disk, and then delegates the updated
+        tree slice to the parent agent. The parent's `spawn_manager` thread
+        then automatically launches the new child agent.
+
+        Args:
+            content (dict): The command payload containing 'target_universal_id'
+                (the parent) and 'subtree' (the new agent node to inject).
+            packet (dict): The raw packet data.
+            identity (IdentityObject): The verified identity of the command sender.
+        """
         try:
             confirm_response = bool(content.get("confirm_response", 0))
             handler_role = content.get("handler_role",None) #handler role
@@ -1090,6 +1173,19 @@ class Agent(BootAgent):
         return ret
 
     def cmd_shutdown_subtree(self, content, packet, identity:IdentityObject = None):
+        """Initiates a graceful shutdown of an agent and its entire subtree.
+
+        This method works by dropping a 'die' file into the `/incoming`
+        directory of the target agent and all of its descendants. The agents'
+        `enforce_singleton` thread monitors for this file and will trigger a
+        clean shutdown of the agent process upon detection.
+
+        Args:
+            content (dict): The payload containing the 'universal_id' of the
+                root of the subtree to be shut down.
+            packet (dict): The raw packet data.
+            identity (IdentityObject): The verified identity of the command sender.
+        """
         target_id = content.get("universal_id")
         if not target_id:
             self.log("[SHUTDOWN][ERROR] Missing universal_id.")
@@ -1116,7 +1212,20 @@ class Agent(BootAgent):
             self.log(f"[SHUTDOWN] Dropped .die for {uid}")
 
     def cmd_resume_subtree(self, content, packet, identity:IdentityObject = None):
+        """Resumes a previously shut-down agent and its subtree.
 
+        This method is the inverse of `cmd_shutdown_subtree`. It removes the
+        'die' and 'tombstone' files from the `/incoming` directory of the
+        target agent and all of its descendants. Once the 'die' file is gone,
+        the parent agent's `spawn_manager` will detect that the agent is down
+        (via a stale heartbeat) and automatically resurrect it.
+
+        Args:
+            content (dict): The payload containing the 'universal_id' of the
+                root of the subtree to be resumed.
+            packet (dict): The raw packet data.
+            identity (IdentityObject): The verified identity of the command sender.
+        """
         target_id = content.get("universal_id")
         if not target_id:
             self.log("[RESUME][ERROR] Missing universal_id.")
@@ -1190,8 +1299,19 @@ class Agent(BootAgent):
     #2 types of trees roll through here: Matrix agent_tree_master.json and agents agent_tree.json
     #if encryption is on: every node will have a vault dict, inside contains the node's public key, timestamp issued
     def delegate_tree_to_agent(self, universal_id, tree_path):
-        try:
+        """Generates and delivers a secure, personalized "slice" of the agent tree.
+        This method extracts the subtree of a specific agent from the master
+        tree. It then securely signs and delivers this personalized
+        `agent_tree.json` file to the target agent's `/directive` directory.
+        This ensures that each agent only has the structural information it
+        needs to manage its own children. It also delivers the agent's signed
+        public key to its `/codex` directory for others to retrieve.
 
+        Args:
+            universal_id (str): The ID of the agent to deliver the tree slice to.
+            tree_path (dict): A dictionary defining the path to the master tree.
+        """
+        try:
             #load the agent_tree_master
             tp = self.get_agent_tree_master()
             if not tp:
@@ -1238,9 +1358,15 @@ class Agent(BootAgent):
 
 
     def get_agent_tree_master(self):
-        """
-        Returns the in-memory master tree.
-        Loads from disk if not already loaded.
+        """Loads the agent_tree_master.json from disk into memory.
+        This method acts as a cached loader for the canonical agent tree.
+        If the tree is not already in memory, it loads the securely signed
+        and encrypted `agent_tree_master.json` file from the Matrix agent's
+        own `/directive` directory. It returns a TreeParser object representing
+        the entire swarm structure.
+
+        Returns:
+            TreeParser: An object representing the entire agent tree, or None.
         """
         if not hasattr(self, "_agent_tree_master") or self._agent_tree_master is None:
             football = self.get_football(type=self.FootballType.CATCH)
@@ -1251,8 +1377,17 @@ class Agent(BootAgent):
 
 
     def save_agent_tree_master(self):
-        """
-        Saves the in-memory agent_tree_master to disk, signed with Matrix's key.
+        """Signs and saves the current state of the in-memory agent tree to disk.
+
+        This method is called whenever the swarm's structure is modified (e.g.,
+        after injecting or deleting an agent). It takes the in-memory tree,
+        adds any agent identity -- signs with the Matrix private key, generates rsa key pairs, private keys, to any added agents, and then
+        securely saves the entire structure back to `agent_tree_master.json`.
+        This persists the change and ensures the file on disk is always the
+        single source of truth.
+
+        Returns:
+            bool: True if the save was successful, False otherwise.
         """
         try:
             if not hasattr(self, "_agent_tree_master") or self._agent_tree_master is None:
