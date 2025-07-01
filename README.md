@@ -1,4 +1,4 @@
-# **MATRIXSWARM**  
+# **MATRIXSWARM**
 <pre>
 ███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
 ██╔════╝██║    ██║██╔══██╗██╔══██╗████╗ ████║
@@ -9,22 +9,147 @@
          MATRIXSWARM v0.2 "STORMCROW"
         Reflex. Resurrection. Real-time RPC.
 </pre>
-## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.  
-## No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
+## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
+**No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
+---
+MatrixSwarm is a lightweight, dependency-free alternative to Docker Compose for managing and coordinating multi-process applications. If you want to run a complex system of interconnected scripts (agents) with automatic restarts, secure communication, and dynamic control—all without containers or daemons—MatrixSwarm is for you. It uses simple file and folder operations as its API, making it incredibly portable and easy to debug.
 
-✅ No containers.  
-✅ No servers.  
-✅ No sockets.  
+---
+## Quick Start
 
-MatrixSwarm v0.1 "Captain Howdy"
+1.  **Deploy the Swarm:**
+    Boot the `ai` universe using the `test-01` directive.
+    ```bash
+    python3 site_ops/site_boot.py --universe ai --directive test-01
+    ```
+
+2.  **List Swarm Activity:**
+    Check which universes are running and see their process IDs.
+    ```bash
+    python3 site_ops/site_list.py
+    ```
+
+3.  **Terminate the Swarm:**
+    Shut down the `ai` universe and clean up old files.
+    ```bash
+    python3 site_ops/site_kill.py --universe ai --cleanup
+    ```
+---
+
+## Core Concepts
+
+- **Philosophy:** MatrixSwarm isn’t just code—it’s a world. A breathing hierarchy where agents think, die, and come back.
+- **File-Driven:** Agents don’t talk through APIs. They talk through **files**. All coordination happens via `.json` and `.cmd` files dropped into communication directories.
+- **Resurrection:** Agents monitor each other—and if one goes silent, it is resurrected or replaced by its parent.
+- **Filesystem Hierarchy:**
+  - `/agent` → Contains the source code for every agent type.
+  - `/pod` → Runtime clones of agents are spawned here, each with a unique UUID.
+  - `/comm` → The communication bus where agents exchange data. For maximum performance, this can be mounted as a `tmpfs` memory disk.
+---
+## Command-Line Toolkit
+
+MatrixSwarm is managed through a simple three-part terminal toolkit located in the `site_ops/` directory.
+
+### `site_boot.py`
+Deploys a new MatrixSwarm universe.
+
+**Usage:**
+```bash
+python3 site_ops/site_boot.py --universe <id> --directive <name>
+
+Arguments:
+
+| Argument        | Description                                                        | Required |
+| --------------- | ------------------------------------------------------------------ | -------- |
+| `--universe`    | A unique ID for the swarm universe (e.g., `ai`, `prod`).           | Yes      |
+| `--directive`   | The name of the directive file from `boot_directives/` (no `.py`). | No       |
+| `--reboot`      | If set, performs a soft reboot instead of a full teardown.         | No       |
+| `--python-site` | Overrides the Python site-packages path (advanced use).            | No       |
+| `--python-bin`  | Overrides the Python interpreter binary (advanced use).            | No       |
+
+```
+
+After termination, deletes all but the most recent boot directory.
+
+No
+site_list.py
+Lists all swarm universes and marks their processes as hot (in memory) or cold (inactive).
+
+Usage:
+
+```Bash
+
+python3 site_ops/site_list.py
+```
+---
+## Understanding Directives: The Blueprint of the Swarm
+
+Think of a **directive** as the architectural blueprint or the DNA for a swarm. It's a simple Python file located in the `boot_directives/` directory that defines the entire hierarchy of agents to be launched: which agents are children of others, what their names are, and how they are configured.
+
+### How to Use a Directive
+
+You specify which directive to use with the `--directive` flag when booting the swarm. The name you provide corresponds to a filename in the `boot_directives/` folder.
+
+
+```bash
+# This command looks for 'gatekeeper-demo.py' in the boot_directives/ folder
+python3 site_ops/site_boot.py --universe demo --directive gatekeeper-demo
+```
+
+### Themed Directives: See it in Action
+MatrixSwarm comes with several pre-built "themed" directives designed to showcase specific capabilities. You can launch them with a single command to see different agent combinations at work.
+
+| Directive Name | Description | Command to Run |
+| :--- | :--- | :--- |
+| **`gatekeeper-demo`** | Deploys a full security suite, including `gatekeeper` for auth logs, `ghostwire` for file integrity, and watchdogs for key services like Apache, MySQL, and Redis. | `python3 site_ops/site_boot.py --universe demo --directive gatekeeper-demo` |
+| **`ghostwire-demo`** | A focused security demo that deploys the `ghostwire` agent to monitor critical system files and commands. | `python3 site_ops/site_boot.py --universe demo --directive ghostwire-demo` |
+| **`mysql-demo`** | Deploys an agent specifically configured to act as a watchdog for a MySQL/MariaDB database service. | `python3 site_ops/site_boot.py --universe demo --directive mysql-demo` |
+| **`nginx-demo`** | Launches a watchdog agent to monitor the health of an Nginx web server. | `python3 site_ops/site_boot.py --universe demo --directive nginx-demo` |
+| **`redis-demo`** | Starts an agent configured to monitor a Redis in-memory database instance. | `python3 site_ops/site_boot.py --universe demo --directive redis-demo` |
+
+---
+### Creating Your Own Directive
+To create a custom swarm configuration:
+1.  Create a new Python file in the `boot_directives/` directory (e.g., `my_swarm.py`).
+2.  Inside the file, define a dictionary named `matrix_directive` that specifies your agent hierarchy.
+
+**Example `my_swarm.py`:**
+
+python
+# A simple directive with a commander and a pinger agent.
+```
+matrix_directive = {
+    "universal_id": "matrix",
+    "name": "matrix",
+    "children": [
+        {
+            "universal_id": "commander-1",
+            "name": "commander"
+        },
+        {
+            "universal_id": "pinger-1",
+            "name": "uptime_pinger",
+            "config": {
+                "role": "pinger"
+            }
+        }
+    ]
+}
+```
+Launch your custom swarm:
+python3 site_ops/site_boot.py --universe my-test --directive my_swarm
+
+---
+## 🎬 Watch the Swarm in Action
+
+This video demonstrates the self-healing power of MatrixSwarm. Even after manually terminating nearly every agent, the swarm fully regenerates from a single surviving guardian.
+
+[![MatrixSwarm Self-Healing Demo](https://img.youtube.com/vi/v54CT44ci4E/0.jpg)](https://www.youtube.com/watch?v=v54CT44ci4E)
+---
+
+#### MatrixSwarm v0.1 "Captain Howdy"
 Reflex-Capable Crypto Alert Swarm
 Built for agents that don’t blink.
-
-Reflex logic
-Live agent patching
-Directional price triggers
-CLI + GUI + container support
-Comes with its own warning siren
 
 https://github.com/matrixswarm/matrixswarm
 
@@ -46,14 +171,12 @@ MatrixSwarm isn’t just code — it’s a world.
 A breathing hierarchy where agents think, die, and come back.  
 A nervous system for AI.
 
-It uses simple folders:
-- `/agent` → source code
-- `/pod` → runtime clones
-- `/comm` → communication (dropzone for payload, status, logs)  
-  ↪ *Pro tip: mount this as a `tmpfs` mem-disk for swarm speed and zero I/O overhead.*
+It is built on a simple but powerful filesystem hierarchy:
+-   `/agent` → Contains the source code for every agent type.
+-   `/pod` → Runtime clones of agents are spawned here, each with a unique UUID.
+-   `/comm` → The communication bus where agents exchange data via JSON files and receive commands.
 
-Agents don’t talk through APIs. They talk through **files**.
-
+Agents don’t talk through APIs; they communicate by creating and reading files in a shared space. For maximum performance, the `/comm` directory can be mounted as a `tmpfs` memory disk to eliminate I/O overhead.
 ---
 
 ## How It Works
