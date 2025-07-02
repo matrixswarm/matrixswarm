@@ -44,6 +44,7 @@ This library provides documentation for the pre-built agents included with Matri
 | **`email_check`** | Connects to an IMAP server to read and process unseen emails. | `[Details](./agents/email_check.md)` |
 | **`email_send`** | Watches a directory for JSON files and sends them as emails via SMTP. | `[Details](./agents/email_send.md)` |
 | **`telegram_relay`** | Forwards alert packets from the swarm to a Telegram chat. | `[Details](./agents/telegram_relay.md)` |
+| **`oracle`** | Connects to an LLM API (like OpenAI) to answer prompts from other agents. | `[Details](./agents/oracle.md)` |
 
 ### Utilities & Integrations
 | Agent Name | Purpose | Link |
