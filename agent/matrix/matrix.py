@@ -112,7 +112,6 @@ class Agent(BootAgent):
         #sanity check
         self.perform_tree_master_validation()
 
-
     def canonize_gospel(self, output_path="codex/gospel_of_matrix.sig.json"):
         gospel = {
             "type": "swarm_gospel",
