@@ -298,23 +298,36 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             #sent to websocket feed
             if msg_type in ("alert", "cmd_alert_to_gui"):
                 content = data.get("content", {})
-                msg_text = content.get("msg", "[No message]")
-                origin = content.get("origin", "?")
                 level = content.get("level", "info").lower()
+                embed = content.get("embed_data")
 
-                summary = f"[ALERT] {msg_text} ← {origin}"
+                # If we have rich embed data, parse it into a multi-line block
+                if embed:
+                    lines_to_display = []
+                    title = embed.get('title', 'ALERT')
+                    description = embed.get('description', '')
+                    footer = embed.get('footer', '')
 
-                # 🔊 Play sound if needed
-                if level in ["critical", "warning"]:
-                    try:
-                        QSound.play("sounds/siren.wav")
-                    except Exception as e:
-                        print(f"[SIREN][ERROR] {e}")
+                    lines_to_display.append(f"--- 🔬 {title.upper()} 🔬 ---")
 
-                self.append_ws_feed_message(summary, level=level)
+                    # Split the description by newlines and clean up Markdown for the GUI
+                    for line in description.split('\\n'):  # Use \\n to split the literal newline characters
+                        cleaned_line = line.replace('**', '').replace('`', '').replace('---', '---')
+                        lines_to_display.append(f"  {cleaned_line}")
 
-                if self.ws_feed_display.autoscroll_enabled:
-                    self.ws_feed_display.scrollToBottom()
+                    lines_to_display.append(f"--- {footer} ---")
+                    lines_to_display.append(" ")  # Add a blank line for spacing
+
+                    # Add each line as a separate item to the feed
+                    for line in lines_to_display:
+                        self.append_ws_feed_message(line, level=level)
+
+                # Otherwise, fall back to the simple text display
+                else:
+                    msg_text = content.get("formatted_msg") or content.get("msg", "[No message]")
+                    origin = content.get("origin", "?")
+                    summary = f"[ALERT] {msg_text} ← {origin}"
+                    self.append_ws_feed_message(summary, level=level)
 
                 return
 
@@ -351,10 +364,22 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         except Exception as e:
             print(f"[WS][ERROR] Could not parse WebSocket msg: {msg}\n{e}")
 
-    def append_ws_feed_message(self, text, level="info"):
+    def append_ws_feed_message(self, text, level="info", is_html=False):
+        """
+                Appends a message to the WebSocket feed, now with HTML support.
+                """
+        item = QListWidgetItem(self.ws_feed_display)  # Set parent
 
-
-        item = QListWidgetItem(text)
+        if is_html:
+            label = QLabel(text)
+            label.setWordWrap(True)
+            label.setStyleSheet("background-color: transparent; border: none; padding: 2px;")
+            item.setSizeHint(label.sizeHint())
+            self.ws_feed_display.addItem(item)
+            self.ws_feed_display.setItemWidget(item, label)
+        else:
+            item.setText(text)  # Original behavior for plain text
+            self.ws_feed_display.addItem(item)
 
         # Apply color based on level
         if level == "critical":

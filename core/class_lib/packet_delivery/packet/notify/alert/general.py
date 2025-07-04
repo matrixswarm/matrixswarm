@@ -1,5 +1,4 @@
 # core/class_lib/packet_delivery/packet/notify/alert/general.py
-
 import time
 from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 
@@ -23,7 +22,8 @@ class Packet(BasePacket):
                 "msg": data["msg"],
                 "formatted_msg": f"📣 Swarm Message\n{data['msg']}",
                 "cause": data.get("cause", "unspecified"),
-                "origin": data.get("origin", data.get("universal_id", "unknown"))
+                "origin": data.get("origin", data.get("universal_id", "unknown")),
+                "embed_data": data.get("embed_data", None)
             }
             self._error_code = 0
             self._error_msg = ""

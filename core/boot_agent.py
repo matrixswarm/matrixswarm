@@ -11,6 +11,7 @@ import inspect
 import copy
 from enum import Enum
 
+from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from core.core_spawner import CoreSpawner
@@ -167,6 +168,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             config.set_matrix_priv(self.matrix_priv_obj)
 
         self.verbose = bool(self.command_line_args.get('verbose',0))
+
         debug = bool(self.command_line_args.get('debug',0))
 
         self.debug.set_enabled(debug)
@@ -1104,6 +1106,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                     #TODO: verify if the agent is in memory first, before spawning, if it is, launch a reaper
                     #      wait for reaper to give all clear, removing die cookie to signal
+                    #  Deploy a mission-reaper(hit job), have it ensure the agent is gone, then have the reaper
+                    # remove the "die" cookie.
+                    # Also, have a 3 strikes and you're out, don't resurrect. Send out alert, that the agent is down permanently.
 
                         # Call new tactical spawn function
                     self.spawn_agent_direct(
@@ -1180,6 +1185,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             new_uuid, pod_path = spawner.create_runtime(universal_id)
 
             spawner.set_verbose(self.verbose)
+            spawner.set_debug(self.debug)
 
             result = spawner.spawn_agent(
                 spawn_uuid=new_uuid,
@@ -1198,3 +1204,76 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         except Exception as e:
             self.log(error=e, block="main_try")
+
+    def pass_packet(self, packet:BasePacket, target_uid:str, drop_zone:str="incoming"):
+        """
+        A high-level helper method to securely prepare and deliver a packet.
+
+        This method encapsulates the entire delivery process: creating a Football,
+        loading the target's identity, getting a DeliveryAgent, and delivering
+        the packet.
+
+        Args:
+            packet (BasePacket): The packet object to be sent.
+            target_uid (str): The universal_id of the recipient agent.
+            drop_zone (str): The sub-directory to deliver to (e.g., "incoming").
+
+        Returns:
+            bool: True if delivery was successful, False otherwise.
+        """
+        try:
+            football = self.get_football(type=self.FootballType.PASS)
+            football.load_identity_file(universal_id=target_uid)
+            da = self.get_delivery_agent("file.json_file", football=football, new=True)
+            da.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([target_uid]) \
+                .set_drop_zone({"drop": drop_zone}) \
+                .set_packet(packet) \
+                .deliver()
+
+            if da.get_error_success() != 0:
+                self.log(f"[PASS-PACKET][FAIL] to {target_uid}: {da.get_error_success_msg()}", level="ERROR")
+                return False
+            else:
+                self.log(f"Packet passed to {target_uid} successfully.")
+                return True
+        except Exception as e:
+            self.log(f"Failed during pass_packet to {target_uid}", error=e, level="ERROR")
+            return False
+
+    def catch_packet(self, filename, drop_zone="incoming"):
+        """
+        A high-level helper method to securely receive and decrypt a packet.
+
+        This encapsulates the process of setting up a Football and ReceptionAgent
+        to process a single file from a drop zone.
+
+        Args:
+            filename (str): The name of the packet file to be processed.
+            drop_zone (str): The sub-directory the file is in (e.g., "incoming").
+
+        Returns:
+            dict: The decrypted packet content, or None on failure.
+        """
+        try:
+            football = self.get_football(type=self.FootballType.CATCH)
+            ra = self.get_reception_agent("file.json_file", new=True, football=football)
+
+            packet_obj = self.get_delivery_packet("standard.command.packet")  # A generic packet to hold the data
+
+            packet = ra.set_location({"path": self.path_resolution["comm_path"]}) \
+                .set_address([self.command_line_args["universal_id"]]) \
+                .set_drop_zone({"drop": drop_zone}) \
+                .set_identifier(filename) \
+                .set_packet(packet_obj) \
+                .receive()
+
+            if packet is None or ra.get_error_success() != 0:
+                self.log(f"Failed to receive packet {filename}: {ra.get_error_success_msg()}", level="ERROR")
+                return None
+
+            return packet.get_packet()
+
+        except Exception as e:
+            self.log(f"Failed during catch_packet for {filename}", error=e, level="ERROR")
+            return None

@@ -25,25 +25,20 @@ class Agent(BootAgent, ReflexAlertMixin):
         self.file_alerts = {}  # (path -> timestamp)
         self.command_hashes = OrderedDict()
 
-
         cfg = self.tree_node.get("config", {})
 
+        self.report_role = cfg.get("report_to_role", None)
 
         self.tick_rate = cfg.get("tick_rate", 5)
         self.command_patterns = cfg.get("command_patterns", [
-            "rm -rf", "scp", "curl", "wget", "nano /etc", "vi /etc", "vim /etc", "sudo", "su", "chmod 777"
-        ])
-        self.watch_paths = cfg.get("watch_paths", [
-            "/etc/passwd", "/etc/shadow", "/root/.ssh", "/home", "/var/www"
+            "rm -rf", "scp", "curl", "wget", "nano /etc", "vi /etc", "vim /etc",
+            "sudo", "su", "chmod 777", "systemctl stop", "service stop"
         ])
 
-        self.session_dir = os.path.join(
-            self.path_resolution["comm_path"],
-            self.command_line_args.get("universal_id", "ghostwire"),
-            "sessions"
-        )
+        self.watch_paths = cfg.get("watch_paths", ["/etc/passwd", "/etc/shadow", "/root/.ssh", "/home", "/var/www"])
+        self.session_dir = os.path.join(self.path_resolution["comm_path"],
+                                        self.command_line_args.get("universal_id", "ghostwire"), "sessions")
         os.makedirs(self.session_dir, exist_ok=True)
-        self.tick_rate = 5
 
     def worker_pre(self):
         self.log("[GHOSTWIRE] Shadow tracker engaged.")
@@ -233,7 +228,13 @@ class Agent(BootAgent, ReflexAlertMixin):
         )
 
         self.log(f"[GHOSTWIRE][ALERT] {msg}")
-        #self.alert_operator(message=msg)
+
+        # Also send a structured data report for the detective
+        self.send_data_report(
+            status="suspicious_command",
+            severity="WARNING",
+            details=f"User '{user}' executed command: {cmd}"
+        )
 
     def hash_command(self, cmd):
         return hashlib.sha256(cmd.strip().encode()).hexdigest()
@@ -242,7 +243,6 @@ class Agent(BootAgent, ReflexAlertMixin):
         self.command_hashes[cmd_hash] = time.time()
         if len(self.command_hashes) > 5000:
             self.command_hashes.popitem(last=False)
-
 
     def persist(self, user, session):
         date_str = self.today()
@@ -254,6 +254,34 @@ class Agent(BootAgent, ReflexAlertMixin):
 
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
+
+    def send_data_report(self, status, severity, details=""):
+        """Sends a structured data packet for forensic analysis."""
+        if not self.report_role:
+            return
+
+        report_nodes = self.get_nodes_by_role(self.report_role)
+        if not report_nodes:
+            return
+
+        # Wrapper packet
+        pk1 = self.get_delivery_packet("standard.command.packet")
+        pk1.set_data({"handler": "cmd_ingest_status_report"})
+
+        # Structured event payload
+        pk2 = self.get_delivery_packet("standard.status.event.packet")
+        pk2.set_data({
+            "source_agent": self.command_line_args.get("universal_id"),
+            "service_name": "ghost_wire",  # A new service name for this event type
+            "status": status,
+            "details": details,
+            "severity": severity,
+        })
+
+        pk1.set_packet(pk2, "content")
+
+        for node in report_nodes:
+            self.pass_packet(pk1, node["universal_id"])
 
 if __name__ == "__main__":
     agent = Agent()

@@ -37,22 +37,7 @@ class IdentityRegistryMixin:
         })
 
 
-        # 🚀 Deliver
-        da = self.get_delivery_agent("file.json_file", new=True)
-        da.set_location({"path": self.path_resolution["comm_path"]}) \
-            .set_address(["matrix"]) \
-            .set_drop_zone({"drop": "incoming"}) \
-            .set_metadata({
-            "file_ext": ".cmd",
-            "prefix": "command_dispatch"
-        }) \
-            .set_packet(dispatch_packet) \
-            .deliver()
-
-        if da.get_error_success() != 0:
-            self.log(f"[DISPATCH-ID][FAIL] {target_uid}: {da.get_error_success_msg()}")
-        else:
-            self.log(f"[DISPATCH-ID][SENT] Identity command dispatched to {target_uid}")
+        self.pass_packet(dispatch_packet, "matrix")
 
     def register_identity(self):
         """
@@ -80,14 +65,4 @@ class IdentityRegistryMixin:
             return
 
         for comm in comms:
-            da = self.get_delivery_agent("file.json_file", new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-              .set_address([comm["universal_id"]]) \
-              .set_drop_zone({"drop": "incoming"}) \
-              .set_packet(pk) \
-              .deliver()
-
-            if da.get_error_success() != 0:
-                self.log(f"[IDENTITY][DELIVERY-FAIL] {comm['universal_id']}: {da.get_error_success_msg()}")
-            else:
-                self.log(f"[IDENTITY][DELIVERED] Registration sent to {comm['universal_id']}")
+            self.pass_packet(pk, comm["universal_id"])

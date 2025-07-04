@@ -37,6 +37,14 @@ This library provides documentation for the pre-built agents included with Matri
 | **`sentinel`** | A high-availability watchdog that resurrects critical agents (like Matrix) if they fail. | `[Details](./agents/sentinel.md)` |
 | **`tripwire_lite`** | Monitors critical filesystem paths for changes. | `[Details](./agents/tripwire_lite.md)` |
 
+### Forensic Intelligence
+| Agent Name | Purpose | Link |
+| :--- | :--- | :--- |
+| **`forensic_detective`**| The central analysis agent. Ingests events, correlates data, and determines the root cause of failures. | `[Details](./agents/forensic_detective.md)` |
+| **`system_health`** | Monitors core system resources (CPU, Memory, Disk) and reports warnings to the detective. | `[Details](./agents/system_health.md)` |
+| **`network_health`** | Monitors network interfaces, connection counts, and traffic, reporting anomalies to the detective. | `[Details](./agents/network_health.md)` |
+
+
 ### Communication & Relays
 | Agent Name | Purpose | Link |
 | :--- | :--- | :--- |

@@ -247,7 +247,7 @@ class Agent(BootAgent):
                 pk1.set_packet(pk2, "content")
 
                 for node in alert_nodes:
-                    football = self.get_football(type=self.FootballType.CATCH)
+                    football = self.get_football(type=self.FootballType.PASS)
                     da = self.get_delivery_agent("file.json_file", football)
                     da.set_location({"path": self.path_resolution["comm_path"]}) \
                         .set_address([node["universal_id"]]) \
@@ -559,19 +559,8 @@ class Agent(BootAgent):
             pk.set_data(forwarded_packet)
 
             # 🚚 Deliver to the right place
-            football = self.get_football(type=self.FootballType.PASS)
-            football.load_identity_file(universal_id=target)
-            da = self.get_delivery_agent("file.json_file", football=football, new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([target]) \
-                .set_drop_zone({"drop": folder}) \
-                .set_packet(pk) \
-                .deliver()
+            self.pass_packet(pk, target)
 
-            if da.get_error_success() == 0:
-                self.log(f"[FORWARD] ✅ Forwarded to {target}/{folder}: {forwarded_packet['handler']}: {da.get_sent_packet()}")
-            else:
-                self.log(f"[FORWARD][FAIL] {da.get_error_success_msg()}")
 
         except Exception as e:
             self.log(error=e, block="main_try")
@@ -843,19 +832,8 @@ class Agent(BootAgent):
                     pk1 = self.get_delivery_packet("standard.general.json.packet")
                     pk1.set_data(node["config"])
 
-                    football = self.get_football(type=self.FootballType.PASS)
-                    football.load_identity_file(universal_id=uid)
-                    da = self.get_delivery_agent("file.json_file", football=football, new=True)
-                    da.set_location({"path": self.path_resolution["comm_path"]}) \
-                        .set_address([uid]) \
-                        .set_drop_zone({"drop": "config"}) \
-                        .set_packet(pk1) \
-                        .deliver()
+                    self.pass_packet(pk1, uid, "config")
 
-                    if da.get_error_success() == 0:
-                        self.log(f"[UPDATE_AGENT] ✅ Live config patch sent to {uid}")
-                    else:
-                        self.log(f"[UPDATE_AGENT][ERROR] Failed to patch running agent: {da.get_error_success_msg()}")
                 except Exception as e:
                     self.log(error=e, block="main_try")
 
@@ -959,19 +937,7 @@ class Agent(BootAgent):
                 pk1.set_packet(pk2, "content")
 
                 for node in alert_nodes:
-                    football = self.get_football(type=self.FootballType.PASS)
-                    football.load_identity_file(universal_id=node["universal_id"])
-                    da = self.get_delivery_agent("file.json_file", football=football)
-                    da.set_location({"path": self.path_resolution["comm_path"]}) \
-                        .set_address([node["universal_id"]]) \
-                        .set_drop_zone({"drop": "incoming"}) \
-                        .set_packet(pk1) \
-                        .deliver()
-
-                    if da.get_error_success() != 0:
-                        self.log(f"[ALERT][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
-                    else:
-                        self.log(f"[ALERT] Delivered to {node['universal_id']}")
+                    self.pass_packet(pk1, node["universal_id"])
 
         except Exception as e:
             self.log(error=e, block="main_try")

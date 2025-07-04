@@ -7,7 +7,6 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 import requests
 from core.boot_agent import BootAgent
-from core.utils.swarm_sleep import interruptible_sleep
 from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
@@ -27,9 +26,6 @@ class Agent(BootAgent):
     def worker_pre(self):
         self.log("[TELEGRAM] Telegram relay activated. Awaiting message drops...")
 
-    def worker(self, config:dict = None, identity:IdentityObject = None):
-        interruptible_sleep(self, 230)
-
     def worker_post(self):
         self.log("[TELEGRAM] Relay shutting down. No more echoes for now.")
 
@@ -41,8 +37,18 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[TELEGRAM][ERROR] Failed to relay message: {e}")
 
-    def format_message(self, data):
-        return data.get("formatted_msg") or data.get("msg") or "[SWARM] No content."
+    def format_message(self, data: dict):
+        """Builds a detailed message from embed_data if present."""
+        embed = data.get("embed_data")
+        if embed:
+            # Construct a detailed message from the embed data
+            title = embed.get('title', 'Swarm Alert')
+            description = embed.get('description', 'No details.')
+            footer = embed.get('footer', '')
+            return f"*{title}*\n\n{description}\n\n_{footer}_"
+        else:
+            # Fallback for older alerts
+            return data.get("formatted_msg") or data.get("msg") or "[SWARM] No content."
 
     def send_to_telegram(self, message):
         if not self.token or not self.chat_id:

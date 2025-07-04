@@ -36,14 +36,14 @@ class FileSystemBuilder:
         # Handle directory
         if item_type == 'd':  # Directory
             if not os.path.exists(item_path):
-                os.makedirs(item_path)  # Create directory
+                os.makedirs(item_path, exist_ok=True)  # Create directory
 
             # If content is a dictionary, recursively process its items
             if isinstance(content, dict):
                 #print(f"[INFO] Recursively processing the contents of directory: {name}")
                 for key, value in content.items():
                     nested_item = {'name': key, 'type': 'd' if isinstance(value, dict) else 'f', 'content': value}
-                    self.process_item(nested_item, item_path)
+                    self.process_item(base, nested_item, current_path=item_path)
 
         # Handle file
         elif item_type == 'f':  # File type

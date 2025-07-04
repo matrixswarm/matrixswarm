@@ -233,17 +233,7 @@ class Agent(BootAgent):
                 "content": patch
             })
 
-            da = self.get_delivery_agent("file.json_file", new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address(["matrix"]) \
-                .set_drop_zone({"drop": "incoming"}) \
-                .set_packet(pkt) \
-                .deliver()
-
-            if da.get_error_success() == 0:
-                self.log("[AGENT] Inactivation patch delivered.")
-            else:
-                self.log(f"[AGENT][PATCH-FAIL] {da.get_error_success_msg()}")
+            self.pass_packet(pkt, "matrix")
 
         except Exception as e:
             self.log("Error saving config patch", error=e)
@@ -257,17 +247,8 @@ class Agent(BootAgent):
                     "target_universal_id": self.command_line_args.get("universal_id", "unknown")
                 }
             })
-            da = self.get_delivery_agent("file.json_file", new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-              .set_address(["matrix"]) \
-              .set_drop_zone({"drop": "incoming"}) \
-              .set_packet(pk) \
-              .deliver()
 
-            if da.get_error_success() == 0:
-                self.log("[CRYPTOAGENT] ☠️ Self-destruct packet sent.")
-            else:
-                self.log(f"[CRYPTOAGENT][SELF-DESTRUCT-FAIL] {da.get_error_success_msg()}")
+            self.pass_packet(pk, "matrix")
 
         except Exception as e:
             self.log(error=e)
@@ -295,17 +276,7 @@ class Agent(BootAgent):
 
             # Broadcast to all gang members with that role
             for node in self.get_nodes_by_role(alert_role):
-                da = self.get_delivery_agent("file.json_file", new=True)
-                da.set_location({"path": self.path_resolution["comm_path"]}) \
-                    .set_address([node["universal_id"]]) \
-                    .set_drop_zone({"drop": "incoming"}) \
-                    .set_packet(pk1) \
-                    .deliver()
-
-                if da.get_error_success() == 0:
-                    self.log(f"[HOWDY-RPC] 🎯 Delivered to {node['universal_id']}")
-                else:
-                    self.log(f"[HOWDY-RPC][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
+                self.pass_packet(pk1, node["universal_id"])
 
         except Exception as e:
             self.log("Captain Howdy RPC dispatch failed", error=e, block="captain_howdy_main_try")
@@ -336,17 +307,7 @@ class Agent(BootAgent):
         pk1.set_packet(pk2, "content")
 
         for node in self.get_nodes_by_role(alert_role):
-            da = self.get_delivery_agent("file.json_file", new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-              .set_address([node["universal_id"]]) \
-              .set_drop_zone({"drop": "incoming"}) \
-              .set_packet(pk1) \
-              .deliver()
-
-            if da.get_error_success() == 0:
-                self.log(f"[ALERT] Delivered to {node['universal_id']}")
-            else:
-                self.log(f"[ALERT][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
+            self.pass_packet(pk1, node["universal_id"])
 
 if __name__ == "__main__":
     agent = Agent()
