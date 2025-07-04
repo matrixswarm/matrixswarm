@@ -45,5 +45,28 @@ request_packet_data = {
     "handler": "msg_prompt",
     "content": prompt_content
 }
+```
+#### ... (standard packet delivery code to send this to the oracle agent)
 
-# ... (standard packet delivery code to send this to the oracle agent)
+### Example Directive
+This directive launches an oracle agent and another "requester" agent that could query it.
+```python
+matrix_directive = {
+    "universal_id": "matrix",
+    "name": "matrix",
+    "children": [
+        {
+            "universal_id": "oracle-1",
+            "name": "oracle",
+            "config": {
+                # Best practice is to set the key via environment variable
+                "api_key": os.getenv("OPENAI_API_KEY_2")
+            }
+        },
+        {
+            "universal_id": "requester-1",
+            "name": "blank" # Using the blank agent as an example
+        }
+    ]
+}
+```

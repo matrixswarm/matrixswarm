@@ -1,3 +1,5 @@
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+#Gemini, docstring-ing and added code enhancements.
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
@@ -91,9 +93,21 @@ class Agent(BootAgent):
         # Launch in a dedicated thread
         threading.Thread(target=runner, daemon=True).start()
 
-    def cmd_send_alert_msg(self, content, packet, identity:IdentityObject = None):
+    def cmd_send_alert_msg(self, content: dict, packet, identity: IdentityObject = None):
+        """
+        Receives a unified alert packet and renders the best format available.
+        """
+        # Check if rich embed data exists
+        if content.get("embed_data"):
+            # Use the new logic to send a rich embed
+            self.send_embed_from_data(content["embed_data"])
+        else:
+            # Fall back to sending plain text for older/simpler alerts
+            message_to_send = content.get("formatted_msg") or content.get("msg") or "[SWARM] No content."
+            self.send_text_message(message_to_send)
+
+    def send_text_message(self, message: str):
         try:
-            message = self.format_message(content)
             self.send_to_discord(message)
             self.log("[DISCORD] Message relayed successfully.")
         except Exception as e:
@@ -112,12 +126,44 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[DISCORD][ERROR] Discord delivery failed: {e}")
 
-    def format_message(self, data):
+    def send_embed_from_data(self, content: dict):
+        """
+        Receives embed data and renders it in a Discord channel.
+        This method replaces the old cmd_send_alert_msg.
+        """
+        if not self.bot or not self.channel_id:
+            self.log("[DISCORD][ERROR] Bot not ready or channel ID missing.")
+            return
+
+        try:
+            # Convert color string to a discord.Color object, default to blurple
+            color_str = content.get("color", "blurple")
+            color_obj = getattr(discord_real.Color, color_str, discord_real.Color.default)()
+
+            # Create the embed object directly from the packet's content
+            embed = discord_real.Embed(
+                title=content.get("title", "Swarm Alert"),
+                description=content.get("description", "No details provided."),
+                color=color_obj
+            )
+            embed.set_footer(text=content.get("footer", ""))
+
+            # Send the embed
+            channel = self.bot.get_channel(self.channel_id)
+            if channel:
+                asyncio.run_coroutine_threadsafe(channel.send(embed=embed), self.bot.loop)
+            else:
+                self.log(f"[DISCORD][ERROR] Channel {self.channel_id} not found.")
+
+        except Exception as e:
+            self.log(f"[DISCORD][ERROR] Failed to send embed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def format_message(self, data: dict):
+        """Builds a detailed message from embed_data if present."""
         return data.get("formatted_msg") or data.get("msg") or "[SWARM] No content."
 
-    def on_alarm(self, payload):
-        msg = f"[{payload['level'].upper()}] {payload['universal_id']} — {payload['cause']}"
-    #    self.send_message_to_platform(msg)
 
 if __name__ == "__main__":
     agent = Agent()

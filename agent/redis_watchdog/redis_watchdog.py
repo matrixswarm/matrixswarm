@@ -132,19 +132,7 @@ class Agent(BootAgent, AgentSummaryMixin):
             return
 
         for node in alert_nodes:
-            football = self.get_football(type=self.FootballType.PASS)
-            football.load_identity_file(universal_id=node["universal_id"])
-            da = self.get_delivery_agent("file.json_file", football=football, new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-              .set_address([node["universal_id"]]) \
-              .set_drop_zone({"drop": "incoming"}) \
-              .set_packet(pk1) \
-              .deliver()
-
-            if da.get_error_success() != 0:
-                self.log(f"[ALERT][FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
-            else:
-                self.log(f"[ALERT] Delivered to {node['universal_id']}")
+            self.pass_packet(pk1, node["universal_id"])
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
         self.maybe_roll_day('redis')

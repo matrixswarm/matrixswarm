@@ -155,15 +155,7 @@ class Agent(BootAgent):
             pk = self.get_delivery_packet("standard.command.packet", new=True)
             pk.set_data(pl)
 
-            football = self.get_football(type=self.FootballType.PASS)
-            football.load_identity_file(universal_id=target)
-            da = self.get_delivery_agent("file.json_file", football=football, new=True)
-
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([target]) \
-                .set_drop_zone({"drop": "incoming"}) \
-                .set_packet(pk) \
-                .deliver()
+            self.pass_packet(pk, target)
 
             self.log("[SCAVENGER] Sent agent_tree_master sync request to Matrix.")
 

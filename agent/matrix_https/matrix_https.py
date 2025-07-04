@@ -149,8 +149,6 @@ class Agent(BootAgent):
 
                     try:
 
-                        target = "matrix"
-
                         #request a refresh of agent_tree_master after 5mins
                         if time.time() - self._last_dir_request > 60:  # 5-minute window
                             self._last_dir_request = time.time()
@@ -164,15 +162,7 @@ class Agent(BootAgent):
                             pk = self.get_delivery_packet("standard.command.packet", new=True)
                             pk.set_data(pl)
 
-                            football = self.get_football(type=self.FootballType.PASS)
-                            football.load_identity_file(universal_id=target)
-                            da = self.get_delivery_agent("file.json_file", football=football, new=True)
-
-                            da.set_location({"path": self.path_resolution["comm_path"]}) \
-                                .set_address([target]) \
-                                .set_drop_zone({"drop": "incoming"}) \
-                                .set_packet(pk) \
-                                .deliver()
+                            self.pass_packet(pk, "matrix")
 
                         football = self.get_football(type=self.FootballType.CATCH)
                         try:
@@ -223,17 +213,8 @@ class Agent(BootAgent):
 
                 pk.set_packet(pk2,"content")
 
-                football = self.get_football(type=self.FootballType.PASS)
-                football.load_identity_file(universal_id='matrix')
-                da = self.get_delivery_agent("file.json_file", new=True, football=football)
+                self.pass_packet(pk, target)
 
-                da.set_location({"path": self.path_resolution["comm_path"]}) \
-                    .set_address([target]) \
-                    .set_drop_zone({"drop": "incoming"}) \
-                    .set_packet(pk) \
-                    .deliver()
-
-                self.log(f"[MATRIX-HTTPS][FORWARDED] {ctype} → {da.get_saved_filename()}")
                 return jsonify({"status": "ok", "message": f"{ctype} routed to Matrix"})
 
             except Exception as e:

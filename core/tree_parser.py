@@ -11,9 +11,7 @@ from core.mixin.log_method import LogMixin
 
 from Crypto.PublicKey import RSA
 from Crypto.Signature import pkcs1_15
-
 from Crypto.Hash import SHA256
-
 
 class TreeParser(LogMixin):
     """Manages the agent directive, acting as the swarm's architect.
@@ -53,9 +51,13 @@ class TreeParser(LogMixin):
         return data if isinstance(data, dict) else {}
 
     def _parse_nodes(self, node):
-        """
-        Recursively parse nodes and store them into self.nodes.
-        Rejects entire subtrees if a duplicate universal_id is found.
+        """"
+        Recursively traverses the tree from the given node, validating each
+        node and adding it to the internal `self.nodes` dictionary.
+
+        This is a core internal method that builds the parser's understanding
+        of the tree. It rejects any subtree that contains a duplicate universal_id
+        to maintain a clean state.
         """
         if not node or not isinstance(node, dict):
             return
@@ -64,16 +66,18 @@ class TreeParser(LogMixin):
         if not universal_id:
             return
 
+        # 🚫 Prevent duplicate agents from being loaded into the swarm.
         if universal_id in self.nodes:
             print(f"[TREE-REJECT] ❌ Duplicate universal_id '{universal_id}' — rejecting this subtree and all children.")
             self._duplicate_nodes.append(universal_id)
             self._rejected_nodes.append(universal_id)
-            return  # Skip entire subtree
+            return  # Skip processing this node and all its children.
 
         self._validate_and_store_node(node)
 
         for child in node.get(self.CHILDREN_KEY, []):
             self._parse_nodes(child)
+
 
     def _validate_and_store_node(self, node):
         """
@@ -160,9 +164,20 @@ class TreeParser(LogMixin):
 
     def insert_node(self, new_node, parent_universal_id=None):
         """
-        Insert a new node under the specified parent node.
-        """
+        Inserts a new node into the tree under a specified parent.
 
+        This method is the primary way to dynamically add agents to the live
+        tree structure. It performs validation to ensure the new node has a
+        unique ID before attaching it to the parent.
+
+        Args:
+            new_node (dict): The agent node to insert.
+            parent_universal_id (str, optional): The ID of the parent. If None,
+                the node is added to the root.
+
+        Returns:
+            list: A list of universal_ids that were successfully added.
+        """
         self._added_nodes.clear()
         self._rejected_nodes.clear()
         self._duplicate_nodes.clear()
@@ -171,12 +186,12 @@ class TreeParser(LogMixin):
         if not new_universal_id:
             raise ValueError("New node must have a `universal_id`.")
 
-        # 🧼 Clean up invalid fields
+        # 🧼 Clean the node to ensure it meets basic structural requirements.
         new_node = TreeParser.strip_invalid_nodes(new_node)
         if not new_node:
             raise ValueError("New node rejected due to missing name or universal_id.")
 
-        # 🚫 Check for existing node with same UID
+        # 🚫 Check for existing node with same UID.
         if self.has_node(new_universal_id):
             print(f"[TREE-INSERT] ❌ Node with universal_id '{new_universal_id}' already exists. Rejecting insertion.")
             self._duplicate_nodes.append(new_universal_id)
@@ -185,37 +200,56 @@ class TreeParser(LogMixin):
 
         self._validate_and_store_node(new_node)
 
+        # Find the parent and append the new node to its children list.
         parent_node = self.root if parent_universal_id is None else self._find_node(self.root, parent_universal_id)
         if not parent_node:
             raise ValueError(f"Parent with `universal_id` {parent_universal_id} not found.")
 
-        parent_node[self.CHILDREN_KEY].append(new_node)
+        parent_node.setdefault(self.CHILDREN_KEY, []).append(new_node)
 
         return list(self._added_nodes)
 
     @staticmethod
     def strip_invalid_nodes(tree):
         """
-        Recursively remove nodes (and all subtrees) where 'name' or 'universal_id' is missing or blank.
+        Recursively removes nodes from a tree that are missing a 'name' or 'universal_id'.
+        This is a utility method to ensure data integrity before parsing or insertion.
         """
         if not isinstance(tree, dict):
             return None
 
-        name = tree.get("name", "").strip()
-        uid = tree.get("universal_id", "").strip()
-
-        if not name or not uid:
-            print(f"[TREE-CLEAN] 🧹 Removed invalid node: name='{name}', universal_id='{uid}'")
+        if not tree.get("name", "").strip() or not tree.get("universal_id", "").strip():
             return None
 
-        cleaned_children = []
-        for child in tree.get("children", []):
-            cleaned = TreeParser.strip_invalid_nodes(child)
-            if cleaned:
-                cleaned_children.append(cleaned)
+        # Recursively clean children and keep only the valid ones.
+        cleaned_children = [
+            cleaned for child in tree.get("children", [])
+            if (cleaned := TreeParser.strip_invalid_nodes(child)) is not None
+        ]
 
         tree["children"] = cleaned_children
         return tree
+
+    def save_tree(self, output_path=None):
+        """
+        Atomically saves the current state of the entire tree to a JSON file.
+
+        It writes to a temporary file first and then replaces the original,
+        preventing data corruption if the save operation is interrupted.
+        """
+        path = output_path or self.tree_path
+        if not path:
+            self.log("No output path specified for save().")
+            return False
+        try:
+            with tempfile.NamedTemporaryFile("w", delete=False, dir=os.path.dirname(path)) as temp_f:
+                json.dump(self.root, temp_f, indent=2)
+                temp_path = temp_f.name
+            os.replace(temp_path, path)
+            return True
+        except Exception as e:
+            self.log(f"Failed to save tree: {e}")
+            return False
 
     def mark_confirmed(self, universal_id):
         """
@@ -247,29 +281,6 @@ class TreeParser(LogMixin):
             return True
         except Exception as e:
             # print(f"[TREE-DUMP-ERROR] Failed to save tree: {e}")
-            return False
-
-    def save_tree(self, output_path=None):
-        """
-        Save the current tree to disk. Uses the original path if output_path is not provided.
-        """
-        if not output_path and hasattr(self, 'tree_path'):
-            output_path = self.tree_path
-
-        if not output_path:
-            self.log("No output path specified for save().")
-            return False
-
-        try:
-            with tempfile.NamedTemporaryFile("w", delete=False, dir=os.path.dirname(output_path)) as temp_file:
-                json.dump(self.root, temp_file, indent=2)
-                temp_file.flush()
-                os.fsync(temp_file.fileno())
-                temp_path = temp_file.name
-            os.replace(temp_path, output_path)
-            return True
-        except Exception as e:
-            self.log(f"Failed to save tree: {e}")
             return False
 
     def is_valid_tree(self):
@@ -431,9 +442,11 @@ class TreeParser(LogMixin):
             root_tree = data
             services = []
 
-
         instance = cls(root_tree)
         instance._service_manager_services = services  # inject globally scoped services
+        # Strip disabled nodes before any other processing
+        instance.strip_disabled_nodes(instance.root)
+
         instance.cleanse()
         instance.pre_scan_for_duplicates(instance.root)
         instance._parse_nodes(instance.root)
@@ -658,37 +671,25 @@ class TreeParser(LogMixin):
         return service_nodes
 
     def assign_identity_to_all_nodes(self, matrix_priv_obj, encryption_enabled=True, force=False):
-        """Iterates through all nodes and assigns a signed identity token.
+        """
+        Iterates through all nodes and assigns a signed identity token.
 
         This method orchestrates the creation of the swarm's chain of trust.
-        It calls `assign_identity_token_to_node` for every agent in the tree.
-        The underlying method is smart and will skip any agent that already
-        has a valid identity, unless `force=True`.
-
-        Args:
-            matrix_priv_obj: The private key object of the Matrix agent, used
-                for signing.
-            force (bool): If True, will overwrite existing identities.
+        It calls `assign_identity_token_to_node` for every agent in the tree,
+        which is the foundation of secure communication within the swarm.
         """
         for uid in self.nodes:
             self.assign_identity_token_to_node(uid, matrix_priv_obj, encryption_enabled, force=force)
 
     def assign_identity_token_to_node(self, uid, matrix_priv_obj, encryption_enabled=True, force=False, replace_keys:dict={}):
-        """Generates and assigns a cryptographically secure identity to a node.
+        """
+        Generates and assigns a cryptographically secure identity to a single node.
 
         This is the core of the identity creation process. For a given node, it:
         1. Generates a new RSA public/private key pair and an AES key.
-        2. Creates an identity "token" containing the agent's universal_id,
-           public key, and a timestamp.
-        3. Signs this token with the master Matrix private key.
+        2. Creates an identity "token" containing the agent's universal_id and public key.
+        3. Signs this token with the master Matrix private key, creating a verifiable chain of trust.
         4. Stores the new keys and the signed token in the node's `vault`.
-
-        Args:
-            uid (str): The universal_id of the node to assign an identity to.
-            matrix_priv_obj: The private key object of the Matrix agent.
-            force (bool): If True, overwrites any existing vault.
-            replace_keys (dict): Optionally provide pre-made keys instead of
-                generating new ones.
         """
         node = self.nodes.get(uid)
         if not node:
@@ -733,12 +734,13 @@ class TreeParser(LogMixin):
             # Assign vault
             node["vault"] = {
                 "priv": priv_pem,
-                "private_key": private_key, #aes encryption key
-                "sig": sigg, #Matrix Sig
+                "private_key": private_key,  # aes encryption key
+                "sig": sigg,  # Matrix Sig
                 "identity": token
             }
 
-            print(f"[ASSIGN-ID] ✅ Identity token assigned for '{uid}'")
+            if not replace_keys:
+                print(f"[ASSIGN-ID] ✅ Identity token assigned for '{uid}'")
             return True
 
         except Exception as e:
@@ -768,3 +770,25 @@ class TreeParser(LogMixin):
             print(f"[TREE-KILL] ❌ Node '{target_uid}' not found.")
 
         return kill_list
+
+    def strip_disabled_nodes(self, node):
+        """
+        Recursively removes nodes (and their entire subtrees) that are
+        explicitly marked with "enabled": false in their config.
+        """
+        if not isinstance(node, dict):
+            return None
+
+        # Check if the node is explicitly disabled in its config.
+        if node.get("enabled") is False:
+            self.log(f"[TREE-CLEAN] ✂️ Stripping disabled agent and its subtree: '{node.get('universal_id')}'")
+            self._rejected_nodes.append(node.get("universal_id"))
+            return None  # This removes the node and its children from the tree.
+
+        # If the node is enabled, recursively process its children.
+        if self.CHILDREN_KEY in node:
+            node[self.CHILDREN_KEY] = [
+                processed_child for child in node.get(self.CHILDREN_KEY, [])
+                if (processed_child := self.strip_disabled_nodes(child)) is not None
+            ]
+        return node

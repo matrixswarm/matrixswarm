@@ -16,7 +16,7 @@
   },
   {
     "pair": "ETH/USDT",
-    "threshold": 3000.0,
+    "threshold": 2800.0,
     "cooldown": 300,
     "active": true,
     "name": "New Price Change Below",

@@ -233,4 +233,44 @@ When an agent receives a file, the `PacketDecryptor` uses this mixin to reverse 
 4.  **Verify the Packet's Signature**: If the identity is valid, it then uses the **public key from the embedded identity** to verify the signature on the sub-packet. This proves that the message was not altered in transit and was indeed sent by the agent whose identity is attached.
 5.  **Return the Payload**: Only if all checks pass is the original, decrypted payload returned to the agent for processing.
 
-This layered approach guarantees **confidentiality** (only the recipient can read it), **integrity** (the message wasn't tampered with), and **authenticity** (the sender is who they claim to be).     
+This layered approach guarantees **confidentiality** (only the recipient can read it), **integrity** (the message wasn't tampered with), and **authenticity** (the sender is who they claim to be).
+
+---
+## 1. The Boot Process & Tree Sanitization
+
+The swarm is brought to life by `site_boot.py`. A key feature of this process is the `TreeParser`'s ability to sanitize the agent directive before launch.
+
+1.  **Directive Loading**: The specified directive file is loaded.
+2.  **Node Stripping**: The `TreeParser`'s **`strip_disabled_nodes`** method is immediately called. It recursively scans the directive and removes any agent (and its entire subtree of children) that has `"enabled": false` set in its configuration. This allows for easy testing and debugging without modifying the directive's structure.
+3.  **Tree Parsing & Validation**: The now-sanitized tree is parsed. The `TreeParser` validates the structure, rejects duplicates, and assigns a unique cryptographic **Vault** to every enabled node.
+4.  **Matrix Launch**: The `CoreSpawner` launches the root `matrix` agent, which then spawns its children based on the clean and validated tree.
+
+---
+## 2. The Forensic Detective System
+
+To provide intelligent, automated root cause analysis, the swarm now employs a sophisticated forensic ecosystem.
+
+1.  **Watchdog Agents**: Specialized agents (`SystemHealthMonitor`, `ApacheWatchdog`, `GhostWire`, etc.) constantly monitor specific aspects of the system. They send **`INFO`**, **`WARNING`**, or **`CRITICAL`** status reports to the `ForensicDetective`.
+2.  **The Forensic Detective**: This central agent acts as an incident response brain.
+    * **Event Ingestion**: It listens for status reports from all watchdog agents.
+    * **De-duplication**: It hashes incoming events to de-duplicate noise, tracking the `count` and `last_seen` time of identical warnings.
+    * **Incident Trigger**: When it receives a **`CRITICAL`** packet (e.g., `nginx` is `DOWN`), it initiates a new forensic incident.
+    * **Correlation**: It gathers all other `WARNING` or `ERROR` events that occurred within a 120-second window *before* the critical failure.
+    * **Automated Analysis**: It consults a `CAUSE_PRIORITIES` list to determine the most probable root cause from the correlated events (e.g., "Low disk space" takes precedence over "High CPU").
+    * **Specialized Investigators**: It dynamically loads a service-specific "investigator" (e.g., for `nginx`) which adds contextual details, like the last few lines of an error log, to the report.
+    * **Unified Alerting**: It constructs a single, rich alert packet containing both a simple text message and detailed embed data, then sends it to all agents with the `hive.alert.send_alert_msg` role.
+    * **Data Archiving**: It saves a complete JSON summary of the incident, including the trigger, all correlated events, and the final report, to its `/summary` directory for later analysis.
+
+---
+## 3. The Agent Lifecycle & Communication
+
+Every agent inherits from `BootAgent`, which provides a standardized lifecycle and communication framework.
+
+* **Secure Initialization**: Agents wake up by decrypting their unique Vault file.
+* **Core Threads**: Standard threads for `heartbeat`, `packet_listener`, and `spawn_manager` are launched automatically.
+* **Packet-Based Communication**: The `pass_packet` and `catch_packet` methods in `BootAgent` provide a high-level, simplified interface for secure, file-based messaging.
+    * **`pass_packet`**: Encapsulates the entire process of creating a cryptographic "Football", loading the target's identity, and delivering an encrypted, signed packet.
+    * **`catch_packet`**: Handles receiving a packet, decrypting it, and cryptographically verifying the sender's identity before returning the payload.
+
+---
+*The rest of the architecture document (`SERVICE MANAGER`, `DYNAMIC CONFIGURATION`, etc.) remains accurate and does not require changes at this time.*     

@@ -1,3 +1,5 @@
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+#Gemini, docstring-ing and added code enhancements.
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
@@ -6,9 +8,9 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 import requests
 import subprocess
 import time
+from datetime import datetime
 from core.boot_agent import BootAgent
 from core.utils.swarm_sleep import interruptible_sleep
-from datetime import datetime
 from core.mixin.agent_summary_mixin import AgentSummaryMixin
 from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
@@ -19,15 +21,14 @@ class Agent(BootAgent, AgentSummaryMixin):
         self.last_restart = None
         self.failed_restart_count = 0
         self.disabled = False
-        self.alert_fired = False
-        self.last_alerted_status = None  # None, "DOWN", or "UP"
-        self.last_alerts = {}
-        self.alert_cooldown_sec = 600
         cfg = self.tree_node.get("config", {})
         self.interval = cfg.get("check_interval_sec", 20)
         self.mysql_port = cfg.get("mysql_port", 3306)
         self.socket_path = cfg.get("socket_path", "/var/run/mysqld/mysqld.sock")
         self.failed_restart_limit = cfg.get("restart_limit", 3)
+        self.alert_role = cfg.get("alert_to_role", None)
+        self.report_role = cfg.get("report_to_role", None)
+        self.alert_cooldown = cfg.get("alert_cooldown", 300)
         self.alert_thresholds = cfg.get("alert_thresholds", {"uptime_pct_min": 90, "slow_restart_sec": 10})
         self.service_name = cfg.get("service_name", "mysql")
         self.comm_targets = cfg.get("comm_targets", [])
@@ -37,10 +38,10 @@ class Agent(BootAgent, AgentSummaryMixin):
             "uptime_sec": 0,
             "downtime_sec": 0,
             "last_status": None,
-            "last_status_change": time.time()
+            "last_status_change": time.time(),
+            "last_state": None
         }
-        # test writing summary
-        self.stats["date"] = "1900-01-01"
+        self.last_alerts = {}
 
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
@@ -74,30 +75,19 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.log(f"[WATCHDOG][FAIL] Restart failed: {e}")
             if self.failed_restart_count >= self.failed_restart_limit:
                 self.disabled = True
-                self.alert_operator("🛑 MySQL watchdog disabled after repeated restart failures.")
+                self.send_simple_alert("🛑 MySQL watchdog disabled after repeated restart failures.")
                 self.log("[WATCHDOG][DISABLED] Max restart attempts reached. Watchdog disabled.")
 
     def update_status_metrics(self, is_running):
         now = time.time()
         last = self.stats.get("last_status")
         elapsed = now - self.stats.get("last_status_change", now)
-
         # If state changed (or first run), update timing
         if last is not None:
             if last:
                 self.stats["uptime_sec"] += elapsed
             else:
                 self.stats["downtime_sec"] += elapsed
-
-        if last != is_running:
-            self.log(f"[WATCHDOG] MySQL status changed → {'UP' if is_running else 'DOWN'}")
-
-            if is_running and self.last_alerted_status == "DOWN":
-                self.alert_operator("✅ MySQL has recovered and is now online.")
-                self.last_alerted_status = "UP"
-
-            elif not is_running:
-                self.last_alerted_status = "DOWN"
 
         self.stats["last_status"] = is_running
         self.stats["last_status_change"] = now
@@ -116,33 +106,58 @@ class Agent(BootAgent, AgentSummaryMixin):
     def worker_pre(self):
         self.log(f"[WATCHDOG] Watching systemd unit: {self.service_name}")
 
-    def worker(self, config:dict = None, identity:IdentityObject = None):
-
+    def worker(self, config: dict = None, identity: IdentityObject = None):
+        # Handle daily summary/report roll
         self.maybe_roll_day("mysql")
-        running = self.is_mysql_running()
-        self.update_status_metrics(running)
 
-        if running and not self.is_mysql_listening() and not self.is_socket_accessible():
-            self.log("[WATCHDOG][WARN] MySQL is running but not accessible on port or socket.")
-            self.alert_operator(f"⚠️ MySQL is running but neither port {self.mysql_port} nor socket {self.socket_path} is open.")
+        # Health check
+        is_healthy = self.is_mysql_running() and self.is_mysql_listening()
+        last_state = self.stats.get("last_state")
 
-        if running:
-            self.log("[WATCHDOG] ✅ MySQL is running.")
+        # First run: establish baseline
+        if last_state is None:
+            self.log(f"[WATCHDOG] Establishing baseline status for {self.service_name}...")
+            self.stats["last_state"] = is_healthy
+            self.stats["last_status_change"] = time.time()
+            interruptible_sleep(self, self.interval)
+            return
+
+        # If state changed
+        if is_healthy != last_state:
+            self.update_status_metrics(is_healthy)
+
+            if is_healthy:
+                # Service just recovered
+                self.log(f"[WATCHDOG] ✅ {self.service_name} has recovered.")
+                self.send_simple_alert(f"✅ {self.service_name.capitalize()} has recovered and is now online.")
+                self.send_data_report("RECOVERED", "INFO", "Service is back online and ports are open.")
+            else:
+                # Service just failed
+                self.log(f"[WATCHDOG] ❌ {self.service_name} is NOT healthy.")
+                diagnostics = self.collect_mysql_diagnostics()
+                if self.should_alert("mysql-down"):
+                    self.send_simple_alert(f"❌ {self.service_name.capitalize()} is DOWN. Attempting restart...")
+                self.send_data_report(
+                    status="DOWN", severity="CRITICAL",
+                    details=f"Service {self.service_name} is not running or ports are not open.",
+                    metrics=diagnostics
+                )
+                self.restart_mysql()
+
+            # Always update last_state after alert/report
+            self.stats["last_state"] = is_healthy
         else:
-            self.log("[WATCHDOG] ❌ MySQL is NOT running.")
+            # Stable, just accumulate
+            self.update_status_metrics(is_healthy)
+            if hasattr(self, "debug") and getattr(self.debug, "is_enabled", lambda: False)():
+                self.log(f"[WATCHDOG] {'✅' if is_healthy else '❌'} {self.service_name} status is stable.")
 
-            # Fire alert immediately even if it might recover quickly
-            if self.should_alert("mysql-down"):
-                self.alert_operator( "❌ MySQL appears to be down. Attempting restart...")
-
-            self.last_alerted_status = "DOWN"
-            self.restart_mysql()
         interruptible_sleep(self, self.interval)
 
     def should_alert(self, key):
         now = time.time()
         last = self.last_alerts.get(key, 0)
-        if now - last > self.alert_cooldown_sec:
+        if now - last > self.alert_cooldown:
             self.last_alerts[key] = now
             return True
         return False
@@ -151,56 +166,63 @@ class Agent(BootAgent, AgentSummaryMixin):
         time.sleep(5)
         if not self.is_mysql_listening():
             self.log(f"[WATCHDOG][CRIT] MySQL restarted but port {self.mysql_port} is still not listening.")
-            self.alert_operator("🚨 MySQL restarted but never began listening on port {self.mysql_port}.")
+            self.send_simple_alert(f"🚨 MySQL restarted but never began listening on port {self.mysql_port}.")
 
-    def alert_operator(self, message=None):
-        """
-        Uses packet + delivery agent system to send alert to all comms.
-        """
-        if not message:
-            message = "🚨 MYSQL REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
+    def send_simple_alert(self, message):
+        """Sends a formatted, human-readable alert."""
+        if not self.alert_role: return
+        alert_nodes = self.get_nodes_by_role(self.alert_role)
+        if not alert_nodes: return
 
         pk1 = self.get_delivery_packet("standard.command.packet")
         pk1.set_data({"handler": "cmd_send_alert_msg"})
-
-        try:
-            server_ip = requests.get("https://api.ipify.org").text.strip()
-        except Exception:
-            server_ip = "Unknown"
-
+        try: server_ip = requests.get("https://api.ipify.org").text.strip()
+        except Exception: server_ip = "Unknown"
         pk2 = self.get_delivery_packet("notify.alert.general")
         pk2.set_data({
-            "server_ip": server_ip,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "universal_id": self.command_line_args.get("universal_id", "unknown"),
-            "level": "critical",
-            "msg": message,
-            "formatted_msg": f"📣 Swarm Message\n{message}",
-            "cause": "Mysql Sentinel Alert",
-            "origin": self.command_line_args.get("universal_id", "unknown")
+            "server_ip": server_ip, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "universal_id": self.command_line_args.get("universal_id"), "level": "critical",
+            "msg": message, "formatted_msg": f"📦 MySQL Watchdog\n{message}",
+            "cause": "MySQL Sentinel Alert", "origin": self.command_line_args.get("universal_id")
         })
-
         pk1.set_packet(pk2, "content")
+        for node in alert_nodes: self.pass_packet(pk1, node["universal_id"])
 
-        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
-        if not alert_nodes:
-            self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
-            return
+    def send_data_report(self, status, severity, details="", metrics=None):
+        """Sends a structured data packet for forensic analysis."""
+        if not self.report_role: return
+        report_nodes = self.get_nodes_by_role(self.report_role)
+        if not report_nodes: return
 
-        for node in alert_nodes:
-            football = self.get_football(type=self.FootballType.PASS)
-            football.load_identity_file(universal_id=node["universal_id"])
-            da = self.get_delivery_agent("file.json_file", football=football, new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([node["universal_id"]]) \
-                .set_drop_zone({"drop": "incoming"}) \
-                .set_packet(pk1) \
-                .deliver()
+        pk1 = self.get_delivery_packet("standard.command.packet")
+        pk1.set_data({"handler": "cmd_ingest_status_report"})
+        pk2 = self.get_delivery_packet("standard.status.event.packet")
+        pk2.set_data({
+            "source_agent": self.command_line_args.get("universal_id"),
+            "service_name": "mysql", "status": status, "details": details,
+            "severity": severity, "metrics": metrics if metrics is not None else {}
+        })
+        pk1.set_packet(pk2, "content")
+        for node in report_nodes:
+            self.pass_packet(pk1, node["universal_id"])
 
-            if da.get_error_success() != 0:
-                self.log(f"[ALERT][DELIVERY-FAIL] {node['universal_id']}: {da.get_error_success_msg()}")
-            else:
-                self.log(f"[ALERT][DELIVERED] Alert sent to {node['universal_id']}")
+    def collect_mysql_diagnostics(self):
+        """Gathers MySQL-specific diagnostics at the moment of failure."""
+        info = {}
+        # Get systemd status summary
+        try:
+            info['systemd_status'] = subprocess.check_output(
+                ["systemctl", "status", self.service_name], text=True, stderr=subprocess.STDOUT
+            ).strip()
+        except Exception as e:
+            info['systemd_status'] = f"Error: {e}"
+        # Error log tail from common locations
+        for log_path in ["/var/log/mysql/error.log", "/var/log/mariadb/mariadb.log"]:
+            if os.path.exists(log_path):
+                try: info['error_log'] = subprocess.check_output(["tail", "-n", "20", log_path], text=True)
+                except Exception as e: info['error_log'] = f"Error: {e}"
+                break
+        return info
 
 if __name__ == "__main__":
     agent = Agent()
