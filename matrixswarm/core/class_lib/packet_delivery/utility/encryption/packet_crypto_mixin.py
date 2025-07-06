@@ -1,7 +1,7 @@
 import time
 import json
 import base64
-from core.mixin.log_method import LogMixin
+from matrixswarm.core.mixin.log_method import LogMixin
 
 from Crypto.Cipher import AES
 from Crypto.PublicKey import RSA
@@ -9,8 +9,8 @@ from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 from Crypto.Random import get_random_bytes
-from core.class_lib.packet_delivery.utility.encryption.utility.sig_payload_json import SigPayloadJson
-from core.class_lib.packet_delivery.utility.encryption.utility.interfaces.sig_payload import SigPayload
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.sig_payload_json import SigPayloadJson
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.interfaces.sig_payload import SigPayload
 
 class PacketCryptoMixin(LogMixin):
 

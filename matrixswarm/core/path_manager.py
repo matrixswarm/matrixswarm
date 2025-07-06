@@ -1,5 +1,5 @@
 import os
-from core.swarm_session_root import SwarmSessionRoot
+from matrixswarm.core.swarm_session_root import SwarmSessionRoot
 
 class PathManager:
     def __init__(self, root_path=None, use_session_root=False, agent_override=None, site_root_path=None):

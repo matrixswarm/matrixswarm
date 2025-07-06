@@ -4,7 +4,7 @@ import json
 import base64
 from Crypto.Cipher import AES        # ← will fail if Cryptodome is installed as separate
 from Crypto.Random import get_random_bytes
-from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 
 class Logger:
     def __init__(self, log_path, logs="logs", file_name="agent.log"):

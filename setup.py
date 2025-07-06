@@ -18,7 +18,7 @@ setup(
     "certifi==2025.6.15",
     "cffi==1.17.1",
     "charset-normalizer==3.4.2",
-    "click==8.2.1",
+    "click>=8.0.0,<8.2.0",
     "cryptography==45.0.4",
     "dotenv==0.9.9",
     "Flask==3.1.1",
@@ -59,4 +59,5 @@ setup(
         ],
     },
     python_requires='>=3.8',
+
 )

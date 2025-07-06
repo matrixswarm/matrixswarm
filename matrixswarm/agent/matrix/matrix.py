@@ -35,13 +35,13 @@ from datetime import datetime
 from Crypto.PublicKey import RSA
 
 # Assuming self.matrix_priv is currently a string with PEM content:
-from core.boot_agent import BootAgent
-from core.tree_parser import TreeParser
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.tree_parser import TreeParser
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
-from core.agent_factory.reaper.reaper_factory import make_reaper_node
-from core.agent_factory.scavenger.scavenger_factory import make_scavenger_node
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.agent_factory.reaper.reaper_factory import make_reaper_node
+from matrixswarm.core.agent_factory.scavenger.scavenger_factory import make_scavenger_node
 
 class Agent(BootAgent):
     """The root agent and central authority of the MatrixSwarm.
@@ -511,7 +511,7 @@ class Agent(BootAgent):
             self.log(error=e, block="SPAWN_RECORD_LOOKUP")
 
         try:
-            from core.live_tree import LiveTree
+            from matrixswarm.core.live_tree import LiveTree
             tree = LiveTree()
             tree.load(self.tree_path)
             report["delegates"] = tree.get_delegates(uid)

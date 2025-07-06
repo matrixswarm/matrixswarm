@@ -1,4 +1,4 @@
-from core.class_lib.packet_delivery.utility.crypto_processors.football import Football
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 
 from .encryptor import PacketEncryptor
 from .decryptor import PacketDecryptor

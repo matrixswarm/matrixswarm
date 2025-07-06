@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
+from matrixswarm.core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
 
 class BaseDeliveryAgent(ABC):
     """Interface for all delivery agent implementations (filesystem, redis, etc)."""

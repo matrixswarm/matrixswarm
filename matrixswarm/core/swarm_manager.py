@@ -1,9 +1,9 @@
 # Matrix: An AI OS System
 # Copyright (c) 2025 Daniel MacDonald
 # Licensed under the MIT License. See LICENSE file in project root for details.
-from core.tree_parser import TreeParser
-from core.class_lib.logging.logger import Logger
-from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
+from matrixswarm.core.tree_parser import TreeParser
+from matrixswarm.core.class_lib.logging.logger import Logger
+from matrixswarm.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 import os
 import time
 import json
@@ -154,7 +154,7 @@ class SwarmManager:
     def kill_all_agents(self, annihilate=True):
         self.logger.log(f"[SWARM][KILL-ALL] Initiating global wipe (annihilate={annihilate})")
 
-        from core.tree_parser import TreeParser
+        from matrixswarm.core.tree_parser import TreeParser
         tp = TreeParser.load_tree(self.tree_path)
         if not tp:
             self.logger.log("[SWARM][KILL-ALL] Tree unavailable.")

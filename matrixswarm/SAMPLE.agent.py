@@ -1,7 +1,7 @@
 import os
 import time
-from agent.core.boot_agent import BootAgent
-from agent.core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.agent.matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.agent.matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
 class BlankAgent(BootAgent):
     def __init__(self, path_resolution, command_line_args, tree_node=None):

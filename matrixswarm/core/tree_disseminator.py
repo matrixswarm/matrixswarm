@@ -1,8 +1,8 @@
 import os
 import json
 import time
-from core.tree_parser import TreeParser
-from core.tree_propagation import propagate_tree_slice
+from matrixswarm.core.tree_parser import TreeParser
+from matrixswarm.core.tree_propagation import propagate_tree_slice
 
 class TreeDisseminator:
     def __init__(self, tree_path, comm_path):

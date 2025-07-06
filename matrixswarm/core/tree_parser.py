@@ -6,8 +6,8 @@ import base64
 import os
 import copy
 import json
-from core.utils.crypto_utils import generate_aes_key
-from core.mixin.log_method import LogMixin
+from matrixswarm.core.utils.crypto_utils import generate_aes_key
+from matrixswarm.core.mixin.log_method import LogMixin
 
 from Crypto.PublicKey import RSA
 from Crypto.Signature import pkcs1_15

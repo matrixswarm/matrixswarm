@@ -5,9 +5,9 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 import time
 import json
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
-from core.boot_agent import BootAgent
-from core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
     def __init__(self):

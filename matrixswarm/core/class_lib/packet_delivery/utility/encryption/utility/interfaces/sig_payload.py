@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from core.mixin.log_method import LogMixin
+from matrixswarm.core.mixin.log_method import LogMixin
 class SigPayload(ABC,LogMixin):
     def __init__(self):
         self._payload = None

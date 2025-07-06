@@ -4,7 +4,7 @@ import time
 
 import json
 import os
-from core.secure_boot_layer import receive_key_blob, encrypt_blob, decrypt_blob, load_private_key, load_public_key
+from matrixswarm.core.secure_boot_layer import receive_key_blob, encrypt_blob, decrypt_blob, load_private_key, load_public_key
 
 class GhostRiderUltraMixin:
     def ghost_init(self):

@@ -1,7 +1,7 @@
 import json
 
 from pathlib import Path
-from core.class_lib.processes.reaper import Reaper
+from matrixswarm.core.class_lib.processes.reaper import Reaper
 
 class ReaperUniversalHandler:
     def __init__(self, pod_root, comm_root, logger=None):

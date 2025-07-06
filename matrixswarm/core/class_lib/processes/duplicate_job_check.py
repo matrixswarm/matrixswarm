@@ -1,7 +1,7 @@
 import os
 import psutil
-from core.utils.debug.config import DEBUG_CONFIG
-from core.utils.debug.config import DebugConfig
+from matrixswarm.core.utils.debug.config import DEBUG_CONFIG
+from matrixswarm.core.utils.debug.config import DebugConfig
 
 class DuplicateProcessCheck:
     @staticmethod

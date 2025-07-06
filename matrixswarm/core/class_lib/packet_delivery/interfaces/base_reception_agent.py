@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any
-from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
+from matrixswarm.core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
 class BaseReceptionAgent(ABC):
     """Interface for all reception agent implementations (filesystem, redis, etc)."""
 

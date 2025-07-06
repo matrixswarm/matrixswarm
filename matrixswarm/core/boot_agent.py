@@ -11,32 +11,32 @@ import inspect
 import copy
 from enum import Enum
 
-from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
-from core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
-from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
-from core.core_spawner import CoreSpawner
-from core.path_manager import PathManager
-from core.mixin.identity_registry import IdentityRegistryMixin
-from core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
+from matrixswarm.core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
+from matrixswarm.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
+from matrixswarm.core.core_spawner import CoreSpawner
+from matrixswarm.core.path_manager import PathManager
+from matrixswarm.core.mixin.identity_registry import IdentityRegistryMixin
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from string import Template
-from core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
-from core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
-from core.class_lib.logging.logger import Logger
-from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
-from core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
-from core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
-from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
-from core.class_lib.packet_delivery.utility.encryption.config import EncryptionConfig
-from core.utils.debug.config import DEBUG_CONFIG
-from core.utils.debug.config import DebugConfig
+from matrixswarm.core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
+from matrixswarm.core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
+from matrixswarm.core.class_lib.logging.logger import Logger
+from matrixswarm.core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
+from matrixswarm.core.class_lib.packet_delivery.mixin.packet_delivery_factory_mixin import PacketDeliveryFactoryMixin
+from matrixswarm.core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import EncryptionConfig
+from matrixswarm.core.utils.debug.config import DEBUG_CONFIG
+from matrixswarm.core.utils.debug.config import DebugConfig
 from cryptography.hazmat.primitives import serialization
-from core.mixin.ghost_vault import decrypt_vault
-from core.utils.trust_log import log_trust_banner
-from core.boot_agent_thread_config import get_default_thread_registry
-from core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
-from core.tree_parser import TreeParser
-from core.class_lib.packet_delivery.utility.crypto_processors.football import Football
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.mixin.ghost_vault import decrypt_vault
+from matrixswarm.core.utils.trust_log import log_trust_banner
+from matrixswarm.core.boot_agent_thread_config import get_default_thread_registry
+from matrixswarm.core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
+from matrixswarm.core.tree_parser import TreeParser
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin, GhostRiderUltraMixin, IdentityRegistryMixin):
     """The foundational class for all agents in the MatrixSwarm.
@@ -357,7 +357,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             count, file_list = FileFinderGlob.find_files_with_glob(path, pattern="die")
             if count > 0:
                 self.running = False
-                print(f"[INFO]core.agent.py: enforce_singleton: {self.command_line_args['universal_id']} die cookie ingested, going down easy...")
+                print(f"[INFO]matrixswarm.core.agent.py: enforce_singleton: {self.command_line_args['universal_id']} die cookie ingested, going down easy...")
 
             # within 20secs if another instance detected, and this is the younger of the die
 

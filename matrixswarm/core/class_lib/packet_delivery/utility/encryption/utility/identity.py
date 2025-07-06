@@ -1,4 +1,4 @@
-from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 class IdentityObject:
     def __init__(self, has_verified_identity=False, universal_id=None):
         self._has_verified_identity = bool(has_verified_identity)

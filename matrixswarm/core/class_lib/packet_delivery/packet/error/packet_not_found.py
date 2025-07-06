@@ -1,4 +1,4 @@
-from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
+from matrixswarm.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 
 class Packet(BasePacket):
     def __init__(self, reason="Packet type not found."):

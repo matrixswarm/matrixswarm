@@ -1,16 +1,16 @@
 import base64
 import importlib
 import traceback
-from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
-from core.class_lib.packet_delivery.utility.crypto_processors.packet_encryption_factory import packet_encryption_factory
-from core.class_lib.packet_delivery.utility.crypto_processors.football import Football
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.packet_encryption_factory import packet_encryption_factory
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 
 class PacketReceptionFactoryMixin:
 
     def get_reception_agent(self, path: str, football:Football, new=True):
 
         try:
-            full_path = f"core.class_lib.packet_delivery.reception_agent.{path}.reception_agent"
+            full_path = f"matrixswarm.core.class_lib.packet_delivery.reception_agent.{path}.reception_agent"
             mod = importlib.import_module(full_path)
             agent = mod.ReceptionAgent()
             if new:
@@ -31,7 +31,7 @@ class PacketReceptionFactoryMixin:
                 print(f"[RECEPTION][ERROR] Could not import reception agent '{path}': {e}")
                 traceback.print_exc()
             try:
-                from core.class_lib.packet_delivery.reception_agent.error.reception_agent_not_found import ReceptionAgent as Fallback
+                from matrixswarm.core.class_lib.packet_delivery.reception_agent.error.reception_agent_not_found import ReceptionAgent as Fallback
                 return Fallback(reason=f"Reception agent '{path}' not found.")
             except Exception as fallback_err:
                 print(f"[RECEPTION][FAILSAFE] Failed to load fallback reception agent: {fallback_err}")

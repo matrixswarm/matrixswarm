@@ -1,6 +1,6 @@
 # core/class_lib/packet_delivery/packet/notify/alert/general.py
 import time
-from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
+from matrixswarm.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 
 class Packet(BasePacket):
 

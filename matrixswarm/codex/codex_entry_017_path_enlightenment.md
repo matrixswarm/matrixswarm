@@ -38,7 +38,7 @@ if root_path and root_path not in sys.path:
 Then:
 
 ```python
-from core.path_resolver import patch_sys_path
+from matrixswarm.core.path_resolver import patch_sys_path
 patch_sys_path(path_resolution)
 ```
 

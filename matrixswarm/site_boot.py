@@ -30,22 +30,22 @@ def main():
         sys.path.insert(0, SITE_ROOT)
 
     from pathlib import Path
-    from core.core_spawner import CoreSpawner
-    from core.tree_parser import TreeParser
-    from core.class_lib.processes.reaper import Reaper
-    from core.path_manager import PathManager
-    from core.swarm_session_root import SwarmSessionRoot
-    from boot_directives.load_boot_directive import load_boot_directive
-    from core.utils.boot_guard import enforce_single_matrix_instance, validate_universe_id
-    from core.utils.crypto_utils import generate_aes_key
+    from matrixswarm.core.core_spawner import CoreSpawner
+    from matrixswarm.core.tree_parser import TreeParser
+    from matrixswarm.core.class_lib.processes.reaper import Reaper
+    from matrixswarm.core.path_manager import PathManager
+    from matrixswarm.core.swarm_session_root import SwarmSessionRoot
+    from matrixswarm.boot_directives.load_boot_directive import load_boot_directive
+    from matrixswarm.core.utils.boot_guard import enforce_single_matrix_instance, validate_universe_id
+    from matrixswarm.core.utils.crypto_utils import generate_aes_key
     from Crypto.Random import get_random_bytes
     from Crypto.Cipher import AES
     from Crypto.PublicKey import RSA
 
-    from core.class_lib.packet_delivery.packet.standard.general.json.packet import Packet
-    from core.class_lib.packet_delivery.delivery_agent.file.json_file.delivery_agent import DeliveryAgent
-    from core.class_lib.packet_delivery.utility.crypto_processors.packet_encryption_factory import packet_encryption_factory
-    from core.class_lib.packet_delivery.utility.crypto_processors.football import Football
+    from matrixswarm.core.class_lib.packet_delivery.packet.standard.general.json.packet import Packet
+    from matrixswarm.core.class_lib.packet_delivery.delivery_agent.file.json_file.delivery_agent import DeliveryAgent
+    from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.packet_encryption_factory import packet_encryption_factory
+    from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 
     # === ARGUMENTS ===
     parser = argparse.ArgumentParser(description="MatrixSwarm Boot Loader", formatter_class=argparse.RawTextHelpFormatter)
@@ -179,7 +179,7 @@ def main():
         cp.set_debug(True)
 
 
-    from core.mixin.ghost_vault import generate_agent_keypair
+    from matrixswarm.core.mixin.ghost_vault import generate_agent_keypair
     from cryptography.hazmat.primitives import serialization
     import hashlib
 

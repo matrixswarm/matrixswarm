@@ -8,8 +8,8 @@ import email
 from email.header import decode_header
 from dotenv import load_dotenv
 load_dotenv()
-from core.boot_agent import BootAgent
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):

@@ -5,8 +5,8 @@ import json
 import psutil
 import re
 from pathlib import Path
-from core.class_lib.logging.logger import Logger
-from core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
+from matrixswarm.core.class_lib.logging.logger import Logger
+from matrixswarm.core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
 
 class Reaper:
     def __init__(self, pod_root, comm_root, timeout_sec=60, logger=None):

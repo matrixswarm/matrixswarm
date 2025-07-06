@@ -16,9 +16,9 @@ import time
 import threading
 from pathlib import Path
 
-from core.boot_agent import BootAgent
-from core.class_lib.processes.reaper_universal_id_handler import ReaperUniversalHandler  # PID Handler
-from core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.class_lib.processes.reaper_universal_id_handler import ReaperUniversalHandler  # PID Handler
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()

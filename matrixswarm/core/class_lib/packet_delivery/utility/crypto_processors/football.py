@@ -3,8 +3,8 @@
 import json
 import base64
 import os
-from core.class_lib.packet_delivery.utility.encryption.utility.sig_payload_json import SigPayloadJson
-from core.class_lib.packet_delivery.utility.encryption.utility.interfaces.sig_payload import SigPayload
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.sig_payload_json import SigPayloadJson
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.interfaces.sig_payload import SigPayload
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 from Crypto.Cipher import AES
@@ -12,10 +12,10 @@ from Crypto.PublicKey import RSA as CryptoRSA
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
-from core.mixin.log_method import LogMixin
-from core.class_lib.packet_delivery.utility.crypto_processors.identity import IdentityObject
-from core.class_lib.packet_delivery.utility.crypto_processors.identity_manager import IdentityManager
-from core.utils.crypto_utils import generate_aes_key
+from matrixswarm.core.mixin.log_method import LogMixin
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.identity import IdentityObject
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.identity_manager import IdentityManager
+from matrixswarm.core.utils.crypto_utils import generate_aes_key
 
 class Football(LogMixin):
     """Manages the cryptographic context for sending and receiving packets.

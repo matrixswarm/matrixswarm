@@ -12,8 +12,8 @@ import threading
 import time
 import base64
 
-from core.boot_agent import BootAgent
-from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 
 from Crypto.Cipher import AES
 

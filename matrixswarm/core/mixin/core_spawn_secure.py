@@ -4,7 +4,7 @@ import os
 import json
 import uuid
 import tempfile
-from core.secure_boot_layer import generate_keypair, serialize_keys, encrypt_blob
+from matrixswarm.core.secure_boot_layer import generate_keypair, serialize_keys, encrypt_blob
 
 class CoreSpawnerSecureMixin:
     def __init__(self):

@@ -3,9 +3,9 @@ import json
 import uuid
 import time
 import tempfile
-from core.class_lib.packet_delivery.interfaces.base_delivery_agent import BaseDeliveryAgent
-from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
-from core.mixin.log_method import LogMixin
+from matrixswarm.core.class_lib.packet_delivery.interfaces.base_delivery_agent import BaseDeliveryAgent
+from matrixswarm.core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
+from matrixswarm.core.mixin.log_method import LogMixin
 class DeliveryAgent(BaseDeliveryAgent, LogMixin):
     def __init__(self):
         self._location = None

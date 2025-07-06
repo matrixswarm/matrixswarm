@@ -1,5 +1,5 @@
-from core.class_lib.packet_delivery.interfaces.base_reception_agent import BaseReceptionAgent
-from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
+from matrixswarm.core.class_lib.packet_delivery.interfaces.base_reception_agent import BaseReceptionAgent
+from matrixswarm.core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
 
 class ReceptionAgent(BaseReceptionAgent):
     def __init__(self, reason="Reception agent type not found."):

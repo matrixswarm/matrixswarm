@@ -9,9 +9,9 @@ import threading
 import asyncio
 import websockets
 import json
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
-from core.boot_agent import BootAgent
+from matrixswarm.core.boot_agent import BootAgent
 
 class Agent(BootAgent):
     def __init__(self):

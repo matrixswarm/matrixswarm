@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import QListWidget
 import os
 import json
 
-from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
+from matrixswarm.core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 
 
 class AutoScrollList(QListWidget):

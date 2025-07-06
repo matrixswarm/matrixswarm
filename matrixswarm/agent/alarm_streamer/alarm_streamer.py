@@ -10,9 +10,9 @@ import json
 import time
 from flask import Flask
 from flask_socketio import SocketIO
-from core.utils.swarm_sleep import interruptible_sleep
-from core.boot_agent import BootAgent
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 # Flask + SocketIO app
 app = Flask(__name__)

@@ -1,7 +1,7 @@
 import os
 import re
 from datetime import datetime
-from core.class_lib.logging.logger import Logger
+from matrixswarm.core.class_lib.logging.logger import Logger
 
 
 

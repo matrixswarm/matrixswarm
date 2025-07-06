@@ -8,7 +8,7 @@ There are moments in swarm development where a single working module causes an o
 A successful test.  
 A full rollout.  
 A failed import.  
-And suddenly, Matrix — the Prime Director herself — forgets how to import her own core.
+And suddenly, Matrix — the Prime Director herself — forgets how to import her own matrixswarm.core.
 
 ---
 

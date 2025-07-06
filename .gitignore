@@ -14,6 +14,7 @@ pod/
 *.csr
 socket_certs/
 https_certs/
+Lib/
 
 # 🧠 Agent build artifacts
 boot_payload/
@@ -41,6 +42,7 @@ ENV/
 Lib/
 Scripts/
 Include/
+matrixswarm.egg-info/
 bin/
 *.exe
 

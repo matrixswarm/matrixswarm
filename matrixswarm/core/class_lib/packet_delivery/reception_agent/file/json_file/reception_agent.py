@@ -1,9 +1,9 @@
 import os
 import json
-from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
-from core.class_lib.packet_delivery.interfaces.base_reception_agent import BaseReceptionAgent
-from core.mixin.log_method import LogMixin
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
+from matrixswarm.core.class_lib.packet_delivery.interfaces.base_reception_agent import BaseReceptionAgent
+from matrixswarm.core.mixin.log_method import LogMixin
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class ReceptionAgent(BaseReceptionAgent, LogMixin):
     def __init__(self):

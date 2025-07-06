@@ -3,7 +3,7 @@ import os
 import sys
 import shutil
 
-from core.tree_parser import TreeParser
+from matrixswarm.core.tree_parser import TreeParser
 
 class KillChainLockManager:
     """

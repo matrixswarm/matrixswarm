@@ -1,5 +1,5 @@
 import json
-from core.class_lib.packet_delivery.utility.encryption.utility.interfaces.sig_payload import SigPayload
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.interfaces.sig_payload import SigPayload
 
 class SigPayloadJson(SigPayload):
 

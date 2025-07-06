@@ -1,6 +1,6 @@
 import importlib
 import traceback
-from core.class_lib.packet_delivery.packet.error.packet_not_found import Packet as ErrorPacket
+from matrixswarm.core.class_lib.packet_delivery.packet.error.packet_not_found import Packet as ErrorPacket
 
 class PacketFactoryMixin:
     def __init__(self):
@@ -12,7 +12,7 @@ class PacketFactoryMixin:
         Falls back to packet/error/packet_not_found.py
         """
         try:
-            full_path = f"core.class_lib.packet_delivery.packet.{dotted_path}"
+            full_path = f"matrixswarm.core.class_lib.packet_delivery.packet.{dotted_path}"
             mod = importlib.import_module(full_path)
             packet = mod.Packet()
             if new:

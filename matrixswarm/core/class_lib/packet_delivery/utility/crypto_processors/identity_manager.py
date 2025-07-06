@@ -1,4 +1,4 @@
-from core.class_lib.packet_delivery.utility.crypto_processors.identity import IdentityObject
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.identity import IdentityObject
 
 class IdentityManager:
     def __init__(self):

@@ -1,7 +1,7 @@
-from core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
-from core.class_lib.packet_delivery.utility.crypto_processors.football import Football
-from core.class_lib.packet_delivery.utility.encryption.packet_crypto_mixin import PacketCryptoMixin
-from core.mixin.log_method import LogMixin
+from matrixswarm.core.class_lib.packet_delivery.interfaces.packet_processor import PacketProcessorBase
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.packet_crypto_mixin import PacketCryptoMixin
+from matrixswarm.core.mixin.log_method import LogMixin
 class PacketDecryptor(PacketProcessorBase, LogMixin):
     def __init__(self, football:Football):
 

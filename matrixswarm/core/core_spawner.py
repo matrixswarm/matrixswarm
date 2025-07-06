@@ -14,9 +14,9 @@ import traceback
 from datetime import datetime
 from class_lib.file_system.file_system_builder import FileSystemBuilder
 from path_manager import PathManager
-from core.class_lib.logging.logger import Logger
-from core.mixin.core_spawn_secure import CoreSpawnerSecureMixin
-from core.mixin.ghost_vault import build_encrypted_spawn_env
+from matrixswarm.core.class_lib.logging.logger import Logger
+from matrixswarm.core.mixin.core_spawn_secure import CoreSpawnerSecureMixin
+from matrixswarm.core.mixin.ghost_vault import build_encrypted_spawn_env
 class CoreSpawner(CoreSpawnerSecureMixin):
     def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path', python_site=None, detected_python=None):
         super().__init__()

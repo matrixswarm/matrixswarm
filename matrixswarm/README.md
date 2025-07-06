@@ -323,7 +323,7 @@ MatrixSwarm now includes structured packet building, command dispatch, and auto-
 - `cmd_forward_command`: Core packet for nested targeting
 - `cmd_hotswap_agent`: Inject new logic into a live pod — no downtime
 
-**New relay agents** handle command injection, resurrection, and lifecycle events without rebooting the core.
+**New relay agents** handle command injection, resurrection, and lifecycle events without rebooting the matrixswarm.core.
 
 #### Build a .deb Package
 
@@ -490,7 +490,7 @@ shell
 
 #### 1. Create the Agent Code
 ```python
-from core.boot_agent import BootAgent
+from matrixswarm.core.boot_agent import BootAgent
 
 class MyAgent(BootAgent):
     def worker(self):

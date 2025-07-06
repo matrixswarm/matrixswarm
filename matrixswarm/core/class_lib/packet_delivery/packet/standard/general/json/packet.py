@@ -1,5 +1,5 @@
 import json
-from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
+from matrixswarm.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 
 class Packet(BasePacket):
 

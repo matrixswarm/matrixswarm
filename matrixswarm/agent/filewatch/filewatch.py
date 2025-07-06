@@ -8,8 +8,8 @@ import hashlib
 import inotify.adapters
 import threading
 
-from core.boot_agent import BootAgent
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):

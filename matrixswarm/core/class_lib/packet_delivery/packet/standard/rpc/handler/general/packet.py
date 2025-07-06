@@ -1,4 +1,4 @@
-from core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
+from matrixswarm.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 import time
 class Packet(BasePacket):
 
@@ -14,7 +14,7 @@ class Packet(BasePacket):
                 "handler": data.get('handler'),
                 "origin": data.get('origin', "none"),
                 "content": data.get('content'),
-                # if set locate the service under core.* and inject data then inject inside handler
+                # if set locate the service under matrixswarm.core.* and inject data then inject inside handler
             }
             self._data = data
             self._error_code = 0

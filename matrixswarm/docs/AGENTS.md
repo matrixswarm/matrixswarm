@@ -18,7 +18,7 @@ This library provides documentation for the pre-built agents included with Matri
 ### Core & Command
 | Agent Name | Purpose | Link |
 | :--- | :--- | :--- |
-| **`matrix`** | The central brain and message routing core. | `[Details](./agents/matrix.md)` |
+| **`matrix`** | The central brain and message routing matrixswarm.core. | `[Details](./agents/matrix.md)` |
 | **`commander`**| Provides a live, text-based dashboard of all swarm agents' status. | `[Details](./agents/commander.md)` |
 | **`matrix_https`**| A secure Flask-based web server that exposes an API to interact with the swarm. | `[Details](./agents/matrix_https.md)` |
 | **`matrix_websocket`**| Provides a secure WebSocket server for real-time, bidirectional communication. | `[Details](./agents/matrix_websocket.md)` |

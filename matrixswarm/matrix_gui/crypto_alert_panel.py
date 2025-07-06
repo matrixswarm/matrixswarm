@@ -5,7 +5,7 @@ from PyQt5.QtCore import QRect, QSize, Qt, QPoint, QTimer
 import json
 import time
 import uuid
-from core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
+from matrixswarm.core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 
 
 class CryptoAlertPanel(QWidget, PacketFactoryMixin):

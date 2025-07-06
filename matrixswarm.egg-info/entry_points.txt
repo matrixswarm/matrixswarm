@@ -1,4 +1,0 @@
-[console_scripts]
-matrixswarm-boot = matrixswarm.site_boot:main
-matrixswarm-kill = matrixswarm.site_kill:main
-matrixswarm-list = matrixswarm.site_list:main

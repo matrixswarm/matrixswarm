@@ -1,7 +1,7 @@
 import base64
-from core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
-from core.class_lib.packet_delivery.utility.crypto_processors.packet_encryption_factory import packet_encryption_factory
-from core.class_lib.packet_delivery.utility.crypto_processors.football import Football
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.packet_encryption_factory import packet_encryption_factory
+from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 import importlib
 import traceback
 
@@ -11,7 +11,7 @@ class PacketDeliveryFactoryMixin:
 
         try:
 
-            full_path = f"core.class_lib.packet_delivery.delivery_agent.{path}.delivery_agent"
+            full_path = f"matrixswarm.core.class_lib.packet_delivery.delivery_agent.{path}.delivery_agent"
             mod = importlib.import_module(full_path)
             agent = mod.DeliveryAgent()
             if new:
@@ -34,7 +34,7 @@ class PacketDeliveryFactoryMixin:
                 traceback.print_exc()
 
             try:
-                from core.class_lib.packet_delivery.delivery_agent.error.delivery_agent_not_found import DeliveryAgent as Fallback
+                from matrixswarm.core.class_lib.packet_delivery.delivery_agent.error.delivery_agent_not_found import DeliveryAgent as Fallback
                 return Fallback(reason=f"Delivery agent '{path}' not found.")
             except Exception as fallback_err:
                 print(f"[DELIVERY][FAILSAFE] Failed to load fallback delivery agent: {fallback_err}")

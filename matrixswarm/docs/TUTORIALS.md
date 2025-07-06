@@ -20,8 +20,8 @@ Create a new folder and file: `/agent/hello_agent/hello_agent.py`
 # /agent/hello_agent/hello_agent.py
 
 import time
-from core.boot_agent import BootAgent
-from core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
     """
@@ -91,7 +91,7 @@ Create a new folder and file: /agent/unstable_agent/unstable_agent.py
 ### /agent/unstable_agent/unstable_agent.py
 
 import os
-from core.boot_agent import BootAgent
+from matrixswarm.core.boot_agent import BootAgent
 
 class Agent(BootAgent):
     def worker(self, config:dict=None, identity=None):
@@ -106,8 +106,8 @@ Create a new folder and file: /agent/watchdog_agent/watchdog_agent.py
 
 ### /agent/watchdog_agent/watchdog_agent.py
 
-from core.boot_agent import BootAgent
-from core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
     def worker(self, config:dict=None, identity=None):

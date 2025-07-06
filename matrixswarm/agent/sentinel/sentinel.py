@@ -15,10 +15,10 @@ import json
 import threading
 import traceback
 
-from core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
-from core.utils.swarm_sleep import interruptible_sleep
-from core.boot_agent import BootAgent
-from core.mixin.ghost_vault import generate_agent_keypair
+from matrixswarm.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.mixin.ghost_vault import generate_agent_keypair
 
 class Agent(BootAgent):
     def __init__(self):

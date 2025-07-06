@@ -8,10 +8,10 @@ def main():
     if SITE_ROOT not in sys.path:
         sys.path.insert(0, SITE_ROOT)
 
-    from core.class_lib.processes.reaper import Reaper
-    from core.path_manager import PathManager
-    from core.utils import resolve_latest_symlink
-    from core.utils import swarm_cleaner
+    from matrixswarm.core.class_lib.processes.reaper import Reaper
+    from matrixswarm.core.path_manager import PathManager
+    from matrixswarm.core.utils import resolve_latest_symlink
+    from matrixswarm.core.utils import swarm_cleaner
 
     # CLI setup
     parser = argparse.ArgumentParser(description="Matrix Swarm Terminator")

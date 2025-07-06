@@ -7,9 +7,9 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 import json
 import psutil
-from core.boot_agent import BootAgent
-from core.utils.swarm_sleep import interruptible_sleep
-from core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.boot_agent import BootAgent
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
     def __init__(self):

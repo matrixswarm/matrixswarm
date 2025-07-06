@@ -6,7 +6,7 @@ import json
 import os
 import time
 import requests
-from core.live_tree import LiveTree
+from matrixswarm.core.live_tree import LiveTree
 
 
 class MatrixV1(tk.Tk):

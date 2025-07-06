@@ -28,7 +28,7 @@ python3 gui/matrix_gui.py
 Create a Python file under `/agent/youragent/youragent.py`:
 
 ```python
-from core.boot_agent import BootAgent
+from matrixswarm.core.boot_agent import BootAgent
 
 class YourAgent(BootAgent):
     def worker(self):
