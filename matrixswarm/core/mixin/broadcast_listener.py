@@ -15,7 +15,7 @@ class BroadcastListenerMixin:
                     if not fname.startswith("broadcast_") or not fname.endswith(".json"):
                         continue
                     fpath = os.path.join(broadcast_path, fname)
-                    with open(fpath, "r") as f:
+                    with open(fpath, "r", encoding="utf-8") as f:
                         try:
                             data = json.load(f)
                         except Exception as e:

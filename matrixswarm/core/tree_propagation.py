@@ -24,7 +24,7 @@ def propagate_tree_slice(tree_parser, target_universal_id, comm_path):
     filename = f"update_delegates_{payload['timestamp']}.cmd"
     full_path = os.path.join(incoming_path, filename)
 
-    with open(full_path, "w") as f:
+    with open(full_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
     print(f"[PROPAGATION] Pushed delegate update to {target_universal_id}")

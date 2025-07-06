@@ -66,7 +66,7 @@ class Agent(BootAgent):
                 files = sorted(os.listdir(spawn_dir), reverse=True)
                 for f in files:
                     if f.endswith(".spawn"):
-                        with open(os.path.join(spawn_dir, f)) as sf:
+                        with open(os.path.join(spawn_dir, f), encoding="utf-8") as sf:
                             data = json.load(sf)
                             report["spawn_uuid"] = data.get("uuid")
                             raw_pid = data.get("pid")
@@ -103,7 +103,7 @@ class Agent(BootAgent):
                     if fname.startswith("poke."):
                         thread = fname.replace("poke.", "")
                         try:
-                            with open(os.path.join(thread_dir, fname)) as f:
+                            with open(os.path.join(thread_dir, fname), encoding="utf-8") as f:
                                 data = json.load(f)
                                 age = round(now - data.get("last_seen", now), 2)
                                 status = data.get("status", "unknown")

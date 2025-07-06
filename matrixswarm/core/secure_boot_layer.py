@@ -65,11 +65,11 @@ def receive_key_blob(args):
     import os
     keyfile = args.get("keyfile")
     if keyfile and isinstance(keyfile, str) and os.path.exists(keyfile):
-        with open(args['keyfile'], 'r') as f:
+        with open(args['keyfile'], 'r', encoding="utf-8") as f:
             return json.load(f)
     elif 'key_blob' in args:
         return json.loads(args['key_blob'])
     elif 'keypipe' in args:
-        with open(args['keypipe'], 'r') as f:
+        with open(args['keypipe'], 'r', encoding="utf-8") as f:
             return json.load(f)
     return None

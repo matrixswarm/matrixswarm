@@ -193,7 +193,7 @@ def main():
     #if the directive is encrypted, decrypt
     def decrypt_directive(encrypted_path, swarm_key_b64):
 
-        with open(encrypted_path, "r") as f:
+        with open(encrypted_path, "r", encoding="utf-8") as f:
             bubble = json.load(f)
 
         key = base64.b64decode(swarm_key_b64)

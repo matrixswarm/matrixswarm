@@ -22,7 +22,7 @@ def live_hive_watch(pod_root="pod", interval_sec=5):
                     continue
 
                 try:
-                    with open(boot_file, "r") as f:
+                    with open(boot_file, "r", encoding="utf-8") as f:
                         boot_data = json.load(f)
 
                     universal_id = boot_data.get("universal_id")

@@ -46,7 +46,7 @@ class ReflexAlertMixin:
 
         try:
             path = os.path.join(inbox, f"reflex_alert_{int(time.time())}.msg")
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f)
             self.log(f"[REFLEX] Alert dropped to: {path}")
         except Exception as e:

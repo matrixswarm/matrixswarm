@@ -11,7 +11,7 @@ def load_delegates(universal_id):
     if not os.path.exists(directive_path):
         return []
     try:
-        with open(directive_path, "r") as f:
+        with open(directive_path, "r", encoding="utf-8") as f:
             directives = json.load(f)
         return directives.get("delegated", [])
     except Exception as e:
@@ -33,7 +33,7 @@ def build_tree_from_deploy():
     if not os.path.exists(DEPLOY_TREE_PATH):
         return {}
     try:
-        with open(DEPLOY_TREE_PATH, "r") as f:
+        with open(DEPLOY_TREE_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         print(f" - Failed to load deploy tree: {e}")

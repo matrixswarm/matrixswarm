@@ -8,7 +8,7 @@ def backup_agent_tree(tree_path, backup_dir=None, replaced_node_id=None, new_nod
         print(f"[TREE-BACKUP] No tree found at: {tree_path}")
         return
 
-    with open(tree_path, "r") as f:
+    with open(tree_path, "r", encoding="utf-8") as f:
         try:
             archived_tree = json.load(f)
         except Exception as e:
@@ -31,7 +31,7 @@ def backup_agent_tree(tree_path, backup_dir=None, replaced_node_id=None, new_nod
     try:
 
 
-        with open(backup_path, "w") as f:
+        with open(backup_path, "w", encoding="utf-8") as f:
             json.dump(archived_tree, f, indent=2)
 
 

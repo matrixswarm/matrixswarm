@@ -339,7 +339,7 @@ class MatrixGUI(tk.Tk):
         print("[DEBUG] Selected team:", selected)
 
         try:
-            with open(team_file, "r") as f:
+            with open(team_file, "r", encoding="utf-8") as f:
                 team_data = json.load(f)
 
             target_universal_id = self.agent_select.get().strip()
@@ -585,7 +585,7 @@ cert = ("certs/client.crt", "certs/client.key"),
     def shutdown_agent(self):
         perm = self.universal_id.get()
         path = f"/comm/reaper-root/payload/kill_{perm}.json"
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump({"universal_id": perm}, f, indent=2)
         messagebox.showinfo("Shutdown", f"Kill order sent for {perm}")
 
@@ -596,7 +596,7 @@ cert = ("certs/client.crt", "certs/client.key"),
         subtree = self.get_subtree(target)
         for agent_id in subtree:
             die_path = f"comm/{agent_id}/incoming/die"
-            open(die_path, "w").close()
+            open(die_path, "w", encoding="utf-8").close()
         messagebox.showinfo("Subtree Terminated", f"{len(subtree)} agents marked for death.")
 
     def resume_subtree(self):
@@ -711,7 +711,7 @@ cert = ("certs/client.crt", "certs/client.key"),
 
         if os.path.exists(log_path):
             try:
-                with open(log_path, "r") as f:
+                with open(log_path, "r", encoding="utf-8") as f:
                     logs = f.read()
                 self.log_box.delete("1.0", tk.END)
                 self.log_box.insert(tk.END, logs)
@@ -725,7 +725,7 @@ cert = ("certs/client.crt", "certs/client.key"),
 
     def view_tags(self):
         if os.path.exists("/deploy/missions.json"):
-            with open("/deploy/missions.json") as f:
+            with open("/deploy/missions.json", encoding="utf-8") as f:
                 tags = f.read()
             messagebox.showinfo("Tags", tags)
         else:

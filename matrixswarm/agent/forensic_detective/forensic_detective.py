@@ -177,7 +177,7 @@ class Agent(BootAgent):
         filename = f"{time.strftime('%Y%m%d-%H%M%S')}-{critical_event['service_name']}-failure.json"
         filepath = os.path.join(self.summary_path, filename)
         try:
-            with open(filepath, 'w') as f:
+            with open(filepath, 'w', encoding="utf-8") as f:
                 json.dump(summary_data, f, indent=4)
             self.log(f"Full incident summary saved to: {filepath}")
         except Exception as e:

@@ -28,7 +28,7 @@ class NewestFile:
                 return False, False  # No files found
 
             if get_file_content:
-                with open(newest_file, 'r') as f:
+                with open(newest_file, 'r', encoding="utf-8") as f:
                     return True, json.load(f)  # Parse and return JSON content as a dictionary
             else:
                 if get_full_path:

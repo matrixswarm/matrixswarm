@@ -30,7 +30,7 @@ async def stream_logs(websocket):
 
                 path = os.path.join(WATCH_PATH, fname)
                 try:
-                    with open(path, "r") as f:
+                    with open(path, "r", encoding="utf-8") as f:
                         content = f.read()
                         try:
                             msg = json.loads(content)

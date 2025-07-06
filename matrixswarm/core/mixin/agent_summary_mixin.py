@@ -28,7 +28,7 @@ class AgentSummaryMixin:
         try:
 
             latest_path = os.path.join(summary_dir, f"{label}_uptime_latest.json")
-            with open(latest_path, "w") as f:
+            with open(latest_path, "w", encoding="utf-8") as f:
                 json.dump(summary, f, indent=2)
 
             self.log(f"[SUMMARY] ✅ {label} summary written to: {summary_path}", level="INFO")

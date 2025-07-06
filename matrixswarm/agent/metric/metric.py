@@ -60,7 +60,7 @@ class Agent(BootAgent):
         cpu = os.getloadavg()[0]
         ram = psutil.virtual_memory().percent
         disk = shutil.disk_usage("/").free / (1024 ** 3)
-        with open("/proc/uptime", "r") as f:
+        with open("/proc/uptime", "r", encoding="utf-8") as f:
             uptime = float(f.readline().split()[0])
         return {
             "cpu": round(cpu, 2),
@@ -78,7 +78,7 @@ class Agent(BootAgent):
         }
         hashval = hashlib.sha256(json.dumps(payload).encode()).hexdigest()
         fname = f"{int(time.time())}_{hashval}.json"
-        with open(os.path.join(self.outbox, fname), "w") as f:
+        with open(os.path.join(self.outbox, fname), "w", encoding="utf-8") as f:
             json.dump(payload, f)
 
     def query_oracle(self, summary):
@@ -89,7 +89,7 @@ class Agent(BootAgent):
             "payload": summary
         }
         fname = f"metrics_trend_query_{int(time.time())}.json"
-        with open(os.path.join(self.oracle_payload, fname), "w") as f:
+        with open(os.path.join(self.oracle_payload, fname), "w", encoding="utf-8") as f:
             json.dump(query, f)
         self.log("[METRICS] Oracle query dispatched.")
 

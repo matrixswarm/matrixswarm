@@ -78,7 +78,7 @@ class Agent(BootAgent):
 
                     self.log(f"[ALARM] Detected new alarm file: {fname}")
 
-                    with open(full_path, "r") as f:
+                    with open(full_path, "r", encoding="utf-8") as f:
                         payload = json.load(f)
                     self.log(f"[ALARM] Emitting: {payload}")
                     socketio.emit("swarm_alarm", payload)
@@ -100,7 +100,7 @@ class Agent(BootAgent):
                     continue
 
                 try:
-                    with open(tree_file, "r") as f:
+                    with open(tree_file, "r", encoding="utf-8") as f:
                         node = json.load(f)
                 except Exception as e:
                     self.log(f"[RELAY][ERROR] Failed to load {tree_file}: {e}")
@@ -115,7 +115,7 @@ class Agent(BootAgent):
 
                 fname = f"alarm_{int(time.time())}.msg"
                 fpath = os.path.join(inbox_path, fname)
-                with open(fpath, "w") as f:
+                with open(fpath, "w", encoding="utf-8") as f:
                     json.dump(payload, f)
 
                 self.log(f"[RELAY] Sent alarm to {agent_id} → {inbox_path}/{fname}")

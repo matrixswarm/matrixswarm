@@ -33,7 +33,7 @@ class Agent(BootAgent):
             self.log("[RESOLVER][WARN] Tree file not found.")
             return
         try:
-            with open(self.tree_path, "r") as f:
+            with open(self.tree_path, "r", encoding="utf-8") as f:
                 tree = json.load(f)
             self.directory.clear()
             self.parse_tree(tree)
@@ -59,7 +59,7 @@ class Agent(BootAgent):
 
     def handle_payload_file(self, path):
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
             content = payload.get("content", {})
             name = content.get("agent_name") or content.get("name")
@@ -78,7 +78,7 @@ class Agent(BootAgent):
     def save_directory_snapshot(self):
         try:
             path = os.path.join(self.path_resolution["comm_path_resolved"], "directory.json")
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.directory, f, indent=2)
         except Exception as e:
             self.log(f"[RESOLVER][SNAPSHOT] Failed: {e}")
@@ -104,7 +104,7 @@ class Agent(BootAgent):
                 "count": len(agents)
             }
 
-            with open(reply_path, "w") as f:
+            with open(reply_path, "w", encoding="utf-8") as f:
                 json.dump(response, f, indent=2)
 
             self.log(f"[RESOLVER][REPLY] → {reply_path} ({len(agents)} matches)")

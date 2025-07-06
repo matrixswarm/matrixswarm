@@ -123,7 +123,7 @@ class Agent(BootAgent):
 
                     payload = {}
                     uid=None
-                    with open(cookie_path, "r") as f:
+                    with open(cookie_path, "r", encoding="utf-8") as f:
                         try:
                             payload = json.load(f)
                             uid = payload.get("target")
@@ -178,17 +178,17 @@ class Agent(BootAgent):
 
             # Write tombstone to comm
             die_path = os.path.join(incoming_dir, "die")
-            with open(die_path, "w") as f:
+            with open(die_path, "w", encoding="utf-8") as f:
                 f.write("true")
 
             # Write tombstone to comm
             tombstone_path = os.path.join(incoming_dir, "tombstone")
-            with open(tombstone_path, "w") as f:
+            with open(tombstone_path, "w", encoding="utf-8") as f:
                 f.write("true")
 
             # Write tombstone to pod
             tombstone_path = os.path.join(pod_dir, "tombstone")
-            with open(tombstone_path, "w") as f:
+            with open(tombstone_path, "w", encoding="utf-8") as f:
                 f.write("true")
 
             self.log(f"[DISPOSABLE-REAPER] Die cookie dropped & Tombstone dropped. Mission complete. Signing off.")
@@ -211,9 +211,9 @@ class Agent(BootAgent):
         # Send 'die' and 'tombstone' signals via `comm_path`
         incoming = os.path.join(comm_path, "incoming")
         os.makedirs(incoming, exist_ok=True)
-        with open(os.path.join(incoming, "die"), "w") as f:
+        with open(os.path.join(incoming, "die"), "w", encoding="utf-8") as f:
             json.dump({"cmd": "die", "force": False}, f)
-        with open(os.path.join(incoming, "tombstone"), "w") as f:
+        with open(os.path.join(incoming, "tombstone"), "w", encoding="utf-8") as f:
             f.write("true")
 
         self.log(f"[DISPOSABLE-REAPER] Die and tombstone delivered to {universal_id}")
@@ -257,7 +257,7 @@ class Agent(BootAgent):
         }
 
         report_path = os.path.join(self.outbox_path, f"reaper_mission_{self.kill_id}.json")
-        with open(report_path, "w") as f:
+        with open(report_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
         self.log(f"[DISPOSABLE-REAPER] Mission report written: {report_path}")

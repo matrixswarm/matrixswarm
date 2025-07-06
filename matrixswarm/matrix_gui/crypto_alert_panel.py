@@ -340,7 +340,7 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin):
 
     def load_alerts(self):
         if os.path.exists(self.alert_path):
-            with open(self.alert_path) as f:
+            with open(self.alert_path, encoding="utf-8") as f:
                 self.alerts = json.load(f)
         else:
             self.alerts = []
@@ -710,7 +710,7 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin):
 
     def save_alerts(self):
         try:
-            with open(self.alert_path, "w") as f:
+            with open(self.alert_path, "w", encoding="utf-8") as f:
                 json.dump(self.alerts, f, indent=2)
         except Exception as e:
             print(f"[ALERT PANEL][ERROR] Failed to save alerts: {e}")

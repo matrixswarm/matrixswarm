@@ -67,7 +67,7 @@ class Agent(BootAgent):
 
     def write_mail_file(self, hashval, content):
         path = os.path.join(self.mail_dir, f"{hashval}.json")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(content)
 
     def write_tally_file(self, hashval, content):
@@ -79,7 +79,7 @@ class Agent(BootAgent):
                 "severity": data.get("severity", "info")
             }
             path = os.path.join(self.tally_dir, f"{hashval}.msg")
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(entry, f)
         except Exception as e:
             self.log(f"[MAILMAN][TALLY-ERROR] {e}")
@@ -87,7 +87,7 @@ class Agent(BootAgent):
     def forward_to_incoming(self, hashval, content):
         try:
             path = os.path.join(self.incoming_dir, f"{int(time.time())}_{hashval}.msg")
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
         except Exception as e:
             self.log(f"[MAILMAN][FORWARD-ERROR] {e}")

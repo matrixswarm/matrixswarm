@@ -22,7 +22,7 @@ class ReaperUniversalHandler:
             if not boot_file.exists():
                 continue
             try:
-                with open(boot_file, "r") as f:
+                with open(boot_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if data.get("universal_id") in universal_ids:
                     agent_paths.append(pod_dir)

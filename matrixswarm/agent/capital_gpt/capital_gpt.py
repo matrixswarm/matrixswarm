@@ -112,12 +112,12 @@ class Agent(BootAgent):
         inbox = os.path.join(self.path_resolution["comm_path"], uid, "incoming")
         os.makedirs(inbox, exist_ok=True)
         fname = f"prompt_{qid}.msg"
-        with open(os.path.join(inbox, fname), "w") as f:
+        with open(os.path.join(inbox, fname), "w", encoding="utf-8") as f:
             json.dump(prompt_payload, f, indent=2)
 
         dialogue_path = self.get_dialogue_path(mission_id)
         os.makedirs(dialogue_path, exist_ok=True)
-        with open(os.path.join(dialogue_path, f"{qid}.prompt"), "w") as f:
+        with open(os.path.join(dialogue_path, f"{qid}.prompt"), "w", encoding="utf-8") as f:
             json.dump(prompt_payload, f, indent=2)
 
         self.log(f"[INTEL] Routed structured prompt {qid} with mission_id {mission_id} to oracle.")
@@ -147,7 +147,7 @@ class Agent(BootAgent):
             "query_id": query_id,
             "content": content
         }
-        with open(thread_path, "a") as f:
+        with open(thread_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(line) + "\n")
         self.log(f"[THREAD] Appended {type} from {role} to thread: {query_id}")
 
@@ -341,7 +341,7 @@ class Agent(BootAgent):
             fname = f"reflex_alert_{int(time.time())}.msg"
             fullpath = os.path.join(inbox_path, fname)
 
-            with open(fullpath, "w") as f:
+            with open(fullpath, "w", encoding="utf-8") as f:
                 json.dump(payload, f)
 
             self.log(f"[REFLEX] Alert dropped to: {fullpath}")
@@ -412,7 +412,7 @@ class Agent(BootAgent):
             return "[CAPITAL][ERROR] No thread log found."
 
         history = []
-        with open(thread_path, 'r') as f:
+        with open(thread_path, 'r', encoding="utf-8") as f:
             for line in f:
                 try:
                     entry = json.loads(line.strip())
@@ -511,7 +511,7 @@ class Agent(BootAgent):
             thread_file = os.path.join(dialogue_path, f"thread_{qid}.jsonl")
 
             if os.path.exists(thread_file):
-                with open(thread_file, 'r') as f:
+                with open(thread_file, 'r', encoding="utf-8") as f:
                     for line in f:
                         try:
                             entry = json.loads(line.strip())  # Load each line as JSON
@@ -646,9 +646,9 @@ class Agent(BootAgent):
 
         scout_inbox = os.path.join(self.path_resolution["comm_path"], scout_uid, "incoming")
         os.makedirs(scout_inbox, exist_ok=True)
-        with open(os.path.join(scout_inbox, f"{qid}.msg"), "w") as f:
+        with open(os.path.join(scout_inbox, f"{qid}.msg"), "w", encoding="utf-8") as f:
             json.dump(msg, f, indent=2)
-        self.log(f"[CAPITAL] Dispatched command to linux_scout: {command}")
+        self.log(f"[CAPITAL] Dispatched command to linux_scout")
 
     def reroute_back_to_oracle(self, query_id):
         thread_path = os.path.join(self.get_dialogue_path(self.get_current_mission_id()), f"thread_{query_id}.jsonl")
@@ -656,7 +656,7 @@ class Agent(BootAgent):
             self.log(f"[CAPITAL][ERROR] No thread found for {query_id}")
             return
 
-        with open(thread_path) as f:
+        with open(thread_path, encoding="utf-8") as f:
             lines = f.readlines()
 
         history = []
@@ -682,7 +682,7 @@ class Agent(BootAgent):
         )
     def get_current_mission_id(self):
         if os.path.exists(self.state_path):
-            with open(self.state_path) as f:
+            with open(self.state_path, encoding="utf-8") as f:
                 state = json.load(f)
             return state.get("active_mission", "unknown")
         return "unknown"

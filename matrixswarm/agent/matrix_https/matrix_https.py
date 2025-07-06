@@ -110,7 +110,7 @@ class Agent(BootAgent):
 
                             rendered_lines = []
 
-                            with open(log_path, "r") as f:
+                            with open(log_path, "r", encoding="utf-8") as f:
                                 for line in f:
                                     try:
                                         if key_bytes:
@@ -234,7 +234,7 @@ class Agent(BootAgent):
 
                 rendered_lines = []
 
-                with open(log_path, "r") as f:
+                with open(log_path, "r", encoding="utf-8") as f:
                     for line in f:
                         try:
                             if key_bytes:

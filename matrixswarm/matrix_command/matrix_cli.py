@@ -20,11 +20,11 @@ def send_command(command_type, content):
         "content": content
     }
 
-    with open(filepath, 'w') as f:
+    with open(filepath, 'w', encoding="utf-8") as f:
         json.dump(command, f, indent=2)
 
     log_path = os.path.join(LOG_DIR, "matrix_cli.log")
-    with open(log_path, 'a') as log:
+    with open(log_path, 'a', encoding="utf-8") as log:
         log.write(f"[SENT] {filename} :: {json.dumps(content)}\n")
 
     print(f"\n✅ Command '{command_type}' sent as {filename}\n")
@@ -39,7 +39,7 @@ def check_outbox():
     files = sorted(os.listdir(OUTBOX_DIR), reverse=True)[:5]  # Show last 5
     for fname in files:
         fpath = os.path.join(OUTBOX_DIR, fname)
-        with open(fpath, 'r') as f:
+        with open(fpath, 'r', encoding="utf-8") as f:
             try:
                 msg = json.load(f)
                 print(f"- {fname}: {msg.get('status', 'N/A')} :: {msg.get('message', '')}")
@@ -53,7 +53,7 @@ def load_json_from_file():
         print("[!] File not found.")
         return None
     try:
-        with open(fname, 'r') as f:
+        with open(fname, 'r', encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         print(f"[!] Failed to load: {e}")

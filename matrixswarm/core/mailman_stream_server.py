@@ -13,7 +13,7 @@ def stream_hash_tally(hash_id):
         last_size = 0
         while True:
             if os.path.exists(filepath):
-                with open(filepath, "r") as f:
+                with open(filepath, "r", encoding="utf-8") as f:
                     f.seek(last_size)
                     chunk = f.read()
                     if chunk:

@@ -50,7 +50,7 @@ class Agent(BootAgent):
             for fname in files:
                 full_path = os.path.join(self.inbox, fname)
                 try:
-                    with open(full_path, "r") as f:
+                    with open(full_path, "r", encoding="utf-8") as f:
                         payload = json.load(f)
 
                     prompt = payload.get("prompt", "")
@@ -109,7 +109,7 @@ class Agent(BootAgent):
             "intent": intent or {}
         }
         path = os.path.join(self.replies, f"{base_id}.msg")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
         self.log(f"[REPLY] Response written to replies/{base_id}.msg")
 
@@ -123,7 +123,7 @@ class Agent(BootAgent):
         }
         ts = int(time.time())
         path = os.path.join(self.matrix_inbox, f"gpt_reflex_cmd_{ts}.cmd")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
         self.log(f"[REFLEX] Dispatched .cmd to Matrix for {action} → {target}")
 

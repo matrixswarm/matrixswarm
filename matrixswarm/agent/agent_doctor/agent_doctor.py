@@ -28,7 +28,7 @@ class Agent(BootAgent):
         for pod_id in os.listdir(pod_root):
             boot_file = os.path.join(pod_root, pod_id, "boot.json")
             try:
-                with open(boot_file) as f:
+                with open(boot_file, encoding="utf-8") as f:
                     boot_data = json.load(f)
                     if boot_data.get("universal_id") == agent_id:
                         return False
@@ -38,7 +38,7 @@ class Agent(BootAgent):
 
     def read_poke_file(self, path):
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 raw = f.read().strip()
                 if raw.startswith("{"):
                     return json.loads(raw)

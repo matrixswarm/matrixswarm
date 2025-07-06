@@ -51,7 +51,7 @@ class Agent(BootAgent):
         }
         hashval = hashlib.sha256(json.dumps(payload).encode()).hexdigest()
         filename = f"{int(time.time())}_{hashval}.json"
-        with open(os.path.join(self.payload_out, filename), "w") as f:
+        with open(os.path.join(self.payload_out, filename), "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
 if __name__ == "__main__":

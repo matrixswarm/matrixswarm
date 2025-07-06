@@ -65,7 +65,7 @@ class Agent(BootAgent):
                         if not os.path.isfile(boot_path):
                             continue
 
-                        with open(boot_path, "r") as f:
+                        with open(boot_path, "r", encoding="utf-8") as f:
                             boot_data = json.load(f)
                             universal_id = boot_data.get("universal_id")
                             cmdline_target = boot_data.get("cmd", [])

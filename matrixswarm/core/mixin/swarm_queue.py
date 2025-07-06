@@ -15,7 +15,7 @@ class SwarmQueueMixin:
         fname = f"{qid}_{label}_{ts}_que.cmd"
         fpath = os.path.join(self.queue_path, fname)
         try:
-            with open(fpath, "w") as f:
+            with open(fpath, "w", encoding="utf-8") as f:
                 json.dump({
                     "queue_id": qid,
                     "timestamp": ts,
@@ -45,7 +45,7 @@ class SwarmQueueMixin:
             return
 
         try:
-            with open(match, "r") as f:
+            with open(match, "r", encoding="utf-8") as f:
                 que_data = json.load(f)
             payload = que_data.get("original_packet")
             results = packet.get("results")

@@ -50,7 +50,7 @@ def attach(agent, config):
                         if fpath in seen:
                             agent.log(f"[DEBUG] Skipping already seen: {fpath}")
                             continue
-                        with open(fpath, "r") as f:
+                        with open(fpath, "r", encoding="utf-8") as f:
                             payload = json.load(f)
                         msg = format_message(payload)
 

@@ -13,7 +13,7 @@ def forge_agent(agent_name, delegated=None):
     class_name = agent_name.capitalize() + "Agent"
 
     try:
-        with open(TEMPLATE_PATH, "r") as f:
+        with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
             template_code = f.read()
     except FileNotFoundError:
         print(f"[!] Template not found at {TEMPLATE_PATH}")
@@ -27,7 +27,7 @@ def forge_agent(agent_name, delegated=None):
     os.makedirs(agent_dir, exist_ok=True)
     agent_path = os.path.join(agent_dir, f"{agent_name}.py")
 
-    with open(agent_path, "w") as f:
+    with open(agent_path, "w", encoding="utf-8") as f:
         f.write(final_code)
 
     print(f"✅ Agent '{agent_name}' created at: {agent_path}")

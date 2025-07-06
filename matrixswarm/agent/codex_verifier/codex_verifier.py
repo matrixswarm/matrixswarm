@@ -33,7 +33,7 @@ class Agent(BootAgent):
             return
 
         try:
-            with open(self.auth_file, "rb") as f:
+            with open(self.auth_file, "rb", encoding="utf-8") as f:
                 file_data = f.read()
                 digest = hashlib.sha256(file_data).hexdigest()
 
@@ -99,7 +99,7 @@ class Agent(BootAgent):
         }
         ts = int(time.time())
         filename = f"resurrect_{agent_id}_{ts}.cmd"
-        with open(os.path.join(matrix_comm, filename), "w") as f:
+        with open(os.path.join(matrix_comm, filename), "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
         self.log(f"[COMMANDER] Resurrection request for {agent_id} dispatched to Matrix → {filename}")
 
@@ -108,7 +108,7 @@ class Agent(BootAgent):
         for pod_dir in os.listdir(pod_root):
             boot_path = os.path.join(pod_root, pod_dir, "boot.json")
             try:
-                with open(boot_path) as f:
+                with open(boot_path, encoding="utf-8") as f:
                     data = json.load(f)
                     if data.get("universal_id") == universal_id:
                         return True

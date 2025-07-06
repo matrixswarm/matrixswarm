@@ -7,7 +7,7 @@ jobs:
         with:
           python-version: '3.x'
       - run: pip install build
-      - run: python -m build    # <-- THIS should run in project root, NOT matrixswarm/
+      - run: python -m build   # <-- MUST BE RUN FROM THE ROOT
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 

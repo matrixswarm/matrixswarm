@@ -14,7 +14,7 @@ class LiveTree:
     def load(self, path):
         self.path = path
         if os.path.exists(path):
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
         else:
             self.data = {}
@@ -22,7 +22,7 @@ class LiveTree:
 
     def save(self):
         if self.path:
-            with open(self.path, "w") as f:
+            with open(self.path, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=2)
             print(f"[TREE] Saved tree to: {self.path}")
 

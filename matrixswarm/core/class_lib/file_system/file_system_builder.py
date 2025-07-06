@@ -62,7 +62,7 @@ class FileSystemBuilder:
                     # Atomically replace the target file with the temporary file
                     os.replace(temp_file_path, item_path)
                 else:  # Perform a non-atomic write
-                    with open(item_path, 'w') as file:  # Open the target file for writing
+                    with open(item_path, 'w', encoding="utf-8") as file:  # Open the target file for writing
                         if isinstance(content, (dict, list)):
                             # Serialize dicts/lists into JSON format before writing
                             json.dump(content, file, indent=4)
@@ -70,7 +70,7 @@ class FileSystemBuilder:
                             # Write other types of content directly
                             file.write(content)
             else:  # If there is no content, create an empty file
-                open(item_path, 'w').close()
+                open(item_path, 'w', encoding="utf-8").close()
 
     def process_selection(self, base, selection):
 

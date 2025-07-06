@@ -24,7 +24,7 @@ REFRESH_RATE = 0.5
 
 def tail(filepath, n=15):
     try:
-        with open(filepath, "r") as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             return f.readlines()[-n:]
     except:
         return ["<No log data>"]
@@ -45,7 +45,7 @@ def gather_agent_logs(width):
             continue
 
         try:
-            with open(agent_log_path) as f:
+            with open(agent_log_path, encoding="utf-8") as f:
                 log_lines = f.readlines()[-30:]
         except Exception as e:
             lines.append(f"[{label}] → [ERROR reading log: {e}]")
@@ -77,7 +77,7 @@ def gather_session_messages(width):
 
     for fpath in files[-50:]:
         try:
-            with open(fpath) as f:
+            with open(fpath, encoding="utf-8") as f:
                 entry = json.load(f)
 
             raw_content = entry.get("content", {})

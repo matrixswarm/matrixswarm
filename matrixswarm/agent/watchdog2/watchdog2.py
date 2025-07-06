@@ -88,7 +88,7 @@ class Agent(BootAgent, DelegationMixin):
         }
         filename = f"request_delegation_{int(time.time())}.cmd"
         full_path = os.path.join(matrix_comm, filename)
-        with open(full_path, "w") as f:
+        with open(full_path, "w", encoding="utf-8") as f:
             json.dump(request, f, indent=2)
         self.log(f"[WATCHDOG-2] Recovery request dispatched for {universal_id} → {filename}")
 

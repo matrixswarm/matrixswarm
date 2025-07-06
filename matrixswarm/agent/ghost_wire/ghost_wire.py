@@ -56,12 +56,12 @@ class Agent(BootAgent, ReflexAlertMixin):
             try:
                 if not os.path.exists(path):
                     continue
-                with open(path, "r") as f:
+                with open(path, "r", encoding="utf-8") as f:
                     content = f.read()
                     if "PROMPT_COMMAND" in content and "history -a" in content:
                         self.log(f"[GHOSTWIRE][PROMPT] Already present in {path}")
                         continue
-                with open(path, "a") as f:
+                with open(path, "a", encoding="utf-8") as f:
                     f.write("\n# Added by GhostWire for real-time history logging\n")
                     f.write("export PROMPT_COMMAND='history -a'\n")
                 self.log(f"[GHOSTWIRE][PROMPT] Injected PROMPT_COMMAND into {path}")
@@ -95,7 +95,7 @@ class Agent(BootAgent, ReflexAlertMixin):
                         os.makedirs(os.path.dirname(session_path), exist_ok=True)
                         if os.path.exists(session_path):
                             try:
-                                with open(session_path, "r") as f:
+                                with open(session_path, "r", encoding="utf-8") as f:
                                     loaded = json.load(f)
                                     self.sessions[user]["commands"] = loaded.get("commands", [])
                             except Exception as e:
@@ -198,7 +198,7 @@ class Agent(BootAgent, ReflexAlertMixin):
 
             if os.path.exists(history_path):
                 try:
-                    with open(history_path, "r") as f:
+                    with open(history_path, "r", encoding="utf-8") as f:
                         lines = f.read().splitlines()
                     new_commands = [cmd for cmd in lines if cmd not in session["commands"]]
                     for cmd in new_commands:
@@ -249,7 +249,7 @@ class Agent(BootAgent, ReflexAlertMixin):
         path = os.path.join(self.session_dir, user)
         os.makedirs(path, exist_ok=True)
         fpath = os.path.join(path, f"{date_str}.log")
-        with open(fpath, "w") as f:
+        with open(fpath, "w", encoding="utf-8") as f:
             json.dump(session, f, indent=2)
 
     def today(self):

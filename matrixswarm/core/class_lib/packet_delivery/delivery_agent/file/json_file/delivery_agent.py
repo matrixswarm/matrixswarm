@@ -144,7 +144,7 @@ class DeliveryAgent(BaseDeliveryAgent, LogMixin):
                     else:
 
 
-                        with open(full_path, "w") as f:
+                        with open(full_path, "w", encoding="utf-8") as f:
                             self._sent_packet=data
                             json.dump(data, f, indent=indent)
 

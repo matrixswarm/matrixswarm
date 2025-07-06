@@ -364,7 +364,7 @@ class Football(LogMixin):
                     raise ValueError("Missing identity base path: both identity_base_path and self._identity_base_path are undefined.")
 
                 full_path=os.path.join(identity_base_path, universal_id, codex,"signed_public_key.json")
-                with open(full_path, "r") as f:
+                with open(full_path, "r", encoding="utf-8") as f:
                     vault = json.load(f)
 
             self.add_identity(vault,

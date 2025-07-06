@@ -70,7 +70,7 @@ class SignedAgentTreeBuilder:
         return payload
 
     def write_tree_to_file(self, signed_tree: dict, filepath: str):
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             json.dump(signed_tree, f, indent=2)
         print(f"[TREE-BUILDER] 🧬 Agent tree signed and saved to {filepath}")
 

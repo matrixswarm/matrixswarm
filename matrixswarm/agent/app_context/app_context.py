@@ -28,7 +28,7 @@ class Agent(BootAgent):
                     self.log(f"[CONTEXT] Codex app file not found: {app_name}")
                     return
 
-                with open(path, "r") as f:
+                with open(path, "r", encoding="utf-8") as f:
                     app_data = json.load(f)
 
                 self.deploy_app(app_data)
@@ -53,7 +53,7 @@ class Agent(BootAgent):
                 }
                 path = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
                 fname = f"spawn_{universal_id}_{int(time.time())}.json"
-                with open(os.path.join(path, fname), "w") as f:
+                with open(os.path.join(path, fname), "w", encoding="utf-8") as f:
                     json.dump(spawn_cmd, f, indent=2)
                 self.log(f"[CONTEXT] Spawned: {universal_id}")
 

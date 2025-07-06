@@ -36,7 +36,7 @@ class Agent(BootAgent):
                 if not fname.endswith(".json"):
                     continue
                 fpath = os.path.join(self.payload_dir, fname)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     msg = json.load(f)
 
                 action = msg.get("action_taken")

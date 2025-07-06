@@ -128,7 +128,7 @@ class ReceptionAgent(BaseReceptionAgent, LogMixin):
 
                     full_path = os.path.join(drop_path, fname)
 
-                    with open(full_path, "r") as f:
+                    with open(full_path, "r", encoding="utf-8") as f:
                         raw_data = json.load(f)
 
                     try:

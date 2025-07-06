@@ -79,7 +79,7 @@ def encrypt_vault(payload_dict, output_path=None):
 
         # Save if path provided
         vault_path = output_path or tempfile.NamedTemporaryFile(delete=False, mode='w', suffix=".vault", prefix="agent_ghost_").name
-        with open(vault_path, "w") as f:
+        with open(vault_path, "w", encoding="utf-8") as f:
             json.dump(vault, f)
 
         return {
@@ -100,7 +100,7 @@ def decrypt_vault(log=None):
             raise RuntimeError("[GHOST-VAULT] Missing VAULTFILE or SYMKEY.")
 
         key = base64.b64decode(symkey_b64)
-        with open(vault_path, "r") as f:
+        with open(vault_path, "r", encoding="utf-8") as f:
             vault = json.load(f)
 
         cipher = AES.new(key, AES.MODE_GCM, nonce=base64.b64decode(vault["nonce"]))
@@ -177,7 +177,7 @@ def build_encrypted_spawn_env(payload_dict, output_path=None):
 
 def sign_pubkey_registry(self, pubkey_path):
     try:
-        with open(pubkey_path, "rb") as f:
+        with open(pubkey_path, "rb", encoding="utf-8") as f:
             data = f.read()
 
         signature = self.private_key_obj.sign(
@@ -186,7 +186,7 @@ def sign_pubkey_registry(self, pubkey_path):
             hashes.SHA256()
         )
 
-        with open(pubkey_path + ".sig", "wb") as sig_file:
+        with open(pubkey_path + ".sig", "wb", encoding="utf-8") as sig_file:
             sig_file.write(signature)
 
         self.log("[VAULT] Registry signed successfully.")
@@ -203,9 +203,9 @@ def verify_pubkey_registry(self):
             self.log("[VAULT] Registry or signature missing.")
             return
 
-        with open(pubkey_path, "rb") as f:
+        with open(pubkey_path, "rb", encoding="utf-8") as f:
             data = f.read()
-        with open(sig_path, "rb") as s:
+        with open(sig_path, "rb", encoding="utf-8") as s:
             signature = s.read()
 
         self.public_key_obj.verify(

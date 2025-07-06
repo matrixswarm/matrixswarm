@@ -11,7 +11,7 @@ def deploy_tree():
         return
 
     try:
-        with open(DEPLOY_TREE_PATH, "r") as f:
+        with open(DEPLOY_TREE_PATH, "r", encoding="utf-8") as f:
             tree = json.load(f)
     except Exception as e:
         print(f"[!] Failed to parse tree.json: {e}")
@@ -22,7 +22,7 @@ def deploy_tree():
         os.makedirs(path, exist_ok=True)
         directive_path = os.path.join(path, "directives")
         try:
-            with open(directive_path, "w") as f:
+            with open(directive_path, "w", encoding="utf-8") as f:
                 json.dump({
                     "universal_id": universal_id,
                     "delegated": children
@@ -50,7 +50,7 @@ def show_tree():
         if not os.path.exists(directive_path):
             continue
         try:
-            with open(directive_path, "r") as f:
+            with open(directive_path, "r", encoding="utf-8") as f:
                 directives = json.load(f)
             tree[universal_id] = directives.get("delegated", [])
         except Exception as e:
@@ -59,7 +59,7 @@ def show_tree():
     if not tree:
         print("[!] No live structure found. Checking local tree.json...")
         try:
-            with open(DEPLOY_TREE_PATH, "r") as f:
+            with open(DEPLOY_TREE_PATH, "r", encoding="utf-8") as f:
                 tree = json.load(f)
         except Exception as e:
             print(f" - Failed to load deploy tree: {e}")

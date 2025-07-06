@@ -141,7 +141,7 @@ class Agent(BootAgent):
             sig = pkcs1_15.new(matrix_priv).sign(digest)
             gospel["sig"] = base64.b64encode(sig).decode()
             output_path=os.path.join(self.path_resolution['comm_path_resolved'], "codex" ,"gospel_of_matrix.sig.json")
-            with open(output_path, "w") as f:
+            with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(gospel, f, indent=2)
 
             print("[GOSPEL] 📜 Gospel of Matrix signed and written to codex.")
@@ -362,7 +362,7 @@ class Agent(BootAgent):
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-            with open(cookie_path, "w") as f:
+            with open(cookie_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
 
             self.log(f"[DELETE] Dropped hit.cookie for {agent}")
@@ -493,7 +493,7 @@ class Agent(BootAgent):
             spawn_dir = os.path.join(comm_root, uid, "spawn")
             spawns = sorted(Path(spawn_dir).glob("*.spawn"), reverse=True)
             if spawns:
-                with open(spawns[0]) as f:
+                with open(spawns[0], encoding="utf-8") as f:
                     info = json.load(f)
                 report["runtime_uuid"] = info.get("uuid")
                 report["boot_time"] = info.get("timestamp")
@@ -616,7 +616,7 @@ class Agent(BootAgent):
                 os.makedirs(payload_dir, exist_ok=True)
 
                 file_path = os.path.join(payload_dir, f"{agent_name}.py")
-                with open(file_path, "w") as f:
+                with open(file_path, "w", encoding="utf-8") as f:
                     f.write(decoded)
 
                 self.log(f"[REPLACE] ✅ Payload source installed to {file_path}")
@@ -1185,7 +1185,7 @@ class Agent(BootAgent):
         for uid in ids:
             die_path = os.path.join(self.path_resolution["comm_path"], uid, "incoming", "die")
             os.makedirs(os.path.dirname(die_path), exist_ok=True)
-            with open(die_path, "w") as f:
+            with open(die_path, "w", encoding="utf-8") as f:
                 f.write("☠️")
             self.log(f"[SHUTDOWN] Dropped .die for {uid}")
 
@@ -1244,7 +1244,7 @@ class Agent(BootAgent):
             os.makedirs(dir_path, exist_ok=True)
 
             file_path = os.path.join(dir_path, f"{agent_name}.py")
-            with open(file_path, "w") as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(decoded)
 
             self.log(f"[INJECT] ✅ Source code installed at {file_path}")
@@ -1306,7 +1306,7 @@ class Agent(BootAgent):
                 dir = os.path.join(self.path_resolution["comm_path"], universal_id, "codex")
                 os.makedirs(dir, exist_ok=True)
                 fpath = os.path.join(dir, "signed_public_key.json")
-                with open(fpath, "w") as f:
+                with open(fpath, "w", encoding="utf-8") as f:
                     json.dump(identity, f, indent=2)
 
             except Exception as e:

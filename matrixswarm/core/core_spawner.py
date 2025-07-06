@@ -189,7 +189,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
         # get the boot file that is json to get the permenant_id
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 content = json.loads(f.read())
                 good = True
         except FileNotFoundError:
@@ -199,13 +199,14 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
     def spawn_agent(self, spawn_uuid, agent_name, universal_id, spawner, tree_node=None, universe_id=None):
 
+        source_path=""
         try:
 
             logger = Logger(os.path.join(self.comm_path, universal_id))
             if bool(self._keychain["encryption_enabled"]):
                 logger.set_encryption_key(self._keychain["swarm_key"])
 
-            with open("/matrix/spawn.log", "a") as f:
+            with open("/matrix/spawn.log", "a", encoding="utf-8") as f:
                 f.write(f"{datetime.now().isoformat()} :: {universal_id} → {agent_name}\n")
 
             logger = Logger(os.path.join(self.comm_path, universal_id))
@@ -263,10 +264,10 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 logger.log(f"Source path not resolved or file missing. Cannot boot agent: {agent_name}")
                 return
 
-            with open(source_path, "r") as f:
+            with open(source_path, "r", encoding="utf-8") as f:
                 file_content = f.read()
 
-            with open(run_path, "w") as f:
+            with open(run_path, "w", encoding="utf-8") as f:
                 f.write(file_content)
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
@@ -287,7 +288,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             }
 
             try:
-                with open(os.path.join(codex_dir, f"{universal_id}.json"), "w") as codex_file:
+                with open(os.path.join(codex_dir, f"{universal_id}.json"), "w", encoding="utf-8") as codex_file:
                     json.dump(codex_entry, codex_file, indent=2)
                 logger.log(f"[CODEX] Entry written for {universal_id}")
             except Exception as e:
@@ -389,7 +390,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 filename = f"{timestamp}_{spawn_uuid}.spawn"
                 filepath = os.path.join(spawn_dir, filename)
 
-                with open(filepath, "w") as f:
+                with open(filepath, "w", encoding="utf-8") as f:
                     json.dump(spawn_record, f, indent=2)
 
                 logger.log(f"[SPAWN-LOG] Spawn recorded at {filepath}")
@@ -403,7 +404,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 "cmd": cmd
             }
 
-            with open(os.path.join(self.pod_path, spawn_uuid, "boot.json"), "w") as f:
+            with open(os.path.join(self.pod_path, spawn_uuid, "boot.json"), "w", encoding="utf-8") as f:
                 json.dump(install, f, indent=4)
 
 

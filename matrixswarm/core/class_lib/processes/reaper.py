@@ -68,7 +68,7 @@ class Reaper:
                 if not os.path.isfile(boot_path):
                     continue
 
-                with open(boot_path, "r") as f:
+                with open(boot_path, "r", encoding="utf-8") as f:
                     boot_data = json.load(f)
 
                 universal_id = boot_data.get("universal_id")
@@ -246,7 +246,7 @@ class Reaper:
                 if not os.path.isfile(boot_path):
                     continue
 
-                with open(boot_path, "r") as f:
+                with open(boot_path, "r", encoding="utf-8") as f:
                     boot_data = json.load(f)
 
                 cmd = boot_data.get("cmd", [])
@@ -353,7 +353,7 @@ class Reaper:
             inbox = os.path.join(self.comm_root, uid, "incoming")
             os.makedirs(inbox, exist_ok=True)
             die_path = os.path.join(inbox, "die")
-            with open(die_path, "w") as f:
+            with open(die_path, "w", encoding="utf-8") as f:
                 f.write("terminate")
             self.log_info(f"[REAPER] Dropped die token for: {uid}")
 

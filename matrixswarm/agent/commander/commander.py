@@ -64,7 +64,7 @@ class Agent(BootAgent):
         for pod_dir in os.listdir(pod_root):
             boot_path = os.path.join(pod_root, pod_dir, "boot.json")
             try:
-                with open(boot_path) as f:
+                with open(boot_path, encoding="utf-8") as f:
                     data = json.load(f)
                     if data.get("universal_id") == universal_id:
                         return True

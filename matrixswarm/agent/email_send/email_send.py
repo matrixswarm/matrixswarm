@@ -30,7 +30,7 @@ class Agent(BootAgent):
 
             try:
                 fpath = os.path.join(self.watch_path, fname)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     msg_data = json.load(f)
 
                 self.send_email(msg_data)

@@ -39,7 +39,7 @@ class Agent(BootAgent):
                 self.command_line_args["universal_id"],
                 "agent_tree.json"
             )
-            with open(tree_path, "w") as f:
+            with open(tree_path, "w", encoding="utf-8") as f:
                 json.dump(command["tree_snapshot"], f, indent=2)
             self.spawn_manager()
 

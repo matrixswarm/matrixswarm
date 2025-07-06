@@ -46,7 +46,7 @@ class Agent(BootAgent):
             "reply_to": self.command_line_args["universal_id"]
         }
         fname = f"sweep_{uuid.uuid4().hex}.prompt"
-        with open(os.path.join(self.oracle_payload, fname), "w") as f:
+        with open(os.path.join(self.oracle_payload, fname), "w", encoding="utf-8") as f:
             f.write(json.dumps(prompt_data, indent=2))
         self.log(f"[SWEEP] Prompt sent to Oracle: {fname}")
 
@@ -59,7 +59,7 @@ class Agent(BootAgent):
             if not f.endswith(".cmd"):
                 continue
             try:
-                with open(os.path.join(self.incoming_path, f), "r") as cmd_file:
+                with open(os.path.join(self.incoming_path, f), "r", encoding="utf-8") as cmd_file:
                     cmd = json.load(cmd_file)
                     self.handle_command(cmd)
                 os.remove(os.path.join(self.incoming_path, f))

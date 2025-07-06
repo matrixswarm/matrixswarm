@@ -75,7 +75,7 @@ class Agent(BootAgent):
         }
 
         fname = f"mirror_{int(time.time())}.json"
-        with open(os.path.join(self.out_dir, fname), "w") as f:
+        with open(os.path.join(self.out_dir, fname), "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
 
         self.log(f"[MIRROR] Snapshot complete. {len(snapshot)} files logged.")

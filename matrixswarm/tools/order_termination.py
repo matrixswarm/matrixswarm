@@ -18,7 +18,7 @@ def send_termination(universal_id, comm_root="/sites/orbit/python/comm"):
         "reason": "order_66"
     }
 
-    with open(full_path, "w") as f:
+    with open(full_path, "w", encoding="utf-8") as f:
         json.dump(command, f, indent=2)
 
     print(f"[ORDER-66] Execution order for {universal_id} issued → {full_path}")

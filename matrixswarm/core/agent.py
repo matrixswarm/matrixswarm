@@ -39,7 +39,7 @@ class Agent:
 
         while self.running:
             try:
-                with open(ping_file, "w") as f:
+                with open(ping_file, "w", encoding="utf-8") as f:
                     f.write(self.command_line_args["install_name"])
                 # self.log(f"[HEARTBEAT] Touched poke.heartbeat for {self.command_line_args['install_name']}")
             except Exception as e:

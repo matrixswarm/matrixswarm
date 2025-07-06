@@ -405,7 +405,7 @@ class TreeParser(LogMixin):
     def load_tree(cls, input_path):
         try:
             # Load JSON data
-            with open(input_path, "r") as f:
+            with open(input_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             #    print("Successfully loaded JSON data:", data)

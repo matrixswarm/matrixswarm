@@ -317,7 +317,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         while self.running:
             try:
-                with open(ping_file, "w") as f:
+                with open(ping_file, "w", encoding="utf-8") as f:
                     now = time.time()
                     f.write(str(now))
                     if self.debug.is_enabled():
@@ -837,7 +837,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         def emit():
             now = time.time()
             if now - last_emit[0] >= interval:
-                with open(poke_path, "w") as f:
+                with open(poke_path, "w", encoding="utf-8") as f:
                     json.dump({
                         "status": "alive",
                         "last_seen": now,
@@ -852,7 +852,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
     def emit_dead_poke(self, thread_name, error_msg):
         path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto", f"poke.{thread_name}")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump({
                 "status": "dead",
                 "last_seen": time.time(),

@@ -34,7 +34,7 @@ class Agent(BootAgent):
     def save_local_report(self, report):
         report_dir = os.path.join(self.path_resolution["comm_path_resolved"], "reports")
         os.makedirs(report_dir, exist_ok=True)
-        with open(os.path.join(report_dir, f"{report['report_id']}.json"), "w") as f:
+        with open(os.path.join(report_dir, f"{report['report_id']}.json"), "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
 
     def run_check(self, command):
@@ -70,7 +70,7 @@ class Agent(BootAgent):
 
         reply_path = os.path.join(self.path_resolution["comm_path"], reflex_id, "incoming", f"{query_id}.msg")
         os.makedirs(os.path.dirname(reply_path), exist_ok=True)
-        with open(reply_path, "w") as f:
+        with open(reply_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
 
         self.save_to_trace_session(report, msg_type="msg")

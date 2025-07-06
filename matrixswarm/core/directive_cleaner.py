@@ -9,7 +9,7 @@ class DirectiveCleaner:
 
     def load(self):
         try:
-            with open(self.directive_path, "r") as f:
+            with open(self.directive_path, "r", encoding="utf-8") as f:
                 self.tree = json.load(f)
             return True
         except Exception as e:
@@ -34,7 +34,7 @@ class DirectiveCleaner:
 
     def save(self):
         try:
-            with open(self.directive_path, "w") as f:
+            with open(self.directive_path, "w", encoding="utf-8") as f:
                 json.dump(self.cleaned_tree, f, indent=4)
             print("[CLEANER] Book of Life cleaned and saved.")
         except Exception as e:

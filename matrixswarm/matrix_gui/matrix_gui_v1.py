@@ -115,13 +115,13 @@ class MatrixV1(tk.Tk):
     def tag_agent(self):
         tag = self.mission_tag.get().strip()
         if tag:
-            with open("/deploy/missions.json", "a") as f:
+            with open("/deploy/missions.json", "a", encoding="utf-8") as f:
                 f.write(tag + "\n")
             messagebox.showinfo("Tagged", f"Mission tag '{tag}' saved.")
 
     def view_tags(self):
         if os.path.exists("/deploy/missions.json"):
-            with open("/deploy/missions.json") as f:
+            with open("/deploy/missions.json", encoding="utf-8") as f:
                 tags = f.read()
             messagebox.showinfo("Tags", tags)
         else:
@@ -143,7 +143,7 @@ class MatrixV1(tk.Tk):
     def shutdown_agent(self):
         perm = self.universal_id.get()
         path = f"/comm/reaper-root/payload/kill_{perm}.json"
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump({"universal_id": perm}, f, indent=2)
         messagebox.showinfo("Shutdown", f"Kill order sent for {perm}")
 
@@ -161,7 +161,7 @@ class MatrixV1(tk.Tk):
         universal_id = self.agent_log_entry.get().strip()
         log_path = f"/sites/orbit/python/pod/{universal_id}/log.txt"
         if os.path.exists(log_path):
-            with open(log_path) as f:
+            with open(log_path, encoding="utf-8") as f:
                 logs = f.read()
             self.log_box.delete("1.0", tk.END)
             self.log_box.insert(tk.END, logs)

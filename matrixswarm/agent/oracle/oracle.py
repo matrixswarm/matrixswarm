@@ -119,7 +119,7 @@ class Agent(BootAgent):
             self.save_to_trace_session(packet, msg_type="msg")
 
             os.makedirs(outbox, exist_ok=True)
-            with open(out_path, "w") as f:
+            with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(packet, f, indent=2)
 
             self.log(f"[ORACLE] Sent GPT reply to {target_uid} as .msg → {query_id}")
@@ -159,7 +159,7 @@ class Agent(BootAgent):
             inbox = os.path.join(self.path_resolution["comm_path"], recipient, "incoming")
             os.makedirs(inbox, exist_ok=True)
             fname = f"oracle_response_{int(time.time())}.json"
-            with open(os.path.join(inbox, fname), "w") as f:
+            with open(os.path.join(inbox, fname), "w", encoding="utf-8") as f:
                 json.dump(response, f, indent=2)
             self.log(f"[ORACLE] Reply sent to {recipient}: {fname}")
         except Exception as e:

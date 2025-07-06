@@ -8,7 +8,7 @@ class JsonSafeWrite:
 
             tmp_path = f"{path}.tmp"
 
-            with open(tmp_path, "w") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(json_data, f, indent=2)
             os.replace(tmp_path, path)
 
@@ -20,7 +20,7 @@ class JsonSafeWrite:
     def safe_load(path):
 
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             print(f"[ERROR] Failed to load {path}: {e}")

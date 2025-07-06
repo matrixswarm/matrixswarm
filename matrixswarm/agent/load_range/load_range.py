@@ -115,9 +115,9 @@ class Agent(BootAgent):
             summary_path = os.path.join(summary_dir, f"loadrange_summary_{date}.json")
             latest_path = os.path.join(summary_dir, "loadrange_summary_latest.json")
 
-            with open(summary_path, "w") as f:
+            with open(summary_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2)
-            with open(latest_path, "w") as f:
+            with open(latest_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2)
 
             self.log(f"[SUMMARY] ✅ loadrange summary written to: {summary_path}")

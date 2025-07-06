@@ -28,7 +28,7 @@ def attach(agent, config):
                         fpath = os.path.join(inbox, fname)
                         if fpath in seen:
                             continue
-                        with open(fpath, "r") as f:
+                        with open(fpath, "r", encoding="utf-8") as f:
                             payload = json.load(f)
 
                         msg = payload.get("msg") or payload.get("cause") or str(payload)

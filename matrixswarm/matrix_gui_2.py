@@ -1043,7 +1043,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
         try:
             # Load .py source and hash
-            with open(file_name, "rb") as f:
+            with open(file_name, "rb", encoding="utf-8") as f:
                 code = f.read()
                 encoded = base64.b64encode(code).decode("utf-8")
                 file_hash = hashlib.sha256(code).hexdigest()
@@ -1330,7 +1330,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         entries = []
         for file in os.listdir(codex_dir):
             try:
-                with open(os.path.join(codex_dir, file)) as f:
+                with open(os.path.join(codex_dir, file), encoding="utf-8") as f:
                     data = json.load(f)
                     entry = f"🧬 {data.get('universal_id', '???')} – {data.get('title', 'Untitled')}\n{data.get('summary', '')}"
                     entries.append(entry)
@@ -1485,7 +1485,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         # 🧠 CASE: JSON TEAM FILE
         # ──────────────────────────────
         if file_name.endswith(".json"):
-            with open(file_name) as f:
+            with open(file_name, encoding="utf-8") as f:
                 data = json.load(f)
 
             def recurse_suffix(node):
@@ -1511,7 +1511,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         # 🧠 CASE: SINGLE .py AGENT
         # ──────────────────────────────
         elif file_name.endswith(".py"):
-            with open(file_name, "rb") as f:
+            with open(file_name, "rb", encoding="utf-8") as f:
                 code = f.read()
             encoded = base64.b64encode(code).decode()
             sha = hashlib.sha256(code).hexdigest()
@@ -1565,7 +1565,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         if name:
             path = os.path.join("inject_payloads", f"{name}.py")
             if os.path.exists(path):
-                with open(path, "rb") as f:
+                with open(path, "rb", encoding="utf-8") as f:
                     code = f.read()
                     encoded = base64.b64encode(code).decode()
                     sha = hashlib.sha256(code).hexdigest()

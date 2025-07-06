@@ -39,7 +39,7 @@ class MatrixAgent(AgentWomb):
         if not os.path.exists(MESSAGE_QUEUE_PATH):
             self.log("Message queue path does not exist.")
             return
-        with open(MESSAGE_QUEUE_PATH, "r") as f:
+        with open(MESSAGE_QUEUE_PATH, "r", encoding="utf-8") as f:
             f.seek(0, os.SEEK_END)
             while not self.shutdown_flag.is_set():
                 line = f.readline()

@@ -76,7 +76,7 @@ class Agent(BootAgent):
                     outbox = os.path.join(self.path_resolution["comm_path"], target, "incoming")
                     os.makedirs(outbox, exist_ok=True)
                     fname = f"{int(time.time())}_calendar.msg"
-                    with open(os.path.join(outbox, fname), "w") as f:
+                    with open(os.path.join(outbox, fname), "w", encoding="utf-8") as f:
                         json.dump(message, f, indent=2)
 
                 self.log(f"[CALENDAR] Event broadcasted: {summary}")

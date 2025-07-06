@@ -90,7 +90,7 @@ class Logger:
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         try:
-            with open(path, "a") as f:
+            with open(path, "a", encoding="utf-8") as f:
                 f.write(output.rstrip() + "\n")  # force newline, strip extras
         except Exception as e:
             print(f"[LOGGER][ERROR] Failed to write to {path}: {e}")

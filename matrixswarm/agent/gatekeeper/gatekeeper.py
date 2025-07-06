@@ -153,7 +153,7 @@ class Agent(BootAgent):
     def persist(self, data):
         fname = f"ssh_{self.today()}.log"
         path = os.path.join(self.log_dir, fname)
-        with open(path, "a") as f:
+        with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(data) + "\n")
 
     def today(self):

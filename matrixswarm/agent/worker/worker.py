@@ -62,7 +62,7 @@ class Agent(BootAgent):
             )
 
             try:
-                with open(tree_path, "w") as f:
+                with open(tree_path, "w", encoding="utf-8") as f:
                     json.dump(tree_snapshot, f, indent=2)
                 self.log("[COMMAND] Tree snapshot saved.")
                 self.spawn_manager()

@@ -40,7 +40,7 @@ class Agent(BootAgent):
 
             try:
                 fpath = os.path.join(self.watch_dir, fname)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     job = json.load(f)
 
                 url = job.get("target_url")
@@ -77,7 +77,7 @@ class Agent(BootAgent):
 
             hashval = hashlib.sha256(url.encode()).hexdigest()
             outpath = os.path.join(self.output_dir, f"{hashval}_{int(time.time())}.json")
-            with open(outpath, "w") as f:
+            with open(outpath, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
 
             self.log(f"[SCRAPER] Logged summary of {url} → {outpath}")
