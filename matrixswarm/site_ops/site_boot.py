@@ -156,7 +156,7 @@ if reboot:
     time.sleep(3)
 
 # === LOAD TREE ===
-print(f"[BOOT] Loading directive: {boot_name}.py")
+print(f"[BOOT] Using directive: {boot_name or 'default'}")
 matrix_directive = load_boot_directive(boot_name)
 tp = TreeParser.load_tree_direct(matrix_directive)
 if not tp:
