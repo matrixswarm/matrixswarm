@@ -35,6 +35,32 @@ MatrixSwarm is a lightweight, dependency-free alternative to Docker Compose for 
     python3 site_ops/site_kill.py --universe ai --cleanup
     ```
 ---
+## Booting MatrixSwarm
+
+After installing MatrixSwarm via pip, you no longer need to run Python scripts directly!
+
+**Recommended: Use the CLI Entrypoint:**
+```sh
+matrixswarm-boot --universe ai --directive test-04 --encryption-off
+Or, for advanced/manual runs, use:
+python -m matrixswarm.site_boot --universe ai --directive test-04 --encryption-off(execute in parent directory or matrixswarm)
+```
+```sh
+matrixswarm-kill --universe ai --cleanup
+Or, for advanced/manual runs, use:
+python -m matrixswarm.site_kill --universe ai --cleanup(execute in parent directory or matrixswarm)
+```
+---
+
+### **Why This Matters**
+- This *prevents* the single biggest source of confusion for new users and contributors: path/import errors from running scripts directly.
+- Ensures everyone is using MatrixSwarm as intended for both pip and dev installs.
+
+---
+
+If you want a copy-paste for your commit or README, just say the word, General!  
+**Long live Matrix, and may the new boot procedure be legendary! 🟢🪖**
+
 
 ## Core Concepts
 
@@ -141,7 +167,6 @@ matrix_directive = {
 ```
 Launch your custom swarm:
 python3 site_ops/site_boot.py --universe my-test --directive my_swarm
-
 ---
 ## 🎬 Watch the Swarm in Action
 
