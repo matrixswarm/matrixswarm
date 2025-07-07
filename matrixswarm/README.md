@@ -59,13 +59,6 @@ After installing MatrixSwarm via pip, you no longer need to run Python scripts d
    python -m matrixswarm.site_kill --universe ai --cleanup(execute in parent directory or matrixswarm)
 ```
 ---
-
-### **Why This Matters**
-- This *prevents* the single biggest source of confusion for new users and contributors: path/import errors from running scripts directly.
-- Ensures everyone is using MatrixSwarm as intended for both pip and dev installs.
-
----
-
 ## Core Concepts
 
 - **Philosophy:** MatrixSwarm isn’t just code—it’s a world. A breathing hierarchy where agents think, die, and come back.

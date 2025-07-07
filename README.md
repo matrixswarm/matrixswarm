@@ -9,12 +9,12 @@
          MATRIXSWARM v0.2 "STORMCROW"
         Reflex. Resurrection. Real-time RPC.
 </pre>
-## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
-**No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
 ---
 MatrixSwarm is a lightweight, dependency-free alternative to Docker Compose for managing and coordinating multi-process applications. If you want to run a complex system of interconnected scripts (agents) with automatic restarts, secure communication, and dynamic control—all without containers or daemons—MatrixSwarm is for you. It uses simple file and folder operations as its API, making it incredibly portable and easy to debug.
-
 ---
+### MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
+ **No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
+
 ## Quick Start
 
 1.  **Deploy the Swarm:**
@@ -35,7 +35,30 @@ MatrixSwarm is a lightweight, dependency-free alternative to Docker Compose for 
     python3 site_ops/site_kill.py --universe ai --cleanup
     ```
 ---
+## Installation
 
+You can now install MatrixSwarm directly from PyPI:
+
+```bash
+  pip install matrixswarm
+```
+---
+## Booting MatrixSwarm
+
+After installing MatrixSwarm via pip, you no longer need to run Python scripts directly!
+
+**Recommended: Use the CLI Entrypoint:**
+```sh
+   matrixswarm-boot --universe ai --directive test-04 --encryption-off
+   Or, for advanced/manual runs, use:
+   python -m matrixswarm.site_boot --universe ai --directive test-04 --encryption-off(execute in parent directory or matrixswarm)
+```
+```sh
+   matrixswarm-kill --universe ai --cleanup
+   Or, for advanced/manual runs, use:
+   python -m matrixswarm.site_kill --universe ai --cleanup(execute in parent directory or matrixswarm)
+```
+---
 ## Core Concepts
 
 - **Philosophy:** MatrixSwarm isn’t just code—it’s a world. A breathing hierarchy where agents think, die, and come back.
