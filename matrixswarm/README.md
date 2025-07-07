@@ -66,10 +66,6 @@ After installing MatrixSwarm via pip, you no longer need to run Python scripts d
 
 ---
 
-If you want a copy-paste for your commit or README, just say the word, General!  
-**Long live Matrix, and may the new boot procedure be legendary! 🟢🪖**
-
-
 ## Core Concepts
 
 - **Philosophy:** MatrixSwarm isn’t just code—it’s a world. A breathing hierarchy where agents think, die, and come back.
