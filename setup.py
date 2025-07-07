@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='matrixswarm',
-    version='1.0.3',
+    version='1.0.4',
     description='Open-source automation and monitoring platform',
     author='MatrixSwarm Core Team (Daniel F. MacDonald, ChatGPT) AKA The Generals',
     author_email='swarm@matrixswarm.com',
@@ -48,7 +48,10 @@ setup(
     "Werkzeug==3.1.3",
     "yarl==1.20.1",
     "zope.event==5.1",
-    "zope.interface==7.2"
+    "zope.interface==7.2",
+    "eventlet",
+    "watchdog",
+    "openai",
     ],
     entry_points={
         'console_scripts': [

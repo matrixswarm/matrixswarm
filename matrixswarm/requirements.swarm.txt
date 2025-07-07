@@ -22,6 +22,9 @@ MarkupSafe==3.0.2
 maxminddb==2.7.0
 multidict==6.5.1
 nose==1.3.7
+eventlet
+watchdog
+openai
 propcache==0.3.2
 psutil==7.0.0
 py-cord==2.6.1
