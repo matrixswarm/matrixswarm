@@ -13,6 +13,7 @@ Run with:
   python site_boot.py --universe ai --python-site /custom/site-packages
   python site_boot.py --universe ai --python-bin /custom/bin/python3
 """
+
 def main():
 
     import os
@@ -23,13 +24,27 @@ def main():
     import sys
     import subprocess
     import site
+    import matrixswarm
 
     # Path prep
-    SITE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    if SITE_ROOT not in sys.path:
-        sys.path.insert(0, SITE_ROOT)
+    import os
 
+    try:
+
+        PACKAGE_ROOT = os.path.dirname(matrixswarm.__file__)
+    except ImportError:
+        # fallback for source/dev runs
+        PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "matrixswarm"))
+
+    print(f"PACKAGE_ROOT: {PACKAGE_ROOT}")
+
+    if PACKAGE_ROOT  not in sys.path:
+        sys.path.insert(0, PACKAGE_ROOT )
+
+    import hashlib
     from pathlib import Path
+    from matrixswarm.core.mixin.ghost_vault import generate_agent_keypair
+    from cryptography.hazmat.primitives import serialization
     from matrixswarm.core.core_spawner import CoreSpawner
     from matrixswarm.core.tree_parser import TreeParser
     from matrixswarm.core.class_lib.processes.reaper import Reaper
@@ -134,14 +149,13 @@ def main():
     os.environ["UNIVERSE_ID"] = universe_id
 
     # === BOOT SESSION SETUP ===
-    SITE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    SwarmSessionRoot.inject_boot_args(site_root=SITE_ROOT)
+    SwarmSessionRoot.inject_boot_args(site_root=PACKAGE_ROOT)
 
 
     session = SwarmSessionRoot()
     base_path = session.base_path
-    agent_source = os.path.join(SITE_ROOT, "agent")
-    pm = PathManager(root_path=base_path, agent_override=agent_source, site_root_path=SITE_ROOT)
+    agent_source = os.path.join(PACKAGE_ROOT, "agent")
+    pm = PathManager(root_path=base_path, site_root_path=PACKAGE_ROOT, agent_override=agent_source)
 
 
     # === POD & COMM ===
@@ -171,17 +185,12 @@ def main():
     # === SPAWN CORE ===
     MATRIX_UUID = matrix_directive.get("universal_id", "matrix")
 
-    cp = CoreSpawner(path_manager=pm, site_root_path=SITE_ROOT, python_site=python_site, detected_python=python_exec)
+    cp = CoreSpawner(path_manager=pm, site_root_path=PACKAGE_ROOT, python_site=python_site, detected_python=python_exec)
     if verbose:
         cp.set_verbose(True)
 
     if debug:
         cp.set_debug(True)
-
-
-    from matrixswarm.core.mixin.ghost_vault import generate_agent_keypair
-    from cryptography.hazmat.primitives import serialization
-    import hashlib
 
     # 🔐 Generate Matrix's keypair and fingerprint
     matrix_keys = generate_agent_keypair()
@@ -294,7 +303,7 @@ def main():
     matrix_node['children'] = []
     # 🚀 Create pod and deploy Matrix
     new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)
-    cp.spawn_agent(new_uuid, MATRIX_UUID, MATRIX_UUID, "site_boot", matrix_node, universe_id=universe_id)
+    cp.spawn_agent(new_uuid, MATRIX_UUID, MATRIX_UUID, "site_boot", matrix_node,  universe_id=universe_id)
 
     print("[✅] Matrix deployed at:", pod_path)
     print("[🔐] Matrix public key fingerprint:", fp)

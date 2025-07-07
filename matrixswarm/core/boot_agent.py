@@ -859,13 +859,25 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 "error": error_msg
             }, f, indent=2)
 
+    def get_load(self):
+        if hasattr(os, "getloadavg"):
+            return os.getloadavg()[0]
+        else:
+            # Windows: fallback (always return 0 or use psutil.cpu_percent())
+            try:
+                import psutil
+                # Return normalized value, e.g., %CPU / 100
+                return psutil.cpu_percent() / 100.0
+            except ImportError:
+                return 0  # Safe default
+
     def start_dynamic_throttle(self, min_delay=2, max_delay=10, max_load=2.0):
         def dynamic_throttle_loop():
             last_throttle_cycle_execution=False
             greatest_load=0
             while self.running:
                 try:
-                    load_avg = os.getloadavg()[0]
+                    load_avg = self.get_load()
                     scale = min(1.0, (load_avg - max_load) / max_load) if load_avg > max_load else 0
                     delay = int(min_delay + scale * (max_delay - min_delay))
                     if scale > 0:

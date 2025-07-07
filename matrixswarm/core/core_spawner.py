@@ -1,6 +1,6 @@
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
-import sys
 import os
+import sys
 # Add the directory containing this script to the PYTHONPATH
 current_directory = os.path.dirname(os.path.abspath(__file__))  # Directory of the current script
 if current_directory not in sys.path:
@@ -11,6 +11,7 @@ import uuid
 import shutil
 import subprocess
 import traceback
+import matrixswarm
 from datetime import datetime
 from class_lib.file_system.file_system_builder import FileSystemBuilder
 from path_manager import PathManager
@@ -219,7 +220,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
             base_name = agent_name.split("_bp_")[0] if "_bp_" in agent_name else agent_name
             source_path = os.path.join(self.agent_path, base_name, f"{base_name}.py")
-
+            print(source_path)
             session_path = os.path.dirname(self.pod_path.rstrip("/"))
             archive_path = os.path.join(session_path, 'archive')
             os.makedirs(archive_path, exist_ok=True)
@@ -364,14 +365,21 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
             })
 
+            env["PYTHONPATH"] = os.path.abspath(os.path.join(os.path.dirname(matrixswarm.__file__), ".."))
+
+            kwargs = {}
+            if os.name == "posix":
+                kwargs["preexec_fn"] = os.setsid
+
             process = subprocess.Popen(
                 cmd,
                 stdout=stdout,
                 stderr=stderr,
                 stdin=stdin,
-                preexec_fn=os.setsid,
                 env=env,
+                **kwargs
             )
+
 
             pid = process.pid
             try:

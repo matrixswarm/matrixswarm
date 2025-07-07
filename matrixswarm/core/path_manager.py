@@ -14,7 +14,7 @@ class PathManager:
             self.paths["session_boot_payload"] = os.path.join(session.base_path, "boot_payload")
         else:
             # Resolve one level up from this file
-            self.root_path = root_path or os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            self.root_path = root_path or os.path.abspath(os.path.join(os.path.dirname(__file__)))
             self.paths["root"] = self.root_path
             self.add_path("comm", "comm")
             self.add_path("pod", "pod")

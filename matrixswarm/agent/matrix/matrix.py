@@ -1,5 +1,6 @@
 import sys
 import os
+
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
@@ -25,8 +26,14 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 import os
 import time
 from pathlib import Path
-import inotify
-import inotify.adapters
+if os.name == "posix":
+    try:
+        import inotify.adapters
+    except ImportError:
+        inotify = None
+        print("[COMM-WATCHER] inotify not installed, cannot use inotify watchers.")
+else:
+    inotify = None
 import threading
 import hashlib
 import json
@@ -149,34 +156,54 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main_try")
 
-    # watches comm for any added universal_ids, and adds the agent_tree instantly
+    import os
+    import sys
+
     def comm_directory_watcher(self):
-        """Watches the root /comm directory for new agent folders.
-
-        This method runs in a background thread and provides a powerful way
-        to auto-provision agents. If a new directory appears in `/comm`, this
-        watcher assumes it's for a new agent and automatically calls
-        `delegate_tree_to_agent()` to deliver its personalized directive,
-        effectively bringing it into the swarm.
-        """
+        """Watches the root /comm directory for new agent folders."""
         print("[COMM-WATCHER] Watching /comm/ for new agents...")
-        i = inotify.adapters.Inotify()
-        i.add_watch(self.path_resolution["comm_path"])
 
-        for event in i.event_gen(yield_nones=False):
-            (_, type_names, path, filename) = event
+        # Linux inotify
+        if os.name == "posix":
+            try:
+                import inotify.adapters
+            except ImportError:
+                print("[COMM-WATCHER] inotify is not installed. Directory watching disabled.")
+                return
 
-            if "IN_CREATE" in type_names or "IN_MOVED_TO" in type_names:
-                try:
-                    # Only act on new directories (universal_ids)
-                    full_path = os.path.join(path, filename)
+            i = inotify.adapters.Inotify()
+            i.add_watch(self.path_resolution["comm_path"])
 
+            for event in i.event_gen(yield_nones=False):
+                (_, type_names, path, filename) = event
+
+                if "IN_CREATE" in type_names or "IN_MOVED_TO" in type_names:
+                    try:
+                        full_path = os.path.join(path, filename)
+                        if os.path.isdir(full_path):
+                            print(f"[COMM-WATCHER] New comm directory detected: {filename}")
+                            self.delegate_tree_to_agent(filename, self.tree_path_dict)
+                    except Exception as e:
+                        self.log(f"[COMM-WATCHER-ERROR] {e}")
+
+        else:
+            # Windows/macOS: polling fallback
+            import time
+            seen_dirs = set(os.listdir(self.path_resolution["comm_path"]))
+            print("[COMM-WATCHER] inotify unavailable—using polling mode.")
+            while True:
+                current_dirs = set(os.listdir(self.path_resolution["comm_path"]))
+                new_dirs = current_dirs - seen_dirs
+                for filename in new_dirs:
+                    full_path = os.path.join(self.path_resolution["comm_path"], filename)
                     if os.path.isdir(full_path):
-                        print(f"[COMM-WATCHER] New comm directory detected: {filename}")
-                        self.delegate_tree_to_agent(filename, self.tree_path_dict)
-                except Exception as e:
-                    self.log(f"[COMM-WATCHER-ERROR] {e}")
-
+                        print(f"[COMM-WATCHER] (POLL) New comm directory detected: {filename}")
+                        try:
+                            self.delegate_tree_to_agent(filename, self.tree_path_dict)
+                        except Exception as e:
+                            self.log(f"[COMM-WATCHER-ERROR] {e}")
+                seen_dirs = current_dirs
+                time.sleep(1)  # Poll every second (tweak as needed)
 
     def cmd_delete_agent(self, content, packet, identity:IdentityObject = None):
         """Handles the command to delete an agent and its entire subtree.

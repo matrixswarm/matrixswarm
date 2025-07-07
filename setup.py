@@ -43,7 +43,6 @@ setup(
     "requests==2.32.4",
     "setuptools==80.9.0",
     "urllib3==2.5.0",
-    "uuid==1.30",
     "websocket==0.2.1",
     "websockets==15.0.1",
     "Werkzeug==3.1.3",
