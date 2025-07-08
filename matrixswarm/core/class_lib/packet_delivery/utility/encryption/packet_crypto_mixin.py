@@ -129,7 +129,7 @@ class PacketCryptoMixin(LogMixin):
             subpacket = packet.get("subpacket", {})
             if self.football.verify_signed_payload():
                 step = "2"
-                '''
+                r'''
                 this tests if the sig matches the whole packet ({identity} + payload + timestamp)
                 Example:
                 #sender signature of subpacket - the pubkey to verify the signature is contained in subpacket\identity\identity\pub

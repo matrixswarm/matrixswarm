@@ -27,6 +27,28 @@ import json
 
 from matrixswarm.core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 
+<<<<<<< HEAD
+=======
+SETTINGS_PATH = os.path.join("matrix_gui/config/settings.json")
+def load_last_host():
+    try:
+        if os.path.exists(SETTINGS_PATH):
+            with open(SETTINGS_PATH, "r") as f:
+                data = json.load(f)
+            return data.get("matrix_host", None)
+    except Exception as e:
+        print(f"[SETTINGS][ERROR] {e}")
+    return None
+
+def save_last_host(host):
+    try:
+        os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+        with open(SETTINGS_PATH, "w") as f:
+            json.dump({"matrix_host": host}, f)
+    except Exception as e:
+        print(f"[SETTINGS][SAVE ERROR] {e}")
+
+>>>>>>> temp-save-branch
 
 class AutoScrollList(QListWidget):
     def __init__(self, *args, **kwargs):
@@ -60,11 +82,17 @@ def run_in_thread(callback=None, error_callback=None):
 
 
 #MATRIX_HOST = "https://147.135.68.135:65431/matrix" #put your own ip here, not mine
+<<<<<<< HEAD
 MATRIX_HOST = "https://147.135.112.25:65431/matrix"
 CLIENT_CERT = ("https_certs/client.crt", "https_certs/client.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
 REQUEST_TIMEOUT = 5
 #MATRIX_WEBSOCKET_HOST = "wss://147.135.68.135:8765"
 MATRIX_WEBSOCKET_HOST = "wss://147.135.112.25:8765"
+=======
+CLIENT_CERT = ("https_certs/client.crt", "https_certs/client.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
+REQUEST_TIMEOUT = 5
+
+>>>>>>> temp-save-branch
 
 
 import asyncio
@@ -83,7 +111,13 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
     log_ready = pyqtSignal(dict, str)
     def __init__(self):
         super().__init__()
+<<<<<<< HEAD
 
+=======
+        self.matrix_host = load_last_host() or "https://147.135.112.25:65431/matrix"
+        ws_ip = self.matrix_host.split("//")[1].split(":")[0]
+        self.matrix_ws_host = f"wss://{ws_ip}:8765"
+>>>>>>> temp-save-branch
 
         self.setWindowTitle("MatrixSwarm V2: Command Bridge")
         self.setMinimumSize(1400, 800)
@@ -94,7 +128,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         self.hotswap_btn.setEnabled(False)
         node_event_bus.node_selected.connect(self.forward_to_health_probe)
         self.message_received.connect(self.handle_websocket_message_safe)
+<<<<<<< HEAD
         self.start_websocket_listener(MATRIX_WEBSOCKET_HOST)
+=======
+        self.start_websocket_listener(self.matrix_ws_host)
+>>>>>>> temp-save-branch
         self.user_requested_log_view = False
         self.current_selected_uid =None
         self.last_probe_report = {}
@@ -116,6 +154,21 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             self.alert_panel.send_agent_payload(alert, partial=False)
 
 
+<<<<<<< HEAD
+=======
+
+    def change_matrix_host(self):
+        host = self.host_input.text().strip()
+        if not host.startswith("http"):
+            self.status_label.setText("⚠️ Invalid host URL.")
+            return
+        self.matrix_host = host
+        ws_ip = host.split("//")[1].split(":")[0]
+        self.matrix_ws_host = f"wss://{ws_ip}:8765"
+        save_last_host(host)
+        self.status_label.setText(f"✅ Matrix host set to {host}. Reconnecting...")
+
+>>>>>>> temp-save-branch
     def slow_scroll_log(self):
         if self.auto_scroll_checkbox.isChecked() and self.log_text.isVisible():
             scrollbar = self.log_text.verticalScrollBar()
@@ -184,7 +237,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             if uid:
                 self.view_logs()  # safely handles async fetch and appending
 
+<<<<<<< HEAD
     def start_websocket_listener(self, url=MATRIX_WEBSOCKET_HOST):
+=======
+    def start_websocket_listener(self, url):
+>>>>>>> temp-save-branch
         def run_ws_loop():
             while True:
                 try:
@@ -519,7 +576,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             )
             def task():
                 return requests.post(
+<<<<<<< HEAD
                     url=MATRIX_HOST,
+=======
+                    url=self.matrix_host,
+>>>>>>> temp-save-branch
                     json=status_payload,
                     cert=CLIENT_CERT,
                     verify=False,
@@ -556,7 +617,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
         try:
             response = requests.post(
+<<<<<<< HEAD
                 url=MATRIX_HOST,
+=======
+                url=self.matrix_host,
+>>>>>>> temp-save-branch
                 json=status_payload,
                 cert=CLIENT_CERT,
                 verify=False,
@@ -677,7 +742,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
         try:
             response = requests.post(
+<<<<<<< HEAD
                 url=MATRIX_HOST,
+=======
+                url=self.matrix_host,
+>>>>>>> temp-save-branch
                 json=payload,
                 cert=CLIENT_CERT,
                 verify=False,
@@ -743,7 +812,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
         try:
             response = requests.post(
+<<<<<<< HEAD
                 url=MATRIX_HOST,
+=======
+                url=self.matrix_host,
+>>>>>>> temp-save-branch
                 json = pk1.get_packet(),
                 cert=CLIENT_CERT,
                 verify=False,
@@ -782,7 +855,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             try:
                 print(f"[THREAD] Sending log request for {universal_id}")
                 response = requests.post(
+<<<<<<< HEAD
                     url=MATRIX_HOST,
+=======
+                    url=self.matrix_host,
+>>>>>>> temp-save-branch
                     json=payload,
                     cert=CLIENT_CERT,
                     verify=False,
@@ -848,6 +925,25 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         box.setObjectName("log_panel")
         layout = QVBoxLayout()
 
+<<<<<<< HEAD
+=======
+
+
+        # ───────────── Host/IP Change Row ─────────────
+        self.host_input = QLineEdit(self.matrix_host)
+        self.host_input.setPlaceholderText("Enter Matrix Host (e.g., https://1.2.3.4:65431/matrix)")
+
+        set_host_btn = QPushButton("Set Host/IP")
+        set_host_btn.clicked.connect(self.change_matrix_host)
+
+        host_layout = QHBoxLayout()
+        host_layout.addWidget(QLabel("Matrix Host:"))
+        host_layout.addWidget(self.host_input)
+        host_layout.addWidget(set_host_btn)
+        layout.addLayout(host_layout)
+        # ───────────────────────────────────────────────────
+
+>>>>>>> temp-save-branch
         self.log_input = QLineEdit()
         self.log_input.setPlaceholderText("Enter agent universal_id to view logs")
         self.log_input.setStyleSheet("background-color: #000; color: #33ff33; border: 1px solid #00ff66;")
@@ -905,7 +1001,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
             payload = {"handler": "cmd_list_tree", "timestamp": time.time(), "content": {}}
             response = requests.post(
+<<<<<<< HEAD
                 url=MATRIX_HOST,
+=======
+                url=self.matrix_host,
+>>>>>>> temp-save-branch
                 json=payload,
                 cert=CLIENT_CERT,
                 verify=False,
@@ -1241,7 +1341,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             try:
                 import requests
                 response = requests.post(
+<<<<<<< HEAD
                     url=MATRIX_HOST,
+=======
+                    url=self.matrix_host,
+>>>>>>> temp-save-branch
                     json=payload,
                     cert=CLIENT_CERT,
                     verify=False,
@@ -1284,7 +1388,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         }
 
         requests.post(
+<<<<<<< HEAD
             url=MATRIX_HOST,
+=======
+            url=self.matrix_host,
+>>>>>>> temp-save-branch
             json=payload,
             cert=CLIENT_CERT,
             verify=False,
@@ -1342,7 +1450,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
     def check_matrix_connection(self):
         try:
             response = requests.get(
+<<<<<<< HEAD
                 url=MATRIX_HOST + "/ping",
+=======
+                url=self.matrix_host + "/ping",
+>>>>>>> temp-save-branch
                 cert=CLIENT_CERT,
                 verify=False,
                 timeout=REQUEST_TIMEOUT
@@ -1602,7 +1714,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         )
         def task():
             return requests.post(
+<<<<<<< HEAD
                 url=MATRIX_HOST,
+=======
+                url=self.matrix_host,
+>>>>>>> temp-save-branch
                 json=payload,
                 cert=CLIENT_CERT,
                 verify=False,
@@ -1623,7 +1739,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
     def post_async(self, payload, on_success=None, on_fail=None):
         def worker():
             try:
+<<<<<<< HEAD
                 response = requests.post(MATRIX_HOST, json=payload, cert=CLIENT_CERT, verify=False, timeout=REQUEST_TIMEOUT)
+=======
+                response = requests.post(self.matrix_host, json=payload, cert=CLIENT_CERT, verify=False, timeout=REQUEST_TIMEOUT)
+>>>>>>> temp-save-branch
                 if response.status_code == 200 and on_success:
                     QTimer.singleShot(0, lambda: on_success(response))
                 elif on_fail:

@@ -13,18 +13,180 @@ Run with:
   python site_boot.py --universe ai --python-site /custom/site-packages
   python site_boot.py --universe ai --python-bin /custom/bin/python3
 """
+import os
+import shutil
+import time
+import argparse
+import json
+import base64
+import sys
+import subprocess
+import site
+import matrixswarm
+from pathlib import Path
+
+def get_active_matrixswarm_path(arg_path=None):
+    if arg_path:
+        active_path = Path(arg_path).expanduser().resolve()
+    else:
+        here = Path.cwd()
+        venv_dir = here / ".venv"
+        if venv_dir.exists():
+            active_path = venv_dir.parent / ".matrixswarm"
+        else:
+            active_path = here / ".matrixswarm"
+    return active_path
+
+def matrixswarm_dirs_valid(base_path):
+    """Checks that the core subdirs exist and returns True/False."""
+    must_have = [
+        base_path / "agent",
+        base_path / "boot_directives",
+        base_path / "certs" / "https_certs",
+        base_path / "certs" / "socket_certs",
+        base_path / ".matrix"
+    ]
+    return all(p.exists() for p in must_have)
+
+def load_matrix_config(base_path):
+    config_path = base_path / ".matrix"
+    with open(config_path) as f:
+        return json.load(f)
+
+def abort_boot(msg):
+    print(f"[MatrixSwarm BOOT ABORTED]: {msg}")
+    print("Please run --init to create a valid workspace, or specify the correct --matrix-path.")
+    sys.exit(1)
+
+SWARM_POINTER = ".swarm"
+
+def write_swarm_pointer(install_path):
+    """Write the .swarm file in the CWD with the path to .matrixswarm."""
+    with open(".swarm", "w") as f:
+        f.write(str(install_path))
+    print(f"[SWARM] Pointer file .swarm created, pointing to {install_path}")
+
+def find_matrixswarm_path(cli_path=None):
+    # 1. CLI arg wins
+    if cli_path:
+        return Path(cli_path).expanduser().resolve()
+    # 2. .swarm pointer in CWD
+    swarm_pointer = Path.cwd() / SWARM_POINTER
+    if swarm_pointer.exists():
+        with open(swarm_pointer) as f:
+            return Path(f.read().strip()).expanduser().resolve()
+    # 3. Env var fallback
+    env_path = os.environ.get("MATRIXSWARM_PATH")
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+    # 4. Fallback
+    here = Path.cwd()
+    venv_dir = here / ".venv"
+    if venv_dir.exists():
+        return venv_dir.parent / ".matrixswarm"
+    else:
+        return here / ".matrixswarm"
+
+def create_user_dirs_and_copy_bases(install_path=None):
+    # Determine install path
+    if install_path is None:
+        # Default: .matrixswarm in the parent dir of the venv or script
+        here = Path.cwd()
+        venv_dir = here / ".venv"
+        if venv_dir.exists():
+            install_path = venv_dir.parent / ".matrixswarm"
+        else:
+            install_path = here / ".matrixswarm"
+    else:
+        install_path = Path(install_path).expanduser().resolve()
+
+    print(f"\n[MatrixSwarm INIT] Using install path: {install_path}")
+
+    # Folders to create/copy
+    boot_directives_src = Path(__file__).resolve().parent / "boot_directives"
+    agent_src = Path(__file__).resolve().parent / "agent"
+
+    agent_dst = install_path / "agent"
+    boot_directive_dst = install_path / "boot_directives"
+    certs_dst = install_path / "certs"
+    https_certs_dst = certs_dst / "https_certs"
+    socket_certs_dst = certs_dst / "socket_certs"
+    env_src = Path(__file__).resolve().parent / "SAMPLE.env"
+
+    install_path.mkdir(parents=True, exist_ok=True)
+    agent_dst.mkdir(parents=True, exist_ok=True)
+    boot_directive_dst.mkdir(parents=True, exist_ok=True)
+    https_certs_dst.mkdir(parents=True, exist_ok=True)
+    socket_certs_dst.mkdir(parents=True, exist_ok=True)
+
+    if agent_src.exists():
+        for item in agent_src.iterdir():
+            dest = agent_dst / item.name
+            if item.is_dir():
+                if not dest.exists():
+                    shutil.copytree(item, dest)
+                    print(f"   Copied agent folder {item.name} → {agent_dst}")
+                else:
+                    print(f"   (Skipped agent folder {item.name}, already exists)")
+            elif item.is_file():
+                if not dest.exists():
+                    shutil.copy(item, dest)
+                    print(f"   Copied agent file {item.name} → {agent_dst}")
+                else:
+                    print(f"   (Skipped agent file {item.name}, already exists)")
+    else:
+        print(f"   (No agent/ to copy from in {agent_src})")
+
+    # Copy all boot_directives folders and files
+    if boot_directives_src.exists():
+        for item in boot_directives_src.iterdir():
+            dest = boot_directive_dst / item.name
+            if item.is_dir():
+                if not dest.exists():
+                    shutil.copytree(item, dest)
+                    print(f"   Copied boot_directive folder {item.name} → {boot_directive_dst}")
+                else:
+                    print(f"   (Skipped boot_directive folder {item.name}, already exists)")
+            elif item.is_file():
+                if not dest.exists():
+                    shutil.copy(item, dest)
+                    print(f"   Copied boot_directive file {item.name} → {boot_directive_dst}")
+                else:
+                    print(f"   (Skipped boot_directive file {item.name}, already exists)")
+    else:
+        print(f"   (No boot_directives/ to copy from in {boot_directives_src})")
+
+    # Copy .env file for secrets/passwords
+    env_dst = install_path / "SAMPLE.env"
+    if env_src.exists() and not env_dst.exists():
+        shutil.copy(env_src, env_dst)
+        print(f"   Copied SAMPLE.env → {env_dst}")
+    elif env_dst.exists():
+        print(f"   (.env SAMPLE.already exists at {env_dst}, not overwritten)")
+    else:
+        print(f"   (No SAMPLE.env found to copy from {env_src})")
+
+    # Create config file for tracking
+    config = {
+        "install_path": str(install_path),
+        "agent": str(agent_dst),
+        "boot_directives": str(boot_directive_dst),
+        "certs": str(certs_dst),
+        "https_certs": str(https_certs_dst),
+        "socket_certs": str(socket_certs_dst),
+        "env": str(env_dst)
+    }
+    config_path = install_path / ".matrix"
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    print(f"\n[MatrixSwarm INIT] Wrote directory map to {config_path}")
+
+    print("\n[MatrixSwarm INIT] ✔ Done! All folders and config created.\n")
+
+    write_swarm_pointer(install_path)
 
 def main():
 
-    import os
-    import time
-    import argparse
-    import json
-    import base64
-    import sys
-    import subprocess
-    import site
-    import matrixswarm
 
     # Path prep
     import os
@@ -53,7 +215,6 @@ def main():
     from matrixswarm.boot_directives.load_boot_directive import load_boot_directive
     from matrixswarm.core.utils.boot_guard import enforce_single_matrix_instance, validate_universe_id
     from matrixswarm.core.utils.crypto_utils import generate_aes_key
-    from Crypto.Random import get_random_bytes
     from Crypto.Cipher import AES
     from Crypto.PublicKey import RSA
 
@@ -64,7 +225,12 @@ def main():
 
     # === ARGUMENTS ===
     parser = argparse.ArgumentParser(description="MatrixSwarm Boot Loader", formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument("--universe", required=True, help="Target universe ID (e.g., ai, bb, os)")
+
+    parser = argparse.ArgumentParser(description="MatrixSwarm Boot Loader")
+    parser.add_argument("--init", action="store_true", help="Initialize user directories and copy base files")
+    parser.add_argument("--install-path", help="(For --init) Path to install .matrixswarm (default: alongside .venv)")
+    parser.add_argument("--matrix-path", help="Use a different .matrixswarm location (default: alongside .venv)")
+    parser.add_argument("--universe",  default="ai", help="Target universe ID (default: ai)")
     parser.add_argument("--directive", default="default", help="Boot directive (e.g., matrix)")
     parser.add_argument("--reboot", action="store_true", help="Soft reboot — skip hard cleanup")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose terminal output")
@@ -74,8 +240,50 @@ def main():
     parser.add_argument("--swarm_key", help="Base64-encoded swarm key used to decrypt directive")
     parser.add_argument("--encryption-off", action="store_true", help="Turn encryption off for all agents")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--switch", help="Switch to a new .matrixswarm location and update .swarm pointer")
 
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+
+    # Special: handle --init instantly
+    if args.init:
+        create_user_dirs_and_copy_bases(args.install_path or args.matrix_path)
+        print("User directories initialized. Exiting.")
+        sys.exit(0)
+
+    if args.switch:
+        switch_path = Path(args.switch).expanduser().resolve()
+        if not (switch_path / ".matrix").exists():
+            print(f"[ERROR] The target .matrixswarm directory at {switch_path} does not contain a .matrix file!")
+            print("You must provide a valid swarm workspace. Aborting.")
+            sys.exit(1)
+        # Write .swarm pointer in the current directory
+        with open(".swarm", "w") as f:
+            f.write(str(switch_path))
+        print(f"[SWARM] Pointer file .swarm created/updated, now pointing to {switch_path}")
+        print("[SWARM] You may now run matrixswarm-boot as normal from this directory.")
+        sys.exit(0)
+
+    swarm_pointer = Path.cwd() / ".swarm"
+    if not swarm_pointer.exists():
+        print(f"[MatrixSwarm BOOT ABORTED]: Cannot find .swarm in {Path.cwd()}.")
+        sys.exit(1)
+    with open(swarm_pointer) as f:
+        matrix_path = Path(f.read().strip()).expanduser().resolve()
+    if not (matrix_path / ".matrix").exists():
+        print(f"[MatrixSwarm BOOT ABORTED]: Target path from .swarm ({matrix_path}) is missing .matrix.")
+        print("This is not a valid MatrixSwarm workspace. Run --init to create one.")
+        sys.exit(1)
+
+    if not matrixswarm_dirs_valid(matrix_path):
+        abort_boot(f"MatrixSwarm directory {matrix_path} is missing required folders/files.")
+
+    config = load_matrix_config(matrix_path)
+
+    #agents_dir = config["agents"]
+    #directives_dir = config["directives"]
+    #https_certs_dir = config["https_certs"]
+    #socket_certs_dir = config["socket_certs"]
+    #env_path = config["env"]
 
     universe_id = args.universe.strip()
     boot_name = args.directive.strip().replace(".py", "")
@@ -87,6 +295,7 @@ def main():
     debug = args.debug
 
     encryption_enabled = not args.encryption_off
+
 
     # === ENVIRONMENT DETECTION ===
     def check_python_env(user_python_bin=None, user_site_path=None, required_module="discord"):
@@ -151,10 +360,9 @@ def main():
     # === BOOT SESSION SETUP ===
     SwarmSessionRoot.inject_boot_args(site_root=PACKAGE_ROOT)
 
-
     session = SwarmSessionRoot()
     base_path = session.base_path
-    agent_source = os.path.join(PACKAGE_ROOT, "agent")
+    agent_source = config['agent']
     pm = PathManager(root_path=base_path, site_root_path=PACKAGE_ROOT, agent_override=agent_source)
 
 
@@ -172,7 +380,7 @@ def main():
 
     # === LOAD TREE ===
     print(f"[BOOT] Loading directive: {boot_name}.py")
-    matrix_directive = load_boot_directive(boot_name)
+    matrix_directive = load_boot_directive(boot_name, path=config['boot_directives'])
     tp = TreeParser.load_tree_direct(matrix_directive)
     if not tp:
         print("[FATAL] Tree load failed. Invalid structure.")
@@ -185,7 +393,7 @@ def main():
     # === SPAWN CORE ===
     MATRIX_UUID = matrix_directive.get("universal_id", "matrix")
 
-    cp = CoreSpawner(path_manager=pm, site_root_path=PACKAGE_ROOT, python_site=python_site, detected_python=python_exec)
+    cp = CoreSpawner(path_manager=pm, site_root_path=PACKAGE_ROOT, python_site=python_site, detected_python=python_exec, install_path=config["install_path"] )
     if verbose:
         cp.set_verbose(True)
 
@@ -226,7 +434,7 @@ def main():
 
     _matrix_priv_obj = RSA.import_key(matrix_keys["priv"])
 
-    is_encryption_on=encryption_enabled = int(encryption_enabled)
+    encryption_enabled = int(encryption_enabled)
 
     #sign and assign all the identities to the agents, priv/pub keys, private aes key, identity(which includes pubkey, universal_id, timestamp)
     tp.assign_identity_to_all_nodes(_matrix_priv_obj)

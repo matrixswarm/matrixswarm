@@ -1186,7 +1186,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             spawner = CoreSpawner(
                 site_root_path=self.path_resolution["site_root_path"],
                 python_site=self.path_resolution["python_site"],
-                detected_python=self.path_resolution["python_exec"]
+                detected_python=self.path_resolution["python_exec"],
+                install_path = self.path_resolution["install_path"]
             )
 
             if keychain and len(keychain) > 0:

@@ -1,41 +1,47 @@
 import os
 import sys
 from dotenv import load_dotenv
+import importlib.util
 
 # Setup the base path and environment (run only once during import)
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
 if BASE not in sys.path:
     sys.path.insert(0, BASE)
-
-# Load environment from the project root
 load_dotenv(os.path.join(BASE, ".env"))
 
-def load_boot_directive(name="default"):
+def load_boot_directive(name="default", path=None):
     """
-    Dynamically loads and returns a boot directive by its name.
+    Dynamically loads and returns a boot directive by its name and (optionally) from an external path.
 
     :param name: Name of the directive to load (default is "default").
     :type name: str
+    :param path: External directory to load directive from (default None: package's own boot_directives).
+    :type path: str or Path or None
     :return: The `matrix_directive` dictionary from the requested module.
-    :raises ModuleNotFoundError: If the module cannot be found.
-    :raises AttributeError: If the module does not contain `matrix_directive`.
     """
     try:
-        # Verify the requested directive file exists
-        module_path = os.path.join(BASE, "boot_directives", f"{name}.py")
-        if not os.path.isfile(module_path):
-            raise ModuleNotFoundError(f"Directive file '{module_path}' does not exist.")
+        # If an external path is given, load the .py file from there
+        if path:
+            directive_path = os.path.join(path, f"{name}.py")
+            if not os.path.isfile(directive_path):
+                raise ModuleNotFoundError(f"Directive file '{directive_path}' does not exist.")
 
-        # Import the directive module dynamically
-        mod_path = f"boot_directives.{name}"
-        directive_mod = __import__(mod_path, fromlist=["matrix_directive"])
+            spec = importlib.util.spec_from_file_location(f"custom_directive_{name}", directive_path)
+            if not spec:
+                raise ImportError(f"Failed to load spec for '{directive_path}'")
+            directive_mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(directive_mod)
+        else:
+            # Built-in/package fallback
+            module_path = os.path.join(BASE, "boot_directives", f"{name}.py")
+            if not os.path.isfile(module_path):
+                raise ModuleNotFoundError(f"Directive file '{module_path}' does not exist.")
+            mod_path = f"boot_directives.{name}"
+            directive_mod = __import__(mod_path, fromlist=["matrix_directive"])
 
-        # Ensure the directive has the required `matrix_directive` attribute
         if not hasattr(directive_mod, "matrix_directive"):
             raise AttributeError(f"Directive module '{name}' does not contain 'matrix_directive'.")
 
-        # Return the loaded directive
         return directive_mod.matrix_directive
 
     except ModuleNotFoundError as e:

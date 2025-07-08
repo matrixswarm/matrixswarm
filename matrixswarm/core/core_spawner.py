@@ -19,7 +19,7 @@ from matrixswarm.core.class_lib.logging.logger import Logger
 from matrixswarm.core.mixin.core_spawn_secure import CoreSpawnerSecureMixin
 from matrixswarm.core.mixin.ghost_vault import build_encrypted_spawn_env
 class CoreSpawner(CoreSpawnerSecureMixin):
-    def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path', python_site=None, detected_python=None):
+    def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path', python_site=None, detected_python=None, install_path=None):
         super().__init__()
 
         pm = path_manager or PathManager(use_session_root=True, site_root_path=site_root_path)
@@ -49,6 +49,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         self.pod_path = pm.get_path("pod")
         self.agent_path = pm.get_path("agent")
         self.site_root_path = pm.get_path("site_root_path")
+        self.install_path = install_path
 
         os.makedirs(self.comm_path, exist_ok=True)
 
@@ -329,6 +330,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "comm_path_resolved": os.path.join(self.comm_path, universal_id),
                     "pod_path_resolved": os.path.join(self.pod_path, spawn_uuid),
                     "site_root_path": self.site_root_path,
+                    "install_path": self.install_path, #path of .matrixswarm dir - where session agent, boot_directive, and certs live
                     "python_site": self.python_site,
                     "python_exec": self.python_exec or "python3"
                 },

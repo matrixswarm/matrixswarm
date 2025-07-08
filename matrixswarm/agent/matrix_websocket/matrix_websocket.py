@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
 import ssl
 import time
 import copy
@@ -25,7 +26,8 @@ class Agent(BootAgent):
         self.clients = set()
         self.loop = None
         self.websocket_ready = False
-        self.cert_dir = os.path.join(self.path_resolution['root_path'], "socket_certs")
+        swarm_root = self.path_resolution["install_path"]
+        self.cert_dir = os.path.join(swarm_root, "certs", "socket_certs")
         self._stop_event = None
         self._thread = None
         self._config = None

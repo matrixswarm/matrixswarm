@@ -9,11 +9,18 @@
          MATRIXSWARM v0.2 "STORMCROW"
         Reflex. Resurrection. Real-time RPC.
 </pre>
+<<<<<<< HEAD
 ---
 MatrixSwarm is a lightweight, dependency-free alternative to Docker Compose for managing and coordinating multi-process applications. If you want to run a complex system of interconnected scripts (agents) with automatic restarts, secure communication, and dynamic control—all without containers or daemons—MatrixSwarm is for you. It uses simple file and folder operations as its API, making it incredibly portable and easy to debug.
 ---
 ### MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
  **No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
+=======
+## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
+**No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
+---
+MatrixSwarm is a lightweight, dependency-free alternative to Docker Compose for managing and coordinating multi-process applications. If you want to run a complex system of interconnected scripts (agents) with automatic restarts, secure communication, and dynamic control—all without containers or daemons—MatrixSwarm is for you. It uses simple file and folder operations as its API, making it incredibly portable and easy to debug.
+>>>>>>> temp-save-branch
 
 ## Quick Start
 
@@ -43,6 +50,10 @@ You can now install MatrixSwarm directly from PyPI:
   pip install matrixswarm
 ```
 ---
+<<<<<<< HEAD
+=======
+
+>>>>>>> temp-save-branch
 ## Booting MatrixSwarm
 
 After installing MatrixSwarm via pip, you no longer need to run Python scripts directly!
@@ -69,6 +80,99 @@ After installing MatrixSwarm via pip, you no longer need to run Python scripts d
   - `/pod` → Runtime clones of agents are spawned here, each with a unique UUID.
   - `/comm` → The communication bus where agents exchange data. For maximum performance, this can be mounted as a `tmpfs` memory disk.
 ---
+<<<<<<< HEAD
+=======
+## Universal Swarm Workspace & .swarm Pointer System
+MatrixSwarm 2.0+ introduces a fully portable, multi-universe, hot-swappable workspace architecture.
+
+### Swarm Workspace Structure
+Every MatrixSwarm deployment revolves around a central workspace folder (usually named .matrixswarm). This folder is the nervous system of the swarm:
+
+```bash
+.matrixswarm/
+├── agent/                 # All available agent source code
+├── boot_directives/       # All directives (the agent blueprints)
+├── certs/
+│   ├── https_certs/       # HTTPS server certs (server.crt, server.key)
+│   └── socket_certs/      # WebSocket & GUI client certs
+├── .matrix                # JSON config describing all paths
+├── .env                   # (Optional) environment secrets
+└── ...                    # More: logs, configs, etc.
+```
+
+Workspace Discovery: The .swarm Pointer File
+You never need to hardcode a swarm location again.
+
+Wherever you want to run MatrixSwarm, place a .swarm file containing the absolute path to your .matrixswarm workspace.
+
+Example:
+
+```bash
+  /srv/hive/.matrixswarm
+The CLI and all entry points will follow this pointer.
+```
+
+Managing Swarm Pointers: --switch Command
+Update or re-point any directory’s .swarm file instantly:
+
+```bash
+  matrixswarm-boot --switch /absolute/path/to/.matrixswarm
+This makes the current directory a MatrixSwarm control station for the chosen universe.
+```
+
+Booting, Killing, Listing
+From anywhere, just:
+
+bash
+Copy
+Edit
+matrixswarm-boot --universe ai
+matrixswarm-kill --universe ai
+matrixswarm-list
+(All commands look up the correct workspace via .swarm)
+
+Certs & Secure Ops:
+Generate certs into your workspace:
+
+```bash
+  matrixswarm-gencerts mydomain.com --name "SwarmHQ"
+Places all certs in certs/https_certs/ and certs/socket_certs/ inside your active .matrixswarm
+
+Agent & Service Path Best Practices:
+All agents, HTTPS, and WebSocket services should resolve certs and data like this:
+```
+
+```python
+cert_dir = os.path.join(self.path_resolution["install_path"], "certs", "https_certs")
+socket_dir = os.path.join(self.path_resolution["install_path"], "certs", "socket_certs")
+This ensures portable, dynamic, zero-hardcoded deployment.
+```
+
+🏆 Workspace Portability
+Move or copy .matrixswarm anywhere.
+
+Update your .swarm pointer file to match.
+
+No configs or paths break. Your swarm just works.
+
+Example: Multi-Env Ops
+Have a global swarm at /srv/global/.matrixswarm for prod.
+
+Point a dev project at /home/you/dev/.matrixswarm for testing.
+
+Use --switch or manually edit .swarm to change control between universes.
+
+TL;DR Orders for Operators
+.matrixswarm = the Hive. .swarm = the pointer.
+
+Always use the pointer file—never hardcode swarm locations.
+
+Use --switch for instant universe swaps.
+
+All agents, certs, and configs are relative to self.path_resolution["install_path"].
+
+---
+>>>>>>> temp-save-branch
 ## Command-Line Toolkit
 
 MatrixSwarm is managed through a simple three-part terminal toolkit located in the `site_ops/` directory.
@@ -164,7 +268,10 @@ matrix_directive = {
 ```
 Launch your custom swarm:
 python3 site_ops/site_boot.py --universe my-test --directive my_swarm
+<<<<<<< HEAD
 
+=======
+>>>>>>> temp-save-branch
 ---
 ## 🎬 Watch the Swarm in Action
 
@@ -346,7 +453,11 @@ MatrixSwarm now includes structured packet building, command dispatch, and auto-
 - `cmd_forward_command`: Core packet for nested targeting
 - `cmd_hotswap_agent`: Inject new logic into a live pod — no downtime
 
+<<<<<<< HEAD
 **New relay agents** handle command injection, resurrection, and lifecycle events without rebooting the core.
+=======
+**New relay agents** handle command injection, resurrection, and lifecycle events without rebooting the matrixswarm.core.
+>>>>>>> temp-save-branch
 
 #### Build a .deb Package
 
@@ -513,7 +624,11 @@ shell
 
 #### 1. Create the Agent Code
 ```python
+<<<<<<< HEAD
 from core.boot_agent import BootAgent
+=======
+from matrixswarm.core.boot_agent import BootAgent
+>>>>>>> temp-save-branch
 
 class MyAgent(BootAgent):
     def worker(self):

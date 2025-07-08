@@ -1,9 +1,8 @@
-#Authored by Daniel F MacDonald
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
-
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
 from flask import Response
 from flask import Flask, request, jsonify
 import ssl
@@ -24,9 +23,10 @@ class Agent(BootAgent):
         self.app = Flask(__name__)
         self.port = 65431
         self.payload_dir = os.path.join(self.path_resolution['comm_path'], "matrix", "payload")
-        self.cert_path = os.path.join(self.path_resolution['root_path'], "https_certs", "server.fullchain.crt")
-        self.key_path = os.path.join(self.path_resolution['root_path'], "https_certs", "server.key")
-        self.client_ca = os.path.join(self.path_resolution['root_path'], "https_certs", "rootCA.pem")
+        swarm_root = self.path_resolution["install_path"]
+        self.cert_path = os.path.join(swarm_root, "certs", "https_certs", "server.fullchain.crt")
+        self.key_path = os.path.join(swarm_root, "certs", "https_certs", "server.key")
+        self.client_ca = os.path.join(swarm_root, "certs", "https_certs", "rootCA.pem")
         self.local_tree_root = None
         self._last_dir_request = 0
         self.configure_routes()

@@ -15,6 +15,7 @@ pod/
 socket_certs/
 https_certs/
 Lib/
+matrixswarm/.env
 
 # 🧠 Agent build artifacts
 boot_payload/

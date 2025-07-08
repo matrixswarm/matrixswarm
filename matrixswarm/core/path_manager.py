@@ -13,16 +13,17 @@ class PathManager:
             self.paths["session_path"] = session.base_path
             self.paths["session_boot_payload"] = os.path.join(session.base_path, "boot_payload")
         else:
-            # Resolve one level up from this file
             self.root_path = root_path or os.path.abspath(os.path.join(os.path.dirname(__file__)))
             self.paths["root"] = self.root_path
             self.add_path("comm", "comm")
             self.add_path("pod", "pod")
-            self.add_path("agent", "agent")
 
-        # Inject override if provided
+            # Handle agent_override *before* anything else
         if agent_override:
             self.paths["agent"] = agent_override
+        elif site_root_path:
+            # Use agent path based on site_root_path if override not present
+            self.paths["agent"] = os.path.join(site_root_path, "agent")
         else:
             self.add_path("agent", "agent")
 
@@ -30,7 +31,7 @@ class PathManager:
             self.root_path = site_root_path
             self.paths["root"] = site_root_path
             self.paths["site_root_path"] = site_root_path
-            self.paths["agent"] = os.path.join(site_root_path, "agent")
+
 
     def set_from_session(self, session):
         self.paths = {
