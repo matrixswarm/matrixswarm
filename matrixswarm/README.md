@@ -9,6 +9,7 @@
          MATRIXSWARM v0.2 "STORMCROW"
         Reflex. Resurrection. Real-time RPC.
 </pre>
+
 ## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
 **No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
 ---
@@ -42,7 +43,6 @@ You can now install MatrixSwarm directly from PyPI:
   pip install matrixswarm
 ```
 ---
-
 ## Booting MatrixSwarm
 
 After installing MatrixSwarm via pip, you no longer need to run Python scripts directly!
@@ -60,7 +60,6 @@ After installing MatrixSwarm via pip, you no longer need to run Python scripts d
 ```
 ---
 ## Core Concepts
-
 - **Philosophy:** MatrixSwarm isn’t just code—it’s a world. A breathing hierarchy where agents think, die, and come back.
 - **File-Driven:** Agents don’t talk through APIs. They talk through **files**. All coordination happens via `.json` and `.cmd` files dropped into communication directories.
 - **Resurrection:** Agents monitor each other—and if one goes silent, it is resurrected or replaced by its parent.
@@ -68,6 +67,93 @@ After installing MatrixSwarm via pip, you no longer need to run Python scripts d
   - `/agent` → Contains the source code for every agent type.
   - `/pod` → Runtime clones of agents are spawned here, each with a unique UUID.
   - `/comm` → The communication bus where agents exchange data. For maximum performance, this can be mounted as a `tmpfs` memory disk.
+---
+## Universal Swarm Workspace & .swarm Pointer System
+MatrixSwarm 2.0+ introduces a fully portable, multi-universe, hot-swappable workspace architecture.
+
+### Swarm Workspace Structure
+Every MatrixSwarm deployment revolves around a central workspace folder (usually named .matrixswarm). This folder is the nervous system of the swarm:
+
+```bash
+  .matrixswarm/
+  ├── agent/                 # All available agent source code
+  ├── boot_directives/       # All directives (the agent blueprints)
+  ├── certs/
+  │   ├── https_certs/       # HTTPS server certs (server.crt, server.key)
+  │   └── socket_certs/      # WebSocket & GUI client certs
+  ├── .matrix                # JSON config describing all paths
+  ├── .env                   # (Optional) environment secrets
+  └── ...                    # More: logs, configs, etc.
+```
+
+Workspace Discovery: The .swarm Pointer File
+You never need to hardcode a swarm location again.
+
+Wherever you want to run MatrixSwarm, place a .swarm file containing the absolute path to your .matrixswarm workspace.
+
+Example:
+
+```bash
+  /srv/hive/.matrixswarm
+The CLI and all entry points will follow this pointer.
+```
+
+Managing Swarm Pointers: --switch Command
+Update or re-point any directory’s .swarm file instantly:
+
+```bash
+  matrixswarm-boot --switch /absolute/path/to/.matrixswarm
+This makes the current directory a MatrixSwarm control station for the chosen universe.
+```
+
+Booting, Killing, Listing
+From anywhere, just:
+
+```bash
+matrixswarm-boot --universe ai
+matrixswarm-kill --universe ai
+matrixswarm-list
+(All commands look up the correct workspace via .swarm)
+```
+Certs & Secure Ops:
+Generate certs into your workspace:
+
+```bash
+  matrixswarm-gencerts mydomain.com --name "SwarmHQ"
+Places all certs in certs/https_certs/ and certs/socket_certs/ inside your active .matrixswarm
+
+Agent & Service Path Best Practices:
+All agents, HTTPS, and WebSocket services should resolve certs and data like this:
+```
+```python
+cert_dir = os.path.join(self.path_resolution["install_path"], "certs", "https_certs")
+socket_dir = os.path.join(self.path_resolution["install_path"], "certs", "socket_certs")
+This ensures portable, dynamic, zero-hardcoded deployment.
+```
+
+🏆 Workspace Portability
+Move or copy .matrixswarm anywhere.
+
+Update your .swarm pointer file to match.
+
+No configs or paths break. Your swarm just works.
+
+Example: Multi-Env Ops
+Have a global swarm at /srv/global/.matrixswarm for prod.
+
+Point a dev project at /home/you/dev/.matrixswarm for testing.
+
+Use --switch or manually edit .swarm to change control between universes.
+
+TL;DR Orders for Operators
+.matrixswarm = the Hive. .swarm = the pointer.
+
+Always use the pointer file—never hardcode swarm locations.
+
+Use --switch for instant universe swaps.
+
+All agents, certs, and configs are relative to self.path_resolution["install_path"].
+
 ---
 ## Command-Line Toolkit
 
@@ -104,8 +190,7 @@ Lists all swarm universes and marks their processes as hot (in memory) or cold (
 Usage:
 
 ```Bash
-
-python3 site_ops/site_list.py
+  python3 site_ops/site_list.py
 ```
 ---
 ## Understanding Directives: The Blueprint of the Swarm
@@ -290,7 +375,7 @@ python3 site_ops/site_boot.py --universe ai --directive test-01
 Send a graceful but fatal signal to all agents in a Matrix universe.
 
 ```bash
-python3 site_ops/site_kill.py --universe ai --cleanup
+  python3 site_ops/site_kill.py --universe ai --cleanup
 ```
 
 #### Args:
@@ -307,7 +392,7 @@ python3 site_ops/site_kill.py --universe ai --cleanup
 ### List Swarm Activity
 
 ```bash
-python3 site_ops/site_list.py
+  python3 site_ops/site_list.py
 ```
 
 - Lists all `/matrix/{universe}` trees
@@ -350,7 +435,7 @@ MatrixSwarm now includes structured packet building, command dispatch, and auto-
 #### Build a .deb Package
 
 ```bash
-./make_deb.sh
+  ./make_deb.sh
 
 ### ⚡ Directives Made Easy
 
@@ -369,7 +454,7 @@ matrix_directive = {
 
 Place them in `boot_directives/`. Call them with:
 ```bash
---directive test-01
+  --directive test-01
 ```
 
 ---
@@ -401,14 +486,14 @@ This script automates SSL certificate creation for both HTTPS and WebSocket laye
 ### Usage
 
 ```bash
-./generate_certs.sh <server-ip-or-domain> [--name YourSwarmName]
+  ./generate_certs.sh <server-ip-or-domain> [--name YourSwarmName]
 ```
 
 #### Examples:
 
 ```bash
-./generate_certs.sh 192.168.1.100
-./generate_certs.sh matrix.yourdomain.com --name SwarmAlpha
+  ./generate_certs.sh 192.168.1.100
+  ./generate_certs.sh matrix.yourdomain.com --name SwarmAlpha
 ```
 
 ### Output
@@ -461,7 +546,6 @@ On first boot:
 - Sentinel, Commander, and all core agents are spawned
 - The live swarm tree appears
 - Logs start flowing into `/comm/`
-
 ---
 ## Agent Architecture + Tutorial
 
@@ -574,7 +658,7 @@ Use the MatrixSwarm GUI to:
 
 Launch the GUI:
 ```bash
-python3 gui/matrix_gui.py
+  python3 gui/matrix_gui.py
 ```
 ---
 
@@ -721,7 +805,7 @@ The Swarm is no longer silent.
 
 Our Discord relay agent is online and responding.  
 Come test the agents, submit lore, log a Codex entry, and witness the first autonomous system that talks back.
-[Join the Swarm](https://discord.com/invite/yPJyTYyq5F)
+[Join the Swarm](https://discord.gg/CyngHqDmku)
 
 ---
 
@@ -752,7 +836,7 @@ Send missions. I’ll respond.
 Read `CONTRIBUTING.md`, clone the repo, and pick a mission.
 
 ```bash
-git clone https://github.com/matrixswarm/matrixswarm.git
+  git clone https://github.com/matrixswarm/matrixswarm.git
 cd matrixswarm
 python3 bootloader.py
 ```
