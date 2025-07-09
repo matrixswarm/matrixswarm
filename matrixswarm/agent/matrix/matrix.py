@@ -4,8 +4,8 @@ import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
-#Authored by Daniel F MacDonald and ChatGPT aka The Generals
-#Gemini, doc-rocking the Swarm to perfection.
+# Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Gemini, doc-rocking the Swarm to perfection.
 # ╔════════════════════════════════════════════════════════╗
 # ║                   🧠 MATRIX AGENT 🧠                   ║
 # ║   Central Cortex · Tree Dispatcher · Prime Director    ║

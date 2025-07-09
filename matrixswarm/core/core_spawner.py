@@ -6,6 +6,7 @@ current_directory = os.path.dirname(os.path.abspath(__file__))  # Directory of t
 if current_directory not in sys.path:
     sys.path.insert(0, current_directory)
 
+
 import json
 import uuid
 import shutil
@@ -19,7 +20,13 @@ from matrixswarm.core.class_lib.logging.logger import Logger
 from matrixswarm.core.mixin.core_spawn_secure import CoreSpawnerSecureMixin
 from matrixswarm.core.mixin.ghost_vault import build_encrypted_spawn_env
 class CoreSpawner(CoreSpawnerSecureMixin):
-    def __init__(self, path_manager=None, site_root_path='/site/your_site_fallback_path', python_site=None, detected_python=None, install_path=None):
+    def __init__(self, path_manager=None,
+                       site_root_path='/site/your_site_fallback_path',
+                       python_site=None,
+                       detected_python=None,
+                       install_path=None
+
+                       ):
         super().__init__()
 
         pm = path_manager or PathManager(use_session_root=True, site_root_path=site_root_path)
@@ -47,7 +54,9 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         self.root_path = pm.get_path("root")
         self.comm_path = pm.get_path("comm")
         self.pod_path = pm.get_path("pod")
-        self.agent_path = pm.get_path("agent")
+        if install_path:
+            self.agent_path = os.path.join(str(install_path), "agent")
+
         self.site_root_path = pm.get_path("site_root_path")
         self.install_path = install_path
 
@@ -221,7 +230,6 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
             base_name = agent_name.split("_bp_")[0] if "_bp_" in agent_name else agent_name
             source_path = os.path.join(self.agent_path, base_name, f"{base_name}.py")
-            print(source_path)
             session_path = os.path.dirname(self.pod_path.rstrip("/"))
             archive_path = os.path.join(session_path, 'archive')
             os.makedirs(archive_path, exist_ok=True)

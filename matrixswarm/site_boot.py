@@ -1,17 +1,75 @@
-#!/usr/bin/env python3
 """
-MatrixSwarm Launcher – Smart Boot
+Authored by Daniel F MacDonald and ChatGPT aka The Generals
+Gemini, doc-rocking the Swarm to perfection.
 
-This tool:
-- Boots the MatrixSwarm AI universe.
-- Detects your current Python environment.
-- Injects the correct Python interpreter and site-packages path.
-- Allows manual override for edge cases or advanced users.
+MatrixSwarm Boot Loader: Initializes and launches a MatrixSwarm universe.
 
-Run with:
-  python site_boot.py --universe ai
-  python site_boot.py --universe ai --python-site /custom/site-packages
-  python site_boot.py --universe ai --python-bin /custom/bin/python3
+This script is the primary entry point for deploying and managing MatrixSwarm environments.
+It handles the initialization of new swarm workspaces, the booting of agent hierarchies based on
+a specified directive, and the management of swarm pointers for seamless workspace switching.
+
+The bootstrapper intelligently detects the Python environment to ensure that agents are
+spawned with the correct interpreter and dependencies. It is designed to be run from the
+command line and serves as the "ignition key" for the entire swarm.
+
+Key Features:
+- **Workspace Initialization**: Creates a new '.matrixswarm' workspace with the required
+  directory structure (`agent/`, `boot_directives/`, `certs/`) using the `--init` flag.
+- **Pointer System**: Manages a `.swarm` file that points to the active workspace,
+  allowing operators to control different swarms from any directory. The `--switch`
+  command updates this pointer.
+- **Directive-Based Booting**: Launches a swarm configuration defined in a Python
+  directive file from the `boot_directives/` directory.
+- **Environment Detection**: Automatically finds the appropriate Python executable and
+  site-packages directory to ensure agents run correctly. These can be overridden
+  with `--python-bin` and `--python-site`.
+- **Secure & Standard Boot**: Supports both encrypted and plaintext directives, with
+  encryption on by default for secure operations.
+
+Usage:
+  # Initialize a new .matrixswarm workspace in the current directory
+  python3 site_boot.py --init
+
+  # Initialize a workspace in a specific location
+  python3 site_boot.py --init --install-path /srv/matrixswarm/prod
+
+  # Switch the current directory to control a different workspace
+  python3 site_boot.py --switch /srv/matrixswarm/prod
+
+  # Boot a swarm universe using a specific directive
+  python3 site_boot.py --universe my_app --directive gatekeeper-demo
+
+  # Boot with verbose output and debugging enabled
+  python3 site_boot.py --universe my_app --directive test-01 --debug --verbose
+
+  # Override the Python interpreter for agent execution
+  python3 site_boot.py --universe my_app --python-bin /usr/bin/python3.9
+
+Arguments:
+    --universe (str): A unique ID for the swarm universe (e.g., "ai", "prod"). Required.
+    --directive (str): The name of the directive file from `boot_directives/`
+                       (without the .py extension). Defaults to "default".
+    --init (flag): When set, initializes a new .matrixswarm workspace and creates a
+                   `.swarm` pointer in the current directory.
+    --install-path (str): Specifies the directory to install the new .matrixswarm
+                          workspace. Used in conjunction with `--init`.
+    --switch (str): Points the `.swarm` file in the current directory to a different
+                    `.matrixswarm` workspace, making it the active target for commands.
+    --matrix-path (str): Specifies a `.matrixswarm` workspace to use for a single boot
+                         operation, overriding the `.swarm` pointer file.
+    --reboot (flag): If set, performs a "soft" reboot by killing existing universe
+                     processes before starting, instead of a full teardown.
+    --python-site (str): Overrides the auto-detected Python site-packages path.
+                         For advanced use cases.
+    --python-bin (str): Overrides the auto-detected Python interpreter binary. For
+                        advanced use cases.
+    --encrypted-directive (str): Path to an AES-GCM encrypted directive file.
+    --swarm_key (str): The Base64 encoded swarm key used to decrypt an encrypted
+                       directive.
+    --encryption-off (flag): Disables encryption for the boot session. Not recommended
+                             for production environments.
+    --debug (flag): Enables detailed debug logging for verbose diagnostic output.
+    --verbose (flag): Enables verbose printouts in the console.
 """
 import os
 import shutil
@@ -47,6 +105,15 @@ def matrixswarm_dirs_valid(base_path):
         base_path / ".matrix"
     ]
     return all(p.exists() for p in must_have)
+
+def find_swarm_pointer(start_path=None):
+    # Start from given path or current working dir
+    path = Path(start_path or Path.cwd()).resolve()
+    for parent in [path] + list(path.parents):
+        swarm_file = parent / ".swarm"
+        if swarm_file.exists():
+            return swarm_file
+    return None  # Not found
 
 def load_matrix_config(base_path):
     config_path = base_path / ".matrix"
@@ -225,8 +292,6 @@ def main():
 
     # === ARGUMENTS ===
     parser = argparse.ArgumentParser(description="MatrixSwarm Boot Loader", formatter_class=argparse.RawTextHelpFormatter)
-
-    parser = argparse.ArgumentParser(description="MatrixSwarm Boot Loader")
     parser.add_argument("--init", action="store_true", help="Initialize user directories and copy base files")
     parser.add_argument("--install-path", help="(For --init) Path to install .matrixswarm (default: alongside .venv)")
     parser.add_argument("--matrix-path", help="Use a different .matrixswarm location (default: alongside .venv)")
@@ -263,12 +328,13 @@ def main():
         print("[SWARM] You may now run matrixswarm-boot as normal from this directory.")
         sys.exit(0)
 
-    swarm_pointer = Path.cwd() / ".swarm"
-    if not swarm_pointer.exists():
-        print(f"[MatrixSwarm BOOT ABORTED]: Cannot find .swarm in {Path.cwd()}.")
+    swarm_pointer = find_swarm_pointer()
+    if not swarm_pointer:
+        print("Cannot find .swarm pointer anywhere up the directory tree.")
         sys.exit(1)
     with open(swarm_pointer) as f:
         matrix_path = Path(f.read().strip()).expanduser().resolve()
+
     if not (matrix_path / ".matrix").exists():
         print(f"[MatrixSwarm BOOT ABORTED]: Target path from .swarm ({matrix_path}) is missing .matrix.")
         print("This is not a valid MatrixSwarm workspace. Run --init to create one.")

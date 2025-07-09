@@ -409,7 +409,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
        """
         try:
             self.pre_boot()
-
             pm = PathManager(use_session_root=True, site_root_path=self.path_resolution["site_root_path"])
             cp = CoreSpawner(path_manager=pm)
             fail_success, self.boot_log = cp.get_boot_log(self.path_resolution["pod_path_resolved"])

@@ -168,18 +168,22 @@ Deploys a new MatrixSwarm universe.
 
 Arguments:
 
-| Argument                | Description                                                                 | Required |
-| ----------------------- | --------------------------------------------------------------------------- | -------- |
-| `--universe`            | A unique ID for the swarm universe (e.g., `ai`, `prod`).                    | ✅ Yes    |
-| `--directive`           | The name of the directive file from `boot_directives/` (no `.py`).          | ❌ No     |
-| `--reboot`              | If set, performs a soft reboot instead of a full teardown.                  | ❌ No     |
-| `--python-site`         | Overrides the Python site-packages path (advanced use).                     | ❌ No     |
-| `--python-bin`          | Overrides the Python interpreter binary (advanced use).                     | ❌ No     |
-| `--encrypted-directive` | Use an AES-GCM encrypted directive instead of plaintext.                    | ❌ No     |
-| `--swarm_key`           | Base64 swarm key used to decrypt the directive.                             | ❌ No     |
-| `--encryption-off`      | Turns encryption OFF for this boot session (not recommended in production). | ❌ No     |
-| `--debug`               | Enables debug logging for verbose diagnostic output.                        | ❌ No     |
-| `--verbose`             | Enables verbose printout in console (optional if `--debug` is used).        | ❌ No     |
+| Argument                | Description                                                                                 | Required |
+| ----------------------- | ------------------------------------------------------------------------------------------- | -------- |
+| `--universe`            | A unique ID for the swarm universe (e.g., ai, prod).                                        | Yes |
+| `--directive`           | The name of the directive file from boot_directives/ (no .py).                              | No |
+| `--init`                | Initialize a new .matrixswarm workspace and create .swarm pointer in the current directory. | No |
+| `--install-path`        | Directory to install the new .matrixswarm workspace (used with --init).                     | No |
+| `--switch`              | Point .swarm in the current directory to a different .matrixswarm workspace.                | No |
+| `--matrix-path`         | Use a specific .matrixswarm workspace for this boot. Overrides .swarm file.                 | No |
+| `--reboot`              | If set, performs a soft reboot instead of a full teardown.                                  | No |
+| `--python-site`         | Overrides the Python site-packages path (advanced use).                                     | No |
+| `--python-bin`          | Overrides the Python interpreter binary (advanced use).                                     | No |
+| `--encrypted-directive` | Use an AES-GCM encrypted directive instead of plaintext.                                    | No |
+| `--swarm_key`           | Base64 swarm key used to decrypt the directive.                                             | No |
+| `--encryption-off`      | Turns encryption OFF for this boot session (not recommended in production).                 | No |
+| `--debug`               | Enables debug logging for verbose diagnostic output.                                        | No |
+| `--verbose`             | Enables verbose printout in console (optional if --debug is used).                          | No |
 ```
 After termination, deletes all but the most recent boot directory.
 
@@ -297,7 +301,6 @@ Agents don’t talk through APIs; they communicate by creating and reading files
 - All coordination happens via `.json` and `.cmd` files
 - The live agent tree is tracked and pruned
 - Agents monitor each other — and if one goes silent, it is resurrected or replaced
-
 ---
 
  Why MatrixSwarm Agents Are Revolutionary:
@@ -335,9 +338,7 @@ That’s hot-swap mutation with memory — something Docker never dreams of.
 ---
 
 ## CLI CONTROL: MATRIX DEPLOYMENT PROTOCOL
-
 MatrixSwarm now comes with a **three-part terminal toolkit**:
-
 ---
 
 ### Deploy the Swarm – boots a new MatrixSwarm universe.
@@ -349,7 +350,7 @@ MatrixSwarm now comes with a **three-part terminal toolkit**:
 
 
 ```bash
-python3 site_ops/site_boot.py --universe ai --directive test-01
+  python3 site_ops/site_boot.py --universe ai --directive test-01
 ```
 
 #### Args:

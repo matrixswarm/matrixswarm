@@ -27,7 +27,6 @@ import json
 
 from matrixswarm.core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 
-
 SETTINGS_PATH = os.path.join("matrix_gui/config/settings.json")
 def load_last_host():
     try:
@@ -76,7 +75,6 @@ def run_in_thread(callback=None, error_callback=None):
             threading.Thread(target=thread_target, daemon=True).start()
         return wrapper
     return decorator
-
 
 #MATRIX_HOST = "https://147.135.68.135:65431/matrix" #put your own ip here, not mine
 CLIENT_CERT = ("https_certs/client.crt", "https_certs/client.key")  #certs go in the folder, on client and on server, read readme for instructions to generate
@@ -959,9 +957,9 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
                 self.status_label_matrix.setText("🔴 Disconnected")
 
 
-        except Exception:
+        except Exception as e:
             self.status_label_matrix.setText("🔴 Disconnected")
-
+            print(str(e))
         self.tree_stack.setCurrentIndex(1)  # Show tree
 
     def render_tree_to_gui(self, tree):
@@ -1391,8 +1389,9 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
                 self.status_label_matrix.setText("🟢 Matrix: Connected")
             else:
                 self.status_label_matrix.setText("🔴 Matrix: Disconnected")
-        except Exception:
+        except Exception as e:
             self.status_label_matrix.setText("🔴 Matrix: Disconnected")
+            print(str(e))
 
     def build_tree_panel(self):
         box = QGroupBox("🧠 Hive Tree View")

@@ -1,7 +1,5 @@
 import sys
 import os
-import requests
-import traceback
 import time
 import requests
 
@@ -79,6 +77,15 @@ class Agent(BootAgent):
                 area = props.get("areaDesc")
                 headline = props.get("headline")
                 issued = props.get("sent")
+                description = props.get("description", "")
+                instruction = props.get("instruction", "")
+
+                msg = f"{event} | {severity} | {area}\n📰 {headline}\n"
+                if description:
+                    msg += f"📖 {description}\n"
+                if instruction:
+                    msg += f"📢 {instruction}\n"
+                msg += f"📅 Issued: {issued}"
 
                 if alert_id not in self.last_alert_ids:
                     self.last_alert_ids.add(alert_id)
