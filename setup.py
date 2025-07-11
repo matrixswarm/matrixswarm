@@ -58,6 +58,7 @@ setup(
             'matrixswarm-boot=matrixswarm.site_boot:main',
             'matrixswarm-kill=matrixswarm.site_kill:main',
             'matrixswarm-list=matrixswarm.site_list:main',
+            'matrixswarm-gencerts=matrixswarm.tools.generate_certs:main',
         ],
     },
     python_requires='>=3.8',

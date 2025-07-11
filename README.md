@@ -487,7 +487,7 @@ This script automates SSL certificate creation for both HTTPS and WebSocket laye
 ### Usage
 
 ```bash
-  ./generate_certs.sh <server-ip-or-domain> [--name YourSwarmName]
+  matrixswarm-gencerts <server-ip-or-domain> [--name YourSwarmName]
 ```
 
 #### Examples:
