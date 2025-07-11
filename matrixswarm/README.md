@@ -110,9 +110,9 @@ Booting, Killing, Listing
 From anywhere, just:
 
 ```bash
-matrixswarm-boot --universe ai
-matrixswarm-kill --universe ai
-matrixswarm-list
+  matrixswarm-boot --universe ai
+  matrixswarm-kill --universe ai
+  matrixswarm-list
 (All commands look up the correct workspace via .swarm)
 ```
 Certs & Secure Ops:
@@ -184,6 +184,7 @@ Arguments:
 | `--encryption-off`      | Turns encryption OFF for this boot session (not recommended in production).                 | No |
 | `--debug`               | Enables debug logging for verbose diagnostic output.                                        | No |
 | `--verbose`             | Enables verbose printout in console (optional if --debug is used).                          | No |
+| `--show-path`           | Print active .matrixswarm path and exit                                                     | No |    
 ```
 After termination, deletes all but the most recent boot directory.
 
@@ -457,9 +458,7 @@ Place them in `boot_directives/`. Call them with:
 ```bash
   --directive test-01
 ```
-
 ---
-
 ### SiteOps Directory
 Everything lives under `site_ops/`:
 
@@ -467,12 +466,11 @@ Everything lives under `site_ops/`:
 - `site_kill.py` — Kill a Matrix
 - `site_list.py` — View all universes and activity
 
-
 #watch what agents are active
 python3 {root of files}/live_hive_watch.py
 ---
 
-## Certificate Generator: `generate_certs.sh`
+## Certificate Generator: matrixswarm-gencerts
 
 This script automates SSL certificate creation for both HTTPS and WebSocket layers of your MatrixSwarm deployment.
 
@@ -484,17 +482,26 @@ This script automates SSL certificate creation for both HTTPS and WebSocket laye
 - Issues WebSocket certs
 - Generates a GUI client certificate (used in secure UIs)
 
+matrixswarm-gencerts looks up your active .matrixswarm workspace (via .swarm pointer), and executes the embedded cert script from within your swarm workspace. All generated certs are stored in:
+
+```bash
+
+.matrixswarm/certs/
+├── https_certs/
+└── socket_certs/
+no need to manage the script manually — it’s embedded and copied on first init.
+```
+
 ### Usage
 
 ```bash
-  ./generate_certs.sh <server-ip-or-domain> [--name YourSwarmName]
+  matrixswarm-gencerts <server-ip-or-domain> [--name YourSwarmName]
 ```
 
 #### Examples:
 
 ```bash
-  ./generate_certs.sh 192.168.1.100
-  ./generate_certs.sh matrix.yourdomain.com --name SwarmAlpha
+  matrixswarm-gencerts matrix.yourdomain.com --name SwarmAlpha
 ```
 
 ### Output
@@ -574,7 +581,6 @@ Available to all agents:
 - `command_listener()` → reacts to `.cmd` files
 - `request_tree_slice_from_matrix()` → ask Matrix for updated subtree
 - `start_dynamic_throttle()` → load-aware pacing
-
 ---
 
 ### Filesystem Structure
