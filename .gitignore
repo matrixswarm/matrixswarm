@@ -97,4 +97,4 @@ deploy_directive.py
 comm/
 
 # Except this one
-!generate_certs.sh
+!generate_certs.sh.venv_fixed
