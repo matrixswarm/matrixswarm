@@ -94,7 +94,7 @@ class Agent(BootAgent):
                                 age = now - os.path.getmtime(tomb)
                                 self.log(f"[DEBUG] ⏱️ Tombstone '{tomb}' age: {age:.2f}s")
                                 tombstone_found = True
-                                if age >= 50:  # Change to 0 to force
+                                if age >= 300:  # Change to 0 to force
                                     tombstone_age_ok = True
                                     break
 

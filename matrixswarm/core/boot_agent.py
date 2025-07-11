@@ -37,6 +37,7 @@ from matrixswarm.core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
 from matrixswarm.core.tree_parser import TreeParser
 from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from Crypto.PublicKey import RSA as PyCryptoRSA
 
 class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin, GhostRiderUltraMixin, IdentityRegistryMixin):
     """The foundational class for all agents in the MatrixSwarm.
@@ -134,10 +135,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             exit()
 
         try:
-            self.matrix_priv_obj = serialization.load_pem_private_key(self.matrix_priv.encode(), password=None)
+            self.matrix_priv_obj = PyCryptoRSA.import_key(self.matrix_priv)
+            self.log("[BOOT] 🔐 Matrix private key imported via PyCryptodome for signature operations.")
         except Exception as e:
             self.matrix_priv_obj = None
-            self.log(f"[TRUST][WARN] Matrix private key invalid or placeholder", error=e, block="serialize_private_key")
+            self.log("[BOOT] ❌ Failed to convert Matrix private key to PyCrypto-compatible object", error=e)
             exit()
 
         # 🧬 Chain-of-trust determination

@@ -107,12 +107,18 @@ def matrixswarm_dirs_valid(base_path):
     return all(p.exists() for p in must_have)
 
 def find_swarm_pointer(start_path=None):
-    # Start from given path or current working dir
+    # 1. Look in CWD and parents (standard)
     path = Path(start_path or Path.cwd()).resolve()
     for parent in [path] + list(path.parents):
         swarm_file = parent / ".swarm"
         if swarm_file.exists():
             return swarm_file
+
+    # 2. Fallback to global pointer
+    global_swarm = Path.home() / ".matrixswarm_pointer"
+    if global_swarm.exists():
+        return global_swarm
+
     return None  # Not found
 
 def load_matrix_config(base_path):
@@ -128,10 +134,14 @@ def abort_boot(msg):
 SWARM_POINTER = ".swarm"
 
 def write_swarm_pointer(install_path):
-    """Write the .swarm file in the CWD with the path to .matrixswarm."""
-    with open(".swarm", "w") as f:
-        f.write(str(install_path))
-    print(f"[SWARM] Pointer file .swarm created, pointing to {install_path}")
+    cwd_pointer = Path.cwd() / ".swarm"
+    global_pointer = Path.home() / ".matrixswarm_pointer"
+
+    for path in [cwd_pointer, global_pointer]:
+        with open(path, "w") as f:
+            f.write(str(install_path))
+
+    print(f"[SWARM] Pointer written to: {cwd_pointer} and {global_pointer}")
 
 def find_matrixswarm_path(cli_path=None):
     # 1. CLI arg wins
@@ -246,9 +256,23 @@ def create_user_dirs_and_copy_bases(install_path=None):
     config_path = install_path / ".matrix"
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
+
+    #CERT TOOL COPY OVER
+    cert_tool_src = Path(__file__).resolve().parent / "tools" / "generate_certs.sh"
+    cert_tool_dst = install_path / "generate_certs.sh"
+
+    if cert_tool_src.exists() and not cert_tool_dst.exists():
+        shutil.copy(cert_tool_src, cert_tool_dst)
+        os.chmod(cert_tool_dst, 0o755)
+        print(f"   Copied generate_certs.sh → {cert_tool_dst}")
+    else:
+        print(f"   (Skipped generate_certs.sh, already exists or missing)")
+
+
     print(f"\n[MatrixSwarm INIT] Wrote directory map to {config_path}")
 
     print("\n[MatrixSwarm INIT] ✔ Done! All folders and config created.\n")
+
 
     write_swarm_pointer(install_path)
 
@@ -306,11 +330,19 @@ def main():
     parser.add_argument("--encryption-off", action="store_true", help="Turn encryption off for all agents")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--switch", help="Switch to a new .matrixswarm location and update .swarm pointer")
+    parser.add_argument("--show-path", action="store_true", help="Print active .matrixswarm path and exit")
 
     args, unknown = parser.parse_known_args()
 
     # Special: handle --init instantly
     if args.init:
+
+        current_dir = Path.cwd().resolve()
+        if ".matrixswarm" in current_dir.parts and current_dir.name == ".matrixswarm":
+            print("🚫 [INIT BLOCKED] You're currently inside an active .matrixswarm directory.")
+            print("    Please run --init from the parent project folder or home directory.")
+            sys.exit(1)
+
         create_user_dirs_and_copy_bases(args.install_path or args.matrix_path)
         print("User directories initialized. Exiting.")
         sys.exit(0)
@@ -334,6 +366,10 @@ def main():
         sys.exit(1)
     with open(swarm_pointer) as f:
         matrix_path = Path(f.read().strip()).expanduser().resolve()
+
+    if args.show_path:
+        print(f"Active .matrixswarm path: {matrix_path}")
+        sys.exit(0)
 
     if not (matrix_path / ".matrix").exists():
         print(f"[MatrixSwarm BOOT ABORTED]: Target path from .swarm ({matrix_path}) is missing .matrix.")

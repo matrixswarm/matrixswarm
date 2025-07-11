@@ -244,28 +244,11 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 "archive_path": archive_path
             }
 
-
-            if "_bp_" in agent_name:
-                base_name = agent_name.split("_bp_")[0]
-                session_path = path_dict["session_path"]
-
-                paths = [
-                    os.path.join(session_path, "boot_payload", agent_name, f"{agent_name}.py"),
-                    os.path.join(session_path, "boot_payload", base_name, f"{base_name}.py"),
-                    os.path.join(self.root_path, "boot_payload", agent_name, f"{agent_name}.py"),
-                    os.path.join(self.root_path, "boot_payload", base_name, f"{base_name}.py"),
-                    os.path.join(self.agent_path, base_name, f"{base_name}.py")  # ultimate fallback
-                ]
-
-                for p in paths:
-                    logger.log(f"[SPAWN-DEBUG] Boot check path: {p}")
-
-                for path in paths:
-                    if os.path.exists(path):
-                        source_path = path
-                        logger.log(f"Loaded agent: {agent_name} from: {source_path}")
-                        break
-
+            if not os.path.exists(source_path):
+                logger.log(f"[SPAWN-FAIL] Agent source not found at expected path: {source_path}")
+                raise RuntimeError(f"[SPAWN-FAIL] Missing agent source: {source_path}")
+            else:
+                logger.log(f"[SPAWN] ✅ Found source for {agent_name} at {source_path}")
 
             run_path = os.path.join(spawn_path, "run")
             vault_path = os.path.join(spawn_path, "vault")

@@ -191,6 +191,10 @@ class Agent(BootAgent):
             with open(tombstone_path, "w", encoding="utf-8") as f:
                 f.write("true")
 
+            death_warrent=self.tree_node.get('config',{}).get('death_warrent', False)
+            if death_warrent:
+                self.deliver_death_warrent(death_warrent)
+
             self.log(f"[DISPOSABLE-REAPER] Die cookie dropped & Tombstone dropped. Mission complete. Signing off.")
 
         except Exception as e:
@@ -243,6 +247,31 @@ class Agent(BootAgent):
             self.log(f"[DISPOSABLE-REAPER] PID Handler escalation complete for {universal_id}")
         except Exception as e:
             self.log(f"[DISPOSABLE-REAPER] PID Handler escalation FAILED for {universal_id}: {e}")
+
+    def deliver_death_warrent(self, signed_warrant):
+
+        try:
+
+            # request the agent_tree_master from Matrix
+            packet = self.get_delivery_packet("standard.command.packet", new=True)
+            packet.set_data({
+                "handler": "cmd_validate_warrant",
+                "agent_id": self.command_line_args["universal_id"],
+                "content": {  # ✅ wrap inside content
+                    "agent_id": self.command_line_args["universal_id"],
+                    "warrant": signed_warrant
+                },
+                "timestamp": time.time(),
+                "origin": self.command_line_args["universal_id"]
+            })
+            self.pass_packet(packet, "matrix")
+
+            self.log("[REAPER] 🕊 Death warrant dispatched to Matrix for post-mission validation.")
+
+        except Exception as e:
+            self.log(f"Sync request failed: {e}")
+
+
 
     def send_mission_report(self, results):
         """

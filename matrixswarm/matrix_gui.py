@@ -356,7 +356,6 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
                 return
 
-
             else:
 
                 if isinstance(msg_type, str):
@@ -1081,7 +1080,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
         try:
             # Load .py source and hash
-            with open(file_name, "rb", encoding="utf-8") as f:
+            with open(file_name, "rb") as f:
                 code = f.read()
                 encoded = base64.b64encode(code).decode("utf-8")
                 file_hash = hashlib.sha256(code).hexdigest()
@@ -1096,8 +1095,6 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             # Fallback to filename if no tree mapping
             if not base_name:
                 base_name = os.path.basename(file_name).replace(".py", "")
-
-            suffix = self.random_suffix(5)
 
             # Generate randomized hot swap ID
             suffix = self.random_suffix(5)
@@ -1125,9 +1122,13 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
             # ⚡ Universal ID: GUI input or fallback to randomized
             universal_id = self.input_universal_id.text().strip() or randomized_name
-            deploy_data["universal_id"] = target_uid
+            if self.agent_tree_flat.get(target_uid):
+                deploy_data["name"] = target_uid  # use existing name
+            else:
+                suffix = self.random_suffix(5)
+                deploy_data["name"] = f"{base_name}_bp_{suffix}"
 
-            # 🧠 Inject encoded source and SHA256
+                # 🧠 Inject encoded source and SHA256
             deploy_data["source_payload"] = {
                 "payload": encoded,
                 "sha256": file_hash

@@ -16,6 +16,7 @@ class Agent(BootAgent):
     def __init__(self):
         super().__init__()
         self.name = "StormCrow"
+
         self._initialized_from_tree = False
         self._private_config = self.tree_node.get("config", {})
 

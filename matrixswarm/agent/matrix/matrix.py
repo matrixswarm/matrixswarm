@@ -38,6 +38,7 @@ import threading
 import hashlib
 import json
 import base64
+import secrets
 from datetime import datetime
 from Crypto.PublicKey import RSA
 
@@ -46,10 +47,11 @@ from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.tree_parser import TreeParser
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
+from Crypto.PublicKey import RSA as PyCryptoRSA
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from matrixswarm.core.agent_factory.reaper.reaper_factory import make_reaper_node
 from matrixswarm.core.agent_factory.scavenger.scavenger_factory import make_scavenger_node
-
+from matrixswarm.core.utils.crypto_utils import generate_signed_payload, verify_signed_payload
 class Agent(BootAgent):
     """The root agent and central authority of the MatrixSwarm.
     As the first agent spawned by the bootloader, the Matrix agent acts as
@@ -483,6 +485,58 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main_try")
 
+    def cmd_validate_warrant(self, content, packet, identity:IdentityObject = None):
+
+        try:
+            self.log(f"[WARRANT][DEBUG] Received packet content: {json.dumps(content, indent=2)}")
+            content = packet.get("content", {})
+            warrant = content.get("warrant")
+            agent_id = content.get("agent_id")
+
+            if not agent_id or not warrant:
+                self.log("[WARRANT] ❌ Missing required warrant fields.")
+                return
+
+            # Step 1: Verify signature
+            payload = warrant.get("payload")
+            signature = warrant.get("signature")
+
+            try:
+                pubkey_obj = PyCryptoRSA.import_key(self.matrix_pub)
+                verify_signed_payload(payload, signature, pubkey_obj)
+            except Exception as e:
+                self.log(f"❌ Invalid signature on warrant for {agent_id}", error=e)
+                return
+
+            # Step 2: Confirm agent ID match
+            if payload["universal_id"] != agent_id:
+                self.log(f"[WARRANT] ❌ Mismatched universal_id in warrant: {payload['universal_id']} != {agent_id}")
+                return
+
+            # Step 3: Match against in-memory agent
+            tp = self.get_agent_tree_master()
+            if not tp:
+                self.log("[UPDATE_AGENT][ERROR] Failed to load tree.")
+                return
+
+            tree_node = tp.get_node(agent_id)
+            if not tree_node:
+                self.log(f"[WARRANT] ⚠️ No agent found in tree for {agent_id}")
+                return
+
+            node_warrant = tree_node.get("config", {}).get("death_warrent", {})
+            if warrant.get("death_id") != node_warrant.get("death_id"):
+                self.log(f"[WARRANT] ❌ Death ID mismatch for {agent_id}")
+                return
+
+            # Step 4: Delete from tree
+            self.log(f"[WARRANT] ✅ Death warrant validated. Removing node: {agent_id}")
+            tp.remove_exact_node(tree_node)
+            self.save_agent_tree_master()
+
+        except Exception as e:
+            self.log("[WARRANT][ERROR] Warrant processing failed", error=e)
+
     def cmd_agent_status_report(self, content, packet, identity:IdentityObject = None):
 
         uid = content.get("target_universal_id")
@@ -615,90 +669,102 @@ class Agent(BootAgent):
             packet (dict): The raw packet data.
             identity (IdentityObject): The verified identity of the command sender.
         """
-        new_agent = content.get("new_agent", {})
-        src = new_agent.get("source_payload")
 
-        target_uid = content.get("target_universal_id")
+        try:
+            new_agent = content.get("new_agent", {})
+            src = new_agent.get("source_payload")
 
-        if not target_uid:
-            self.log("[REPLACE] Missing 'target_universal_id'. Cannot dispatch Reaper.")
-            return
+            target_uid = content.get("target_universal_id")
 
-        if target_uid == "matrix":
-            self.log("[REPLACE] Cannot target Matrix for self-replacement. Operation aborted.")
-            return
-
-        #REPLACE AGENT
-        if src:
-            try:
-                decoded = base64.b64decode(src["payload"]).decode()
-                sha_check = hashlib.sha256(decoded.encode()).hexdigest()
-
-                if sha_check != src["sha256"]:
-                    self.log(f"[REPLACE] ❌ SHA-256 mismatch. Payload rejected.")
-                    return
-
-                agent_name = new_agent["name"]
-                payload_dir = os.path.join(self.path_resolution["root_path"], "boot_payload", agent_name)
-                os.makedirs(payload_dir, exist_ok=True)
-
-                file_path = os.path.join(payload_dir, f"{agent_name}.py")
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(decoded)
-
-                self.log(f"[REPLACE] ✅ Payload source installed to {file_path}")
-
-            except Exception as e:
-                self.log(msg="❌ Failed to install source payload", error=e, block="replace-agent")
+            if not target_uid:
+                self.log("[REPLACE] Missing 'target_universal_id'. Cannot dispatch Reaper.")
                 return
 
-        if not self._validate_or_prepare_agent(new_agent):
-            self.log("[REPLACE] ❌ Validation or prep failed. Replacement skipped.")
-            return
+            if target_uid == "matrix":
+                self.log("[REPLACE] Cannot target Matrix for self-replacement. Operation aborted.")
+                return
 
-        if not self._handle_replace_agent(content):
-            self.log("[REPLACE] ❌ Replacement failed. Tree untouched. Aborting Reaper dispatch.")
-            return
+            #REPLACE AGENT
+            if src:
+                try:
+                    decoded = base64.b64decode(src["payload"]).decode()
+                    sha_check = hashlib.sha256(decoded.encode()).hexdigest()
 
-        # 🎯 Gather kill list and full field set
-        kill_list = [target_uid]
-        universal_ids = {target_uid: target_uid}
+                    if sha_check != src["sha256"]:
+                        self.log(f"[REPLACE] ❌ SHA-256 mismatch. Payload rejected.")
+                        return
 
-        # Pull optional flags from new_agent["source_payload"] or agent config
-        reaper_config = new_agent.get("reaper", {})
-        tombstone_comm = reaper_config.get("tombstone_comm", True)
-        tombstone_pod = reaper_config.get("tombstone_pod", True)
-        cleanup_die = reaper_config.get("cleanup_die", True)
-        delay = reaper_config.get("delay", 2)
+                    agent_name = new_agent["name"]
+                    #creates the directory of the new agent: {somepath}/.matrixswarm/agent/{agent_name}
+                    agent_dir = os.path.join(self.path_resolution["agent_path"], agent_name)
+                    os.makedirs(agent_dir, exist_ok=True)
 
-        # 🛠 Create reaper node with full config
-        reaper_node = make_reaper_node(
-            kill_list,
-            universal_ids,
-            tombstone_comm=tombstone_comm,
-            tombstone_pod=tombstone_pod,
-            delay=delay,
-            cleanup_die=cleanup_die,
-            is_mission=True
+                    agent_path = os.path.join(agent_dir, f"{agent_name}.py")
+                    with open(agent_path, "w", encoding="utf-8") as f:
+                        f.write(decoded)
 
-        )
+                    self.log(f"[REPLACE] ✅ Live agent source written to {agent_path}")
 
-        # Inject Reaper
-        reaper_packet = {
-            "target_universal_id": "matrix",
-            "subtree": reaper_node
-        }
+                except Exception as e:
+                    self.log(msg="❌ Failed to install source payload", error=e, block="replace-agent")
+                    return
 
-        reaper_result = self._cmd_inject_agents(reaper_packet, packet)
+            if not self._validate_or_prepare_agent(new_agent):
+                self.log("[REPLACE] ❌ Validation or prep failed. Replacement skipped.")
+                return
 
-        if reaper_result.get("status") == "success":
-            self.log(f"[DELETE] ✅ Reaper injected: {reaper_node['universal_id']}")
-        else:
-            self.log(f"[DELETE] ❌ Reaper injection failed: {reaper_result.get('message')}")
+            if not self._handle_replace_agent(content):
+                self.log("[REPLACE] ❌ Replacement failed. Tree untouched. Aborting Reaper dispatch.")
+                return
 
-        self.delegate_tree_to_agent("matrix", self.tree_path_dict)
+            # 🎯 Gather kill list and full field set
+            kill_list = [target_uid]
+            universal_ids = {target_uid: target_uid}
 
-        self.log(f"[REPLACE] 🧨 Reaper dispatched for {kill_list} with pod={tombstone_pod}, comm={tombstone_comm}, cleanup_die={cleanup_die}")
+            # 🛠 Create reaper node with full config
+            reaper_node = make_reaper_node(
+                kill_list,
+                universal_ids,
+                tombstone_comm=True,
+                tombstone_pod=True,
+                delay=4,
+                cleanup_die=True,
+                is_mission=True,
+            )
+
+            #when reaper self-bye-byes, he will drop this in death_warrent.json and Matrix will verify and
+            #remove from tree
+            death_id = secrets.token_hex(16)  # or uuid4().hex
+            warrant_payload = {
+                "universal_id": reaper_node["universal_id"],
+                "death_id": death_id,
+                "timestamp": time.time(),
+                "reason": "mission_complete"
+            }
+
+            signed_warrant = generate_signed_payload(warrant_payload, self.matrix_priv_obj)
+
+            reaper_node['config']['death_warrent'] = signed_warrant
+
+            # Inject Reaper
+            reaper_packet = {
+                "target_universal_id": "matrix",
+                "subtree": reaper_node
+            }
+
+            reaper_result = self._cmd_inject_agents(reaper_packet, packet)
+
+            if reaper_result.get("status") == "success":
+                self.log(f"[DELETE] ✅ Reaper injected: {reaper_node['universal_id']}")
+            else:
+                self.log(f"[DELETE] ❌ Reaper injection failed: {reaper_result.get('message')}")
+
+            self.delegate_tree_to_agent("matrix", self.tree_path_dict)
+
+            self.log(f"[REPLACE] 🧨 Reaper dispatched for {kill_list}")
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
     def _handle_replace_agent(self, content):
         old_id = content.get("target_universal_id")
@@ -774,7 +840,6 @@ class Agent(BootAgent):
             self.log(f"[REPLACE] ⚠️ No valid fields were updated for agent '{old_id}'. Replace aborted.")
 
     def _validate_or_prepare_agent(self, new_agent):
-
         self.log(f"[DEBUG] _validate_or_prepare_agent() received: {json.dumps(new_agent, indent=2)}")
 
         agent_name = new_agent.get("name")
@@ -782,13 +847,6 @@ class Agent(BootAgent):
             self.log("[REPLACE-VALIDATE] ❌ Missing agent 'name'.")
             return False
 
-        required_fields = ["name"]
-        for key in required_fields:
-            if key not in new_agent:
-                self.log(f"[REPLACE-VALIDATE] ❌ Missing required field: '{key}'")
-                return False
-
-        # Check standard agent path
         agent_dir = os.path.join(self.path_resolution["agent_path"], agent_name)
         entry_file = os.path.join(agent_dir, f"{agent_name}.py")
 
@@ -796,21 +854,7 @@ class Agent(BootAgent):
             self.log(f"[REPLACE-VALIDATE] ✅ Agent source verified: {entry_file}")
             return True
 
-        # Check boot payload directory
-        boot_payload_dir = os.path.join(self.path_resolution["root_path"], "boot_payload", agent_name)
-        boot_payload_file = os.path.join(boot_payload_dir, f"{agent_name}.py")
-
-        if os.path.exists(boot_payload_file):
-            self.log(f"[REPLACE-VALIDATE] ✅ Boot-payload source verified: {boot_payload_file}")
-            return True
-
-        # Check for install payload
-        payload_path = os.path.join(self.path_resolution["payload_path"], f"{agent_name}_install.pkg")
-        if os.path.exists(payload_path):
-            self.log(f"[REPLACE-VALIDATE] 💾 Agent source missing but install payload found: {payload_path}")
-            return False
-
-        self.log(f"[REPLACE-VALIDATE] ❌ No source and no install payload for '{agent_name}'. Replace aborted.")
+        self.log(f"[REPLACE-VALIDATE] ❌ No source found at {entry_file}. Replace aborted.")
         return False
 
     def cmd_update_agent(self, content, packet, identity:IdentityObject = None):
@@ -1052,7 +1096,6 @@ class Agent(BootAgent):
         try:
             success = False
 
-
             #SUBTREE_INJECTION
             if subtree:
 
@@ -1095,7 +1138,6 @@ class Agent(BootAgent):
                             ret["status"] = "success"
                             ret["message"] = f"Agent already existed — config partially updated for {universal_id}"
                             return ret
-
 
                     success = bool(len(injected_ids))
                     if not success:
@@ -1150,11 +1192,6 @@ class Agent(BootAgent):
                     success=True
 
             if success:
-
-                try:
-                    tp.assign_identity_to_all_nodes(self.matrix_priv)
-                except Exception as e:
-                    self.log(error=e, block="assign_pub_priv_keys")
 
                 self.save_agent_tree_master()
 
@@ -1347,7 +1384,7 @@ class Agent(BootAgent):
                 "name": "agent_tree.json"
             }
 
-            data = {"agent_tree": subtree, 'services': tp.get_service_managers(universal_id)}
+            data = {"agent_tree": subtree, 'services': tp.get_minimal_services_tree(universal_id)}
 
             football = self.get_football(type=self.FootballType.PASS)
             football.load_identity_file(vault=subtree.get("vault"), universal_id=universal_id)

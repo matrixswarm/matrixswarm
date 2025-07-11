@@ -107,3 +107,26 @@ def verify_identity_token(token: dict, matrix_pub_key_obj):
         return True, "Valid"
     except Exception as e:
         return False, f"Invalid: {e}"
+
+def verify_signed_payload(payload: dict, signature_b64: str, pub_key_obj) -> bool:
+
+    digest = SHA256.new(json.dumps(payload, sort_keys=True).encode())
+    signature = base64.b64decode(signature_b64)
+    pkcs1_15.new(pub_key_obj).verify(digest, signature)
+
+def generate_signed_payload(payload: dict, priv_key_obj) -> dict:
+    """
+    Returns a signed payload dictionary.
+    Structure:
+    {
+        "payload": {...},
+        "signature": "base64...",
+    }
+    """
+    serialized = json.dumps(payload, sort_keys=True).encode()
+    digest = SHA256.new(serialized)
+    signature = pkcs1_15.new(priv_key_obj).sign(digest)
+    return {
+        "payload": payload,
+        "signature": base64.b64encode(signature).decode()
+    }

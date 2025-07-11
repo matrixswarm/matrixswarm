@@ -207,6 +207,8 @@ class TreeParser(LogMixin):
 
         parent_node.setdefault(self.CHILDREN_KEY, []).append(new_node)
 
+        self._parse_nodes(self.root)
+
         return list(self._added_nodes)
 
     @staticmethod
@@ -678,8 +680,11 @@ class TreeParser(LogMixin):
         It calls `assign_identity_token_to_node` for every agent in the tree,
         which is the foundation of secure communication within the swarm.
         """
-        for uid in self.nodes:
-            self.assign_identity_token_to_node(uid, matrix_priv_obj, encryption_enabled, force=force)
+
+        for node in self.walk_tree(self.root):
+            uid = node.get("universal_id")
+            if uid:
+                self.assign_identity_token_to_node(uid, matrix_priv_obj, encryption_enabled, force=force)
 
     def assign_identity_token_to_node(self, uid, matrix_priv_obj, encryption_enabled=True, force=False, replace_keys:dict={}):
         """
@@ -691,7 +696,7 @@ class TreeParser(LogMixin):
         3. Signs this token with the master Matrix private key, creating a verifiable chain of trust.
         4. Stores the new keys and the signed token in the node's `vault`.
         """
-        node = self.nodes.get(uid)
+        node = self.get_node(uid)
         if not node:
             print(f"[ASSIGN-ID] ❌ No node found for UID: {uid}")
             raise RuntimeError(f"[ASSIGN-ID] ❌ No node found for UID: {uid}")
@@ -792,3 +797,27 @@ class TreeParser(LogMixin):
                 if (processed_child := self.strip_disabled_nodes(child)) is not None
             ]
         return node
+
+    def get_minimal_services_tree(self, root_universal_id=None):
+        """
+        Returns a stripped-down list of all service-manager-enabled nodes
+        in the tree, excluding the node with universal_id == root_universal_id.
+        Preserves only: name, universal_id, and config.service-manager.
+        """
+        minimal_tree = []
+
+        for node in self.walk_tree(self.root):
+            if root_universal_id and node.get("universal_id") == root_universal_id:
+                continue  # ❌ Skip the excluded node
+
+            config = node.get("config", {})
+            if config.get("service-manager"):
+                minimal_tree.append({
+                    "name": node.get("name"),
+                    "universal_id": node.get("universal_id"),
+                    "config": {
+                        "service-manager": config["service-manager"]
+                    }
+                })
+
+        return minimal_tree

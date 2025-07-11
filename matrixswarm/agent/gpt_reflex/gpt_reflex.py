@@ -13,28 +13,34 @@ class Agent(BootAgent):
     def __init__(self):
         super().__init__()
 
-        config = self.tree_node.get("config", {})
-        self.api_key = config.get("api_key", os.getenv("OPENAI_API_KEY"))
-        self.model = config.get("model", "gpt-4")
-        self.universal_id = self.command_line_args.get("universal_id", "gpt-reflex")
-        self.inbox = Template(self.path_resolution["incoming_path_template"]).substitute(universal_id=self.universal_id)
-        self.outbox = os.path.join(self.path_resolution["comm_path"], self.universal_id, "outbox")
-        self.replies = os.path.join(self.path_resolution["comm_path"], self.universal_id, "replies")
-        self.queue = os.path.join(self.path_resolution["comm_path"], self.universal_id, "queue")
-        self.matrix_inbox = Template(self.path_resolution["incoming_path_template"]).substitute(universal_id="matrix")
-        os.makedirs(self.inbox, exist_ok=True)
-        os.makedirs(self.outbox, exist_ok=True)
-        os.makedirs(self.replies, exist_ok=True)
-        os.makedirs(self.queue, exist_ok=True)
-        os.makedirs(self.inbox, exist_ok=True)
-        os.makedirs(self.outbox, exist_ok=True)
+        try:
+            config = self.tree_node.get("config", {})
+            self.api_key = config.get("api_key", os.getenv("OPENAI_API_KEY"))
+            self.model = config.get("model", "gpt-4")
+            self.universal_id = self.command_line_args.get("universal_id", "gpt-reflex")
+            self.inbox = Template(self.path_resolution["incoming_path_template"]).substitute(universal_id=self.universal_id)
+            self.outbox = os.path.join(self.path_resolution["comm_path"], self.universal_id, "outbox")
+            self.replies = os.path.join(self.path_resolution["comm_path"], self.universal_id, "replies")
+            self.queue = os.path.join(self.path_resolution["comm_path"], self.universal_id, "queue")
+            self.matrix_inbox = Template(self.path_resolution["incoming_path_template"]).substitute(universal_id="matrix")
+            os.makedirs(self.inbox, exist_ok=True)
+            os.makedirs(self.outbox, exist_ok=True)
+            os.makedirs(self.replies, exist_ok=True)
+            os.makedirs(self.queue, exist_ok=True)
+            os.makedirs(self.inbox, exist_ok=True)
+            os.makedirs(self.outbox, exist_ok=True)
 
-        if not self.api_key:
-            self.log("[GPT][ERROR] No OPENAI_API_KEY found in environment.")
-        self.client = OpenAI(api_key=self.api_key)
+            if not self.api_key:
+                self.log("[GPT][ERROR] No OPENAI_API_KEY found in environment.")
+            self.client = OpenAI(api_key=self.api_key)
 
-        self.log(f"[GPT][BOOT] Inbox path: {self.inbox}")
-        self.log(f"[GPT][BOOT] Outbox path: {self.outbox}")
+            self.log(f"[GPT][BOOT] Inbox path: {self.inbox}")
+            self.log(f"[GPT][BOOT] Outbox path: {self.outbox}")
+
+        except Exception as e:
+            self.log(error=e, block="main-try")
+
+
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
         self.log("[GPT][DEBUG] Entered worker() loop.")

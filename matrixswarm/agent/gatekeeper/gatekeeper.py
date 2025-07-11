@@ -17,7 +17,6 @@ class Agent(BootAgent):
     def __init__(self):
         super().__init__()
         self.name = "Gatekeeper"
-
         cfg = self.tree_node.get("config", {})
 
         if os.path.exists("/var/log/secure"):
@@ -32,7 +31,15 @@ class Agent(BootAgent):
         self.always_alert = bool(cfg.get("always_alert", 1))
         self.cooldown_sec = 300
         self.last_alerts = {}
-        self.mmdb_path = os.path.join(self.path_resolution["site_root_path"], "maxmind", self.maxmind_db)
+
+        cfg_db = str(cfg.get("maxmind_db", "")).strip()
+
+        # If it's an absolute path or a path relative to install_path
+        if cfg_db and os.path.isfile(cfg_db):
+            self.mmdb_path = cfg_db
+        else:
+            self.mmdb_path = os.path.join(self.path_resolution["install_path"], "maxmind", "GeoLite2-City.mmdb")
+
         self.log_dir = os.path.join(self.path_resolution["comm_path"], "gatekeeper")
         os.makedirs(self.log_dir, exist_ok=True)
 

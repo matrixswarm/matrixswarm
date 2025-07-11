@@ -1,20 +1,5 @@
 [
   {
-    "pair": "BTC/USDT",
-    "threshold": 110500.0,
-    "cooldown": 300,
-    "active": true,
-    "name": "Captain Howdy Price Change",
-    "trigger_type": "price_above",
-    "type": "price_above",
-    "exchange": "coingecko",
-    "poll_interval": 60,
-    "notify": [
-      "gui"
-    ],
-    "universal_id": "crypto-btcusdt-5c6826"
-  },
-  {
     "pair": "ETH/USDT",
     "threshold": 2800.0,
     "cooldown": 300,
@@ -28,5 +13,20 @@
       "gui"
     ],
     "universal_id": "crypto-14e47d"
+  },
+  {
+    "pair": "BTC/USDT",
+    "threshold": 118000.0,
+    "cooldown": 300,
+    "active": true,
+    "name": "New Price Change Above",
+    "trigger_type": "price_change_above",
+    "type": "price_change_above",
+    "exchange": "coingecko",
+    "poll_interval": 60,
+    "notify": [
+      "gui"
+    ],
+    "universal_id": "crypto-ad6e02"
   }
 ]
