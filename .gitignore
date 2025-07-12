@@ -31,8 +31,6 @@ maxmind/*.mmdb
 
 
 # Python system files
-__pycache__/
-*.py[cod]
 *.pyo
 *.pyd
 
@@ -40,7 +38,6 @@ __pycache__/
 env/
 venv/
 ENV/
-Lib/
 Scripts/
 Include/
 matrixswarm.egg-info/
@@ -48,8 +45,6 @@ bin/
 *.exe
 
 # Certificates and private keys
-*.crt
-*.key
 *.cmd
 *.log
 
@@ -64,37 +59,28 @@ bin/
 .idea/
 .vscode/
 
+.venv_fixed/
+
 # Matrix runtime
 comm/certs/*.csr
 certs/*.srl
 *.zipx
 To OpenAI.txt
-*.zip
-*.zipx
-*.tar.gz
 *.sj
-*.sh
 *.bak
 
 # TLS certs
-socket_certs/
-https_certs/
-*.crt
-*.key
-*.csr
 *.srl
 
 # Swarm logs and runtime traces
 comm/**/logs/
-*.log
 agent.log
 
 # Deploy/test junk
-*.bak
-*.sh
-deploy_directive.py
 # MatrixSwarm runtime data
-comm/
 
 # Except this one
 !generate_certs.sh.venv_fixed
+matrixswarm.egg-info
+.venv_fixed
+.venv

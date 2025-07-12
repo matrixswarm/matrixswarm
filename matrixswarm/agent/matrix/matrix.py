@@ -158,13 +158,27 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main_try")
 
-    import os
-    import sys
-
     def comm_directory_watcher(self):
-        """Watches the root /comm directory for new agent folders."""
-        print("[COMM-WATCHER] Watching /comm/ for new agents...")
 
+        """Monitors the root /comm directory to automatically provision new agents.
+
+        This method runs in a background thread and provides a powerful way
+        to auto-provision agents. Its primary purpose is to ensure that any
+        new agent whose communication directory appears in the swarm is
+        immediately provided with its necessary configuration.
+
+        When a new subdirectory is created in the `/comm` path (which happens
+        when a new agent is spawned), this watcher detects it and automatically
+        calls `delegate_tree_to_agent`. This provides the new agent with its
+        personalized `agent_tree.json` directive slice, a critical step for
+        the agent to become fully operational.
+
+        It uses the highly efficient `inotify` library on Linux systems for
+        real-time event detection and gracefully falls back to a polling
+        mechanism on other operating systems like Windows.
+        """
+
+        print("[COMM-WATCHER] Watching /comm/ for new agents...")
         # Linux inotify
         if os.name == "posix":
             try:
@@ -294,6 +308,27 @@ class Agent(BootAgent):
 
 
     def _cmd_delete_agent(self, content, packet):
+        """Contains the core implementation for decommissioning an agent and its subtree.
+
+        This private method executes the multi-step process for safely and completely
+        removing an agent from the swarm. It is called by the public-facing
+        `cmd_delete_agent` handler.
+
+        The process includes:
+        1. Marking the target node and all its children as "deleted" in the master tree.
+        2. Saving the updated tree to persist this change.
+        3. Calling `drop_hit_cookies` to signal the live agents to terminate.
+        4. Injecting a 'reaper' agent to forcefully terminate any lingering processes.
+        5. Injecting a 'scavenger' agent to clean up the pod/comm directories.
+
+        Args:
+            content (dict): The command payload, requiring a 'target_universal_id'.
+            packet (dict): The raw packet data.
+
+        Returns:
+            dict: A result dictionary summarizing the outcome of the operation,
+                  including the status, kill list, and error messages.
+        """
         result = {
             "status": "error",
             "error_code": 99,
@@ -380,7 +415,17 @@ class Agent(BootAgent):
 
 
     def drop_hit_cookies(self, kill_list):
+        """Places a 'hit.cookie' file in each target agent's directory.
 
+        This helper method acts as a signaling mechanism for termination. It does not
+        kill the process itself but leaves a signal file. A patrolling 'reaper'
+        agent continuously scans the swarm for these cookies. Upon finding one,
+        the reaper knows it has a new target to terminate.
+
+        Args:
+            kill_list (list): A list of universal_ids for the agents to be
+                marked for termination.
+        """
         for agent in kill_list:
 
             cookie_path = os.path.join(self.path_resolution["comm_path"], agent, "hello.moto", "hit.cookie")
@@ -424,29 +469,34 @@ class Agent(BootAgent):
             self.log(error=e, block="main_try")
 
     def cmd_deletion_confirmation(self, content, packet, identity: IdentityObject = None):
+        """Processes a confirmation that an agent's resources have been cleaned up.
 
+        This handler is typically called by a 'scavenger' agent after it has
+        successfully removed the pod and comm directories of a deleted agent.
+        Its purpose is to mark the agent as fully decommissioned in the master
+        agent tree, providing a final state for forensic and operational history.
+
+        Args:
+            content (dict): The command payload, expecting a 'universal_id'
+                of the agent whose deletion is being confirmed.
+            packet (dict): The raw packet data.
+            identity (IdentityObject): The verified identity of the command sender,
+                which should be the scavenger agent.
+        """
         try:
             uid = content.get("universal_id")
             if not uid:
                 self.log("Missing universal_id in confirmation.", block="deletion-confirm")
                 return
 
-            good = True
-            self.log(f"Confirming deletion of {uid}", block="deletion-confirm")
+            # Security check to ensure the confirmation comes from a trusted source
+            is_trusted_source = True # Default to true if encryption is off
+            if identity and identity.is_encryption_enabled():
+                if not identity.has_verified_identity() or identity.get_sender_uid() != 'scavenger-keeper':
+                    is_trusted_source = False
 
-            if identity:
-                if (not identity.is_encryption_enabled() or
-                    not identity.has_verified_identity() or
-                    not (identity.get_sender_uid() == 'scavenger-keeper')):
-                    good = False
-
-                if not identity.is_encryption_enabled():
-                    good = True
-
-            if good:
-
+            if is_trusted_source:
                 self.log(f"[CONFIRM-DELETE] ✅ Confirmed deletion from: {uid}")
-
                 tp = self.get_agent_tree_master()
                 if not tp:
                     self.log("[CONFIRM-DELETE][ERROR] Failed to load agent_tree_master")
@@ -454,42 +504,38 @@ class Agent(BootAgent):
 
                 node = tp.get_node(uid)
                 if node:
-                    node['confirmed_deleted'] = True  # or 'confirmed': 'deleted'
+                    node['confirmed_deleted'] = True
                     self.log(f"[CONFIRM-DELETE] ⛔ Node {uid} marked confirmed_deleted")
-
-                    # Walk up and check parents
-                    parent = tp.find_parent_of(uid)
-                    while parent:
-                        children = parent.get("children", [])
-                        if all(c.get("confirmed_deleted") for c in children):
-                            parent['confirmed_deleted'] = True
-                            self.log(f"[CONFIRM-DELETE] ⛔ Parent {parent['universal_id']} also marked confirmed_deleted")
-                            parent = tp.find_parent_of(parent["universal_id"])
-                        else:
-                            break
-
                     self.save_agent_tree_master()
-
-                    #If desired, you could delete the agent_tree node, but at this time
-                    #it might be better to just leave it for forensics
-                    # Optional cleanup: prune all confirmed_deleted leaf nodes
-                    removed = True
-                    #while removed:
-                        #removed_nodes = tp.remove_nodes(lambda node: node.get("confirmed_deleted") and not node.get("children"))
-                        #removed = bool(removed_nodes)
-                    #    if removed:
-                            #self.log(f"[CONFIRM-DELETE] 🪓 Pruned {len(removed_nodes)} confirmed-deleted leaf nodes.")
-                            #self.save_agent_tree_master()
-                    #        pass
+            else:
+                self.log(f"[CONFIRM-DELETE][DENIED] Untrusted source attempted to confirm deletion for {uid}")
 
         except Exception as e:
             self.log(error=e, block="main_try")
 
     def cmd_validate_warrant(self, content, packet, identity:IdentityObject = None):
+        """Securely validates and executes a "death warrant" for an agent.
 
+        This method serves as the final step for self-terminating, mission-based
+        agents like the Reaper. The Reaper, upon completing its mission, sends
+        its unique, signed death warrant back to Matrix. This handler performs
+        a multi-step verification to ensure the warrant is authentic before
+        permanently removing the agent from the master tree.
+
+        The validation process includes:
+        1. Verifying the warrant's signature against the master Matrix public key.
+        2. Matching the agent ID in the packet with the ID inside the warrant.
+        3. Matching the unique 'death_id' in the warrant with the one assigned
+           to the agent's config when it was created.
+
+        Args:
+            content (dict): The command payload, containing the 'agent_id' and
+                the signed 'warrant' object.
+            packet (dict): The raw packet data.
+            identity (IdentityObject): The verified identity of the command sender.
+        """
         try:
             self.log(f"[WARRANT][DEBUG] Received packet content: {json.dumps(content, indent=2)}")
-            content = packet.get("content", {})
             warrant = content.get("warrant")
             agent_id = content.get("agent_id")
 
@@ -500,20 +546,18 @@ class Agent(BootAgent):
             # Step 1: Verify signature
             payload = warrant.get("payload")
             signature = warrant.get("signature")
-
             try:
-                pubkey_obj = PyCryptoRSA.import_key(self.matrix_pub)
-                verify_signed_payload(payload, signature, pubkey_obj)
+                verify_signed_payload(payload, signature, self.matrix_pub_obj)
             except Exception as e:
                 self.log(f"❌ Invalid signature on warrant for {agent_id}", error=e)
                 return
 
             # Step 2: Confirm agent ID match
-            if payload["universal_id"] != agent_id:
+            if payload.get("universal_id") != agent_id:
                 self.log(f"[WARRANT] ❌ Mismatched universal_id in warrant: {payload['universal_id']} != {agent_id}")
                 return
 
-            # Step 3: Match against in-memory agent
+            # Step 3: Match against in-memory agent's death_id
             tp = self.get_agent_tree_master()
             if not tp:
                 self.log("[UPDATE_AGENT][ERROR] Failed to load tree.")
@@ -524,12 +568,12 @@ class Agent(BootAgent):
                 self.log(f"[WARRANT] ⚠️ No agent found in tree for {agent_id}")
                 return
 
-            node_warrant = tree_node.get("config", {}).get("death_warrent", {})
+            node_warrant = tree_node.get("config", {}).get("death_warrant", {})
             if warrant.get("death_id") != node_warrant.get("death_id"):
                 self.log(f"[WARRANT] ❌ Death ID mismatch for {agent_id}")
                 return
 
-            # Step 4: Delete from tree
+            # Step 4: Delete from tree if all checks pass
             self.log(f"[WARRANT] ✅ Death warrant validated. Removing node: {agent_id}")
             tp.remove_exact_node(tree_node)
             self.save_agent_tree_master()
@@ -732,7 +776,7 @@ class Agent(BootAgent):
                 is_mission=True,
             )
 
-            #when reaper self-bye-byes, he will drop this in death_warrent.json and Matrix will verify and
+            #when reaper self-bye-byes, he will drop this in death_warrant.json and Matrix will verify and
             #remove from tree
             death_id = secrets.token_hex(16)  # or uuid4().hex
             warrant_payload = {
@@ -744,7 +788,7 @@ class Agent(BootAgent):
 
             signed_warrant = generate_signed_payload(warrant_payload, self.matrix_priv_obj)
 
-            reaper_node['config']['death_warrent'] = signed_warrant
+            reaper_node['config']['death_warrant'] = signed_warrant
 
             # Inject Reaper
             reaper_packet = {

@@ -191,9 +191,9 @@ class Agent(BootAgent):
             with open(tombstone_path, "w", encoding="utf-8") as f:
                 f.write("true")
 
-            death_warrent=self.tree_node.get('config',{}).get('death_warrent', False)
-            if death_warrent:
-                self.deliver_death_warrent(death_warrent)
+            death_warrant=self.tree_node.get('config',{}).get('death_warrant', False)
+            if death_warrant:
+                self.deliver_death_warrant(death_warrant)
 
             self.log(f"[DISPOSABLE-REAPER] Die cookie dropped & Tombstone dropped. Mission complete. Signing off.")
 
@@ -248,7 +248,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[DISPOSABLE-REAPER] PID Handler escalation FAILED for {universal_id}: {e}")
 
-    def deliver_death_warrent(self, signed_warrant):
+    def deliver_death_warrant(self, signed_warrant):
 
         try:
 

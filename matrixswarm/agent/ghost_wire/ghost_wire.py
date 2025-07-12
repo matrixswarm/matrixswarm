@@ -20,7 +20,8 @@ from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.ident
 class Agent(BootAgent, ReflexAlertMixin):
     def __init__(self):
         super().__init__()
-        self.name = "GhostWire"
+        self.NAME = "GhostWire"
+        self.AGENT_VERSION = "1.2.0"
         self.sessions = {}
         self.file_alerts = {}  # (path -> timestamp)
         self.command_hashes = OrderedDict()
@@ -41,11 +42,14 @@ class Agent(BootAgent, ReflexAlertMixin):
         os.makedirs(self.session_dir, exist_ok=True)
 
     def worker_pre(self):
-        self.log("[GHOSTWIRE] Shadow tracker engaged.")
         self.enforce_prompt_command_once()
         threading.Thread(target=self.watch_file_changes, daemon=True).start()
 
-    def worker(self, config:dict = None, identity:IdentityObject = None):
+    def post_boot(self):
+        self.log(f"{self.NAME} v{self.AGENT_VERSION} – Shadow tracker engaged.")
+
+    def worker(self, config: dict = None, identity: IdentityObject = None):
+
         self.track_active_users()
         self.poll_shell_history()
         interruptible_sleep(self, self.tick_rate)
@@ -198,7 +202,7 @@ class Agent(BootAgent, ReflexAlertMixin):
 
             if os.path.exists(history_path):
                 try:
-                    with open(history_path, "r", encoding="utf-8") as f:
+                    with open(history_path, "r", encoding="utf-8", errors="ignore") as f:
                         lines = f.read().splitlines()
                     new_commands = [cmd for cmd in lines if cmd not in session["commands"]]
                     for cmd in new_commands:

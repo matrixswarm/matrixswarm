@@ -28,6 +28,8 @@ class Agent(BootAgent):
         self.key_path = os.path.join(swarm_root, "certs", "https_certs", "server.key")
         self.client_ca = os.path.join(swarm_root, "certs", "https_certs", "rootCA.pem")
         self.local_tree_root = None
+        #keep trying to start for infinity: false do max retries in method
+        self.run_server_retries = True
         self._last_dir_request = 0
         self.configure_routes()
 
@@ -266,24 +268,33 @@ class Agent(BootAgent):
                 return f"[DECRYPT-FAIL] {str(e)}"
 
     def run_server(self):
+        retry_delay = 10  # seconds between retries
+        max_retries = 5
+        retries = 0
 
-        try:
-            self.log("[HTTPS] Starting run_server()...")
+        while (retries < max_retries) or self.run_server_retries:
 
-            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            try:
+                self.log("[HTTPS] Starting run_server()...")
 
-            context.verify_mode = ssl.CERT_REQUIRED
-            context.load_verify_locations(cafile=self.client_ca)
-            context.load_cert_chain(
-                certfile=self.cert_path,
-                keyfile=self.key_path,
-            )
-            self.log(f"[HTTPS] Listening on port {self.port}")
-            self.app.run(host="0.0.0.0", port=self.port, ssl_context=context)
+                context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                context.verify_mode = ssl.CERT_REQUIRED
+                context.load_verify_locations(cafile=self.client_ca)
+                context.load_cert_chain(certfile=self.cert_path, keyfile=self.key_path)
 
-        except Exception as e:
-            self.log(f"Server failed to start", error=e, block="main_try")
+                self.log(f"[HTTPS] Listening on port {self.port}")
+                self.app.run(host="0.0.0.0", port=self.port, ssl_context=context)
 
+                break  # If server exits cleanly, stop the loop
+
+            except Exception as e:
+                self.log(f"[HTTPS][FAIL] Server failed to start or crashed", error=e)
+                retries += 1
+                self.log(f"[HTTPS][RETRY] Attempt {retries}/{max_retries} in {retry_delay}s")
+                time.sleep(retry_delay)
+
+        if retries >= max_retries:
+            self.log("[HTTPS][ABORT] Max retries reached. Server not started.")
 
 if __name__ == "__main__":
     agent = Agent()
