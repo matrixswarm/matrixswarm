@@ -8,7 +8,7 @@ setup(
     author_email='swarm@matrixswarm.com',
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown", 
-    packages=find_packages(),
+    packages=find_packages(include=["matrixswarm", "matrixswarm.*"]),
     install_requires=[
     "aiohappyeyeballs==2.6.1",
     "aiohttp==3.12.13",
