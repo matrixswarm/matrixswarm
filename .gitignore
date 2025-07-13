@@ -75,12 +75,13 @@ To OpenAI.txt
 # Swarm logs and runtime traces
 comm/**/logs/
 agent.log
+matrix_gui/config/
 
 # Deploy/test junk
 # MatrixSwarm runtime data
 
 # Except this one
-!generate_certs.sh.venv_fixed
-matrixswarm.egg-info
+!generate_certs.sh
 .venv_fixed
+matrixswarm.egg-info
 .venv

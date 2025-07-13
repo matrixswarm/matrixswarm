@@ -68,6 +68,7 @@ class Agent(BootAgent):
         """
         super().__init__()
 
+        self.AGENT_VERSION = "1.2.0"
         self._agent_tree_master = None
 
         #no need to delegate any agents at start
@@ -104,12 +105,13 @@ class Agent(BootAgent):
         self.canonize_gospel()
 
     def post_boot(self):
+
+        self.log(f"{self.NAME} v{self.AGENT_VERSION} – panopticon live and lethal..")
         message = "I'm watching..."
         # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
         universal_id = self.command_line_args.get("universal_id", "matrix")
         threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
-
 
     def worker_pre(self):
         self.log("Pre-boot checks complete. Swarm ready.")

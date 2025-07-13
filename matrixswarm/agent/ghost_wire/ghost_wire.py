@@ -20,7 +20,6 @@ from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.ident
 class Agent(BootAgent, ReflexAlertMixin):
     def __init__(self):
         super().__init__()
-        self.NAME = "GhostWire"
         self.AGENT_VERSION = "1.2.0"
         self.sessions = {}
         self.file_alerts = {}  # (path -> timestamp)
@@ -46,7 +45,7 @@ class Agent(BootAgent, ReflexAlertMixin):
         threading.Thread(target=self.watch_file_changes, daemon=True).start()
 
     def post_boot(self):
-        self.log(f"{self.NAME} v{self.AGENT_VERSION} – Shadow tracker engaged.")
+        self.log(f"{self.NAME} v{self.AGENT_VERSION} – shadow tracker engaged.")
 
     def worker(self, config: dict = None, identity: IdentityObject = None):
 

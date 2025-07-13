@@ -179,6 +179,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self._service_manager_services = {}
 
         self.running = False
+        self.NAME = self.command_line_args.get("agent_name", "UNKNOWN")
 
         '''
         fb.add_identity(matrix_node['vault'],
@@ -221,6 +222,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self._catch_football.set_aes_encryption_privkey(self.secure_keys.get("priv"))  #used by the receiving agent to decrypt the aes key that wa
         # s encrypted with the paired pubkey, then using the aes key to decrypt the payload
         self._catch_football.set_identity_base_path(self.path_resolution['comm_path'])
+
     class FootballType(Enum):
         PASS = 1
         CATCH = 2

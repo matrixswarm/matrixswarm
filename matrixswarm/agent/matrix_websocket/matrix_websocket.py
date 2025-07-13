@@ -17,11 +17,11 @@ from matrixswarm.core.boot_agent import BootAgent
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
-
-        config = self.tree_node.get("config", {})
+        self.AGENT_VERSION = "1.2.0"
 
         self.clients = set()
-
+        config = self.tree_node.get("config", {})
+        self.allowlist_ips = config.get("allowlist_ips", [])
         self.port = config.get("port", 8765)
         self.clients = set()
         self.loop = None
@@ -32,6 +32,9 @@ class Agent(BootAgent):
         self._thread = None
         self._config = None
         self._lock = threading.Lock()
+
+    def post_boot(self):
+        self.log(f"{self.NAME} v{self.AGENT_VERSION} – agent ready and active.")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
         """
@@ -119,15 +122,22 @@ class Agent(BootAgent):
 
     async def websocket_handler(self, websocket):
 
-        ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
-        self.log(f"[WS][CONNECT] Client connected from IP: {ip}")
-        self.log("[WS][TRACE] >>> websocket_handler() CALLED <<<")
-        self.log("[WS] HANDLER INIT - Client added")
-        # Add the client securely to the clients set
-        self.clients.add(websocket)
-        self.log("[WS] HANDLER INIT - Client added")
-
         try:
+
+            ip = websocket.remote_address[0] if websocket.remote_address else "unknown"
+            self.log(f"[WS][CONNECT] Client connected from IP: {ip}")
+
+            if self.allowlist_ips and ip not in self.allowlist_ips:
+                self.log(f"[WS][BLOCK] Connection from {ip} rejected (not in allowlist)")
+                await websocket.close(reason="IP not allowed")
+                return
+
+            self.log("[WS][TRACE] >>> websocket_handler() CALLED <<<")
+            self.log("[WS] HANDLER INIT - Client added")
+            # Add the client securely to the clients set
+            self.clients.add(websocket)
+            self.log("[WS] HANDLER INIT - Client added")
+
             while True:
                 self.log("[WS] Awaiting message...")
 

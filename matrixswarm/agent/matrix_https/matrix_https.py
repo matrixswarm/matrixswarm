@@ -1,8 +1,9 @@
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
-#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+
 from flask import Response
 from flask import Flask, request, jsonify
 import ssl
@@ -19,9 +20,13 @@ from Crypto.Cipher import AES
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
-
+        self.AGENT_VERSION = "1.2.0"
         self.app = Flask(__name__)
         self.port = 65431
+
+        config = self.tree_node.get("config", {})
+        self.allowlist_ips = config.get("allowlist_ips", [])
+
         self.payload_dir = os.path.join(self.path_resolution['comm_path'], "matrix", "payload")
         swarm_root = self.path_resolution["install_path"]
         self.cert_path = os.path.join(swarm_root, "certs", "https_certs", "server.fullchain.crt")
@@ -38,7 +43,7 @@ class Agent(BootAgent):
         threading.Thread(target=self.run_server, daemon=True).start()
 
     def post_boot(self):
-        self.log("[POST-BOOT] Matrix HTTPS Agent ready and active.")
+        self.log(f"{self.NAME} v{self.AGENT_VERSION} – agent ready and active.")
 
     def process_command(self, data):
         self.log(f"[CMD] Received delegated command: {data}")
@@ -59,6 +64,13 @@ class Agent(BootAgent):
         @self.app.route("/agents", methods=["GET"])
         def get_agent_list():
             try:
+
+                ip = request.remote_addr or "unknown"
+
+                if self.allowlist_ips and ip not in self.allowlist_ips:
+                    self.log(f"Request from disallowed IP: {ip}", block="agents")
+                    return jsonify({"status": "error", "message": "Access denied"}), 403
+
                 self.log("[CMD] Getting Live Agent List")
                 comm_path = self.path_resolution['comm_path']
                 agents = []
@@ -78,12 +90,24 @@ class Agent(BootAgent):
 
         @self.app.route("/matrix/ping", methods=["GET"])
         def ping():
+
+            ip = request.remote_addr or "unknown"
+
+            if self.allowlist_ips and ip not in self.allowlist_ips:
+                self.log(f"Request from disallowed IP: {ip}", block="ping")
+                return jsonify({"status": "error", "message": "Access denied"}), 403
+
             return jsonify({"status": "ok"}), 200
 
         @self.app.route("/matrix", methods=["POST"])
         def receive_command():
             try:
                 ip = request.remote_addr or "unknown"
+
+                if self.allowlist_ips and ip not in self.allowlist_ips:
+                    self.log(f"[MATRIX-HTTPS][BLOCKED] Request from disallowed IP: {ip}")
+                    return jsonify({"status": "error", "message": "Access denied"}), 403
+
                 self.log(f"[MATRIX-HTTPS][SOURCE-IP] Packet received from {ip}")
                 payload = request.get_json()
                 ctype = payload.get("handler")

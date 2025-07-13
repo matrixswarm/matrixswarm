@@ -60,6 +60,12 @@ matrix_directive = {
             "name": "matrix_https",
             "delegated": [],
             "app": "matrix-core",
+            "config": {
+                "allowlist_ips": [
+                    # allowed list of ips to access server
+                ],
+
+            },
             "filesystem": {
                 "folders": [],
                 "files": {}
@@ -200,6 +206,9 @@ matrix_directive = {
             "name": "matrix_websocket",
             "config": {
                 "port": 8765,
+                "allowlist_ips": [
+                  #allowed list of ips to access server
+                ],
                 "factories": {
                     "reflex.health.status_report": {}
                 },
