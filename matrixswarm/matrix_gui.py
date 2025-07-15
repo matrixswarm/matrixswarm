@@ -41,8 +41,15 @@ def load_last_host():
 def save_last_host(host):
     try:
         os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+        data = {"matrix_host": host, "previous_hosts": []}
+        if os.path.exists(SETTINGS_PATH):
+            with open(SETTINGS_PATH, "r") as f:
+                data = json.load(f)
+        if host not in data.get("previous_hosts", []):
+            data.setdefault("previous_hosts", []).append(host)
+        data["matrix_host"] = host
         with open(SETTINGS_PATH, "w") as f:
-            json.dump({"matrix_host": host}, f)
+            json.dump(data, f)
     except Exception as e:
         print(f"[SETTINGS][SAVE ERROR] {e}")
 
@@ -113,7 +120,8 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         self.user_requested_log_view = False
         self.current_selected_uid =None
         self.last_probe_report = {}
-
+        self._ws_flare_triggered = False
+        self.websocket_task = None
         self.log_ready.connect(self._handle_logs_result)
 
         self.resize(1400, 800)  # or whatever size fits your battle station
@@ -131,15 +139,39 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             self.alert_panel.send_agent_payload(alert, partial=False)
 
     def change_matrix_host(self):
-        host = self.host_input.text().strip()
-        if not host.startswith("http"):
-            self.status_label.setText("⚠️ Invalid host URL.")
+        new_host = self.host_dropdown.currentText().strip()
+        if not new_host:
             return
-        self.matrix_host = host
-        ws_ip = host.split("//")[1].split(":")[0]
-        self.matrix_ws_host = f"wss://{ws_ip}:8765"
-        save_last_host(host)
-        self.status_label.setText(f"✅ Matrix host set to {host}. Reconnecting...")
+
+        self.matrix_host = new_host
+        save_last_host(new_host)
+        self.status_label_ws.setText(f"🔄 WS: Switching to {new_host}...")
+
+        def reconnect():
+            try:
+                # Attempt to cleanly close old websocket
+                if hasattr(self, "websocket") and self.websocket:
+                    try:
+                        loop = asyncio.get_event_loop()
+                        loop.call_soon_threadsafe(asyncio.create_task, self.websocket.close(reason="Switching host"))
+                        self.websocket = None
+                    except Exception as e:
+                        print(f"[WS] Error closing socket: {e}")
+            except Exception as e:
+                print(f"[WS] Cleanup error: {e}")
+
+            # Restart WebSocket listener thread
+            if hasattr(self, "ws_listener_thread") and self.ws_listener_thread:
+                if self.ws_listener_thread.is_alive():
+                    print("[WS] Terminating old listener thread")
+                self.ws_listener_thread = None
+
+            # Launch new thread
+            self.start_websocket_listener(new_host)
+            self.status_label.setText(f"✅ Matrix host set to {new_host}. Reconnecting...")
+
+        QTimer.singleShot(100, reconnect)
+
 
     def slow_scroll_log(self):
         if self.auto_scroll_checkbox.isChecked() and self.log_text.isVisible():
@@ -210,68 +242,63 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
                 self.view_logs()  # safely handles async fetch and appending
 
     def start_websocket_listener(self, url):
+        if hasattr(self, "ws_listener_thread") and self.ws_listener_thread and self.ws_listener_thread.is_alive():
+            print("[WS] Listener thread already running.")
+            return
+        self.matrix_ws_host = self.get_ws_url()
+
         def run_ws_loop():
-            while True:
-                try:
-                    asyncio.set_event_loop(asyncio.new_event_loop())
-                    loop = asyncio.get_event_loop()
-                    loop.run_until_complete(self.websocket_main_loop(url))
-                except Exception as e:
-                    print(f"[WS][RETRY] Reconnect in 5s: {e}")
-                time.sleep(5)  # Retry delay
+            asyncio.set_event_loop(asyncio.new_event_loop())
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(self.websocket_main_loop(self.get_ws_url()))
 
-        threading.Thread(target=run_ws_loop, daemon=True).start()
+        self.ws_listener_thread = threading.Thread(target=run_ws_loop, daemon=True)
+        self.ws_listener_thread.start()
 
-    async def websocket_main_loop(self, url):
-        """
-        Main asynchronous WebSocket loop.
-        """
-        try:
-            print(f"[WS] Connecting to: {url}")
+    def get_ws_url(self):
+        host = self.matrix_host.split("://")[1].split(":")[0]  # strip scheme + port
+        return f"wss://{host}:8765"
 
-            ssl_context = None
-            if url.startswith("wss://"):
-                try:
-                    ssl_context = ssl.create_default_context()
-                    ssl_context.load_cert_chain("socket_certs/client.crt", "socket_certs/client.key")
-                    ssl_context.check_hostname = False
-                    ssl_context.verify_mode = ssl.CERT_NONE
-                except Exception as e:
-                    print(f"[WS][SSL ERROR] Failed to create SSL context: {e}")
+    async def websocket_main_loop(self, _initial_url=None):
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
 
-            async with websockets.connect(url, ssl=ssl_context, ping_interval=15, ping_timeout=10) as websocket:
-                self.status_label_ws.setText("🟢 WS: Connected")
-                self.ws_connected = True
-                if not hasattr(self, "_ws_flare_triggered"):
-                    self._ws_flare_triggered = False
+        reconnect_attempts = 0
 
-                if not self._ws_flare_triggered:
-                    self.status_label_ws.setStyleSheet("color: #33ff33; font-weight: bold; background-color: #003300;")
-                    QTimer.singleShot(3000, lambda: self.status_label_ws.setStyleSheet(
-                        "color: #33ff33; background-color: transparent;"))
+        while True:
+            try:
+                # Always re-resolve the URL to respect latest dropdown host
+                url = self.get_ws_url()
+                self.status_label_ws.setText("🔄 WS: Connecting...")
+
+                async with websockets.connect(url, ssl=ssl_context) as websocket:
+                    self.websocket = websocket
+                    self.status_label_ws.setText("🟢 WS: Connected")
                     self._ws_flare_triggered = True
+                    reconnect_attempts = 0
 
-                print("[WS] WebSocket connection established.")
-                await websocket.send(json.dumps({
-                    "type": "diagnostic",
-                    "msg": "HiveMonitor is online.",
-                    "timestamp": time.time()
-                }))
-                while True:
-                    try:
+                    await websocket.send(json.dumps({
+                        "type": "diagnostic",
+                        "msg": "MatrixGUI reconnected.",
+                        "timestamp": time.time()
+                    }))
+
+                    while True:
                         msg = await websocket.recv()
                         self.message_received.emit(msg)
-                    except Exception as e:
-                        print(f"[WS][RECEIVE ERROR] {e}")
-                        break
 
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            print(f"[WS][ERROR] Failed to connect to WebSocket: {e}")
-            self.status_label_ws.setText("🔴 WS: Disconnected")
-            self.ws_connected = False
+            except websockets.exceptions.ConnectionClosed:
+                self.status_label_ws.setText("🔴 WS: Disconnected (Closed)")
 
+            except Exception as e:
+                self.status_label_ws.setText(f"🔴 WS: Error [{reconnect_attempts}]")
+                print(f"[WS] Exception: {e}")
+
+            finally:
+                reconnect_attempts += 1
+                self.status_label_ws.setText(f"🕐 WS: Reconnecting in {min(10, reconnect_attempts * 2)}s")
+                await asyncio.sleep(min(10, reconnect_attempts * 2))
 
     def handle_websocket_message_safe(self, msg: str):
         try:
@@ -873,15 +900,28 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         layout = QVBoxLayout()
 
         # ───────────── Host/IP Change Row ─────────────
-        self.host_input = QLineEdit(self.matrix_host)
-        self.host_input.setPlaceholderText("Enter Matrix Host (e.g., https://1.2.3.4:65431/matrix)")
+        self.host_dropdown = QComboBox()
+        self.host_dropdown.setEditable(True)
+        self.host_dropdown.setInsertPolicy(QComboBox.InsertAtTop)
+        host_list = []
 
-        set_host_btn = QPushButton("Set Host/IP")
+        try:
+            with open(SETTINGS_PATH, "r") as f:
+                settings = json.load(f)
+                host_list = settings.get("previous_hosts", [])
+                last_host = settings.get("matrix_host", "")
+        except Exception:
+            last_host = ""
+
+        self.host_dropdown.addItems(host_list or [])
+        self.host_dropdown.setEditText(last_host or "https://127.0.0.1:65431/matrix")
+
+        set_host_btn = QPushButton("🔄 Reconnect")
         set_host_btn.clicked.connect(self.change_matrix_host)
 
         host_layout = QHBoxLayout()
         host_layout.addWidget(QLabel("Matrix Host:"))
-        host_layout.addWidget(self.host_input)
+        host_layout.addWidget(self.host_dropdown)
         host_layout.addWidget(set_host_btn)
         layout.addLayout(host_layout)
         # ───────────────────────────────────────────────────

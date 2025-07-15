@@ -16,7 +16,7 @@
   },
   {
     "pair": "BTC/USDT",
-    "threshold": 118000.0,
+    "threshold": 125000.0,
     "cooldown": 300,
     "active": true,
     "name": "New Price Change Above",

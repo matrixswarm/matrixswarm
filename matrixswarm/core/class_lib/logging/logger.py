@@ -4,7 +4,7 @@ import json
 import base64
 from datetime import datetime
 from pathlib import Path
-from Crypto.Cipher import AES        # ← will fail if Cryptodome is installed as separate
+from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 

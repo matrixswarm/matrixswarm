@@ -63,7 +63,11 @@ matrix_directive = {
             "filesystem": {
                 "folders": [],
                 "files": {}
-            }
+            },
+            "allowlist_ips": [
+                  #allowed list of ips to access server
+            ],
+
         },
         {
             "universal_id": "agent_doctor-1",
@@ -165,19 +169,6 @@ matrix_directive = {
             ,
             "children": []
         },
-        {
-          "universal_id": "shadowgeist",
-          "name": "ghost_wire",
-          "app": "swarm-intel",
-          "config": {
-            "role": "enforcer",
-            "tick_rate": 5,
-            "command_patterns": ["rm -rf","scp", "curl", "wget", "nano /etc", "vim /etc", "vi /etc", "sudo", "su", "chmod 777"],
-            "target_users": ["root", "matrixswarm"],
-            "whitelist": ["ubuntu", "jenkins"],
-            "alert_cooldown": 300
-          }
-        },
 
         {
             "universal_id": "websocket-relay",
@@ -194,6 +185,10 @@ matrix_directive = {
                     "priority": 10,                # lower = more preferred
                     "exclusive": False             # can other services respond?
                 }],
+                "allowlist_ips": [
+                  #allowed list of ips to access server
+                ],
+
             },
 
             "filesystem": {},
