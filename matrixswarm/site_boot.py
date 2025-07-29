@@ -278,9 +278,23 @@ def create_user_dirs_and_copy_bases(install_path=None):
 
 def main():
 
-
     # Path prep
     import os
+
+    #if the directive is encrypted, decrypt
+    def decrypt_directive(encrypted_path, swarm_key_b64):
+
+        with open(encrypted_path, "r", encoding="utf-8") as f:
+            bubble = json.load(f)
+
+        key = base64.b64decode(swarm_key_b64)
+        nonce = base64.b64decode(bubble["nonce"])
+        tag = base64.b64decode(bubble["tag"])
+        ciphertext = base64.b64decode(bubble["ciphertext"])
+
+        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        decrypted = cipher.decrypt_and_verify(ciphertext, tag)
+        return json.loads(decrypted.decode())
 
     try:
 
@@ -481,8 +495,13 @@ def main():
         time.sleep(3)
 
     # === LOAD TREE ===
-    print(f"[BOOT] Loading directive: {boot_name}.py")
-    matrix_directive = load_boot_directive(boot_name, path=config['boot_directives'])
+    if args.encrypted_directive and args.swarm_key:
+        print(f"[BOOT] 🔐 Decrypting encrypted directive from {args.encrypted_directive}")
+        matrix_directive = decrypt_directive(args.encrypted_directive, args.swarm_key)
+    else:
+        print(f"[BOOT] 📦 Loading plaintext directive: {boot_name}.py")
+        matrix_directive = load_boot_directive(boot_name, path=config['boot_directives'])
+
     tp = TreeParser.load_tree_direct(matrix_directive)
     if not tp:
         print("[FATAL] Tree load failed. Invalid structure.")
@@ -508,21 +527,6 @@ def main():
     fp = hashlib.sha256(matrix_keys["pub"].encode()).hexdigest()[:12]
 
     print(f"[TRUST] Matrix pubkey fingerprint: {fp}")
-
-    #if the directive is encrypted, decrypt
-    def decrypt_directive(encrypted_path, swarm_key_b64):
-
-        with open(encrypted_path, "r", encoding="utf-8") as f:
-            bubble = json.load(f)
-
-        key = base64.b64decode(swarm_key_b64)
-        nonce = base64.b64decode(bubble["nonce"])
-        tag = base64.b64decode(bubble["tag"])
-        ciphertext = base64.b64decode(bubble["ciphertext"])
-
-        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
-        decrypted = cipher.decrypt_and_verify(ciphertext, tag)
-        return json.loads(decrypted.decode())
 
     swarm_key_b64 = generate_aes_key()
     matrix_key_b64 = generate_aes_key()

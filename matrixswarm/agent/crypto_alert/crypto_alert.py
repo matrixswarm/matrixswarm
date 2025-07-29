@@ -86,8 +86,6 @@ class Agent(BootAgent):
             else:
                 self.log(f"[UNKNOWN TRIGGER] {trigger}")
 
-
-
         except Exception as e:
             self.log(error=e, block="main_try")
 

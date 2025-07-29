@@ -1,4 +1,5 @@
-#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Docstrings by Gemini
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
@@ -14,7 +15,13 @@ from matrixswarm.core.mixin.agent_summary_mixin import AgentSummaryMixin
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent, AgentSummaryMixin):
+    """
+    A watchdog agent that monitors an Nginx web server. It checks if the service is active
+    and listening on critical ports (e.g., 80, 443), attempts to restart it upon failure,
+    and sends alerts and reports about its operational status.
+    """
     def __init__(self):
+        """Initializes the NginxWatchdog agent, setting up configuration and statistics."""
         super().__init__()
         self.name = "NginxWatchdog"
         cfg = self.tree_node.get("config", {})
@@ -39,9 +46,21 @@ class Agent(BootAgent, AgentSummaryMixin):
         self.last_alerts = {}
 
     def today(self):
+        """
+        Returns the current date as a string in YYYY-MM-DD format.
+
+        Returns:
+            str: The current date.
+        """
         return datetime.now().strftime("%Y-%m-%d")
 
     def is_nginx_running(self):
+        """
+        Checks if the Nginx service is active using systemd.
+
+        Returns:
+            bool: True if the service is active, False otherwise.
+        """
         try:
             result = subprocess.run(["systemctl", "is-active", "--quiet", self.service_name], check=False)
             return result.returncode == 0
@@ -50,6 +69,12 @@ class Agent(BootAgent, AgentSummaryMixin):
             return False
 
     def are_ports_open(self):
+        """
+        Checks if the configured Nginx ports are open and listening.
+
+        Returns:
+            bool: True if all specified ports are listening, False otherwise.
+        """
         try:
             out = subprocess.check_output(["ss", "-ltn"])
             for port in self.ports:
@@ -60,6 +85,10 @@ class Agent(BootAgent, AgentSummaryMixin):
             return False
 
     def restart_nginx(self):
+        """
+        Attempts to restart the Nginx service. If restart attempts fail repeatedly,
+        it disables itself to prevent a restart loop.
+        """
         if self.disabled:
             self.log("[SENTINEL][DISABLED] Agent is disabled after repeated restart failures.")
             return
@@ -77,6 +106,12 @@ class Agent(BootAgent, AgentSummaryMixin):
                 self.send_simple_alert("💀 Nginx watchdog disabled after repeated restart failures.")
 
     def update_status_metrics(self, is_running):
+        """
+        Updates the uptime and downtime statistics based on the current service status.
+
+        Args:
+            is_running (bool): The current running state of the service.
+        """
         now = time.time()
         last = self.stats.get("last_state")
         elapsed = now - self.stats.get("last_status_change", now)
@@ -89,6 +124,15 @@ class Agent(BootAgent, AgentSummaryMixin):
         self.stats["last_status_change"] = now
 
     def should_alert(self, key):
+        """
+        Determines if an alert should be sent based on a cooldown to prevent alert fatigue.
+
+        Args:
+            key (str): A unique key for the type of alert.
+
+        Returns:
+            bool: True if an alert should be sent, False otherwise.
+        """
         now = time.time()
         last = self.last_alerts.get(key, 0)
         if now - last > self.alert_cooldown:
@@ -97,12 +141,22 @@ class Agent(BootAgent, AgentSummaryMixin):
         return False
 
     def post_restart_check(self):
+        """
+        Performs a check after a restart attempt to ensure the service
+        is listening on its designated ports.
+        """
         time.sleep(5)
         if not self.are_ports_open():
             self.log(f"[SENTINEL][CRIT] Nginx restarted but ports {self.ports} are still not listening.")
             self.send_simple_alert(f"🚨 Nginx restarted but ports {self.ports} are still not open.")
 
     def send_simple_alert(self, message):
+        """
+        Sends a formatted, human-readable alert to agents with the designated alert role.
+
+        Args:
+            message (str): The core message of the alert.
+        """
         if not self.alert_role:
             return
         alert_nodes = self.get_nodes_by_role(self.alert_role)
@@ -132,6 +186,16 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.pass_packet(pk1, node["universal_id"])
 
     def send_data_report(self, status, severity, details="", metrics=None):
+        """
+        Sends a structured data packet with detailed status and diagnostic information
+        to agents with the designated reporting role.
+
+        Args:
+            status (str): The current status (e.g., "DOWN", "RECOVERED").
+            severity (str): The severity level (e.g., "CRITICAL", "INFO").
+            details (str, optional): A human-readable description of the event.
+            metrics (dict, optional): A dictionary of diagnostic information.
+        """
         if not self.report_role:
             return
         report_nodes = self.get_nodes_by_role(self.report_role)
@@ -154,6 +218,14 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.pass_packet(pk1, node["universal_id"])
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        """
+        The main worker loop. It performs the health check, handles state changes,
+        triggers restarts, and sends reports as needed.
+
+        Args:
+            config (dict, optional): Configuration dictionary. Defaults to None.
+            identity (IdentityObject, optional): Identity object for the agent. Defaults to None.
+        """
         self.maybe_roll_day("nginx")
         is_healthy = self.is_nginx_running() and self.are_ports_open()
         last_state = self.stats.get("last_state")
@@ -194,6 +266,13 @@ class Agent(BootAgent, AgentSummaryMixin):
         interruptible_sleep(self, self.interval)
 
     def collect_nginx_diagnostics(self):
+        """
+        Gathers Nginx-specific diagnostics at the moment of failure, including
+        systemd status and recent error log entries.
+
+        Returns:
+            dict: A dictionary containing diagnostic information.
+        """
         info = {}
         # Get systemd status summary
         try:

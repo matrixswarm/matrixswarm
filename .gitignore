@@ -77,11 +77,48 @@ comm/**/logs/
 agent.log
 matrix_gui/config/
 
-# Deploy/test junk
-# MatrixSwarm runtime data
-
 # Except this one
 !generate_certs.sh
 .venv_fixed
 matrixswarm.egg-info
 .venv
+
+# Secret config files
+**/settings.json
+**/alerts.json
+**/config/*.json
+**/config/*.enc
+**/config/*.key
+**/config/*.pem
+**/config/*.crt
+
+# Local host/IP and backup files
+*.local.json
+*.dev.json
+*.swp
+*.tmp
+
+# GUI secrets (eg: matrix_host, previous_hosts, etc)
+**/matrix_host.*
+**/previous_hosts.*
+
+# Exclude SSL certs and anything that could contain infra secrets
+*.pem
+matrixswarm/https_certs/
+.matrixswarm/
+.env
+.env.*
+
+# Swarm runtime secrets and keys
+**/boot_directives/*.enc.json
+**/boot_directives/*.json
+**/comm/*/payload
+**/comm/*/directive
+**/comm/*/hello.moto
+**/comm/*/.state
+**/comm/*/scan_history.json.enc
+
+# Security: never leak actual IPs or secrets via JSON/YAML
+*ip_list*
+*secret*
+*token*

@@ -1,11 +1,11 @@
+# Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Docstrings by Gemini
 import sys
 import os
 
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
-# Authored by Daniel F MacDonald and ChatGPT aka The Generals
-# Gemini, doc-rocking the Swarm to perfection.
 # ╔════════════════════════════════════════════════════════╗
 # ║                   🧠 MATRIX AGENT 🧠                   ║
 # ║   Central Cortex · Tree Dispatcher · Prime Director    ║
@@ -106,10 +106,10 @@ class Agent(BootAgent):
 
     def post_boot(self):
 
-        self.log(f"{self.NAME} v{self.AGENT_VERSION} – panopticon live and lethal..")
+        self.log(f"{self.NAME} v{self.AGENT_VERSION} – panopticon live and lethal...")
         message = "I'm watching..."
         # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
-        universal_id = self.command_line_args.get("universal_id", "matrix")
+        self.command_line_args.get("universal_id", "matrix")
         threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
 
@@ -443,7 +443,7 @@ class Agent(BootAgent):
 
             self.log(f"[DELETE] Dropped hit.cookie for {agent}")
 
-    #used to get a copy of the current agent_tree_master, usally sent from
+    #used to get a copy of the current agent_tree_master, usually sent from
     #matrix-https to send back to gui
     def cmd_deliver_agent_tree(self, content, packet, identity:IdentityObject = None):
 
@@ -699,7 +699,7 @@ class Agent(BootAgent):
         the following sequence:
         1. Validates the `new_agent` payload, which can include new source code.
         2. If new source code is provided, it's installed to the
-           `/boot_payload` directory.
+           `{active instance path}/.matrixswarm/agent/` directory.
         3. The agent's node in the master tree is updated in-memory with the
            new configuration.
         4. The master tree is saved, and the updated directive slice is

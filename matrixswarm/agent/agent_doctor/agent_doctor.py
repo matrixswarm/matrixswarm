@@ -1,3 +1,5 @@
+# Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Docstrings by Gemini
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
@@ -10,20 +12,37 @@ from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
+    """
+    The AgentDoctor is a diagnostic agent that monitors the health and status of all other agents in the swarm.
+    It periodically checks for agent beacons to ensure they are alive and responsive, reporting any anomalies.
+    """
     def __init__(self):
+        """Initializes the AgentDoctor agent, setting its name and the maximum age for a beacon to be considered valid."""
         super().__init__()
         self.name = "AgentDoctor"
         self.max_allowed_beacon_age = 8  # seconds
 
     def pre_boot(self):
+        """Logs a message indicating that the diagnostics module is armed and ready."""
         self.log("[DOCTOR] Swarm-wide diagnostics module armed.")
 
     def post_boot(self):
+        """Logs messages indicating the start of monitoring and registration with the Matrix."""
         self.log("[DOCTOR] Monitoring active threads via intelligent beacon protocol.")
         self.log("[IDENTITY] Registering with Matrix...")
         #self.dispatch_identity_command()
 
     def is_phantom(self, agent_id):
+        """
+        Checks if an agent is a 'phantom'—meaning its communication directory exists, but its corresponding
+        pod (and boot file) does not.
+
+        Args:
+            agent_id (str): The universal ID of the agent to check.
+
+        Returns:
+            bool: True if the agent is a phantom, False otherwise.
+        """
         pod_root = self.path_resolution["pod_path"]
         for pod_id in os.listdir(pod_root):
             boot_file = os.path.join(pod_root, pod_id, "boot.json")
@@ -37,6 +56,15 @@ class Agent(BootAgent):
         return True
 
     def read_poke_file(self, path):
+        """
+        Reads a 'poke' file which contains the last seen timestamp of an agent's thread.
+
+        Args:
+            path (str): The path to the poke file.
+
+        Returns:
+            dict: A dictionary containing the status and last seen time, or an error.
+        """
         try:
             with open(path, "r", encoding="utf-8") as f:
                 raw = f.read().strip()
@@ -48,6 +76,16 @@ class Agent(BootAgent):
             return {"status": "error", "error": str(e)}
 
     def verify_agent_consciousness(self, agent_id, threads=("heartbeat","worker", "packet_listener")):
+        """
+        Verifies the status of an agent by checking the beacon files for its various threads.
+
+        Args:
+            agent_id (str): The universal ID of the agent to verify.
+            threads (tuple, optional): A tuple of thread names to check. Defaults to ("heartbeat", "worker", "packet_listener").
+
+        Returns:
+            dict: A dictionary with the status of each checked thread.
+        """
         comm_path = os.path.join(self.path_resolution["comm_path"], agent_id)
         beacon_dir = os.path.join(comm_path, "hello.moto")
 
@@ -89,6 +127,14 @@ class Agent(BootAgent):
         return status_report
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        """
+        The main worker loop for the AgentDoctor. It periodically scans all agents in the swarm,
+        checks their status, and logs a report.
+
+        Args:
+            config (dict, optional): Configuration dictionary. Defaults to None.
+            identity (IdentityObject, optional): Identity object for the agent. Defaults to None.
+        """
         self.log("[DOCTOR] Beginning swarm scan...")
         agents = self.get_agents_list()
 
@@ -109,6 +155,12 @@ class Agent(BootAgent):
         interruptible_sleep(self, 30)
 
     def get_agents_list(self):
+        """
+        Retrieves a list of all agent IDs from the communication directory.
+
+        Returns:
+            list: A list of agent universal IDs.
+        """
         comm_path = self.path_resolution.get("comm_path", "/matrix/ai/latest/comm")
         agents = []
         for agent_id in os.listdir(comm_path):

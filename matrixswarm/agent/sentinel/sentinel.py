@@ -1,4 +1,5 @@
-# 🧭 UpdateSentinelAgent
+# Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Docstrings by Gemini
 # ╔════════════════════════════════════════════════════════╗
 # ║                    🛡 SENTINEL AGENT 🛡                 ║
 # ║     Heartbeat Monitor · Resurrection Watch · Sentinel  ║
@@ -11,17 +12,40 @@ import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
-import json
 import threading
-import traceback
 
 from matrixswarm.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from matrixswarm.core.boot_agent import BootAgent
-from matrixswarm.core.mixin.ghost_vault import generate_agent_keypair
 
 class Agent(BootAgent):
+    """
+    A high-availability watchdog agent for the MatrixSwarm.
+
+    The Sentinel's purpose is to monitor a single, critical agent (typically
+    the root 'matrix' agent) for signs of failure. If the monitored agent's
+    heartbeat becomes stale, the Sentinel will use a pre-loaded, secure set of
+    credentials (the 'security_box') to automatically respawn it, ensuring
+    the swarm's central authority remains operational.
+    """
     def __init__(self):
+        """
+        Initializes the Sentinel agent and its monitoring configuration.
+
+        This method loads settings from the agent's directive, such as the
+        timeout period for the agent it is watching. It primarily configures
+        the conditions under which it will trigger a resurrection.
+
+        Attributes:
+            matrix_secure_verified (bool): A flag indicating if this Sentinel
+                is a trusted guardian with special privileges.
+            watching (str): A descriptive name for the agent being monitored.
+            universal_id_under_watch (str): The universal_id of the agent to
+                be monitored.
+            target_node (dict): A placeholder for the target's node data.
+            time_delta_timeout (int): The number of seconds to wait after the
+                last heartbeat before considering the target agent to be down.
+        """
         super().__init__()
 
         config = self.tree_node.get("config", {})
@@ -29,24 +53,37 @@ class Agent(BootAgent):
         self.watching = config.get("watching", "the Matrix")
         self.universal_id_under_watch = config.get("universal_id_under_watch", False)
         self.target_node = None
-        self.time_delta_timeout = config.get("timeout", 60)  # Default 5 min if not set
+        self.time_delta_timeout = config.get("timeout", 60)  # Default 60 sec if not set
 
 
 
     def post_boot(self):
+        """
+        A one-time setup hook that starts the main monitoring thread.
+        """
         self.log(f"[SENTINEL] Sentinel booted. Monitoring: {self.watching}")
-
         # Start watch thread
         threading.Thread(target=self.watch_cycle, daemon=True).start()
 
     def worker_pre(self):
+        """A lifecycle hook that runs before the main worker loop begins."""
         self.log("[SENTINEL] Sentinel activated. Awaiting signal loss...")
 
     def worker_post(self):
+        """A lifecycle hook that runs after the agent's main loops exit."""
         self.log("[SENTINEL] Sentinel down. Final watch cycle complete.")
 
     def watch_cycle(self):
+        """
+        The main monitoring and resurrection loop for the Sentinel.
 
+        This method runs in a background thread for the entire lifecycle of
+        the agent. It continuously checks the heartbeat of the target agent
+        defined in its 'security_box'. If the heartbeat becomes older than the
+        configured timeout and no 'die' file is present, it constructs a
+        keychain with the necessary high-privilege credentials and respawns
+        the target agent.
+        """
         self.log("[SENTINEL] Watch cycle started.")
 
         if self.universal_id_under_watch:
@@ -54,6 +91,7 @@ class Agent(BootAgent):
             while self.running:
 
                 try:
+                    # The security_box contains the credentials needed to resurrect Matrix
                     if len(self.security_box)==0:
                         break
 
@@ -63,28 +101,29 @@ class Agent(BootAgent):
                         self.log("Target node missing universal_id. Breathing idle.", block="WATCHING")
                         break
 
+                    # Respect intentional shutdown signals
                     die_file = os.path.join(self.path_resolution['comm_path'], universal_id, 'incoming', 'die')
-
                     if os.path.exists(die_file):
                         self.log(f"{universal_id} has die file. Skipping Loop.", block="WATCHING_DIE_FILE")
                         interruptible_sleep(self, 10)
                         continue
 
+                    # Check if the target's heartbeat is stale
                     time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], universal_id)
                     if time_delta is not None and time_delta < self.time_delta_timeout:
                         interruptible_sleep(self, 10)
                         continue
 
+                    # If heartbeat is stale, initiate respawn
                     try:
-
                         keychain = {}
-
                         node = self.security_box.get('node', {})
                         keychain["priv"] = node.get("vault", {}).get("priv", {})
                         keychain["pub"] = node.get("vault", {}).get("identity", {}).get('pub', {})
                         keychain["swarm_key"] = self.swarm_key
                         keychain['private_key'] = node.get("vault", {}).get("private_key")
                         keychain["matrix_pub"] = self.matrix_pub
+                        # Use the real Matrix private key from the security box
                         keychain["matrix_priv"] = self.security_box["matrix_priv"]
                         keychain["encryption_enabled"] = int(self.encryption_enabled)
                         keychain["security_box"] = self.security_box.copy()

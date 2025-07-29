@@ -109,6 +109,22 @@ matrix_directive = {
             }
         },
         {
+          "universal_id": "contact-reflex",
+          "name": "contact_reflex",
+          "app": "swarm-core",
+          "config": {
+            "oracle_timeout": 15,
+            "watched_paths": [
+                  "/some/site/path1/outgoing_msgs/",
+                  "/some/site/path2/outgoing_msgs/"
+            ],
+            "suspended": 0,
+            "enable_fallback_forward": 1,
+            "enable_oracle": 1,
+            "privkey": "##GENERATE_KEY##"
+          }
+        },
+        {
             "universal_id": "scavenger-strike",
             "name": "scavenger",
             "app": "matrix-core",
@@ -132,13 +148,6 @@ matrix_directive = {
             "children": [],
             "filesystem": {},
             "delegated": [],
-        }
-        ,
-        {
-            "universal_id": "commander-1",
-            "name": "commander",
-            "app": "matrix-core",
-            "children": []
         },
         {
             "universal_id": "redis-hammer",
@@ -248,6 +257,94 @@ matrix_directive = {
                     "exclusive": False             # can other services respond?
                 }]
             }
+        },
+        {
+            "universal_id": "perm-guardian-1",
+            "name": "permissions_guardian",
+            "config": {
+                "is_cron_job": 1,
+                "cron_interval_sec": 300,
+                "log_only": 1,
+                "targets": [
+                    {"path": "agent_path", "dir_mode": 493, "file_mode": 420},
+                    {"path": "core_path", "dir_mode": 493, "file_mode": 420},
+                    {"path": "comm_path", "dir_mode": 509, "file_mode": 436}
+                ]
+            }
+        },
+        {
+            "universal_id": "forensic-detective-1",
+            "name": "forensic_detective"
+            # It will automatically receive reports from agents using its role
+        },
+        {
+            "universal_id": "apache-error-watcher",
+            "name": "log_watcher",
+            "config": {
+                "log_path": "/var/log/httpd/error_log",
+                "service_name": "apache.error_log", # Must match the investigator path
+                "severity_rules": {
+                    "CRITICAL": ["segfault"],
+                    "WARNING": ["error", "client denied"]
+                }
+            }
+        },
+        {
+            "universal_id": "auth-log-watcher",
+            "name": "log_watcher",
+            "config": {
+                "log_path": "/var/log/secure",
+                "service_name": "system.auth_log",
+                "severity_rules": {
+                    "CRITICAL": ["authentication failure"],
+                    "WARNING": ["failed password", "invalid user"]
+                }
+            }
+        },
+        {
+            # Our new, config-driven system health monitor
+            "universal_id": "system-health-1",
+            "name": "system_health",
+            "config": {
+                "check_interval_sec": 60,
+                "mem_threshold_percent": 90.0,  # Custom threshold
+                "cpu_threshold_percent": 85.0,  # Custom threshold
+                "disk_threshold_percent": 95.0,
+                # It reports to the same data feed as the other watchdogs
+                "report_to_role": "hive.forensics.data_feed",
+                "report_handler": "cmd_ingest_status_report"
+            }
+        },
+        {
+            "universal_id": "network-health-1",
+            "name": "network_health",
+            "config": {
+                "check_interval_sec": 30,  # Check network status every 30 seconds
+                "exclude_interfaces": [],  # List of interfaces to skip (e.g. ["lo"])
+                "tx_threshold_mbps": 100,  # Warn if outbound rate exceeds 100 Mbps
+                "rx_threshold_mbps": 100,  # Warn if inbound rate exceeds 100 Mbps
+                "conn_threshold": 1000,  # Warn if active TCP/UDP conns > 1000
+                "top_n_procs": 5,  # Include top 5 process hogs in report
+                "report_to_role": "hive.forensics.data_feed",
+                "report_handler": "cmd_ingest_status_report"
+            }
+        },
+        {
+            "universal_id": "golden-child-4",
+            "name": "oracle",
+            "app": "blackhole-cometh",
+            "filesystem": {
+                "folders": [],
+                "files": {}
+            },
+            "children": [],
+            "config": {
+                "service-manager": [{
+                    "role": ["hive.oracle"],
+                }],
+                "api_key": os.getenv("OPENAI_API_KEY_2"),
+            }
+
         },
         {
             "universal_id": "storm-crow",

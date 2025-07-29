@@ -10,7 +10,6 @@ import time
 import json
 import hashlib
 import uuid
-import requests
 from collections import OrderedDict
 
 from matrixswarm.core.boot_agent import BootAgent

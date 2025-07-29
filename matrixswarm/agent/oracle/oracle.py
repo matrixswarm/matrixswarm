@@ -1,169 +1,138 @@
-# 🧠 OracleAgent — MatrixSwarm Prototype
+# Authored by Daniel F MacDonald and ChatGPT aka The Generals
 # Purpose: Responds to `.prompt` files dropped into its payload folder
 # Returns OpenAI-generated responses into `outbox/`
+# Docstrings by Gemini
 
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
-import json
 import time
-import re
 from openai import OpenAI
 from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent):
+    """
+    Acts as a gateway to a Large Language Model (LLM) for the swarm.
+
+    This agent receives prompts from other agents, queries the configured
+    OpenAI model (e.g., gpt-3.5-turbo), and delivers the AI-generated
+    response back to the requesting agent. It enables other agents to leverage
+    advanced AI for tasks like reasoning, content generation, and analysis.
+    """
     def __init__(self):
+        """
+        Initializes the Oracle agent and the OpenAI client.
+
+        This method loads the OpenAI API key from the agent's configuration
+        or an environment variable and instantiates the OpenAI client used
+        to communicate with the LLM API.
+        """
         super().__init__()
+
+        self.AGENT_VERSION = "1.0.0"
 
         config = self.tree_node.get("config", {})
         self.api_key = config.get("api_key", os.getenv("OPENAI_API_KEY_2"))
         self.log(self.api_key)
         self.client = OpenAI(api_key=self.api_key)
         self.processed_query_ids = set()
-        self.prompt_path = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
         self.outbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "outbox")
-        os.makedirs(self.prompt_path, exist_ok=True)
         os.makedirs(self.outbox_path, exist_ok=True)
-        self.report_final_packet_to='matrix'
         self.use_dummy_data = False
 
     def worker_pre(self):
+        """
+        A one-time setup hook that runs before the main worker loop starts.
+
+        This method performs a critical health check to ensure that an OpenAI
+        API key has been successfully loaded. If no key is found, it logs a
+        warning, indicating that the agent will not be functional.
+        """
         if not self.api_key:
             self.log("[ORACLE][ERROR] No API key detected. Is your .env loaded?")
         else:
             self.log("[ORACLE] Pre-boot hooks initialized.")
-            #threading.Thread(target=self.start_broadcast_listener, daemon=True).start()
 
     def worker_post(self):
+        """A one-time hook that runs after the agent's main loops have exited."""
         self.log("[ORACLE] Oracle shutting down. No more prophecies today.")
 
-    def msg_prompt(self, content, packet):
+    def cmd_msg_prompt(self, content, packet, identity: IdentityObject = None):
+        """
+        Handles an incoming prompt request from another agent.
+
+        This is the primary command handler for the Oracle. It receives a
+        prompt, sends it to the OpenAI API for completion, and then packages
+        the response into a command packet. This response packet is then sent
+        back to the original requesting agent, instructing it to use the
+        specified `return_handler` for processing. This enables a flexible,
+        asynchronous request/response pattern within the swarm.
+
+        Args:
+            content (dict): The command payload containing the prompt and
+                routing information. Expected keys include 'prompt',
+                'target_universal_id', 'return_handler', and 'query_id'.
+            packet (dict): The raw packet object received by the agent.
+            identity (IdentityObject, optional): The verified identity of the
+                agent that sent the prompt.
+        """
         self.log("[ORACLE] Reflex prompt received.")
 
-        if isinstance(content, dict):
-            prompt_text = content.get("prompt", "")
-            history = content.get("history", [])
-            target_uid = content.get("target_universal_id") or packet.get("target_universal_id")
-            role = packet.get("role", "oracle")
-            tracer_session_id = packet.get("tracer_session_id")
-            report_to = packet.get("report_final_packet_to")
-            response_mode = (content.get("response_mode") or "terse").lower()
-        else:
-            prompt_text = content
-            history = []
-            role = "oracle"
-            tracer_session_id = packet.get("tracer_session_id", "unknown")
-            target_uid = packet.get("target_universal_id", "capital_gpt")
-            report_to = packet.get("report_final_packet_to", "capital_gpt")
-            response_mode = "terse"
-
+        # Parse request context
+        prompt_text = content.get("prompt", "")
+        history = content.get("history", [])
+        target_uid = content.get("target_universal_id") or packet.get("target_universal_id")
+        return_handler = content.get("return_handler", "cmd_oracle_response")
+        response_mode = (content.get("response_mode") or "terse").lower()
+        query_id = content.get("query_id", 0)
 
         try:
-            if report_to is not None:
-                self.report_final_packet_to = report_to
-
             if not prompt_text:
                 self.log("[ORACLE][ERROR] Prompt content is empty.")
                 return
-            if not target_uid:
-                self.log("[ORACLE][ERROR] No target_universal_id. Cannot respond.")
-                return
-            if target_uid == self.command_line_args.get("universal_id"):
-                self.log(f"[ORACLE][WARN] Refusing to reflex to self: {target_uid}")
+            if not (target_uid):
+                self.log("[ORACLE][ERROR] target_universal_id. Cannot respond.")
                 return
 
+            self.log(f"[ORACLE] Response mode: {response_mode}")
 
-            try:
+            messages = [{"role": "user", "content": prompt_text}]
 
-                self.log(f"[ORACLE] Response mode: {response_mode}")
+            # Call the OpenAI API
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                temperature=0,
+            ).choices[0].message.content.strip()
 
-                messages = [{"role": "user", "content": prompt_text}]
-
-                response = self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=messages,
-                    temperature=0,
-                ).choices[0].message.content.strip()
-            except Exception as e:
-                self.log(f"[ERROR] Failed to fetch response: {str(e)}")
-                return None
-
-
-            # 🎯 Final payload construction
-            mission_status = 1
-            query_id = f"q_{int(time.time())}"
-            outbox = os.path.join(self.path_resolution["comm_path"], target_uid, "incoming")
-            out_path = os.path.join(outbox, f"oracle_reply_{query_id}.msg")
-
-            self.log(response)
-
-            packet = {
-                "type": "gpt_analysis",
-                "query_id": query_id,
-                "tracer_session_id": tracer_session_id,
+            # Construct the response packet
+            pk_resp = self.get_delivery_packet("standard.command.packet")
+            pk_resp.set_data({
+                "handler": return_handler,  # This is what the recipient will process
                 "packet_id": int(time.time()),
-                "target_universal_id": "sgt-in-arms",
+                "target_universal_id": target_uid,
                 "role": "oracle",
                 "content": {
+                    "query_id": query_id,
                     "response": response,
                     "origin": self.command_line_args.get("universal_id", "oracle"),
-                    "role": role,
-                    "mission_status": mission_status,
-                    "history": history
+                    "history": history,
+                    "prompt": prompt_text,
+                    "response_mode": response_mode,
                 }
-            }
+            })
 
-            self.save_to_trace_session(packet, msg_type="msg")
+            # Send the response back to the original requester
+            self.pass_packet(pk_resp, target_uid)
 
-            os.makedirs(outbox, exist_ok=True)
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(packet, f, indent=2)
-
-            self.log(f"[ORACLE] Sent GPT reply to {target_uid} as .msg → {query_id}")
+            self.log(f"[ORACLE] Sent {return_handler} reply to {target_uid} for query_id {query_id}")
 
         except Exception as e:
-            self.log(f"[ORACLE][CRITICAL] Failed during msg_prompt(): {e}")
+            self.log(error=e, block='cmd_msg_prompt')
 
-
-
-    @staticmethod
-    def contains_dangerous_commands(actions):
-        dangerous = ["apt", "yum", "dnf", "install", "remove", "chown", "chmod", "rm", "mv"]
-        for cmd in actions.values():
-            if any(danger in cmd.lower() for danger in dangerous):
-                return True
-        return False
-
-    @staticmethod
-    def extract_first_json_block(text):
-        try:
-            blocks = re.findall(r'\{(?:[^{}]|(?R))*\}', text, re.DOTALL)
-            for b in blocks:
-                json.loads(b)  # only return if it's valid
-                return b
-        except Exception:
-            pass
-        return "{}"
-
-
-    def send_oracle_reply(self, query, response):
-        recipient = query.get("response_to")
-        if not recipient:
-            self.log("[ORACLE][REPLY][ERROR] No response_to field in query.")
-            return
-
-        try:
-            inbox = os.path.join(self.path_resolution["comm_path"], recipient, "incoming")
-            os.makedirs(inbox, exist_ok=True)
-            fname = f"oracle_response_{int(time.time())}.json"
-            with open(os.path.join(inbox, fname), "w", encoding="utf-8") as f:
-                json.dump(response, f, indent=2)
-            self.log(f"[ORACLE] Reply sent to {recipient}: {fname}")
-        except Exception as e:
-            self.log(f"[ORACLE][REPLY-FAIL] Failed to deliver reply: {e}")
 
 if __name__ == "__main__":
     agent = Agent()

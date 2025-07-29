@@ -638,6 +638,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         left_layout = QVBoxLayout(self.left_panel)
         left_layout.addWidget(self.build_command_panel())
         left_layout.addWidget(self.build_autoscroll_left_panel())
+        self.left_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.center_panel = self.build_tree_panel()
         self.right_panel = self.build_log_panel()
 
@@ -655,6 +656,7 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         splitter.setCollapsible(0, False)
         splitter.setCollapsible(1, False)
         splitter.setCollapsible(2, False)
+
         layout.addWidget(splitter)
         return container
 
@@ -1495,6 +1497,9 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
                 border: 1px solid #00ff66;
             }
         """)
+        self.agent_info_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        self.agent_info_panel.setWordWrap(True)
         layout.addWidget(self.agent_info_panel)
 
         # Button

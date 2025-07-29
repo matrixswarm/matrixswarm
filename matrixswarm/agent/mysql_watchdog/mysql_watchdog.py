@@ -15,7 +15,13 @@ from matrixswarm.core.mixin.agent_summary_mixin import AgentSummaryMixin
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 class Agent(BootAgent, AgentSummaryMixin):
+    """
+    A watchdog agent that monitors a MySQL/MariaDB service. It checks if the service is running
+    and listening on its designated port, attempts to restart it upon failure, and sends alerts
+    and structured data reports about its status.
+    """
     def __init__(self):
+        """Initializes the MySQLWatchdog agent, setting up configuration parameters and statistics tracking."""
         super().__init__()
         self.name = "MySQLWatchdog"
         self.last_restart = None
@@ -44,9 +50,21 @@ class Agent(BootAgent, AgentSummaryMixin):
         self.last_alerts = {}
 
     def today(self):
+        """
+        Returns the current date as a string in YYYY-MM-DD format.
+
+        Returns:
+            str: The current date.
+        """
         return datetime.now().strftime("%Y-%m-%d")
 
     def is_mysql_running(self):
+        """
+        Checks if the MySQL service is active using systemd.
+
+        Returns:
+            bool: True if the service is running, False otherwise.
+        """
         try:
             result = subprocess.run(
                 ["systemctl", "is-active", "--quiet", self.service_name],
@@ -58,6 +76,10 @@ class Agent(BootAgent, AgentSummaryMixin):
             return False
 
     def restart_mysql(self):
+        """
+        Attempts to restart the MySQL service. If restarts fail repeatedly,
+        it disables itself to prevent a restart loop.
+        """
         if self.disabled:
             self.log("[WATCHDOG][DISABLED] Agent is disabled due to repeated failures.")
             return
@@ -79,6 +101,12 @@ class Agent(BootAgent, AgentSummaryMixin):
                 self.log("[WATCHDOG][DISABLED] Max restart attempts reached. Watchdog disabled.")
 
     def update_status_metrics(self, is_running):
+        """
+        Updates the uptime and downtime statistics based on the current service status.
+
+        Args:
+            is_running (bool): The current running state of the service.
+        """
         now = time.time()
         last = self.stats.get("last_status")
         elapsed = now - self.stats.get("last_status_change", now)
@@ -93,9 +121,21 @@ class Agent(BootAgent, AgentSummaryMixin):
         self.stats["last_status_change"] = now
 
     def is_socket_accessible(self):
+        """
+        Checks if the MySQL socket file exists.
+
+        Returns:
+            bool: True if the socket exists, False otherwise.
+        """
         return os.path.exists(self.socket_path)
 
     def is_mysql_listening(self):
+        """
+        Checks if any process is listening on the configured MySQL port.
+
+        Returns:
+            bool: True if the port is being listened on, False otherwise.
+        """
         try:
             out = subprocess.check_output(["ss", "-ltn"])
             return f":{self.mysql_port}".encode() in out
@@ -104,9 +144,18 @@ class Agent(BootAgent, AgentSummaryMixin):
             return False
 
     def worker_pre(self):
+        """Logs the systemd unit being watched before the main worker loop starts."""
         self.log(f"[WATCHDOG] Watching systemd unit: {self.service_name}")
 
     def worker(self, config: dict = None, identity: IdentityObject = None):
+        """
+        The main worker loop. It checks the health of the MySQL service, handles state
+        changes (e.g., failure, recovery), triggers restarts, and sends alerts/reports.
+
+        Args:
+            config (dict, optional): Configuration dictionary. Defaults to None.
+            identity (IdentityObject, optional): Identity object for the agent. Defaults to None.
+        """
         # Handle daily summary/report roll
         self.maybe_roll_day("mysql")
 
@@ -155,6 +204,15 @@ class Agent(BootAgent, AgentSummaryMixin):
         interruptible_sleep(self, self.interval)
 
     def should_alert(self, key):
+        """
+        Determines if an alert should be sent based on a cooldown period to avoid alert fatigue.
+
+        Args:
+            key (str): A unique key for the alert type.
+
+        Returns:
+            bool: True if an alert should be sent, False otherwise.
+        """
         now = time.time()
         last = self.last_alerts.get(key, 0)
         if now - last > self.alert_cooldown:
@@ -163,13 +221,22 @@ class Agent(BootAgent, AgentSummaryMixin):
         return False
 
     def post_restart_check(self):
+        """
+        Performs a check after a restart attempt to ensure the service
+        is listening on its port.
+        """
         time.sleep(5)
         if not self.is_mysql_listening():
             self.log(f"[WATCHDOG][CRIT] MySQL restarted but port {self.mysql_port} is still not listening.")
             self.send_simple_alert(f"🚨 MySQL restarted but never began listening on port {self.mysql_port}.")
 
     def send_simple_alert(self, message):
-        """Sends a formatted, human-readable alert."""
+        """
+        Sends a formatted, human-readable alert to agents with the designated alert role.
+
+        Args:
+            message (str): The core alert message to send.
+        """
         if not self.alert_role: return
         alert_nodes = self.get_nodes_by_role(self.alert_role)
         if not alert_nodes: return
@@ -189,7 +256,16 @@ class Agent(BootAgent, AgentSummaryMixin):
         for node in alert_nodes: self.pass_packet(pk1, node["universal_id"])
 
     def send_data_report(self, status, severity, details="", metrics=None):
-        """Sends a structured data packet for forensic analysis."""
+        """
+        Sends a structured data packet with detailed status and diagnostic information
+        to agents with the designated reporting role.
+
+        Args:
+            status (str): The current status (e.g., "DOWN", "RECOVERED").
+            severity (str): The severity level (e.g., "CRITICAL", "INFO").
+            details (str, optional): A human-readable description of the event.
+            metrics (dict, optional): A dictionary of diagnostic information.
+        """
         if not self.report_role: return
         report_nodes = self.get_nodes_by_role(self.report_role)
         if not report_nodes: return
@@ -207,7 +283,13 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.pass_packet(pk1, node["universal_id"])
 
     def collect_mysql_diagnostics(self):
-        """Gathers MySQL-specific diagnostics at the moment of failure."""
+        """
+        Gathers MySQL-specific diagnostics, such as systemd status and recent log entries,
+        at the moment of failure.
+
+        Returns:
+            dict: A dictionary containing diagnostic information.
+        """
         info = {}
         # Get systemd status summary
         try:

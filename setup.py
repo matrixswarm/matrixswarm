@@ -2,9 +2,9 @@ from setuptools import setup, find_packages
 
 setup(
     name='matrixswarm',
-    version='1.0.13',
+    version='1.0.15',
     description='Open-source automation and monitoring platform',
-    author='MatrixSwarm Core Team (Daniel F. MacDonald, ChatGPT) AKA The Generals',
+    author='MatrixSwarm Core Team (Daniel F. MacDonald, ChatGPT) AKA The Generals, Gemini Docstring Engineer',
     author_email='swarm@matrixswarm.com',
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown", 
@@ -52,12 +52,14 @@ setup(
     "eventlet",
     "watchdog",
     "openai",
+    "bleach",
     ],
     entry_points={
         'console_scripts': [
             'matrixswarm-boot=matrixswarm.site_boot:main',
             'matrixswarm-kill=matrixswarm.site_kill:main',
             'matrixswarm-list=matrixswarm.site_list:main',
+            'matrixswarm-encrypt-directive=matrixswarm.encrypt_directive:main',
             'matrixswarm-gencerts=matrixswarm.tools.generate_certs:main',
         ],
     },

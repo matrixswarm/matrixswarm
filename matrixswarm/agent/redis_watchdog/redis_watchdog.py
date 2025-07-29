@@ -1,3 +1,5 @@
+# Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Docstrings by Gemini
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
@@ -14,6 +16,7 @@ from matrixswarm.core.mixin.agent_summary_mixin import AgentSummaryMixin
 class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
         super().__init__()
+
         self.name = "RedisHammer"
         cfg = self.tree_node.get("config", {})
         self.interval = cfg.get("check_interval_sec", 10)

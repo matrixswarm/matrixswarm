@@ -104,7 +104,7 @@ class Agent(BootAgent):
                         #self.log(f"[DEBUG] ✅ tombstone_found={tombstone_found}, tombstone_age_ok={tombstone_age_ok}, die_exists={die_exists}")
 
                         if not tombstone_found or not tombstone_age_ok or not die_exists:
-                            self.log(f"[SCAVENGER] ⚠️ Skipping {universal_id} — check failed.")
+                            self.log(f"[SCAVENGER] ⚠️ Skipping {universal_id} — nothing to do.")
                             continue
 
                         self.log(f"[SCAVENGER] 🧼 Cleaning up {universal_id} now.")

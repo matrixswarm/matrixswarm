@@ -799,6 +799,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                 os.remove(fpath)
                             self.log(f"config {config}", error=e)
 
+                        #AVOID SPAMMING LOGS
                         now = time.time()
                         if (last_worker_cycle_execution + 30) < now:
                             last_worker_cycle_execution = now
@@ -986,20 +987,36 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             return []
 
     def get_nodes_by_subscription(self, topic: str, scope: str = "child", return_count: int = 0):
-        """Monitors and manages the lifecycle of this agent's direct children.
+        """Finds nodes with services subscribed to a specific topic.
 
-        Running in its own thread, this method periodically checks the agent's
-        directive for any defined children. For each child, it checks the age
-        of its heartbeat file. If the heartbeat is stale (older than the
-        timeout), this method assumes the child agent has crashed and will
-        automatically re-spawn it using the spawn_agent_direct() method. This
-        is the primary mechanism for the swarm's self-healing capability.
+        This function queries the agent's cached data to find and return a
+        list of nodes that have a service subscribed to a specific topic. It
+        iterates through all cached service manager configurations and checks
+        their subscriptions, ensuring each matching node is returned only once.
+
+        Note:
+            The 'scope' parameter is parsed but not currently used to filter
+            the nodes. The search is always performed across all cached nodes.
+
+        Args:
+            topic (str): The subscription topic to search for, e.g.,
+                "system.health.report".
+            scope (str): Defines the intended search scope.
+                Defaults to "child".
+            return_count (int): The maximum number of matching nodes to return.
+                If 0 or less, all matches are returned. Defaults to 0.
+
+        Returns:
+            list: A list of node objects that match the subscription topic.
+            Returns an empty list if no nodes are found or if an error
+            occurs during execution.
         """
         try:
             topic = topic.strip()
             if not topic:
                 return []
 
+            # Determine the depth limit from scope
             depth_limit = None
             if scope.startswith("child("):
                 try:
@@ -1009,25 +1026,48 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             elif scope == "child":
                 depth_limit = 1
             elif scope in ("any", "child(0)"):
-                depth_limit = None
+                depth_limit = None  # no limit
             else:
                 depth_limit = 1
 
+            # BFS to honor depth_limit
             nodes = self.get_cached_service_managers()
+            uid_to_node = {n.get("universal_id"): n for n in nodes}
 
+            # Start from this agent's node
+            start_uid = self.command_line_args.get("universal_id")
             seen_uids = set()
             matches = []
+            queue = [(start_uid, 0)]  # (uid, current_depth)
 
-            for node in nodes:
+            while queue:
+                uid, cur_depth = queue.pop(0)
+                if uid in seen_uids:
+                    continue
+                seen_uids.add(uid)
+                node = uid_to_node.get(uid)
+                if not node:
+                    continue
+
+                # Check for subscription at this node
                 for svc in node.get("config", {}).get("service-manager", []):
                     subscriptions = svc.get("subscribe", [])
                     if isinstance(subscriptions, str):
                         subscriptions = [subscriptions]
                     for sub in subscriptions:
-                        if sub.strip() == topic and node.get("universal_id") not in seen_uids:
-                            seen_uids.add(node.get("universal_id"))
+                        if sub.strip() == topic:
                             matches.append(node)
-                            break  # one match per node is enough
+                            break  # Only one match per node
+
+                # Queue children if within depth_limit
+                if depth_limit is None or cur_depth < depth_limit:
+                    for child in node.get("children", []):
+                        cuid = child.get("universal_id")
+                        if cuid and cuid not in seen_uids:
+                            queue.append((cuid, cur_depth + 1))
+
+                if return_count > 0 and len(matches) >= return_count:
+                    break
 
             return matches if return_count <= 0 else matches[:return_count]
 
@@ -1118,6 +1158,20 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], node.get("universal_id"))
                     if time_delta is not None and time_delta < time_delta_timeout:
                         continue
+
+                    #check to see if this agent is a cronjob
+                    if node.get("is_cron_job", False):
+                        mission_complete_file = os.path.join(self.path_resolution['comm_path_resolved'],'hello.moto', 'mission.complete')
+                        if os.path.exists(mission_complete_file):
+                            last_run_time = os.path.getmtime(mission_complete_file)
+                            interval = node.get("cron_interval_sec", 3600)
+                            if (time.time() - last_run_time) >= interval:
+                                self.log(f"[CRON] Interval met for {node.get('universal_id')}. Removing die cookie to trigger next run.")
+                                os.remove(mission_complete_file)
+                            else:
+                                continue
+
+
 
                     #TODO: verify if the agent is in memory first, before spawning, if it is, launch a reaper
                     #      wait for reaper to give all clear, removing die cookie to signal

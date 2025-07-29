@@ -52,6 +52,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         ]
 
         self.root_path = pm.get_path("root")
+        self.core_path = os.path.join(self.root_path, 'core')
         self.comm_path = pm.get_path("comm")
         self.pod_path = pm.get_path("pod")
         if install_path:
@@ -238,6 +239,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 "pod_path": self.pod_path,
                 "comm_path": self.comm_path,
                 "agent_path": self.agent_path,
+                "core_path": self.core_path,
                 "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
                 "comm_path_resolved": os.path.join(self.comm_path, universal_id),
                 "session_path": session_path,

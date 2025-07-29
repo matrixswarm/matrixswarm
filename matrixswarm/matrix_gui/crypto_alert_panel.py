@@ -1,7 +1,8 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+from PyQt5.QtWidgets import (QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                              QSizePolicy, QComboBox, QSpinBox, QMessageBox, QScrollArea, QGroupBox, QCheckBox, QLayout)
 from PyQt5.QtGui import QColor
 from PyQt5.QtCore import QRect, QSize, Qt, QPoint, QTimer
+
 import json
 import time
 import uuid
@@ -133,100 +134,249 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin):
         self.refresh_cards()
 
     def create_alert_card(self, alert):
-        card = QGroupBox(alert.get("name") or f"{alert.get('pair')} | {alert.get('trigger_type').upper()}")
+        card = QGroupBox()
         layout = QVBoxLayout(card)
+        FIELD_WIDTH = 215
+
+        # --- Card Neon Shadow ---
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QFrame, QSpacerItem, QSizePolicy
+        from PyQt5.QtGui import QColor
+
+        neon_shadow = QGraphicsDropShadowEffect(card)
+        neon_shadow.setBlurRadius(28)
+        neon_shadow.setColor(QColor("#00ff66"))
+        neon_shadow.setOffset(0, 0)
+        card.setGraphicsEffect(neon_shadow)
 
         card.setStyleSheet("""
             QGroupBox {
-                border: 1px solid #00ff66;
-                border-radius: 6px;
-                background-color: #111;
-                margin: 6px;
-                padding: 10px;
+                border: 2.5px solid #00ff66;
+                border-radius: 17px;
+                background-color: #141414;
+                margin: 16px;
+                padding: 18px 15px 14px 15px;
             }
         """)
-        card.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        # Price & trigger summary bar
+
+        # ---- Card Header ----
+        header = QLabel(alert.get("name") or f"New {alert.get('trigger_type', '').replace('_', ' ').title()}")
+        header.setStyleSheet("""
+            font-size: 19px;
+            color: #39ff14;
+            font-family: 'Consolas', 'Courier', monospace;
+            font-weight: bold;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+            padding-top: 2px;
+        """)
+        layout.addWidget(header)
+
+        # ---- Neon Divider Under Header ----
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setFrameShadow(QFrame.Sunken)
+        divider.setStyleSheet("""
+            color: #00ff66;
+            background: #00ff66;
+            min-height: 2px;
+            margin-bottom: 12px;
+        """)
+        layout.addWidget(divider)
+
+        # ---- Summary Bar ----
         summary_bar = QWidget()
         summary_layout = QVBoxLayout(summary_bar)
         summary_layout.setContentsMargins(0, 0, 0, 0)
-        summary_layout.setSpacing(6)
-
         pill_container = QWidget()
         pill_layout = QHBoxLayout(pill_container)
         pill_layout.setContentsMargins(0, 0, 0, 0)
-        pill_layout.setSpacing(6)
-
-        # Status dot
+        pill_layout.setSpacing(7)
         status = "🟢" if alert.get("active", True) else "🔴"
         pill_layout.addWidget(QLabel(status))
-
-        # Title label (not dynamic, just descriptor)
         title_label = QLabel(f"{alert.get('pair')} | {alert.get('trigger_type', '').replace('_', ' ').upper()}")
         pill_layout.addWidget(title_label)
-
-        # Price pill (this will be updated on combo change)
         price = self.get_price(alert.get("pair", ""))
         price_pill = self._pill(f"{alert.get('pair').split('/')[0]}  ${price:,.2f}" if price else "--")
         pill_layout.addWidget(price_pill)
-
-        # Optional: conversion/change pill
         if "change_percent" in alert:
             pill_layout.addWidget(self._pill(f"Δ {alert['change_percent']}%"))
-
         pill_layout.addStretch()
         summary_layout.addWidget(pill_container)
         layout.addWidget(summary_bar)
 
-        # Pair Selector
-        layout.addWidget(QLabel("Pair:"))
+        # --- Section Spacing ---
+        layout.addSpacerItem(QSpacerItem(5, 12, QSizePolicy.Minimum, QSizePolicy.Fixed))
+
+        # ---- Field Styling Template ----
+        field_style = """
+            QLineEdit, QComboBox {
+                background-color: #000;
+                color: #00ff66;
+                border: 1.7px solid #00ff66;
+                border-radius: 5px;
+                font-family: 'Consolas', 'Courier', monospace;
+                font-size: 13px;
+                padding: 3px 10px;
+            }
+            QSpinBox {
+                background-color: #000;
+                color: #00ff66;
+                border: 1.7px solid #00ff66;
+                border-radius: 5px;
+                font-size: 13px;
+                font-family: 'Consolas', 'Courier', monospace;
+                padding-left: 8px;
+            }
+        """
+
+        # ---- Pair Selector ----
+        label_style = "color: #00ff66; font-size: 13px; font-weight: bold; font-family: 'Consolas', 'Courier', monospace;"
+        pair_label = QLabel("Pair:")
+        pair_label.setStyleSheet(label_style)
+        layout.addWidget(pair_label)
         pair_input = QComboBox()
         pair_input.addItems(self.supported_pairs)
         pair_input.setCurrentText(alert.get("pair", "BTC/USDT"))
+        pair_input.setMinimumWidth(FIELD_WIDTH)
+        pair_input.setStyleSheet(field_style)
         layout.addWidget(pair_input)
 
-        # === Triggered Update Logic ===
-        def update_price_display():
-            pair = pair_input.currentText().strip()
-            alert["pair"] = pair
-            price = self.get_price(pair)
-            price_pill.setText(f"{pair.split('/')[0]}  ${price:,.2f}" if price else "--")
+        # ---- Common Fields ----
+        trigger_type = alert.get("trigger_type", "")
+        trigger_label = QLabel("Trigger Type:")
+        trigger_label.setStyleSheet(label_style)
+        layout.addWidget(trigger_label)
+        trigger_type_val = QLabel(trigger_type.replace("_", " ").title())
+        trigger_type_val.setStyleSheet("color: #00ffcc; font-size: 13px;")
+        layout.addWidget(trigger_type_val)
 
-        pair_input.currentTextChanged.connect(update_price_display)
-
-        # Trigger Type Display
-        trigger_box = QHBoxLayout()
-        trigger_box.addWidget(QLabel("Trigger Type:"))
-        trigger_label = QLabel(alert.get("trigger_type", "???").replace("_", " ").title())
-        trigger_box.addWidget(trigger_label)
-        layout.addLayout(trigger_box)
-
-        # Threshold
-        layout.addWidget(QLabel("Threshold:"))
+        threshold_label = QLabel("Threshold:")
+        threshold_label.setStyleSheet(label_style)
+        layout.addWidget(threshold_label)
         threshold_input = QLineEdit(str(alert.get("threshold", "")))
+        threshold_input.setMinimumWidth(FIELD_WIDTH)
+        threshold_input.setStyleSheet(field_style)
         layout.addWidget(threshold_input)
 
-        # Cooldown
-        layout.addWidget(QLabel("Cooldown (sec):"))
+        cooldown_label = QLabel("Cooldown (sec):")
+        cooldown_label.setStyleSheet(label_style)
+        layout.addWidget(cooldown_label)
         cooldown_input = QSpinBox()
         cooldown_input.setRange(30, 86400)
         cooldown_input.setValue(alert.get("cooldown", 300))
+        cooldown_input.setMinimumWidth(FIELD_WIDTH)
+        cooldown_input.setStyleSheet(field_style)
         layout.addWidget(cooldown_input)
 
-        # Active toggle
+        layout.addSpacerItem(QSpacerItem(2, 6, QSizePolicy.Minimum, QSizePolicy.Fixed))
+
         active_checkbox = QCheckBox("Active")
         active_checkbox.setChecked(alert.get("active", True))
+        active_checkbox.setStyleSheet("color: #00ff66; font-weight: bold;")
         layout.addWidget(active_checkbox)
 
-        # Name
-        layout.addWidget(QLabel("Alert Name:"))
+        name_label = QLabel("Alert Name:")
+        name_label.setStyleSheet(label_style)
+        layout.addWidget(name_label)
         name_input = QLineEdit(alert.get("name", ""))
+        name_input.setMinimumWidth(FIELD_WIDTH)
+        name_input.setStyleSheet(field_style)
         layout.addWidget(name_input)
 
-        # Save/Delete
+        # ---- Asset Conversion Section ----
+        if trigger_type == "asset_conversion":
+            layout.addSpacerItem(QSpacerItem(2, 9, QSizePolicy.Minimum, QSizePolicy.Fixed))
+            from_asset_label = QLabel("From Asset:")
+            from_asset_label.setStyleSheet(label_style)
+            layout.addWidget(from_asset_label)
+            from_asset_input = QComboBox()
+            from_asset_input.addItems(self.supported_assets)
+            from_asset_input.setCurrentText(alert.get("from_asset", "BTC"))
+            from_asset_input.setMinimumWidth(FIELD_WIDTH)
+            from_asset_input.setStyleSheet(field_style)
+            layout.addWidget(from_asset_input)
+
+            to_asset_label = QLabel("To Asset:")
+            to_asset_label.setStyleSheet(label_style)
+            layout.addWidget(to_asset_label)
+            to_asset_input = QComboBox()
+            to_asset_input.addItems(self.supported_assets)
+            to_asset_input.setCurrentText(alert.get("to_asset", "ETH"))
+            to_asset_input.setMinimumWidth(FIELD_WIDTH)
+            to_asset_input.setStyleSheet(field_style)
+            layout.addWidget(to_asset_label)
+            layout.addWidget(to_asset_input)
+
+            from_amount_label = QLabel("From Amount:")
+            from_amount_label.setStyleSheet(label_style)
+            layout.addWidget(from_amount_label)
+            from_amount_input = QLineEdit(str(alert.get("from_amount", "0.1")))
+            from_amount_input.setMinimumWidth(FIELD_WIDTH)
+            from_amount_input.setStyleSheet(field_style)
+            layout.addWidget(from_amount_input)
+
+            conversion_label = QLabel("")
+            conversion_label.setMinimumWidth(FIELD_WIDTH + 15)
+            conversion_label.setStyleSheet("""
+                color: #39ff14;
+                font-size: 15px;
+                font-weight: bold;
+                margin-top: 7px;
+                margin-bottom: 2px;
+            """)
+            layout.addWidget(conversion_label)
+
+            def update_conversion_display():
+                from_asset = from_asset_input.currentText()
+                to_asset = to_asset_input.currentText()
+                try:
+                    from_amount = float(from_amount_input.text())
+                except Exception:
+                    from_amount = 1.0
+                price1 = self.get_price(f"{from_asset}/USDT")
+                price2 = self.get_price(f"{to_asset}/USDT")
+                if price1 and price2:
+                    value = from_amount * price1 / price2
+                    conversion_label.setText(f"{from_amount} {from_asset} ≈ {value:.4f} {to_asset}")
+                else:
+                    conversion_label.setText("...")
+
+            from_asset_input.currentTextChanged.connect(update_conversion_display)
+            to_asset_input.currentTextChanged.connect(update_conversion_display)
+            from_amount_input.textChanged.connect(update_conversion_display)
+            update_conversion_display()
+
+        # --- Final Spacing Before Buttons ---
+        layout.addSpacerItem(QSpacerItem(2, 16, QSizePolicy.Minimum, QSizePolicy.Fixed))
+
+        # ---- Save/Delete Buttons ----
         btn_row = QHBoxLayout()
         save_btn = QPushButton("💾 Save")
         delete_btn = QPushButton("🗑 Delete")
+
+        button_style = """
+            QPushButton {
+                background-color: #000;
+                color: #00ff66;
+                border: 2px solid #00ff66;
+                font-weight: bold;
+                border-radius: 9px;
+                font-size: 14px;
+                padding: 7px 22px;
+                margin: 4px 8px;
+                letter-spacing: 1.1px;
+                transition: background 0.17s;
+            }
+            QPushButton:hover {
+                background-color: #00ff66;
+                color: #000;
+            }
+        """
+        save_btn.setStyleSheet(button_style)
+        delete_btn.setStyleSheet(button_style)
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(delete_btn)
+        layout.addLayout(btn_row)
 
         def save_changes():
             updated = {
@@ -235,13 +385,20 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin):
                 "cooldown": cooldown_input.value(),
                 "active": active_checkbox.isChecked(),
                 "name": name_input.text().strip(),
-                "trigger_type": alert.get("trigger_type"),
-                "type": alert.get("trigger_type"),
+                "trigger_type": trigger_type,
+                "type": trigger_type,
                 "exchange": alert.get("exchange", "coingecko"),
                 "poll_interval": 60,
                 "notify": ["gui"],
                 "universal_id": alert["universal_id"]
             }
+            if trigger_type == "asset_conversion":
+                updated["from_asset"] = from_asset_input.currentText().strip()
+                updated["to_asset"] = to_asset_input.currentText().strip()
+                try:
+                    updated["from_amount"] = float(from_amount_input.text().strip() or "0.1")
+                except Exception:
+                    updated["from_amount"] = 0.1
             for i, a in enumerate(self.alerts):
                 if a.get("universal_id") == alert["universal_id"]:
                     self.alerts[i] = updated
@@ -256,13 +413,8 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin):
         save_btn.clicked.connect(save_changes)
         delete_btn.clicked.connect(delete_alert)
 
-        btn_row.addWidget(save_btn)
-        btn_row.addWidget(delete_btn)
-        layout.addLayout(btn_row)
-
         card.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         return card
-
 
     def build_alert_summary_bar(self, alert):
         from PyQt5.QtWidgets import QLabel, QHBoxLayout, QWidget
@@ -367,8 +519,20 @@ class CryptoAlertPanel(QWidget, PacketFactoryMixin):
             self.card_layout.addWidget(placeholder)
             return
 
+        # --- Build all cards first, but DON'T add to layout yet
+        cards = []
         for alert in self.alerts:
-            self.card_layout.addWidget(self.create_alert_card(alert))
+            card = self.create_alert_card(alert)
+            cards.append(card)
+
+        # --- Find the tallest card
+        max_height = max(card.sizeHint().height() for card in cards)
+
+        # --- Set all cards to the max height, then add to layout
+        for card in cards:
+            card.setMinimumHeight(max_height)
+            card.setMaximumHeight(max_height)
+            self.card_layout.addWidget(card)
 
 
     def load_alert_to_form(self, alert):
