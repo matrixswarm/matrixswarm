@@ -6,6 +6,7 @@ import base64
 import os
 import copy
 import json
+import hashlib
 from matrixswarm.core.utils.crypto_utils import generate_aes_key
 from matrixswarm.core.mixin.log_method import LogMixin
 
@@ -821,3 +822,4 @@ class TreeParser(LogMixin):
                 })
 
         return minimal_tree
+

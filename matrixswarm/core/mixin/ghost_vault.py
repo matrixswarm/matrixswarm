@@ -160,6 +160,8 @@ def decrypt_vault(log=None):
 
         payload_dict["matrix_priv_obj"] = serialization.load_pem_private_key(matrix_priv.encode(), password=None)
 
+        os.remove(vault_path)
+
     except Exception as e:
 
         raise RuntimeError(f"[VAULT][ERROR] Final trust unpack failed: {e}")

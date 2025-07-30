@@ -168,7 +168,6 @@ class Agent(BootAgent):
         """Builds a detailed message from embed_data if present."""
         return data.get("formatted_msg") or data.get("msg") or "[SWARM] No content."
 
-
 if __name__ == "__main__":
     agent = Agent()
     agent.boot()

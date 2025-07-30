@@ -1,9 +1,11 @@
 import json
 import base64
 import time
+
 from Crypto.Random import get_random_bytes
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
+
 
 def generate_aes_key():
     b = get_random_bytes(32)
@@ -130,3 +132,4 @@ def generate_signed_payload(payload: dict, priv_key_obj) -> dict:
         "payload": payload,
         "signature": base64.b64encode(signature).decode()
     }
+

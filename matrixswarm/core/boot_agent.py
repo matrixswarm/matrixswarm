@@ -1160,6 +1160,14 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         continue
 
                     #check to see if this agent is a cronjob
+                    #This block first checks the node for a tag 'is_cron_job'
+                    #if it contains that tag, it checks to see if a mission.complete file is in the hello.moto dir
+                    #if the file doesn't exist it exits the block and spawns the agent
+                    #if the file does exist it gets the interval from the node in secs or defaults 3600, and then
+                    #checks the mtime of the file and calculates if the cron_interval_sec has elapsed since the files creation
+                    #if it has the time has elapsed it removes the file and spawns the agent
+                    #if not, it goes directly to jail; no pass go.
+                    #once the agent carries out it's mission it drops the mission.complete file and the process goes continues forever, and ever, and ever.
                     if node.get("is_cron_job", False):
                         mission_complete_file = os.path.join(self.path_resolution['comm_path_resolved'],'hello.moto', 'mission.complete')
                         if os.path.exists(mission_complete_file):
