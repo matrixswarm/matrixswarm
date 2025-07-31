@@ -55,9 +55,11 @@ class Agent(BootAgent):
         pk.set_data(pk_content)
         for node in report_nodes:
             self.pass_packet(pk, node["universal_id"])
-
-        if self.debug.is_enabled():
             self.log(f"Sent '{severity}' for '{service_name}' to role '{self.report_to_role}'", level="INFO")
+
+        #if self.debug.is_enabled():
+        #    self.log(f"Sent '{severity}' for '{service_name}' to role '{self.report_to_role}'", level="INFO")
+
 
     def worker(self, config: dict = None, identity: IdentityObject = None):
         """Main execution loop for the agent."""

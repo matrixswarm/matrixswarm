@@ -9,6 +9,7 @@ from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 from Crypto.Random import get_random_bytes
+from matrixswarm.core.utils.debug.config import DebugConfig
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.sig_payload_json import SigPayloadJson
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.interfaces.sig_payload import SigPayload
 
@@ -18,6 +19,7 @@ class PacketCryptoMixin(LogMixin):
         self.football = None  # Command & Crypto strategy
         self._decrypted_packet = None
         self.allowed_sender_ids = set()
+        self.debug = DebugConfig()
 
     def set_football(self, football_obj):
         self.football = football_obj
@@ -406,7 +408,8 @@ class PacketCryptoMixin(LogMixin):
             payload_bytes = payload.get_payload()
             digest = SHA256.new(payload_bytes)
             pkcs1_15.new(rsa_key).verify(digest, signature)
-            self.log("Signature verified successfully", block="BL_VERIFY", level="INFO")
+            if self.debug.is_enabled():
+                self.log("Signature verified successfully", block="BL_VERIFY", level="INFO")
 
             return True
 

@@ -8,7 +8,7 @@ class DebugConfig:
 
         return cls._instance
 
-    def set_enabled(self, enabled: bool=True):
+    def set_enabled(self, enabled:bool=True):
         self._enabled=bool(enabled)
 
     def is_enabled(self) -> bool:

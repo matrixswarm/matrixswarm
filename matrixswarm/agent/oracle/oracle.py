@@ -43,6 +43,9 @@ class Agent(BootAgent):
         os.makedirs(self.outbox_path, exist_ok=True)
         self.use_dummy_data = False
 
+    def post_boot(self):
+        self.log(f"{self.NAME} v{self.AGENT_VERSION} – have a cookie.")
+
     def worker_pre(self):
         """
         A one-time setup hook that runs before the main worker loop starts.

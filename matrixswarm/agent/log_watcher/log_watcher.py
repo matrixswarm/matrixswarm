@@ -1,15 +1,15 @@
 # log_watcher.py
 # Authored by Daniel F MacDonald and Gemini
-
-import sys
 import os
+import sys
+
+sys.path.insert(0, os.getenv("SITE_ROOT"))
+sys.path.insert(0, os.getenv("AGENT_PATH"))
+
 import time
-import json
-import re
 from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
-
 
 class Agent(BootAgent):
     """
@@ -20,6 +20,8 @@ class Agent(BootAgent):
     def __init__(self):
         """Initializes the agent and its log watching configuration."""
         super().__init__()
+        self.AGENT_VERSION = "1.0.0"
+
         config = self.tree_node.get("config", {})
 
         self.log_path = config.get("log_path")
@@ -37,18 +39,23 @@ class Agent(BootAgent):
         self._current_inode = None
         self._log_file = None
 
+    def post_boot(self):
+        self.log(f"{self.NAME} v{self.AGENT_VERSION} – your logs tell many secrets...")
+
+    def worker_pre(self):
+        self.log(f"Beginning to watch log file: {self.log_path}")
+        self._open_log_file()
+
+
     def worker(self, config: dict = None, identity: IdentityObject = None):
         """
         Main worker loop that tails the log file and handles rotation.
         """
-        if not self.log_path or not os.path.exists(self.log_path):
-            self.log(f"Log path '{self.log_path}' is invalid or not found. Worker will idle.", level="ERROR")
-            return
+        try:
+            if not self.log_path or not os.path.exists(self.log_path):
+                self.log(f"Log path '{self.log_path}' is invalid or not found. Worker will idle.", level="ERROR")
+                return
 
-        self.log(f"Beginning to watch log file: {self.log_path}")
-        self._open_log_file()
-
-        while self.running:
             try:
                 # Check for log rotation
                 if not self._is_file_still_valid():
@@ -65,16 +72,24 @@ class Agent(BootAgent):
 
             except Exception as e:
                 self.log("Error during log watch cycle.", error=e, level="ERROR")
-                interruptible_sleep(self, 5)  # Longer sleep on error
+
+            interruptible_sleep(self, 10)  # Longer sleep on error
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
     def _open_log_file(self):
         """Opens or re-opens the log file and seeks to the end."""
-        if self._log_file:
-            self._log_file.close()
+        try:
+            if self._log_file:
+                self._log_file.close()
 
-        self._log_file = open(self.log_path, 'r')
-        self._current_inode = os.fstat(self._log_file.fileno()).st_ino
-        self._log_file.seek(0, 2)  # Go to the end of the file
+            self._log_file = open(self.log_path, 'r')
+            self._current_inode = os.fstat(self._log_file.fileno()).st_ino
+            self._log_file.seek(0, 2)  # Go to the end of the file
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
 
     def _is_file_still_valid(self):
         """Checks if the log file has been rotated."""
@@ -85,28 +100,32 @@ class Agent(BootAgent):
 
     def _process_line(self, line: str):
         """Parses a log line and sends it as a status report."""
-        line = line.strip()
-        if not line:
-            return
 
-        severity = "INFO"  # Default severity
-        line_lower = line.lower()
-        for level, keywords in self.severity_rules.items():
-            if any(keyword in line_lower for keyword in keywords):
-                severity = level
-                break
+        try:
+            line = line.strip()
+            if not line:
+                return
 
-        report = {
-            "source_agent": self.command_line_args.get("universal_id"),
-            "service_name": self.service_name,
-            "status": "log_entry_detected",
-            "severity": severity,
-            "details": {
-                "timestamp": time.time(),
-                "log_line": line
+            severity = "INFO"  # Default severity
+            line_lower = line.lower()
+            for level, keywords in self.severity_rules.items():
+                if any(keyword in line_lower for keyword in keywords):
+                    severity = level
+                    break
+
+            report = {
+                "source_agent": self.command_line_args.get("universal_id"),
+                "service_name": self.service_name,
+                "status": "log_entry_detected",
+                "severity": severity,
+                "details": {
+                    "timestamp": time.time(),
+                    "log_line": line
+                }
             }
-        }
-        self._send_report(report)
+            self._send_report(report)
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
     def _send_report(self, report_content: dict):
         """Constructs and sends a status report packet."""

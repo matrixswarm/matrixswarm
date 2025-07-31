@@ -1436,7 +1436,8 @@ class Agent(BootAgent):
             football.load_identity_file(vault=subtree.get("vault"), universal_id=universal_id)
             self.save_directive(path, data, football=football)
 
-            self.log(f"Tree delivered to {universal_id}")
+            if self.debug.is_enabled():
+                self.log(f"Tree delivered to {universal_id}")
 
         except Exception as e:
             self.log(error=e, block="main-try")

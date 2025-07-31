@@ -57,7 +57,8 @@ class Agent(BootAgent):
         ])
 
         self.abs_watch_paths = [
-            os.path.join(self.path_resolution["site_root_path"], path) for path in self.watch_paths
+            path if os.path.isabs(path) else os.path.join(self.path_resolution["site_root_path"], path)
+            for path in self.watch_paths
         ]
         self.cooldown = 60
         self.last_seen = {}

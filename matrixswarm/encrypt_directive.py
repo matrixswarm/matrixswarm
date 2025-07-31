@@ -232,7 +232,7 @@ def find_matrixswarm_path(cli_path=None):
     return here / ".matrixswarm"
 
 
-def embed_keypair_if_marker(obj):
+def embed_keypair_if_marker(obj, universal_id=None):
     """
     Recursively searches a directive for a "##GENERATE_KEY##" marker and
     replaces it with a newly generated RSA public/private key pair.
@@ -244,17 +244,19 @@ def embed_keypair_if_marker(obj):
         str: The public key of each generated key pair.
     """
     if isinstance(obj, dict):
-        for k, v in list(obj.items()):  # Iterate over a copy for safe modification
+        this_id = obj.get("universal_id", universal_id)
+        for k, v in list(obj.items()):
+
             if k == "privkey" and v == "##GENERATE_KEY##":
                 priv, pub = generate_rsa_keypair()
                 obj[k] = priv
                 obj["pubkey"] = pub
-                yield pub
+                yield (this_id, pub)
             else:
-                yield from embed_keypair_if_marker(v)
+                yield from embed_keypair_if_marker(v, this_id)
     elif isinstance(obj, list):
         for item in obj:
-            yield from embed_keypair_if_marker(item)
+            yield from embed_keypair_if_marker(item, universal_id)
 
 
 def main():
@@ -338,6 +340,7 @@ def main():
         # Generate and embed RSA key pairs if markers are found
         pubkeys = list(embed_keypair_if_marker(data))
 
+
         # Encrypt the final directive structure
         data_bytes = json.dumps(data, indent=2).encode()
         key = get_random_aes_key()
@@ -359,12 +362,15 @@ def main():
         print(base64.b64encode(key).decode())
         print("=" * 50 + "\n", file=sys.stderr)
 
+
         if pubkeys:
             print("[🪪] Generated Public Key(s) for external use:", file=sys.stderr)
-            for pub in pubkeys:
-                print(pub, file=sys.stderr)
+            for universal_id, pub in pubkeys:
+                id_str = universal_id or "<no universal_id>"
+                print(f"\n[AGENT: {id_str}]\n{pub}\n", file=sys.stderr)
         else:
             print("[ℹ️] No '##GENERATE_KEY##' marker found; no RSA keypair embedded.", file=sys.stderr)
+
 
         print("\nIf the AES key is lost, the encrypted file is unrecoverable.", file=sys.stderr)
 

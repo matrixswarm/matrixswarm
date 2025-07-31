@@ -62,7 +62,8 @@ matrix_directive = {
             "app": "matrix-core",
             "config": {
                 "allowlist_ips": [
-                    # allowed list of ips to access server
+                    #'ip',
+                    #'ip2'
                 ],
                 "privkey": "##GENERATE_KEY##",  #optional: can be used to sign all outgoing messages, headed for the gui; PASTE THIS IN THE GUI FOR THE CONNECTION USED
                 "remote_pubkey": "<OPTIONAL: PASTE THE PUBKEY GENERATED FROM YOUR matrix_gui HERE>", #optional: verify the signature of all incoming packets. paste pubkey generated from matrix_gui that have or will create
@@ -117,8 +118,8 @@ matrix_directive = {
           "config": {
             "oracle_timeout": 15,
             "watched_paths": [
-                  "/some/site/path1/outgoing_msgs/",
-                  "/some/site/path2/outgoing_msgs/"
+                  "/some/path/outgoing_msgs/",
+                  "/some/path/outgoing_msgs/"
             ],
             "suspended": 0,
             "enable_fallback_forward": 1,
@@ -145,7 +146,9 @@ matrix_directive = {
                 "ports": [80, 443],
                 "restart_limit": 3,
                 "always_alert": 1,
-                "alert_cooldown": 300
+                "alert_cooldown": 300,
+                "report_to_role": "hive.forensics.data_feed",
+                "report_handler": "cmd_ingest_status_report"
             },
             "children": [],
             "filesystem": {},
@@ -194,6 +197,8 @@ matrix_directive = {
                     "slow_restart_sec": 10
                 },
                 "role": "mysql-alarm",
+                "report_to_role": "hive.forensics.data_feed",
+                "report_handler": "cmd_ingest_status_report"
             }
             ,
             "children": []
@@ -204,7 +209,8 @@ matrix_directive = {
             "config": {
                 "port": 8765,
                 "allowlist_ips": [
-                  #allowed list of ips to access server
+                    #'ip',
+                    #'ip2'
                 ],
                 "factories": {
                     "reflex.health.status_report": {}
@@ -281,7 +287,13 @@ matrix_directive = {
             "universal_id": "forensic-detective-1",
             "name": "forensic_detective",
             "config": {
-                "enable_oracle": 1,
+                "service-manager": [{
+                    "role": ["hive.forensics.data_feed"],
+                }],
+                "oracle_analysis": {
+                    "enable_oracle": 1,
+                    "role": "hive.oracle"
+                }
             }
             # It will automatically receive reports from agents using its role
         },
@@ -294,7 +306,9 @@ matrix_directive = {
                 "severity_rules": {
                     "CRITICAL": ["segfault"],
                     "WARNING": ["error", "client denied"]
-                }
+                },
+                "report_to_role": "hive.forensics.data_feed",
+                "report_handler": "cmd_ingest_status_report"
             }
         },
         {
@@ -306,7 +320,10 @@ matrix_directive = {
                 "severity_rules": {
                     "CRITICAL": ["session opened for user root"],
                     "WARNING": ["failed password", "invalid user"]
-                }
+                },
+                "report_to_role": "hive.forensics.data_feed",
+                "report_handler": "cmd_ingest_status_report"
+
             }
         },
         {

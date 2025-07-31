@@ -1,67 +1,83 @@
+# forensic_detective/factory/watchdog/generic_log/investigator.py
+# Authored by Daniel F MacDonald and Gemini
+
 import os
-import subprocess
+import re
 
 class Investigator:
     """
-    Forensic Investigator for MySQL.
-    Correlates status events and error conditions to provide
-    concise, actionable findings for operators.
+    Forensic Investigator for the generic Log Watcher.
+
+    This investigator is designed to analyze critical log entries reported by
+    the log_watcher agent. It extracts the key error message and correlates it
+    with any recent warning-level logs to provide a concise and relevant
+    forensic summary.
     """
     def __init__(self, agent_ref, service_name, all_events):
+        """
+        Initializes the investigator.
+
+        Args:
+            agent_ref (Agent): A reference to the parent ForensicDetective agent.
+            service_name (str): The name of the service that generated the log
+                                (e.g., 'auth_log', 'application_log').
+            all_events (list): A list of all recent event dictionaries from the
+                               detective's buffer for correlation.
+        """
         self.agent = agent_ref
         self.service_name = service_name
         self.all_events = all_events
+        self.critical_event = self._find_critical_event()
 
-        self.CAUSE_PRIORITIES = [
-            # Prioritize resource issues and classic MySQL pitfalls
-            {"service": "system.memory", "status": "high_usage", "finding": "Probable Cause: System memory exhaustion."},
-            {"service": "system.cpu", "status": "high_load", "finding": "Probable Cause: High CPU load."},
-            {"service": "system.disk", "status": "low_space", "finding": "Possible Cause: Low disk space."},
-            {"service": "mysql", "status": "crashed", "finding": "Critical: MySQL process crashed."},
-            {"service": "mysql", "status": "not_listening", "finding": "MySQL process running but not listening on expected port."},
-            {"service": "dependency.filesystem", "status": "readonly", "finding": "Possible Cause: Filesystem went read-only (often fatal for MySQL)."},
-        ]
+    def _find_critical_event(self):
+        """Finds the most recent critical log entry that triggered this investigation."""
+        for event in reversed(self.all_events):
+            if event.get('service_name') == self.service_name and event.get('severity') == 'CRITICAL':
+                return event
+        return None
 
     def add_specific_findings(self, findings):
-        self.agent.log(f"Running MYSQL-specific forensic checks for {self.service_name}")
-        concise_finding = "No high-priority MySQL cause identified in correlated events."
-        primary_cause_found = False
+        """
+        Analyzes the log events and constructs a list of findings.
 
-        # Use priority list to find the most likely cause
-        for priority in self.CAUSE_PRIORITIES:
-            for event in self.all_events:
-                if event.get('service_name') == priority['service'] and event.get('status') == priority['status']:
-                    concise_finding = priority['finding'] + (f"\nDetails: {event.get('details')}" if event.get('details') else "")
-                    primary_cause_found = True
-                    break
-            if primary_cause_found:
-                break
+        This method forms the core logic of the investigator. It identifies the
+        primary error and supplements it with contextual warnings.
 
+        Args:
+            findings (list): The list of findings to append to.
+
+        Returns:
+            list: The updated list of findings.
+        """
+        self.agent.log(f"Running Generic Log forensic checks for '{self.service_name}'")
+
+        if not self.critical_event:
+            findings.insert(0, "**Concise Analysis:**\n---\nCould not identify the triggering critical log event.")
+            return findings
+
+        # Extract the primary error message
+        critical_log_line = self.critical_event.get('details', {}).get('log_line', 'No log line found.')
+        concise_finding = f"**Critical Log Entry Detected:**\n`{critical_log_line}`"
         findings.insert(0, f"**Concise Analysis:**\n---\n{concise_finding}\n---")
 
-        # Pull MySQL or MariaDB error log as supporting evidence
-        try:
-            log_paths = [
-                "/var/log/mysql/error.log",
-                "/var/log/mariadb/mariadb.log",
-                "/var/log/mysql/mysql.err",
-                "/var/log/mysqld.log"
-            ]
-            for log_path in log_paths:
-                if os.path.exists(log_path):
-                    log_output = subprocess.check_output(["tail", "-n", "20", log_path], text=True).strip()
-                    if log_output:
-                        # Search for known error patterns
-                        error_patterns = {
-                            "segfault": "Apache process segfaulted.",
-                            "Syntax error": "Syntax error in Apache config.",
-                            "client denied by server configuration": "Access denied by Apache config."
-                        }
-                        for line in log_output.splitlines():
-                            for pattern, explanation in error_patterns.items():
-                                if pattern in line:
-                                    findings.append(f"**Pattern Match:** {explanation}\n> {line}")
-        except Exception as e:
-            findings.append(f"[!] MySQL log check failed: {e}")
+        # Find recent preceding warnings
+        warnings = []
+        critical_timestamp = self.critical_event.get('details', {}).get('timestamp', 0)
+
+        for event in self.all_events:
+            event_timestamp = event.get('details', {}).get('timestamp', 0)
+            # Correlate events that are also from this service, are warnings, and occurred before the critical event
+            if (event.get('service_name') == self.service_name and
+                event.get('severity') == 'WARNING' and
+                event_timestamp < critical_timestamp):
+                warnings.append(event.get('details', {}).get('log_line', 'Malformed warning line.'))
+
+        if warnings:
+            # Reverse to show the most recent warnings first (closest to the event)
+            warnings.reverse()
+            formatted_warnings = "\n".join([f"- `{line}`" for line in warnings[:5]]) # Limit to 5 for brevity
+            findings.append(f"**Preceding Warnings:**\n---\n{formatted_warnings}\n---")
+        else:
+            findings.append("**Preceding Warnings:**\n---\nNo relevant warnings found in the correlation window.\n---")
 
         return findings

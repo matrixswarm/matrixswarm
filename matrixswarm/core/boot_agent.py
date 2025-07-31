@@ -27,7 +27,6 @@ from matrixswarm.core.class_lib.packet_delivery.mixin.packet_delivery_factory_mi
 from matrixswarm.core.class_lib.packet_delivery.mixin.packet_reception_factory_mixin import PacketReceptionFactoryMixin
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.config import EncryptionConfig
-from matrixswarm.core.utils.debug.config import DEBUG_CONFIG
 from matrixswarm.core.utils.debug.config import DebugConfig
 from cryptography.hazmat.primitives import serialization
 from matrixswarm.core.mixin.ghost_vault import decrypt_vault
@@ -173,8 +172,19 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         debug = bool(self.command_line_args.get('debug',0))
 
-        self.debug.set_enabled(debug)
-        
+        self.debug.set_enabled(enabled = debug)
+        if self.debug.is_enabled():
+            status="enabled"
+        else:
+            status="disabled"
+        self.log(f"Debugging: {status}")
+
+        if self.encryption_enabled:
+            status = "enabled"
+        else:
+            status = "disabled"
+        self.log(f"Encryption: {status}")
+
         self._loaded_tree_nodes={}
         self._service_manager_services = {}
 
@@ -1129,7 +1139,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                     tree = tp.root
                     last_tree_mtime = mtime
-                    self.log(f"[SPAWN] Tree updated from disk.")
+                    if self.debug.is_enabled():
+                        self.log(f"[SPAWN] Tree updated from disk.")
 
                 if not tree:
                     print(f"[SPAWN][ERROR] Could not load tree for {self.command_line_args['universal_id']}")
@@ -1145,7 +1156,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                     # Skip deleted nodes
                     if node.get("deleted", False) is True:
-                        # self.log(f"[SPAWN-BLOCKED] {node.get('universal_id')} is marked deleted.")
+                        if self.debug.is_enabled():
+                            self.log(f"[SPAWN-BLOCKED] {node.get('universal_id')} is marked deleted.")
                         continue
 
                     # Skip if die token exists
@@ -1163,7 +1175,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     #This block first checks the node for a tag 'is_cron_job'
                     #if it contains that tag, it checks to see if a mission.complete file is in the hello.moto dir
                     #if the file doesn't exist it exits the block and spawns the agent
-                    #if the file does exist it gets the interval from the node in secs or defaults 3600, and then
+                    #if the file does exist it gets the interval from the node in secs or defaults 3600(6 min), and then
                     #checks the mtime of the file and calculates if the cron_interval_sec has elapsed since the files creation
                     #if it has the time has elapsed it removes the file and spawns the agent
                     #if not, it goes directly to jail; no pass go.
@@ -1263,7 +1275,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             new_uuid, pod_path = spawner.create_runtime(universal_id)
 
             spawner.set_verbose(self.verbose)
-            spawner.set_debug(self.debug)
+            spawner.set_debug(self.debug.is_enabled())
 
             result = spawner.spawn_agent(
                 spawn_uuid=new_uuid,

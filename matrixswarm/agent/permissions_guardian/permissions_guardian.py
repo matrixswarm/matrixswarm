@@ -211,16 +211,19 @@ class Agent(BootAgent):
             if current_mode != desired_mode:
                 action = "chmod" if not self.log_only else "log_only"
                 log_msg = f"{action.upper()} {path}: {oct(current_mode)} -> {oct(desired_mode)}"
-                self.log(log_msg)
-                log_events.append({
-                    "timestamp": time.time(),
-                    "path": path,
-                    "previous_mode": oct(current_mode),
-                    "enforced_mode": oct(desired_mode),
-                    "action_taken": action
-                })
-                if not self.log_only:
-                    os.chmod(path, desired_mode)
+
+                if self.debug.is_enabled():
+                    self.log(log_msg)
+                    log_events.append({
+                        "timestamp": time.time(),
+                        "path": path,
+                        "previous_mode": oct(current_mode),
+                        "enforced_mode": oct(desired_mode),
+                        "action_taken": action
+                    })
+                    if not self.log_only:
+                        os.chmod(path, desired_mode)
+
         except Exception as e:
             self.log(f"Could not process {path}", error=e, level="ERROR")
         return log_events
@@ -236,7 +239,6 @@ class Agent(BootAgent):
         receipt_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto", "mission.complete")
         with open(receipt_path, "w") as f:
             f.write(str(time.time()))
-
 
 if __name__ == "__main__":
     agent = Agent()

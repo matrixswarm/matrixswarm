@@ -59,6 +59,8 @@ class Agent(BootAgent):
         pk.set_data(content)
         for node in report_nodes:
             self.pass_packet(pk, node["universal_id"])
+            self.log(f"Sent '{severity}' for 'system.network' to role '{self.report_to_role}'", level="INFO")
+
 
     def get_network_summary(self):
         """Collects interface/IP status and errors/drops."""

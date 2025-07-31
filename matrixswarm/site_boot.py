@@ -412,7 +412,6 @@ def main():
 
     encryption_enabled = not args.encryption_off
 
-
     # === ENVIRONMENT DETECTION ===
     def check_python_env(user_python_bin=None, user_site_path=None, required_module="discord"):
         # Step 1: Determine Python binary
