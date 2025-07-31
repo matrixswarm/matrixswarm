@@ -64,6 +64,8 @@ matrix_directive = {
                 "allowlist_ips": [
                     # allowed list of ips to access server
                 ],
+                "privkey": "##GENERATE_KEY##",  #optional: can be used to sign all outgoing messages, headed for the gui; PASTE THIS IN THE GUI FOR THE CONNECTION USED
+                "remote_pubkey": "<OPTIONAL: PASTE THE PUBKEY GENERATED FROM YOUR matrix_gui HERE>", #optional: verify the signature of all incoming packets. paste pubkey generated from matrix_gui that have or will create
 
             },
             "filesystem": {
@@ -214,6 +216,9 @@ matrix_directive = {
                     "priority": 10,                # lower = more preferred
                     "exclusive": False             # can other services respond?
                 }],
+                "privkey": "##GENERATE_KEY##",     #optional: can be used to sign all outgoing messages, headed for the gui; PASTE THIS IN THE GUI FOR THE CONNECTION USED
+                "remote_pubkey": "<OPTIONAL: PASTE THE PUBKEY GENERATED FROM YOUR matrix_gui HERE>",      #optional: verify the signature of all incoming packets. paste pubkey generated from matrix_gui that have or will create
+
             },
 
             "filesystem": {},
@@ -274,7 +279,10 @@ matrix_directive = {
         },
         {
             "universal_id": "forensic-detective-1",
-            "name": "forensic_detective"
+            "name": "forensic_detective",
+            "config": {
+                "enable_oracle": 1,
+            }
             # It will automatically receive reports from agents using its role
         },
         {
@@ -296,7 +304,7 @@ matrix_directive = {
                 "log_path": "/var/log/secure",
                 "service_name": "system.auth_log",
                 "severity_rules": {
-                    "CRITICAL": ["authentication failure"],
+                    "CRITICAL": ["session opened for user root"],
                     "WARNING": ["failed password", "invalid user"]
                 }
             }
@@ -329,6 +337,7 @@ matrix_directive = {
                 "report_handler": "cmd_ingest_status_report"
             }
         },
+
         {
             "universal_id": "golden-child-4",
             "name": "oracle",
