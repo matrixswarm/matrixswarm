@@ -83,12 +83,16 @@ class Agent(BootAgent):
             self._watchers = []
 
             self.watch_folder = self.tree_node['config'].get('watch_folder', '/sites/matrixswarm/public_html/outgoing_msgs/')
-            #key generated using directive encryption
-            privkey_pem = self.tree_node['config'].get('privkey')  # Already loaded from vault
-            if "\\n" in privkey_pem:
-                privkey_pem = privkey_pem.replace("\\n", "\n")
 
-            self.privkey_for_external_comm = RSA.import_key(privkey_pem)
+            try:
+                #key generated using directive encryption
+                privkey_pem = self.tree_node['config'].get('privkey')  # Already loaded from vault
+                if "\\n" in privkey_pem:
+                    privkey_pem = privkey_pem.replace("\\n", "\n")
+
+                self.privkey_for_external_comm = RSA.import_key(privkey_pem)
+            except Exception as e:
+                self.log("You need to either run encrypt_directive or provide a private key. {privkey_pem} or it's corrupt" ,error=e, block="inner_try")
 
             self.oracle_timeout = int(self._private_config.get('oracle_timeout', 15))
             self.pending_evals = {}

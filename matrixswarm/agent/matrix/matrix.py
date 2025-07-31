@@ -1,5 +1,5 @@
 # Authored by Daniel F MacDonald and ChatGPT aka The Generals
-# Docstrings by Gemini
+# Gemini, code enchancments and Docstrings
 import sys
 import os
 
@@ -16,12 +16,6 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 # ║   THE SWARM IS ALIVE — AGENTS COMING OUT OF EVERY ORIFICE  ║
 # ║       Please take as many as your system can support        ║
 # ╚═════════════════════════════════════════════════════════════╝
-
-# Disclaimer: If your system catches fire, enters recursive meltdown,
-# or you OD on die cookies — just remember: we met at a Star Trek convention.
-# You were dressed as Data. I was the Captain. That’s all we know about each other.
-#He said something about agents… then started telling people to fork off.
-#I don’t know, something was up with that guy.
 
 import os
 import time
@@ -68,7 +62,7 @@ class Agent(BootAgent):
         """
         super().__init__()
 
-        self.AGENT_VERSION = "1.2.0"
+        self.AGENT_VERSION = "1.2.2"
         self._agent_tree_master = None
 
         #no need to delegate any agents at start
@@ -97,7 +91,6 @@ class Agent(BootAgent):
                 self.path_resolution["comm_path_resolved"],
                 "payload"
             )
-
 
     def pre_boot(self):
         message = "Knock... Knock... Knock... The Matrix has you..."
@@ -1241,6 +1234,13 @@ class Agent(BootAgent):
 
                 self.save_agent_tree_master()
 
+                # --- REMEDY ---
+                # After saving, the tree has new nodes with vaults.
+                # We must force the tree parser to re-index its internal
+                # dictionary so it can find the new agents.
+                tp.reparse()
+                # --- END REMEDY ---
+
                 #delegate to parent agent
                 self.delegate_tree_to_agent(parent, self.tree_path_dict)
 
@@ -1403,6 +1403,11 @@ class Agent(BootAgent):
             if not tp:
                 self.log(f"Failed to load master tree for {universal_id}")
                 return
+
+            if not tp.has_node(universal_id):
+                self.log(f"Skipping node {universal_id} not found in agent_tree, probably phantom dir created in comm by other agent or process.)")
+                return
+
 
             subtree = tp.extract_subtree_by_id(universal_id)
             if not subtree:

@@ -1,5 +1,5 @@
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
-#Gemini, doc-rocking the Swarm to perfection.
+#Gemini, docstring and code enhancements.
 import time
 import tempfile
 import base64
@@ -111,6 +111,19 @@ class TreeParser(LogMixin):
         # Ensure children is properly initialized
         node.setdefault(self.CHILDREN_KEY, [])
 
+    def reparse(self):
+        """
+        Clears the internal node cache and re-parses the entire tree from the root.
+        This is useful after making structural changes like injections to ensure
+        the internal state is up-to-date.
+        """
+        self.nodes.clear()
+        self._duplicate_nodes.clear()
+        self._rejected_nodes.clear()
+        self._added_nodes.clear()
+        self._parse_nodes(self.root)
+        self.log("[TREE] Reparsed tree and refreshed internal node cache.")
+
     def get_first_level_child_ids(self, universal_id):
         """
         Get a list of universal_ids for all direct children of a node.
@@ -208,7 +221,12 @@ class TreeParser(LogMixin):
 
         parent_node.setdefault(self.CHILDREN_KEY, []).append(new_node)
 
-        self._parse_nodes(self.root)
+        # --- REMEDY ---
+        # The premature call to _parse_nodes is removed from here.
+        # The Matrix agent is responsible for re-parsing the tree after
+        # it has assigned cryptographic identities to the new nodes.
+        # self._parse_nodes(self.root)
+        # --- END REMEDY ---
 
         return list(self._added_nodes)
 
@@ -649,7 +667,6 @@ class TreeParser(LogMixin):
         def recurse(node, path_stack):
             if not isinstance(node, dict):
                 return
-
             config = node.get("config", {})
             universal_id = node.get("universal_id")
             full_path = path_stack + [universal_id] if universal_id else path_stack
@@ -822,4 +839,3 @@ class TreeParser(LogMixin):
                 })
 
         return minimal_tree
-
