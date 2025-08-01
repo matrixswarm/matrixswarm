@@ -267,7 +267,7 @@ class Football(LogMixin):
             if is_privkey_for_signing:
                 self.set_payload_signing_key(private_key_pem)
 
-            #if this identity is the identity of the target, then use the pubkey passed to encrypte the aes key
+            #if this identity is the identity of the target, then use the pubkey passed to encrypt the aes key
             if encrypt_aes_key_using_pub:
                 self._aes_encryption_pubkey = identity["pub"]
 
@@ -454,13 +454,13 @@ class Football(LogMixin):
     def decrypt_aes_key_using_privkey(self):
         return self._decrypt_aes_key_using_privkey
 
+    # privkey to decrypt the aes key used to decrypt the payload
+    def set_aes_encryption_privkey(self, privkey):
+        self._aes_encryption_privkey = privkey
+
     #when the target agent's identity is loaded, the pubkey embedded will be used
     def set_aes_encryption_pubkey(self, pubkey):
         self._aes_encryption_pubkey = pubkey
-
-    #privkey to decrypt the aes key used to decrypt the payload
-    def set_aes_encryption_privkey(self, privkey):
-        self._aes_encryption_privkey = privkey
 
     #pubkey to encrypt the aes key used to encrypt the payload
     def get_aes_encryption_pubkey(self):

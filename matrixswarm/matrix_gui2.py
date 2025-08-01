@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (
     QLineEdit, QGroupBox, QSplitter, QFileDialog,
     QTextEdit, QStatusBar, QSizePolicy, QStackedLayout, QCheckBox, QComboBox
 )
+from PyQt5.QtWidgets import QMainWindow
 from PyQt5.QtWidgets import QDesktopWidget
 from PyQt5.QtWidgets import QMessageBox
 import urllib3
@@ -28,12 +29,36 @@ import json
 from matrixswarm.core.class_lib.packet_delivery.mixin.packet_factory_mixin import PacketFactoryMixin
 
 SETTINGS_PATH = os.path.join("matrix_gui/config/settings.json")
+
+
+from matrix_gui.crypto.vault_handler import (
+    load_vault, save_vault,
+    generate_local_keypair, add_trusted_server,
+    sign_payload, verify_signature
+)
+
 def load_last_host():
     try:
+        encrypted_path = os.path.join("matrix_gui/config/settings.enc")
+        fernet_key_path = os.path.join("matrix_gui/keys/fernet.key")
+
+        # Prefer encrypted config if available
+        if os.path.exists(encrypted_path) and os.path.exists(fernet_key_path):
+            from cryptography.fernet import Fernet
+            with open(fernet_key_path, "rb") as f:
+                key = f.read()
+            fernet = Fernet(key)
+            with open(encrypted_path, "rb") as f:
+                decrypted = fernet.decrypt(f.read())
+            data = json.loads(decrypted)
+            return data.get("matrix_host", None)
+
+        # Fallback to plaintext config
         if os.path.exists(SETTINGS_PATH):
             with open(SETTINGS_PATH, "r") as f:
                 data = json.load(f)
             return data.get("matrix_host", None)
+
     except Exception as e:
         print(f"[SETTINGS][ERROR] {e}")
     return None
@@ -98,7 +123,7 @@ class NodeSelectionEventBus(QObject):
 node_event_bus = NodeSelectionEventBus()
 
 
-class MatrixCommandBridge(QWidget, PacketFactoryMixin):
+class MatrixCommandBridge(QMainWindow, PacketFactoryMixin):
 
     message_received = pyqtSignal(str)
     log_ready = pyqtSignal(dict, str)
@@ -107,8 +132,44 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         self.matrix_host = load_last_host() or "https://147.135.112.25:65431/matrix"
         ws_ip = self.matrix_host.split("//")[1].split(":")[0]
         self.matrix_ws_host = f"wss://{ws_ip}:8765"
-        self.setWindowTitle("MatrixSwarm V2: Command Bridge")
-        self.setMinimumSize(1400, 800)
+
+        # 1️⃣ UI FRAMEWORK SETUP
+        self.setWindowTitle("MatrixSwarm V2 : Command Bridge")
+        self.resize(1400, 800)  # Or whatever fits one monitor cleanly
+        self.setMinimumSize(1200, 700)
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QVBoxLayout()
+        self.central_widget.setLayout(self.layout)
+
+        # 2️⃣ CONTROL PANEL COMPONENTS (Define everything first)
+        self.matrix_host_input = QLineEdit()
+        self.reconnect_button = QPushButton("Reconnect")
+        self.manage_keys_button = QPushButton("🔐 Manage Keys")
+        self.inject_button = QPushButton("Inject")
+        self.shutdown_button = QPushButton("Shutdown")
+        self.send_payload_button = QPushButton("Send Payload to Agent")
+        self.auto_scroll_checkbox = QCheckBox("Auto-scroll logs")
+
+
+        # 3️⃣ VAULT SESSION FLAGS
+        self.vault_data = None
+        self.vault_password = None
+        self.vault_loaded = False
+
+        # 4️⃣ LOCK DOWN CONTROLS UNTIL VAULT IS UNLOCKED
+        self.matrix_host_input.setEnabled(False)
+        self.reconnect_button.setEnabled(False)
+        self.inject_button.setEnabled(False)
+        self.shutdown_button.setEnabled(False)
+        self.send_payload_button.setEnabled(False)
+        self.manage_keys_button.setEnabled(False)
+
+        # 5️⃣ UI SIGNALS
+        self.reconnect_button.clicked.connect(self.reconnect_to_matrix)
+        self.manage_keys_button.clicked.connect(self.open_key_manager)
+
+
         self.setup_ui()
         self.setup_status_bar()
         self.setup_timers()
@@ -137,6 +198,66 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
 
         for alert in self.alert_panel.alerts:
             self.alert_panel.send_agent_payload(alert, partial=False)
+
+        QTimer.singleShot(100, self.unlock_vault)
+
+    def reconnect_to_matrix(self):
+        print("🛰️ Attempting to reconnect to Matrix... [stub]")
+
+    def unlock_vault(self):
+        from matrix_gui.ui.vault_popup import VaultPasswordDialog
+        self.vault_popup = VaultPasswordDialog(self)
+        self.vault_popup.password_entered.connect(self._handle_vault_unlock)
+        self.vault_popup.exec_()
+
+    def _handle_vault_unlock(self, pw):
+        from matrix_gui.crypto.vault_handler import load_vault, save_vault
+        from matrix_gui.ui.vault_init_dialog import VaultInitDialog
+
+        try:
+            vault = load_vault(pw)
+        except FileNotFoundError:
+            dlg = VaultInitDialog(self)
+            if dlg.exec_() == 1:
+                self.vault_data = {"trusted_servers": {}}
+                self.vault_password = pw
+                self.vault_loaded = True
+                save_vault(self.vault_data, pw)
+                self.apply_vault_settings()
+            return
+        except Exception as e:
+            print(f"[VAULT][ERROR] Unlock failed: {e}")
+            # Just reopen after a slight delay to allow GUI cleanup
+            QTimer.singleShot(100, self.unlock_vault)
+            return
+
+        self.vault_data = vault
+        self.vault_password = pw
+        self.vault_loaded = True
+        self.apply_vault_settings()
+
+    def apply_vault_settings(self):
+        host = self.vault_data.get("last_known_host", "")
+        self.matrix_host_input.setText(host)
+
+        self.matrix_host_input.setEnabled(True)
+        self.reconnect_button.setEnabled(True)
+        self.inject_button.setEnabled(True)
+        self.shutdown_button.setEnabled(True)
+        self.send_payload_button.setEnabled(True)
+        self.manage_keys_button.setEnabled(True)
+
+        print("✅ Vault unlocked. Secure flight deck operational.")
+
+    def closeEvent(self, event):
+        if self.vault_loaded and self.vault_password:
+            from matrix_gui.crypto.vault_handler import save_vault
+            self.vault_data["last_known_host"] = self.matrix_host_input.text()
+            save_vault(self.vault_data, self.vault_password)
+            print("✅ Vault saved.")
+        else:
+            print("⚠️ No vault session. Changes discarded.")
+        event.accept()
 
     def change_matrix_host(self):
         new_host = self.host_dropdown.currentText().strip()
@@ -949,6 +1070,11 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
             }
         """)
 
+        #manage key function
+        manage_keys_btn = QPushButton("🔐 Manage Keys")
+        manage_keys_btn.clicked.connect(self.open_key_manager)
+        host_layout.addWidget(manage_keys_btn)
+
         self.log_limit_box = QComboBox()
         self.log_limit_box.addItems(["0 (unlimited)", "100", "500", "1000"])
         self.log_limit_box.setCurrentIndex(0)  # default to unlimited
@@ -967,6 +1093,202 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         layout.addWidget(self.log_text)
         box.setLayout(layout)
         return box
+
+    #builds a model windows for manage keys
+    def open_key_manager(self):
+        from PyQt5.QtWidgets import QDialog, QTextEdit, QVBoxLayout, QPushButton, QFileDialog
+
+        class VaultPasswordDialog(QDialog):
+            password_entered = pyqtSignal(str)
+
+            def __init__(self, parent=None, password=None):
+                super().__init__(parent)
+                self.vault_password = password
+                self.setWindowTitle("Vault Password")
+                self.setFixedSize(300, 120)
+
+                layout = QVBoxLayout()
+                layout.addWidget(QLabel("Enter vault password:"))
+
+                self.input = QLineEdit()
+                self.input.setEchoMode(QLineEdit.Password)
+                layout.addWidget(self.input)
+
+                submit_btn = QPushButton("Unlock")
+                submit_btn.clicked.connect(self.submit)
+                layout.addWidget(submit_btn)
+
+                self.setLayout(layout)
+
+            def submit(self):
+                password = self.input.text().strip()
+                if password:
+                    self.password_entered.emit(password)
+                    self.accept()
+                else:
+                    self.reject()
+
+        class KeyManagerPopup(QDialog):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self.setWindowTitle("🔐 Manage Connection Keys")
+                self.setMinimumSize(500, 300)
+                layout = QVBoxLayout()
+
+                self.output = QTextEdit()
+                self.output.setReadOnly(True)
+                layout.addWidget(self.output)
+
+                generate_btn = QPushButton("🧬 Generate Keypair")
+                generate_btn.clicked.connect(self.generate_keypair)
+                layout.addWidget(generate_btn)
+
+                encrypt_btn = QPushButton("🔒 Encrypt Config to Disk")
+                encrypt_btn.clicked.connect(self.encrypt_config)
+                layout.addWidget(encrypt_btn)
+
+                gen_keypair_btn = QPushButton("🧬 Generate Local Keypair")
+                gen_keypair_btn.clicked.connect(self.handle_generate_keypair)
+                layout.addWidget(gen_keypair_btn)
+
+                import_server_key_btn = QPushButton("📥 Add Server PubKey")
+                import_server_key_btn.clicked.connect(self.handle_add_server_key)
+                layout.addWidget(import_server_key_btn)
+
+                view_vault_btn = QPushButton("📖 View Vault Info")
+                view_vault_btn.clicked.connect(self.handle_view_vault)
+                layout.addWidget(view_vault_btn)
+
+                self.setLayout(layout)
+
+            def handle_generate_keypair(self):
+                popup = VaultPasswordDialog(self)
+
+                def on_password_entered(password):
+                    try:
+                        generate_local_keypair(password)
+                        self.output.append("✅ RSA 2048-bit keypair generated and stored in encrypted vault.")
+                    except Exception as e:
+                        self.output.append(f"❌ Keypair generation failed: {e}")
+
+                popup.password_entered.connect(on_password_entered)
+                popup.exec_()
+
+            def handle_add_server_key(self):
+                from PyQt5.QtWidgets import QInputDialog, QFileDialog
+
+                name, ok = QInputDialog.getText(self, "Add Server", "Enter agent name (e.g. matrix-https):")
+                if not ok or not name.strip():
+                    return
+
+                ip, ok = QInputDialog.getText(self, "Add Server", "Enter IP (e.g. 199.193.85.57):")
+                if not ok or not ip.strip():
+                    return
+
+                port, ok = QInputDialog.getInt(self, "Add Server", "Enter port (e.g. 443):", min=1, max=65535)
+                if not ok:
+                    return
+
+                file_name, _ = QFileDialog.getOpenFileName(self, "Select Server PubKey PEM", "", "PEM Files (*.pem)")
+                if not file_name:
+                    return
+
+                try:
+                    with open(file_name, "r") as f:
+                        pubkey_pem = f.read()
+                    add_trusted_server(name.strip(), ip.strip(), port, pubkey_pem, self.vault_password)
+                    self.output.append(f"✅ Added trusted server key: {name.strip()} at {ip}:{port}")
+                except Exception as e:
+                    self.output.append(f"❌ Failed to import key: {e}")
+
+            def generate_keypair(self):
+                import rsa
+                (pubkey, privkey) = rsa.newkeys(2048)
+                os.makedirs("matrix_gui/keys", exist_ok=True)
+                with open("matrix_gui/keys/public.pem", "wb") as f:
+                    f.write(pubkey.save_pkcs1())
+                with open("matrix_gui/keys/private.pem", "wb") as f:
+                    f.write(privkey.save_pkcs1())
+                self.output.append("✅ RSA 2048-bit keypair generated and saved to `matrix_gui/keys/`.")
+
+            def handle_view_vault(self):
+                def on_password_entered(password):
+                    try:
+                        vault = load_vault(password)
+                        info = []
+
+                        if vault.get("local_public_key"):
+                            info.append("🔐 Local Keypair: ✅")
+                        if "trusted_servers" in vault:
+                            info.append("🌐 Trusted Servers:")
+                            for name, srv in vault["trusted_servers"].items():
+                                ip = srv.get("ip", "???")
+                                port = srv.get("port", "???")
+                                info.append(f"  - {name} @ {ip}:{port}")
+                        if not info:
+                            info.append("⚠️ Vault is empty.")
+                        self.output.append("\n".join(info))
+                    except Exception as e:
+                        self.output.append(f"❌ Vault load failed: {e}")
+
+                popup = VaultPasswordDialog(self)
+                popup.password_entered.connect(on_password_entered)
+                popup.exec_()
+
+            def encrypt_config(self):
+                from cryptography.fernet import Fernet
+
+                key_path = "matrix_gui/keys/fernet.key"
+                if not os.path.exists(key_path):
+                    key = Fernet.generate_key()
+                    with open(key_path, "wb") as f:
+                        f.write(key)
+                else:
+                    with open(key_path, "rb") as f:
+                        key = f.read()
+
+                fernet = Fernet(key)
+                try:
+                    with open("matrix_gui/config/settings.json", "rb") as f:
+                        config = f.read()
+                    encrypted = fernet.encrypt(config)
+                    with open("matrix_gui/config/settings.enc", "wb") as f:
+                        f.write(encrypted)
+                    self.output.append("🔐 Config encrypted to `settings.enc`.")
+                except Exception as e:
+                    self.output.append(f"❌ Failed to encrypt: {e}")
+
+        popup = KeyManagerPopup(self)
+        popup.exec_()
+
+    def assign_server_pubkey(self):
+        from PyQt5.QtWidgets import QInputDialog
+
+        agent_name, ok = QInputDialog.getText(self, "Assign To Agent", "Enter agent name (e.g., websocket-relay):")
+        if not ok or not agent_name.strip():
+            return
+
+        file_name, _ = QFileDialog.getOpenFileName(self, "Select Agent Public Key", "", "PEM Files (*.pem)")
+        if not file_name:
+            return
+
+        try:
+            with open(file_name, "r") as f:
+                pubkey_data = f.read()
+
+            with open(SETTINGS_PATH, "r") as f:
+                settings = json.load(f)
+
+            settings.setdefault("trusted_pubkeys", {})
+            settings["trusted_pubkeys"][agent_name.strip()] = pubkey_data
+
+            with open(SETTINGS_PATH, "w") as f:
+                json.dump(settings, f, indent=2)
+
+            self.output.append(f"✅ Assigned public key to {agent_name.strip()} in settings.json")
+
+        except Exception as e:
+            self.output.append(f"❌ Failed to assign pubkey: {e}")
 
     #REFRESH AGENT TREE EVER 10 sec's
     def start_tree_autorefresh(self, interval=10):

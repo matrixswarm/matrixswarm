@@ -41,7 +41,6 @@ from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.tree_parser import TreeParser
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
-from Crypto.PublicKey import RSA as PyCryptoRSA
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from matrixswarm.core.agent_factory.reaper.reaper_factory import make_reaper_node
 from matrixswarm.core.agent_factory.scavenger.scavenger_factory import make_scavenger_node
@@ -103,7 +102,6 @@ class Agent(BootAgent):
         message = "I'm watching..."
         # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
         self.command_line_args.get("universal_id", "matrix")
-        threading.Thread(target=self.comm_directory_watcher, daemon=True).start()
         print(message)
 
     def worker_pre(self):
@@ -111,10 +109,6 @@ class Agent(BootAgent):
 
     def worker_post(self):
         self.log("Matrix shutting down. Closing directives.")
-
-    def packet_listener_post(self):
-        #sanity check
-        self.perform_tree_master_validation()
 
     def canonize_gospel(self, output_path="codex/gospel_of_matrix.sig.json"):
         gospel = {
@@ -153,68 +147,6 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main_try")
 
-    def comm_directory_watcher(self):
-
-        """Monitors the root /comm directory to automatically provision new agents.
-
-        This method runs in a background thread and provides a powerful way
-        to auto-provision agents. Its primary purpose is to ensure that any
-        new agent whose communication directory appears in the swarm is
-        immediately provided with its necessary configuration.
-
-        When a new subdirectory is created in the `/comm` path (which happens
-        when a new agent is spawned), this watcher detects it and automatically
-        calls `delegate_tree_to_agent`. This provides the new agent with its
-        personalized `agent_tree.json` directive slice, a critical step for
-        the agent to become fully operational.
-
-        It uses the highly efficient `inotify` library on Linux systems for
-        real-time event detection and gracefully falls back to a polling
-        mechanism on other operating systems like Windows.
-        """
-
-        print("[COMM-WATCHER] Watching /comm/ for new agents...")
-        # Linux inotify
-        if os.name == "posix":
-            try:
-                import inotify.adapters
-            except ImportError:
-                print("[COMM-WATCHER] inotify is not installed. Directory watching disabled.")
-                return
-
-            i = inotify.adapters.Inotify()
-            i.add_watch(self.path_resolution["comm_path"])
-
-            for event in i.event_gen(yield_nones=False):
-                (_, type_names, path, filename) = event
-
-                if "IN_CREATE" in type_names or "IN_MOVED_TO" in type_names:
-                    try:
-                        full_path = os.path.join(path, filename)
-                        if os.path.isdir(full_path):
-                            print(f"[COMM-WATCHER] New comm directory detected: {filename}")
-                            self.delegate_tree_to_agent(filename, self.tree_path_dict)
-                    except Exception as e:
-                        self.log(f"[COMM-WATCHER-ERROR] {e}")
-
-        else:
-            # Windows/macOS: polling fallback
-            import time
-            seen_dirs = set(os.listdir(self.path_resolution["comm_path"]))
-            print("[COMM-WATCHER] inotify unavailable—using polling mode.")
-            while True:
-                current_dirs = set(os.listdir(self.path_resolution["comm_path"]))
-                new_dirs = current_dirs - seen_dirs
-                for filename in new_dirs:
-                    full_path = os.path.join(self.path_resolution["comm_path"], filename)
-                    if os.path.isdir(full_path):
-                        print(f"[COMM-WATCHER] (POLL) New comm directory detected: {filename}")
-                        try:
-                            self.delegate_tree_to_agent(filename, self.tree_path_dict)
-                        except Exception as e:
-                            self.log(f"[COMM-WATCHER-ERROR] {e}")
-                seen_dirs = current_dirs
-                time.sleep(1)  # Poll every second (tweak as needed)
 
     def cmd_delete_agent(self, content, packet, identity:IdentityObject = None):
         """Handles the command to delete an agent and its entire subtree.
@@ -259,6 +191,7 @@ class Agent(BootAgent):
                     self.log("No agent found with role", error=None, block="RPC-DELETE")
                     return
 
+
                 pk1 = self.get_delivery_packet("standard.command.packet")
                 pk1.set_data({"handler": handler})
 
@@ -285,18 +218,7 @@ class Agent(BootAgent):
                 pk1.set_packet(pk2, "content")
 
                 for node in alert_nodes:
-                    football = self.get_football(type=self.FootballType.PASS)
-                    da = self.get_delivery_agent("file.json_file", football)
-                    da.set_location({"path": self.path_resolution["comm_path"]}) \
-                        .set_address([node["universal_id"]]) \
-                        .set_drop_zone({"drop": "incoming"}) \
-                        .set_packet(pk1) \
-                        .deliver()
-
-                    if da.get_error_success() != 0:
-                        self.log("RPC result delivery failed", error=None, block=node["universal_id"])
-                    else:
-                        self.log(f"RPC delete response delivered to {node['universal_id']}")
+                    self.pass_packet(pk1, target_uid=node["universal_id"])
 
         except Exception as e:
             self.log("Failed to process cmd_delete_agent", error=e, block="main-try")
@@ -370,7 +292,9 @@ class Agent(BootAgent):
                     "target_universal_id": "matrix",
                     "subtree": reaper_node
                 }
+
                 reaper_result = self._cmd_inject_agents(reaper_packet, packet)
+
                 if reaper_result.get("status") == "success":
                     result["reaped"] = 1
                     self.log(f"[DELETE] ✅ Reaper injected: {reaper_node['universal_id']}")
@@ -408,33 +332,29 @@ class Agent(BootAgent):
 
         return result
 
-
     def drop_hit_cookies(self, kill_list):
-        """Places a 'hit.cookie' file in each target agent's directory.
 
-        This helper method acts as a signaling mechanism for termination. It does not
-        kill the process itself but leaves a signal file. A patrolling 'reaper'
-        agent continuously scans the swarm for these cookies. Upon finding one,
-        the reaper knows it has a new target to terminate.
-
-        Args:
-            kill_list (list): A list of universal_ids for the agents to be
-                marked for termination.
-        """
         for agent in kill_list:
+            try:
+                comm_dir = os.path.join(self.path_resolution["comm_path"], agent, "hello.moto")
+                os.makedirs(comm_dir, exist_ok=True)  # ✅ Ensure path exists
 
-            cookie_path = os.path.join(self.path_resolution["comm_path"], agent, "hello.moto", "hit.cookie")
+                cookie_path = os.path.join(comm_dir, "hit.cookie")
 
-            payload = {
-                "target": agent,
-                "reason": "deleted_by_matrix",
-                "timestamp": datetime.utcnow().isoformat()
-            }
+                payload = {
+                    "target": agent,
+                    "reason": "deleted_by_matrix",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
 
-            with open(cookie_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
+                with open(cookie_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2)
 
-            self.log(f"[DELETE] Dropped hit.cookie for {agent}")
+                self.log(f"[DELETE] Dropped hit.cookie for {agent}")
+
+            except Exception as e:
+
+                self.log(error=e, block="main_try")
 
     #used to get a copy of the current agent_tree_master, usually sent from
     #matrix-https to send back to gui
@@ -852,13 +772,6 @@ class Agent(BootAgent):
             #self.log(f"[REPLACE] 💾 Tree backed up to: {backup_path}")
 
             # Save patched tree
-
-            try:
-                #assign new keys to new nodes
-                tp.assign_identity_to_all_nodes(self.matrix_priv)
-            except Exception as e:
-                self.log(error=e, block="assign_pub_priv_keys")
-
             self.save_agent_tree_master()
 
             self.log(f"[REPLACE] 💾 Tree saved with updated agent '{old_id}'")
@@ -948,10 +861,6 @@ class Agent(BootAgent):
                     self.log(error=e, block="main_try")
 
             if updated:
-                try:
-                    tp.assign_identity_to_all_nodes(self.matrix_priv)
-                except Exception as e:
-                    self.log(error=e, block="assign_pub_priv_keys")
 
                 self.save_agent_tree_master()
 
@@ -989,6 +898,7 @@ class Agent(BootAgent):
             handler = content.get("handler",None) #local command to execute
             response_handler = content.get("response_handler", None)  #sent back to gui, so it knows what handler to call
             response_id = content.get("response_id", 0)
+
 
             ret = self._cmd_inject_agents(content, packet)
 
@@ -1091,6 +1001,7 @@ class Agent(BootAgent):
             self.log(ret["message"])
             return ret
 
+
         # Check for parent node existence
         if not tp.has_node(parent):
             ret["error_code"] = 2
@@ -1147,7 +1058,10 @@ class Agent(BootAgent):
                         ret["message"] = f"Agent '{universal_id}' already exists."
                     else:
 
-                        injected_ids = tp.insert_node(subtree, parent_universal_id=parent)
+                        injected_ids = tp.insert_node(subtree, parent_universal_id=parent, matrix_priv_obj=self.matrix_priv_obj)
+
+
+
                         ret["injected"] = tp.get_added_nodes()
                         ret["rejected"] = tp.get_rejected_nodes()
                         ret["duplicates"] = tp.get_duplicates()
@@ -1217,7 +1131,7 @@ class Agent(BootAgent):
                     "confirmed": time.time()
                 }
 
-                injected_ids = tp.insert_node(new_node, parent_universal_id=parent)
+                injected_ids = tp.insert_node(new_node, parent_universal_id=parent, matrix_priv_obj=self.matrix_priv_obj)
                 success = bool(len(injected_ids))
                 if not success:
                     self.log(f"[INJECT][ERROR] Insert failed. Rejected node {universal_id}")
@@ -1487,7 +1401,6 @@ class Agent(BootAgent):
                 return False
 
             self._agent_tree_master.pre_scan_for_duplicates(self._agent_tree_master.root)
-            self._agent_tree_master.assign_identity_to_all_nodes(self.matrix_priv)
 
             data = {"agent_tree": self._agent_tree_master.root}
             football = self.get_football(type=self.FootballType.PASS)
@@ -1500,6 +1413,17 @@ class Agent(BootAgent):
             self.log("[TREE][ERROR] Failed to save agent_tree_master.", error=e)
             return False
 
+    def cmd_deliver_agent_tree_to_child(self, content, packet, identity: IdentityObject = None):
+        try:
+            uid = content.get("universal_id")
+            if not uid:
+                self.log("[DELIVER-TREE][ERROR] Missing universal_id.")
+                return
+
+            self.delegate_tree_to_agent(uid, self.tree_path_dict)
+
+        except Exception as e:
+            self.log("[DELIVER-TREE][ERROR]", error=e)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='matrixswarm',
-    version='1.0.18',
+    version='1.0.19',
     description='Open-source automation and monitoring platform',
     author='MatrixSwarm Core Team (Daniel F. MacDonald, ChatGPT) AKA The Generals, Gemini Docstring Engineer',
     author_email='swarm@matrixswarm.com',

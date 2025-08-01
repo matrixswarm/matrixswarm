@@ -176,7 +176,7 @@ class TreeParser(LogMixin):
 
         return None  # Return None if the node is not found in the current branch
 
-    def insert_node(self, new_node, parent_universal_id=None):
+    def insert_node(self, new_node, parent_universal_id=None, matrix_priv_obj=None):
         """
         Inserts a new node into the tree under a specified parent.
 
@@ -221,12 +221,11 @@ class TreeParser(LogMixin):
 
         parent_node.setdefault(self.CHILDREN_KEY, []).append(new_node)
 
-        # --- REMEDY ---
-        # The premature call to _parse_nodes is removed from here.
-        # The Matrix agent is responsible for re-parsing the tree after
-        # it has assigned cryptographic identities to the new nodes.
-        # self._parse_nodes(self.root)
-        # --- END REMEDY ---
+        if matrix_priv_obj:
+            for node in self.walk_tree(new_node):
+                uid = node.get(self.UNIVERSAL_ID_KEY)
+                if uid:
+                    self.assign_identity_token_to_node(uid, matrix_priv_obj, encryption_enabled=True, force=True)
 
         return list(self._added_nodes)
 

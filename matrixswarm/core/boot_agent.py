@@ -37,6 +37,8 @@ from matrixswarm.core.tree_parser import TreeParser
 from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from Crypto.PublicKey import RSA as PyCryptoRSA
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
+
 
 class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionFactoryMixin, GhostRiderUltraMixin, IdentityRegistryMixin):
     """The foundational class for all agents in the MatrixSwarm.
@@ -233,6 +235,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         # s encrypted with the paired pubkey, then using the aes key to decrypt the payload
         self._catch_football.set_identity_base_path(self.path_resolution['comm_path'])
 
+        self.last_tree_mtime = 0
+
     class FootballType(Enum):
         PASS = 1
         CATCH = 2
@@ -338,7 +342,53 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         print(f"[HEARTBEAT] Touched poke.heartbeat for {ping_file} -> {now}")
             except Exception as e:
                 print(f"[HEARTBEAT][ERROR] Failed to write ping: {e} -> {ping_file} -> {now}")
-            time.sleep(10)
+            interruptible_sleep(self, 10)
+
+    def directive_watcher(self):
+        """
+        Periodically checks if this agent's agent_tree.json exists or was modified.
+        If missing or updated, sends a request to Matrix (or parent) to re-delegate it.
+        """
+        directive_path = os.path.join(self.path_resolution["comm_path_resolved"], "directive", "agent_tree.json")
+
+        while self.running:
+            try:
+                if not os.path.exists(directive_path):
+                    self.log("[TREE-WATCH] agent_tree.json missing — requesting from parent.")
+                    self.request_agent_tree()
+                else:
+                    current_mtime = os.path.getmtime(directive_path)
+                    if current_mtime != self.last_tree_mtime:
+                        self.log("[TREE-WATCH] Detected update to agent_tree.json")
+                        self.last_tree_mtime = current_mtime
+
+            except Exception as e:
+                self.log("[TREE-WATCH][ERROR]", error=e)
+
+            interruptible_sleep(self, 10)
+
+    def request_agent_tree(self):
+        """
+        Sends a request to Matrix or the parent to receive the agent's tree slice.
+        """
+        try:
+            payload = {
+                "handler": "cmd_deliver_agent_tree_to_child",
+                "timestamp": time.time(),
+                "content": {
+                    "universal_id": self.command_line_args.get("universal_id")
+                }
+            }
+
+            target = self.command_line_args.get("spawner", "matrix")
+
+            pk1 = self.get_delivery_packet("standard.command.packet")
+            pk1.set_data(payload)
+            self.pass_packet(pk1, target, "incoming")
+            self.log(f"[TREE-REQUEST] Tree request sent to {target}.")
+
+        except Exception as e:
+            self.log("[TREE-REQUEST][ERROR]", error=e)
 
     def enforce_singleton(self):
 
@@ -375,7 +425,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             # within 20secs if another instance detected, and this is the younger of the die
 
-            time.sleep(7)
+            interruptible_sleep(self, 7)
 
     def monitor_threads(self):
         while self.running:
@@ -385,7 +435,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 self.emit_dead_poke("worker", "Worker thread crashed unexpectedly.")
                 self.running = False
                 os._exit(1)
-            time.sleep(3)
+            interruptible_sleep(self, 3)
 
     def resolve_factory_injections(self):
         self.log("Starting factory injection from 'factories' block only.")
@@ -442,6 +492,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.thread_registry["heartbeat"]["active"] = True
             threading.Thread(target=self.spawn_manager, name="spawn_manager", daemon=True).start()
             self.thread_registry["spawn_manager"]["active"] = True
+            threading.Thread(target=self.directive_watcher, name="directive_watcher", daemon=True).start()
+            self.thread_registry["directive_watcher"] = {"active": True, "timeout": 30}
             threading.Thread(target=self.packet_listener, name="packet_listener", daemon=True).start()
             self.thread_registry["packet_listener"]["active"] = True
             self.start_dynamic_throttle()
@@ -618,7 +670,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             except Exception as e:
                 self.log(error=e, block="packet_listener_post")
 
-            interruptible_sleep(self, 2)
+            interruptible_sleep(self, 3)
 
 
     def save_directive(self, path: dict, node_tree :dict, football:Football):
@@ -1132,10 +1184,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     tp = self.load_directive(tree_path, football=football)
                     self._service_manager_services = getattr(tp, "_service_manager_services", [])
 
-                    if not tp or not hasattr(tp, "root"):
-                        self.log("[SPAWN][ERROR] Failed to load directive — invalid tree object.")
-                        interruptible_sleep(self, 5)
-                        continue
+                    if not tp or not hasattr(tp, "root") or not isinstance(tp.root, dict):
+                        self.log("[SPAWN] Corrupt or invalid tree — deleting and re-requesting.")
+                        os.remove(tree_path_resolved)
+                        continue  # Will retry in next loop
 
                     tree = tp.root
                     last_tree_mtime = mtime
@@ -1312,6 +1364,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             bool: True if delivery was successful, False otherwise.
         """
         try:
+
+            codex_path = os.path.join(self.path_resolution["comm_path"], target_uid, "codex", "signed_public_key.json")
+            if not os.path.exists(codex_path):
+                self.log(f"[PASS-PACKET] ❌ No public key found for {target_uid}. Aborting send.")
+                return False
+
             football = self.get_football(type=self.FootballType.PASS)
             football.load_identity_file(universal_id=target_uid)
             da = self.get_delivery_agent("file.json_file", football=football, new=True)

@@ -84,9 +84,9 @@ class PacketCryptoMixin(LogMixin):
                 aes_key_b64 = self.football.get_aes_key()
 
                 packet = self.encrypt_packet(packet,
-                                             aes_key_b64,
-                                             self.football.encrypt_aes_key_using_target_pubkey(),
-                                             self.football.get_aes_encryption_pubkey()
+                                             aes_key_b64,                                          #personal aes key
+                                             self.football.encrypt_aes_key_using_target_pubkey(),  #are we using a key
+                                             self.football.get_aes_encryption_pubkey()    #key belongs to the target
                                              )
 
             # exit(json.dumps(packet, indent=2, sort_keys=True))
