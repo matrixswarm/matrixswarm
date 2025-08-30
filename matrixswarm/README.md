@@ -10,6 +10,9 @@
         Reflex. Resurrection. Real-time RPC.
 </pre>
 
+[![Hive Status](https://img.shields.io/badge/Hive-Active-green)]()
+> **Last Active: Aug 2025** — Phoenix cockpit dispatchers wired, inbound verification live, replay protection enforced. The Hive is alive.
+
 ## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
 **No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
 ---
