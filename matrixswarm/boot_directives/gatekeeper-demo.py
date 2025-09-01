@@ -11,7 +11,21 @@ matrix_directive = {
         "folders": [],
         "files": {}
     },
-
+    "service-manager": [{
+        "delegate": {"agent_tree":"agent_tree"},
+    }],
+    "config": {
+        "security": [{
+            "signing": {
+                "privkey": "##CERT_ID_123f0887##",  #optional: can be used to sign all outgoing messages, headed for the gui; PASTE THIS IN THE GUI FOR THE CONNECTION USED
+                "remote_pubkey": "##CERT_ID_e240a824##" #optional: verify the signature of all incoming packets. paste pubkey generated from matrix_gui that have or will create
+            },
+            "acl": {
+                #"cmd_deliver_agent_tree_to_child": "*"
+            },
+            "serial": "##DIRECTIVE_SERIAL##"
+        }]
+    },
     "children": [
 
         # MATRIX PROTECTION LAYER 4 SENTINELS
@@ -59,20 +73,66 @@ matrix_directive = {
             "universal_id": "matrix-https",
             "name": "matrix_https",
             "delegated": [],
-            "app": "matrix-core",
+            "security-tag": "perimeter_https",
             "config": {
                 "allowlist_ips": [
                     #'ip',
                     #'ip2'
                 ],
-                "privkey": "##GENERATE_KEY##",  #optional: can be used to sign all outgoing messages, headed for the gui; PASTE THIS IN THE GUI FOR THE CONNECTION USED
-                "remote_pubkey": "<OPTIONAL: PASTE THE PUBKEY GENERATED FROM YOUR matrix_gui HERE>", #optional: verify the signature of all incoming packets. paste pubkey generated from matrix_gui that have or will create
-
+                "service-manager": [{
+                    "role": ["hive.log.delivery"],
+                    "scope": ["parent", "any"],     # who it serves
+                    "priority": {                   # lower = more preferred
+                      "hive.log.delivery": -1,
+                      "default": 10
+                    },
+                    "exclusive": False             # can other services respond?
+                }],
+                'security': [{
+                    'connection':{
+                        "certs": "##CERT_ID_21d4bb9a##",
+                        "serial": "##DIRECTIVE_SERIAL##"
+                    }
+                }],
             },
             "filesystem": {
                 "folders": [],
                 "files": {}
             }
+        },
+        {
+            "universal_id": "websocket-relay",
+            "name": "matrix_websocket",
+            "config": {
+                "port": 8765,
+                "allowlist_ips": [
+                    # 'ip',
+                    # 'ip2'
+                ],
+                "factories": {
+                    "reflex.health.status_report": {}
+                },
+                "service-manager": [{
+                    "role": ["hive.alert.send_alert_msg, hive.rpc.route, hive.log.delivery"],
+                    "scope": ["parent", "any"],  # who it serves
+                    "priority": {  # lower = more preferred
+                        "hive.log.delivery": -1,
+                        "hive.proxy.route": 5,
+                        "default": 10
+                    },
+                    "exclusive": False  # can other services respond?
+                }],
+                'security': [{
+                    'connection':{
+                        "certs": "##CERT_ID_21d4bb9a##" # or another cert
+                    },
+                    "serial": "##DIRECTIVE_SERIAL##"
+                }],
+
+            },
+
+            "filesystem": {},
+            "delegated": []
         },
 
         {
@@ -202,33 +262,6 @@ matrix_directive = {
             }
             ,
             "children": []
-        },
-        {
-            "universal_id": "websocket-relay",
-            "name": "matrix_websocket",
-            "config": {
-                "port": 8765,
-                "allowlist_ips": [
-                    #'ip',
-                    #'ip2'
-                ],
-                "factories": {
-                    "reflex.health.status_report": {}
-                },
-                "service-manager": [{
-                    "role": ["hive.alert.send_alert_msg, hive.rpc.route"],
-                    "scope": ["parent", "any"],     # who it serves
-                    "auth": {"sig": True},
-                    "priority": 10,                # lower = more preferred
-                    "exclusive": False             # can other services respond?
-                }],
-                "privkey": "##GENERATE_KEY##",     #optional: can be used to sign all outgoing messages, headed for the gui; PASTE THIS IN THE GUI FOR THE CONNECTION USED
-                "remote_pubkey": "<OPTIONAL: PASTE THE PUBKEY GENERATED FROM YOUR matrix_gui HERE>",      #optional: verify the signature of all incoming packets. paste pubkey generated from matrix_gui that have or will create
-
-            },
-
-            "filesystem": {},
-            "delegated": []
         },
 
         {
@@ -388,3 +421,6 @@ matrix_directive = {
 
     ]
 }
+
+
+

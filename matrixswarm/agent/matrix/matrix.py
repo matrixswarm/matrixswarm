@@ -1,5 +1,5 @@
 # Authored by Daniel F MacDonald and ChatGPT aka The Generals
-# Gemini, code enchancments and Docstrings
+# Gemini, code enhancments and Docstrings
 import sys
 import os
 
@@ -17,7 +17,8 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 # ║       Please take as many as your system can support        ║
 # ╚═════════════════════════════════════════════════════════════╝
 
-import os
+
+import re
 import time
 from pathlib import Path
 if os.name == "posix":
@@ -28,7 +29,7 @@ if os.name == "posix":
         print("[COMM-WATCHER] inotify not installed, cannot use inotify watchers.")
 else:
     inotify = None
-import threading
+
 import hashlib
 import json
 import base64
@@ -44,7 +45,11 @@ from Crypto.Hash import SHA256
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from matrixswarm.core.agent_factory.reaper.reaper_factory import make_reaper_node
 from matrixswarm.core.agent_factory.scavenger.scavenger_factory import make_scavenger_node
-from matrixswarm.core.utils.crypto_utils import generate_signed_payload, verify_signed_payload
+from matrixswarm.core.utils.crypto_utils import generate_signed_payload, verify_signed_payload, encrypt_with_ephemeral_aes,  sign_data, pem_fix
+from matrixswarm.core.class_lib.packet_delivery.utility.security.packet_size import guard_packet_size
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.verify_packet_signature import verify_packet_signature
+from matrixswarm.core.class_lib.time_utils.heartbeat_checker import check_heartbeats
+from matrixswarm.core.utils.analyze_spawn_records import analyze_spawn_records
 class Agent(BootAgent):
     """The root agent and central authority of the MatrixSwarm.
     As the first agent spawned by the bootloader, the Matrix agent acts as
@@ -61,17 +66,15 @@ class Agent(BootAgent):
         """
         super().__init__()
 
-        self.AGENT_VERSION = "1.2.2"
+        self.AGENT_VERSION = "1.3.0"
         self._agent_tree_master = None
 
         #no need to delegate any agents at start
         self._last_tree_verify = time.time()
 
-        self.tree_path = os.path.join(
-            self.path_resolution["comm_path_resolved"],
-            "directive",
-            "agent_tree_master.json"
-        )
+        self._last_consciousness_scan = time.time()
+
+        self.tree_path = os.path.join( self.path_resolution["comm_path_resolved"], "directive", "agent_tree_master.json")
 
 
         self.tree_path_dict = {
@@ -81,8 +84,27 @@ class Agent(BootAgent):
              "name": "agent_tree_master.json"
         }
 
+        self._acl = {}
+
+        # make sure signing keys are loaded BEFORE seeding
+        self._signing_keys = self.tree_node.get('config', {}).get('security', {}).get('signing', {})
+        self._has_signing_keys = bool(self._signing_keys.get('privkey')) and bool(
+        self._signing_keys.get('remote_pubkey'))
+
+        if self._has_signing_keys:
+            priv_pem = self._signing_keys.get("privkey")
+            priv_pem=pem_fix(priv_pem)
+            self._signing_key_obj = RSA.import_key(priv_pem.encode() if isinstance(priv_pem, str) else priv_pem)
+
+        self._serial_num= self.tree_node.get('config', {}).get('security', {}).get('serial', {})
+
+        self._seed_acl()  # builds dict-shaped ACL entries for matrix + dominion
+
         # delegate Matrix her Tree
         self.delegate_tree_to_agent("matrix", self.tree_path_dict)
+
+        self._signing_keys = self.tree_node.get('config',{}).get('security',{}).get('signing',{})
+        self._has_signing_keys = self._signing_keys.get('privkey',False) and self._signing_keys.get('remote_pubkey',False)
 
         # Inject payload_path if it's not already present
         if "payload_path" not in self.path_resolution:
@@ -91,13 +113,94 @@ class Agent(BootAgent):
                 "payload"
             )
 
+    PRIVILEGED_MATRIX_HANDLERS = {
+        "cmd_deliver_agent_tree_to_child",
+    }
+
+    def _keyhash(self, pem_str: str) -> str:
+        return hashlib.sha256(pem_str.encode()).hexdigest()
+
+    def _acl_entry(self, pub_pem: str, allow):
+        # store canonical ACL entries with pubkey so we can verify later
+        return {"pubkey": pub_pem, "allow": set(allow)}
+
+    def _seed_acl(self):
+        try:
+            self._acl = {}
+            # Tier 1: Matrix baseline
+            self._acl[self._keyhash(self.matrix_pub)] = self._acl_entry(self.matrix_pub, self.PRIVILEGED_MATRIX_HANDLERS)
+            # Tier 0: Dominion key (GUI directive signing key) — allow everything
+            dom_pub = self._signing_keys.get('remote_pubkey') if hasattr(self, "_signing_keys") else None
+            if dom_pub:
+                self._acl[self._keyhash(dom_pub)] = self._acl_entry(dom_pub, {"*"})
+        except Exception as e:
+            self.log("ACL seed failed", error=e, block="acl-seed")
+
+    def grant_acl(self, pub_pem: str, handlers):
+        h = self._keyhash(pub_pem)
+        if h in self._acl:
+            if "*" in self._acl[h]["allow"]:
+                return  # already omnipotent
+            self._acl[h]["allow"].update(handlers)
+        else:
+            self._acl[h] = self._acl_entry(pub_pem, handlers)
+
+    def incoming_packet_acl_check(self, pk: dict, identity=None) -> bool:
+        """
+        Access model:
+          • Beast mode (neo cert): signature verifies with self._signing_keys["remote_pubkey"] ⇒ allow any cmd_*
+          • No/invalid signature: goodwill only ⇒ allow cmd_deliver_agent_tree_to_child
+        """
+        try:
+            # 0) Hard size/nesting limits
+            if not guard_packet_size(pk, log=self.log):
+                self.log("[ACL] Size/nesting guard rejected packet")
+                return False
+
+            handler = pk.get("handler")
+            timestamp = pk.get("timestamp")
+            sig = pk.get("sig")
+
+            # Basic shape
+            if not isinstance(handler, str) or timestamp is None:
+                self.log("[ACL] Missing/invalid handler or timestamp")
+                return False
+
+            # 1) Must have a verified identity object
+            if not identity or not getattr(identity, "has_verified_identity", lambda: False)():
+                self.log("[ACL] Identity not verified — dropping")
+                return False
+
+            # 2) Beast mode: signed by dominion key ⇒ allow any cmd_*
+            if sig and self._has_signing_keys and self._signing_keys.get("remote_pubkey"):
+                try:
+                    # raises ValueError on failure
+                    verify_packet_signature(pk, self._signing_keys["remote_pubkey"])
+                    if not handler.startswith("cmd_"):
+                        self.log(f"[ACL] Signed packet but non-command handler blocked: {handler}")
+                        return False
+                    return True
+                except Exception as e:
+                    if self.debug.is_enabled():
+                        self.log("[ACL] Signature present but verification failed; falling back to goodwill", error=e)
+
+            # 3) Goodwill token only: permit the Christmas tree delivery, nothing else
+            if handler == "cmd_deliver_agent_tree_to_child":
+                return True
+
+            self.log(f"[ACL] DENY (goodwill mode) handler={handler}")
+            return False
+
+        except Exception as e:
+            self.log("[ACL] Pipeline error", error=e)
+            return False
+
     def pre_boot(self):
         message = "Knock... Knock... Knock... The Matrix has you..."
         print(message)
         self.canonize_gospel()
 
     def post_boot(self):
-
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – panopticon live and lethal...")
         message = "I'm watching..."
         # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
@@ -110,7 +213,11 @@ class Agent(BootAgent):
     def worker_post(self):
         self.log("Matrix shutting down. Closing directives.")
 
-    def canonize_gospel(self, output_path="codex/gospel_of_matrix.sig.json"):
+    #called at the end of every packet_listener cycle
+    def packet_listener_post(self):
+        self.perform_agent_consciousness_scan()
+
+    def canonize_gospel(self):
         gospel = {
             "type": "swarm_gospel",
             "title": "The Gospel of Matrix",
@@ -146,7 +253,6 @@ class Agent(BootAgent):
 
         except Exception as e:
             self.log(error=e, block="main_try")
-
 
     def cmd_delete_agent(self, content, packet, identity:IdentityObject = None):
         """Handles the command to delete an agent and its entire subtree.
@@ -1361,8 +1467,6 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main-try")
 
-
-
     def get_agent_tree_master(self):
         """Loads the agent_tree_master.json from disk into memory.
         This method acts as a cached loader for the canonical agent tree.
@@ -1382,7 +1486,7 @@ class Agent(BootAgent):
         return self._agent_tree_master
 
 
-    def save_agent_tree_master(self):
+    def save_agent_tree_master(self, push_tree_home=False):
         """Signs and saves the current state of the in-memory agent tree to disk.
 
         This method is called whenever the swarm's structure is modified (e.g.,
@@ -1406,16 +1510,169 @@ class Agent(BootAgent):
             football = self.get_football(type=self.FootballType.PASS)
             football.load_identity_file(vault=self.tree_node['vault'], universal_id='matrix')
             self.save_directive(self.tree_path_dict, data, football=football)
-            self.log("[TREE] agent_tree_master saved and signed.")
+
+            if self.debug.is_enabled():
+                if self.encryption_enabled:
+                    self.log("[TREE] agent_tree_master saved and signed.")
+                else:
+                    self.log("[TREE] agent_tree_master saved.")
+
+            #deliver agent listing to gui
+            alert_role = self.tree_node.get("rpc_router_role", "hive.rpc.route")
+            if push_tree_home and alert_role:
+
+                # Encrypt for hive
+                remote_pub_pem = self._signing_keys.get("remote_pubkey")
+
+                data = {
+                        "content": self._agent_tree_master.root,
+                        "handler": "agent_tree_master.update"
+                        }
+
+                #encrypt the random aes key with remote pubkey
+                sealed = encrypt_with_ephemeral_aes(data, remote_pub_pem)
+
+                if not self._serial_num:
+                    raise ValueError("[OUTBOUND] ❌ Missing serial in signing keys")
+
+                content = {
+                    "serial": self._serial_num,
+                    "content": sealed,
+                    "timestamp": int(time.time())
+                }
+                 # Sign with Matrix privkey
+                sig = sign_data(content, self._signing_key_obj)
+                content["sig"] = sig
+
+                pk1 = self.get_delivery_packet("standard.command.packet")
+                pk1.set_data({"handler": "cmd_rpc_route", "content":content})
+
+                # Broadcast to all gang members with that role
+                for node in self.get_nodes_by_role(alert_role):
+                    self.pass_packet(pk1, node["universal_id"])
+
             return True
 
         except Exception as e:
             self.log("[TREE][ERROR] Failed to save agent_tree_master.", error=e)
             return False
 
+    def perform_agent_consciousness_scan(self, time_delta_timeout=0, flip_threshold=3, flip_window=60):
+        """
+        Evaluates each agent's heartbeat (from poke files) and spawn history (flip-tripping).
+        Stores results inside node["agent_status"]. Broadcasts updated tree to relays if live.
+        """
+        try:
+            if (time.time() - self._last_consciousness_scan) > 20:
+                self._last_consciousness_scan = time.time()
+                now = time.time()
+
+                def recurse(node: dict):
+                    if not isinstance(node, dict):
+                        return
+
+                    uid = node.get("universal_id")
+                    if not uid:
+                        return
+
+                    statuses = check_heartbeats(self.path_resolution["comm_path"], uid, time_delta_timeout)
+                    thread_status = {}
+                    if statuses is None:
+                        thread_status = {"error": "❌ no beacon files"}
+                    else:
+                        for t, info in statuses.items():
+                            delta = round(info["delta"], 1)
+                            if info["status"] == "sleeping":
+                                thread_status[t] = f"😴 sleep (wake in {abs(delta)}s)"
+                            elif info["status"] == "alive":
+                                thread_status[t] = f"✅ {delta}s"
+                            else:
+                                thread_status[t] = f"💥 failed ({delta}s)"
+
+                    #Spawn analysis
+                    spawn_data = analyze_spawn_records(
+                        self.path_resolution["comm_path"],
+                        uid,
+                        flip_threshold=flip_threshold,
+                        flip_window=flip_window
+                    )
+                    spawn_report = {
+                        "count": spawn_data["count"],
+                        "latest_timestamp": spawn_data["latest_timestamp"],
+                        "flip_tripping": spawn_data["flip_tripping"]
+                    }
+
+                    if spawn_report["flip_tripping"]:
+                        spawn_report["note"] = "flip-tripping detected"
+
+                    node["agent_status"] = {
+                        "checked_at": now,
+                        "threads": thread_status,
+                        "spawn": spawn_report
+                    }
+
+                    for child in node.get("children", []):
+                        recurse(child)
+
+                recurse(self._agent_tree_master.root)
+
+                # Push tree if relays are alive
+                alert_role = self.tree_node.get("rpc_router_role", "hive.rpc.route")
+                live_relays = [
+                    n for n in self.get_nodes_by_role(alert_role)
+                    if self.has_fresh_broadcast_flag(n["universal_id"])
+                ]
+
+                if live_relays:
+                    self.save_agent_tree_master(push_tree_home=True)
+                else:
+                    self.log("[TREE] Skipped broadcast (no fresh relays)")
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
+    def has_fresh_broadcast_flag(self, universal_id: str, threshold: int = 30) -> list[str]:
+        """
+        Checks whether any connected.flag* exists for the agent and is fresh.
+
+        Args:
+            universal_id (str): Agent UID to check.
+            threshold (int): Max age (seconds) before a flag is considered stale.
+
+        Returns:
+            list[str]: A list of session_ids (or "legacy" for old style) that are alive.
+        """
+        base = os.path.join(
+            self.path_resolution["comm_path"],
+            universal_id,
+            "broadcast"
+        )
+        if not os.path.isdir(base):
+            return []
+
+        now = time.time()
+        alive_sessions = []
+
+        for fname in os.listdir(base):
+            if not fname.startswith("connected.flag"):
+                continue
+
+            fpath = os.path.join(base, fname)
+            age = now - os.path.getmtime(fpath)
+            if age < threshold:
+                if fname == "connected.flag":
+                    alive_sessions.append("legacy")  # backward compat
+                else:
+                    sid = fname.replace("connected.flag.", "")
+                    alive_sessions.append(sid)
+            else:
+                self.log(f"[BROADCAST] Flag stale: {fname} ({int(age)}s old)")
+
+        return alive_sessions
+
     def cmd_deliver_agent_tree_to_child(self, content, packet, identity: IdentityObject = None):
         try:
-            uid = content.get("universal_id")
+            uid = content.get("universal_id", False)
             if not uid:
                 self.log("[DELIVER-TREE][ERROR] Missing universal_id.")
                 return

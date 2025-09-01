@@ -62,6 +62,7 @@ class Agent(BootAgent):
         ]
         self.cooldown = 60
         self.last_seen = {}
+        self.interval =  30
 
     def log_event(self, event_type, full_path):
         """Logs a file system event with a cooldown to prevent spam.
@@ -89,7 +90,7 @@ class Agent(BootAgent):
         self.log(f"[TRIPWIRE] {msg}")
         # self.alert_operator(message=msg)  # optional alert to Discord/etc.
 
-    def worker(self, config: dict = None, identity: IdentityObject = None):
+    def post_boot(self):
         """The main worker method that monitors file system events.
 
         This method sets up the inotify watches on the specified directories.
@@ -102,22 +103,34 @@ class Agent(BootAgent):
             identity (IdentityObject, optional): Identity object for the agent.
                                                  Defaults to None.
         """
-        i = inotify.adapters.Inotify()
-        for path in self.abs_watch_paths:
-            if os.path.exists(path):
-                i.add_watch(path,
-                            mask=inotify.constants.IN_MODIFY | inotify.constants.IN_CREATE | inotify.constants.IN_DELETE)
-                self.log(f"[TRIPWIRE] Watching {path}")
-            else:
-                self.log(f"[TRIPWIRE][SKIP] Missing: {path}")
+        emit_beacon = self.check_for_thread_poke("tripwire_watch", timeout=self.interval, emit_to_file_interval=10)
 
-        for event in i.event_gen(yield_nones=False):
-            (_, type_names, path, filename) = event
-            full_path = os.path.join(path, filename)
-            self.log_event(", ".join(type_names), full_path)
+        while self.running:
 
-        interruptible_sleep(self, 10)
+            try:
+                i = inotify.adapters.Inotify()
+                for path in self.abs_watch_paths:
+                    if os.path.exists(path):
+                        i.add_watch(path,
+                                    mask=inotify.constants.IN_MODIFY | inotify.constants.IN_CREATE | inotify.constants.IN_DELETE)
+                        self.log(f"[TRIPWIRE] Watching {path}")
+                    else:
+                        self.log(f"[TRIPWIRE][SKIP] Missing: {path}")
 
+                for event in i.event_gen(yield_nones=True, timeout_s=1):
+                    if event is not None:
+                        (_, type_names, path, filename) = event
+                        full_path = os.path.join(path, filename)
+                        self.log_event(", ".join(type_names), full_path)
+
+                    # Call the beacon function on every loop iteration
+                    emit_beacon()
+
+
+            except Exception as e:
+                self.log(error=e, block="main_try")
+
+            interruptible_sleep(self, self.interval)
 
 if __name__ == "__main__":
     """

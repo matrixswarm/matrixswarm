@@ -19,8 +19,10 @@ class Agent(BootAgent):
         super().__init__()
         self.name = "StormCrow"
 
+        self.interval = 900
         self._initialized_from_tree = False
         self._private_config = self.tree_node.get("config", {})
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval*2, emit_to_file_interval=10)
 
     def cmd_update_agent_config(self):
 
@@ -29,6 +31,7 @@ class Agent(BootAgent):
             self._initialized_from_tree = True
             # Support ZIP code override
             self.zipcode = self._private_config.get("zip-code") or os.getenv("WEATHER_ZIPCODE")
+
 
             self.log(f"🌪 [HOWDY] We've moved. StormCrow now watches over ZIP: {self.zipcode}")
 
@@ -58,6 +61,7 @@ class Agent(BootAgent):
     def worker(self, config: dict = None, identity:IdentityObject = None):
         try:
 
+            self._emit_beacon()
             if config and isinstance(config, dict):
 
                 self.log(f"config loaded: {config}")
@@ -97,12 +101,10 @@ class Agent(BootAgent):
                     self.log(f"[STORMCROW] 📰 {headline} (Issued: {issued})")
                     self.alert_operator(event, msg)
 
-            interruptible_sleep(self, 900)
-
         except Exception as e:
             self.log(error=e, block="main_try")
-            interruptible_sleep(self, 60)
 
+        interruptible_sleep(self, self.interval)
 
     def fetch_alerts(self):
         try:

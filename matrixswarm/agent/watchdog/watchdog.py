@@ -20,8 +20,8 @@ from matrixswarm.core.boot_agent import BootAgent
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
-
         self.failure_count = 0
+        self._emit_beacon = self.check_for_thread_poke("watchdog", timeout=self.tree_node.get("config", {}).get("check_interval_sec", 60) * 2, emit_to_file_interval=30)
 
     def worker_pre(self):
         config = self.tree_node.get("config", {}) if 'tree_node' in globals() else {}
@@ -35,6 +35,7 @@ class Agent(BootAgent):
         self.log("[WATCHDOG] WatchdogAgent initialized and watching.")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        self._emit_beacon()
         self.check_ping_once()
         interruptible_sleep(self, self.check_interval)
 

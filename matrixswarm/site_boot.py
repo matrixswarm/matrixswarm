@@ -317,6 +317,8 @@ def main():
     from matrixswarm.core.class_lib.processes.reaper import Reaper
     from matrixswarm.core.path_manager import PathManager
     from matrixswarm.core.swarm_session_root import SwarmSessionRoot
+    from runpy import run_path
+    from runpy import run_path
     from matrixswarm.boot_directives.load_boot_directive import load_boot_directive
     from matrixswarm.core.utils.boot_guard import enforce_single_matrix_instance, validate_universe_id
     from matrixswarm.core.utils.crypto_utils import generate_aes_key
@@ -402,7 +404,7 @@ def main():
     #env_path = config["env"]
 
     universe_id = args.universe.strip()
-    boot_name = args.directive.strip().replace(".py", "")
+    directive_file = args.directive.strip()
     reboot = args.reboot
     #show realtime log prints - be warned you will need to open another terminal to
     #terminate the swarm
@@ -498,8 +500,19 @@ def main():
         print(f"[BOOT] 🔐 Decrypting encrypted directive from {args.encrypted_directive}")
         matrix_directive = decrypt_directive(args.encrypted_directive, args.swarm_key)
     else:
-        print(f"[BOOT] 📦 Loading plaintext directive: {boot_name}.py")
-        matrix_directive = load_boot_directive(boot_name, path=config['boot_directives'])
+        print(f"[BOOT] 📦 Loading plaintext directive: {directive_file}")
+        if directive_file.endswith(".json"):
+            with open(Path(config["boot_directives"]) / directive_file, "r") as f:
+                matrix_directive = json.load(f)
+        elif directive_file.endswith(".py"):
+            namespace = run_path(str(Path(config["boot_directives"]) / directive_file))
+            matrix_directive = namespace.get("matrix_directive")
+            if not matrix_directive:
+                print(f"[FATAL] No 'matrix_directive' found in {directive_file}")
+                sys.exit(1)
+        else:
+            print("[FATAL] Directive file must end with .json or .py")
+            sys.exit(1)
 
     tp = TreeParser.load_tree_direct(matrix_directive)
     if not tp:
@@ -597,8 +610,8 @@ def main():
         print(f"[BOOT] 🔐 Decrypting encrypted directive from {args.encrypted_directive}")
         matrix_directive = decrypt_directive(args.encrypted_directive, args.swarm_key)
     else:
-        print(f"[BOOT] 📦 Loading plaintext directive: {boot_name}")
-        matrix_directive = load_boot_directive(boot_name)
+        print(f"[BOOT] 📦 Loading plaintext directive: {directive_file}")
+        matrix_directive = load_boot_directive(directive_file)
 
     trust_payload = {
         "encryption_enabled": int(encryption_enabled),

@@ -45,9 +45,6 @@ class Agent(BootAgent):
         os.makedirs(self.alarm_path, exist_ok=True)
         threading.Thread(target=self.alarm_watcher, daemon=True).start()
 
-    def worker(self, config:dict = None, identity:IdentityObject = None):
-        interruptible_sleep(self, 20)
-
     def post_boot(self):
         self.log("[ALARM-STREAMER] Spinning up WebSocket relay...")
         threading.Thread(target=self.launch_socket_server, daemon=True).start()

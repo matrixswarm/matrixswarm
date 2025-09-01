@@ -27,6 +27,7 @@ class Agent(BootAgent):
         for d in [self.payload_dir, self.mail_dir, self.tally_dir, self.incoming_dir]:
             os.makedirs(d, exist_ok=True)
         self.hash_cache = set()
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
     def worker_pre(self):
         self.log("[MAILMAN] Mailman v2.1 booted. Awaiting payloads.")
@@ -35,8 +36,9 @@ class Agent(BootAgent):
         self.log("[MAILMAN] Agent shutting down.")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        self._emit_beacon()
         self.process_payload_once()
-        interruptible_sleep(self, 10)
+        interruptible_sleep(self, 20)
 
     def process_payload_once(self):
         try:

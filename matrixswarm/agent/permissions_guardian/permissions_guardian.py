@@ -13,7 +13,7 @@ import json
 import time
 import base64
 from Crypto.Cipher import AES
-
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
@@ -43,11 +43,12 @@ class Agent(BootAgent):
         config = self.tree_node.get("config", {})
         self.targets = config.get("targets", [])
         self.log_only = config.get("log_only", False)
-
+        self.interval=20
         # Agent state for scan history (encrypted)
         self._state_path = os.path.join(self.path_resolution["comm_path_resolved"], ".state")
         os.makedirs(self._state_path, exist_ok=True)
         self._history_file_path = os.path.join(self._state_path, "scan_history.json.enc")
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval, emit_to_file_interval=10)
 
     def worker(self, config: dict = None, identity: IdentityObject = None):
         """
@@ -61,17 +62,25 @@ class Agent(BootAgent):
             config (dict, optional): Live configuration data. Not used by this agent.
             identity (IdentityObject, optional): Sender identity. Not used by this agent.
         """
-        self.log("Permissions Guardian: starting scan.")
-        scan_history = self._load_history()
+        try:
+            self._emit_beacon()
 
-        for target in self.targets:
-            scan_history += self._scan_and_enforce(target)
+            self.log("Permissions Guardian: starting scan.")
+            scan_history = self._load_history()
 
-        self._save_history(scan_history)
-        self.log("Permissions scan complete. Dropping mission.complete receipt.")
-        self._drop_mission_complete_receipt()
-        self.log("Standing down for the parent to respawn (cron-style).")
-        self.running = False  # Agent will exit after 1 pass
+            for target in self.targets:
+                scan_history += self._scan_and_enforce(target)
+
+            self._save_history(scan_history)
+            self.log("Permissions scan complete. Dropping mission.complete receipt.")
+            self._drop_mission_complete_receipt()
+            self.log("Standing down for the parent to respawn (cron-style).")
+            self.running = False  # Agent will exit after 1 pass
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
+        interruptible_sleep(self, self.interval)
 
     def _get_aes_key(self, which="agent"):
         """
@@ -239,6 +248,13 @@ class Agent(BootAgent):
         receipt_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto", "mission.complete")
         with open(receipt_path, "w") as f:
             f.write(str(time.time()))
+
+        #clean up runtime dir
+        pod_tombstone_path=os.path.join(self.command_line_args["pod_path_resolved"], "tombstone")
+        if os.path.exists(pod_tombstone_path):
+            with open(pod_tombstone_path, "w") as f:
+                f.write(str(time.time()))
+
 
 if __name__ == "__main__":
     agent = Agent()

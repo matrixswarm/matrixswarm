@@ -44,6 +44,7 @@ class Agent(BootAgent):
 
         self.log_dir = os.path.join(self.path_resolution["comm_path"], "gatekeeper")
         os.makedirs(self.log_dir, exist_ok=True)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
     def should_alert(self, key):
 
@@ -169,6 +170,7 @@ class Agent(BootAgent):
         return datetime.now().strftime("%Y-%m-%d")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        self._emit_beacon()
         self.tail_log()
         interruptible_sleep(self, 10)
 

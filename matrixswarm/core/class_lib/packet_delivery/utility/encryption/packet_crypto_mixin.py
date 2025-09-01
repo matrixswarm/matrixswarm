@@ -39,7 +39,6 @@ class PacketCryptoMixin(LogMixin):
 
     def build_secure_packet(self, raw_payload: dict):
 
-        subpacket= {}
         try:
             """
             Builds a secure packet using Football as the strategy controller.

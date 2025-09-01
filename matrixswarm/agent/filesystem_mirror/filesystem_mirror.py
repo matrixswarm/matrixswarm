@@ -19,6 +19,7 @@ class Agent(BootAgent):
         self.watch_path = config.get("watch_path", "/etc")
         self.mode = config.get("mode", "once")  # or "cycle"
         self.self_destruct = config.get("self_destruct", False)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
         self.report_to = config.get("report_to", "mailman-1")
         self.out_dir = os.path.join(self.path_resolution["comm_path"], self.report_to, "payload")
@@ -29,6 +30,7 @@ class Agent(BootAgent):
         self.log(f"[MIRROR] Mission start. Watching {self.watch_path} [mode: {self.mode}]")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        self._emit_beacon()
         if self.mode != "cycle" and self.cycle_index > 0:
             interruptible_sleep(self, 10)
             return

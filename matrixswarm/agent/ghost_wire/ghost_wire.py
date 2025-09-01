@@ -41,6 +41,7 @@ class Agent(BootAgent, ReflexAlertMixin):
         self.session_dir = os.path.join(self.path_resolution["comm_path"],
                                         self.command_line_args.get("universal_id", "ghostwire"), "sessions")
         os.makedirs(self.session_dir, exist_ok=True)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
     def worker_pre(self):
         self.enforce_prompt_command_once()

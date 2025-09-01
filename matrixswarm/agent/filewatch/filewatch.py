@@ -24,13 +24,11 @@ class Agent(BootAgent):
             self.path_resolution["comm_path"], self.send_to, "payload"
         )
         os.makedirs(self.target_payload, exist_ok=True)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
     def post_boot(self):
         self.log(f"[FILEWATCH] Booted. Watching: {self.watch_path}, Reporting: {self.send_to}")
         threading.Thread(target=self.start_filewatch_loop, daemon=True).start()
-
-    def worker(self, config:dict = None, identity:IdentityObject = None):
-        pass  # Not used — all work happens in filewatch thread
 
     def worker_pre(self):
         self.log("[FILEWATCH] Pre-worker setup complete.")
@@ -42,15 +40,26 @@ class Agent(BootAgent):
         self.log("[FILEWATCH] Starting inotify watcher loop.")
         try:
             i = inotify.adapters.InotifyTree(self.watch_path)
-            for event in i.event_gen(yield_nones=False):
+            for event in i.event_gen(yield_nones=True, timeout_s=5):
                 if not self.running:
                     break
+
+                if event is None:
+                    # No events in last 5s → still alive, emit heartbeat
+                    self._emit_beacon()
+                    continue
+
+                # We have a filesystem event
                 (_, type_names, path, filename) = event
                 event_type = ",".join(type_names)
                 full_path = os.path.join(path, filename)
+
                 try:
-                    self.log_event(event_type, full_path)
-                    self.log(f"[FILEWATCH] {event_type}: {full_path}")
+                    if self.debug.is_enabled():
+                        self.log(f"[FILEWATCH] {event_type}: {full_path}")
+
+                    # Emit beacon after handling an event too
+                    self._emit_beacon()
                 except Exception as e:
                     self.log(f"[FILEWATCH][ERROR] {event_type}: {e}")
         except Exception as e:
@@ -65,8 +74,8 @@ class Agent(BootAgent):
         }
         hashval = hashlib.sha256(json.dumps(entry).encode()).hexdigest()
         outpath = os.path.join(self.target_payload, f"{int(time.time())}_{hashval}.json")
-        with open(outpath, "w", encoding="utf-8") as f:
-            json.dump(entry, f, indent=2)
+        #with open(outpath, "w", encoding="utf-8") as f:
+        #    json.dump(entry, f, indent=2)
 
 if __name__ == "__main__":
     agent = Agent()

@@ -31,14 +31,14 @@ Decryption Mode Usage:
 """
 import os
 import sys
-import json
 import base64
+import json
 import argparse
-import hashlib
+
 from Crypto.Cipher import AES
 from Crypto.PublicKey import RSA
 from pathlib import Path
-
+from matrix_gui.modules.vault.crypto.cert_utils import inject_cert_pairs_by_id, set_hash_bang, embed_agent_sources, load_cert_store_from_vault
 
 def get_random_aes_key(length=32):
     """
@@ -110,78 +110,6 @@ def generate_rsa_keypair(bits=2048):
     privkey_pem = key.export_key().decode()
     pubkey_pem = key.publickey().export_key().decode()
     return privkey_pem, pubkey_pem
-
-
-def embed_agent_sources(directive, base_path=None):
-    """
-    Recursively finds agent definitions, reads their source code, and embeds
-    it as a base64 encoded string in a 'src_embed' field.
-
-    This is the "clown-car" feature, allowing a directive to carry all
-    necessary agent code within it for portable deployment.
-
-    Args:
-        directive (dict or list): The directive structure to process.
-        base_path (str, optional): The root path of the MatrixSwarm installation,
-                                   used for resolving agent paths. Defaults to None.
-    """
-    if isinstance(directive, dict):
-        agent_name = directive.get("name")
-        src_path = directive.get("src")
-        # Auto-infer src path if not present and agent name is standard
-        if not src_path and agent_name and base_path:
-            test_path = os.path.join(base_path, "agent", agent_name, f"{agent_name}.py")
-            if os.path.exists(test_path):
-                src_path = test_path
-                directive["src"] = test_path  # Update directive with inferred path
-
-        if src_path and os.path.exists(src_path):
-            with open(src_path, "rb") as f:
-                encoded = base64.b64encode(f.read()).decode()
-            directive["src_embed"] = encoded
-
-        # Recurse into child values
-        for v in directive.values():
-            embed_agent_sources(v, base_path=base_path)
-    elif isinstance(directive, list):
-        for item in directive:
-            embed_agent_sources(item, base_path=base_path)
-
-def set_hash_bang(directive, base_path=None):
-    """
-    Recursively finds agent definitions and sets a 'hash_bang' field containing
-    the SHA256 hash of the agent's source code.
-
-    This provides a mechanism for the spawner to verify the integrity of the
-    agent code before execution, preventing tampering. It hashes the embedded
-    source code (`src_embed`) if it exists, otherwise it hashes the source file
-    from the filesystem.
-
-    Args:
-        directive (dict or list): The directive structure to process.
-        base_path (str, optional): The root path of the MatrixSwarm installation,
-                                   used for resolving agent paths. Defaults to None.
-    """
-    if isinstance(directive, dict):
-        agent_name = directive.get("name")
-        src_path = directive.get("src")
-        if not src_path and agent_name and base_path:
-            test_path = os.path.join(base_path, "agent", agent_name, f"{agent_name}.py")
-            if os.path.exists(test_path):
-                src_path = test_path
-        if "src_embed" in directive:
-            # Hash the embedded base64 code
-            src_bytes = base64.b64decode(directive["src_embed"])
-            directive["hash_bang"] = hashlib.sha256(src_bytes).hexdigest()
-        elif src_path and os.path.exists(src_path):
-            with open(src_path, "rb") as f:
-                directive["hash_bang"] = hashlib.sha256(f.read()).hexdigest()
-        # Recurse
-        for v in directive.values():
-            set_hash_bang(v, base_path=base_path)
-    elif isinstance(directive, list):
-        for item in directive:
-            set_hash_bang(item, base_path=base_path)
 
 
 def ensure_boot_directives_path(filename):
@@ -271,6 +199,7 @@ def main():
     parser.add_argument("--decrypt", action="store_true", help="Run in decryption mode instead of encryption")
     parser.add_argument("--clown-car", action="store_true", help="Embed all agent source code as base64 in 'src_embed'")
     parser.add_argument("--hash-bang", action="store_true", help="SHA256 hash each agent source and set 'hash_bang' in all nodes")
+    parser.add_argument("--vault", help="Path to vault data (.json)")
 
     args = parser.parse_args()
 
@@ -340,6 +269,10 @@ def main():
         # Generate and embed RSA key pairs if markers are found
         pubkeys = list(embed_keypair_if_marker(data))
 
+        # replaces certs tags, if the vault is provided and has matching tags
+        if args.vault:
+            cert_store = load_cert_store_from_vault(args.vault)
+            inject_cert_pairs_by_id(data, cert_store)
 
         # Encrypt the final directive structure
         data_bytes = json.dumps(data, indent=2).encode()

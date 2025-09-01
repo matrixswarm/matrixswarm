@@ -22,13 +22,15 @@ class Agent(BootAgent):
         self.incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(self.oracle_payload, exist_ok=True)
         os.makedirs(self.incoming_path, exist_ok=True)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
     def worker_pre(self):
         self.log("[SWEEP] Agent activated. Awaiting cleanup directives.")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        self._emit_beacon()
         self.check_incoming_once()
-        interruptible_sleep(self, 3)
+        interruptible_sleep(self, 20, ping_file=self.path_resolution["poke_worker_file"])
 
     def worker_post(self):
         self.log("[SWEEP] Shutting down. No further directives expected.")

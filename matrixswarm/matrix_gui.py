@@ -1656,8 +1656,6 @@ class MatrixCommandBridge(QWidget, PacketFactoryMixin):
         for child in node.get("children", []):
             self.inject_sources_into_tree(child)
 
-
-
     def handle_delete_subtree(self):
         universal_id = self.input_universal_id.text().strip()
         if not universal_id:

@@ -34,6 +34,7 @@ class Agent(BootAgent):
         self.tombstone_comm = config.get("tombstone_comm", True)
         self.tombstone_pod = config.get("tombstone_pod", True)
         self.cleanup_die = config.get("cleanup_die", False)
+        self._emit_beacon = self.check_for_thread_poke("patrol", timeout=30, emit_to_file_interval=10)
 
         self.universal_id_handler = ReaperUniversalHandler(self.path_resolution['pod_path'], self.path_resolution['comm_path'], logger=self.logger)
 
@@ -113,6 +114,7 @@ class Agent(BootAgent):
         self.log("[REAPER] 🛰 Patrol mode active. Scanning for hit cookies...")
         comm_root = Path(self.path_resolution["comm_path"])
         while True:
+            self._emit_beacon()
             try:
                 for agent_dir in comm_root.iterdir():
                     hello_path = agent_dir / "hello.moto"
@@ -143,7 +145,6 @@ class Agent(BootAgent):
                     if not uid:
                         continue
 
-                    # TODO: Verify signature if encryption is enabled (hook here)
                     self.log(f"[REAPER] ☠ Target marked: {uid} — executing...")
 
                     # Execute: reuse universal_id handler

@@ -9,15 +9,15 @@ import hashlib
 import fnmatch
 import inspect
 import copy
+import queue
 from enum import Enum
 
 from matrixswarm.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 from matrixswarm.core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
-from matrixswarm.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
+from matrixswarm.core.class_lib.time_utils.heartbeat_checker import check_heartbeats
 from matrixswarm.core.core_spawner import CoreSpawner
 from matrixswarm.core.path_manager import PathManager
 from matrixswarm.core.mixin.identity_registry import IdentityRegistryMixin
-from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from string import Template
 from matrixswarm.core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
 from matrixswarm.core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
@@ -36,6 +36,7 @@ from matrixswarm.core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
 from matrixswarm.core.tree_parser import TreeParser
 from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.signing import sign_packet
 from Crypto.PublicKey import RSA as PyCryptoRSA
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
@@ -107,6 +108,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         config = EncryptionConfig()
 
+        #automatic throttle
+        self.throttle_queue = queue.Queue(maxsize=1)
 
         self.debug = DebugConfig()
 
@@ -189,6 +192,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         self._loaded_tree_nodes={}
         self._service_manager_services = {}
+
+        self._outgoing_addins = []  # keep BootAgent skinny
 
         self.running = False
         self.NAME = self.command_line_args.get("agent_name", "UNKNOWN")
@@ -315,34 +320,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as fallback:
             print(f"[LOG-FAIL] Logging system failure: {fallback}")
 
+
     def send_message(self, message):
         self.log(f"[SEND] {json.dumps(message)}")
-
-        # sends a heartbeat to comm/{universal_id}/hello.moto of self
-
-    def heartbeat(self):
-        """Periodically writes a timestamp to a file to signal liveness.
-        This method runs in a continuous loop in its own thread. It creates a
-        `poke.heartbeat` file in the agent's `/hello.moto` directory and
-        updates it with the current timestamp every 10 seconds. Other agents,
-        like Sentinels, monitor this file to determine if the agent is still
-        alive.
-        """
-        hello_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto")
-        ping_file = os.path.join(hello_path, "poke.heartbeat")
-
-        os.makedirs(hello_path, exist_ok=True)
-
-        while self.running:
-            try:
-                with open(ping_file, "w", encoding="utf-8") as f:
-                    now = time.time()
-                    f.write(str(now))
-                    if self.debug.is_enabled():
-                        print(f"[HEARTBEAT] Touched poke.heartbeat for {ping_file} -> {now}")
-            except Exception as e:
-                print(f"[HEARTBEAT][ERROR] Failed to write ping: {e} -> {ping_file} -> {now}")
-            interruptible_sleep(self, 10)
 
     def directive_watcher(self):
         """
@@ -378,6 +358,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 "content": {
                     "universal_id": self.command_line_args.get("universal_id")
                 }
+                #"sig": sign_packet(
             }
 
             target = self.command_line_args.get("spawner", "matrix")
@@ -389,6 +370,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         except Exception as e:
             self.log("[TREE-REQUEST][ERROR]", error=e)
+
+
 
     def enforce_singleton(self):
 
@@ -481,15 +464,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 return
 
             self.running = True
-
+            self.thread_registry["worker"]["active"] = self.is_worker_overridden()
             self.worker_thread = threading.Thread(target=self._throttled_worker_wrapper, name="worker", daemon=False)
             self.worker_thread.start()
-            self.thread_registry["worker"]["active"] = self.is_worker_overridden()
-
             threading.Thread(target=self.enforce_singleton, name="enforce_singleton", daemon=True).start()
             self.thread_registry["enforce_singleton"]["active"] = True
-            threading.Thread(target=self.heartbeat, name="heartbeat", daemon=True).start()
-            self.thread_registry["heartbeat"]["active"] = True
             threading.Thread(target=self.spawn_manager, name="spawn_manager", daemon=True).start()
             self.thread_registry["spawn_manager"]["active"] = True
             threading.Thread(target=self.directive_watcher, name="directive_watcher", daemon=True).start()
@@ -517,10 +496,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             verified identity of the sender if the worker is triggered
             by a packet. Defaults to None.
     """
-    def worker(self, config:dict = None, identity:IdentityObject=None):
-        self.log("[BOOT] Default worker loop running. Override me.")
-        while self.running:
-            interruptible_sleep(self, 5)
+
+    def worker(self, config=None, identity=None):
+        pass
+
     def pre_boot(self):
         """A one-time setup hook called before the main threads start.
         This method is intended to be overridden by child agent classes.
@@ -551,7 +530,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.log("Monitoring incoming packets...")
         incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(incoming_path, exist_ok=True)
-        emit_beacon = self.check_for_thread_poke("packet_listener", 5)
+        emit_beacon = self.check_for_thread_poke("packet_listener", timeout=60)
         last_dir_mtime = os.path.getmtime(incoming_path)
         #TOP TRY
         try:
@@ -579,7 +558,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     for fname in os.listdir(incoming_path):
                         #dynamic config packet
                         try:
-                            if not fname.endswith(".json"):
+                            if not fname.startswith("pk_") or not fname.endswith(".json"):
                                 continue
 
                             pk = self.get_delivery_packet("standard.command.packet", new=True)
@@ -594,6 +573,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                             try:
                                 os.remove(fpath)
+                            except Exception as e:
+                                pass
+
+                            try:
                                 identity=ra.get_identity()
                             except Exception as e:
                                 identity=None
@@ -620,9 +603,18 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                             content = pk.get("content", {})
 
 
+                            #will implement on next iteration
+                            #if not self.incoming_packet_acl_check(pk, identity):
+                            #    continue
+
                             # 1. Check if the class has a direct method with this name
                             handler_fn = getattr(self, handler_name, None)
                             #factory handler check
+
+                            if not handler_name.startswith("cmd_"):
+                                self.log(f"[INVALID HANDLER NAME]: {handler_name}")
+                                continue
+
                             if callable(handler_fn):
                                 try:
                                     handler_fn(content, pk, identity)
@@ -672,6 +664,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             interruptible_sleep(self, 3)
 
+    def incoming_packet_acl_check(self, pk:dict, identity:IdentityObject = None) -> bool:
+        """
+        Determines if the given agent identity is allowed to call this handler.
+        Default stub: allows everything. Can be replaced by Matrix runtime.
+        """
+        return True
 
     def save_directive(self, path: dict, node_tree :dict, football:Football):
         """
@@ -740,32 +738,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌", error=e, block="main_try")
             return TreeParser.load_tree_direct({})
 
-    def save_to_trace_session(self, packet, msg_type="msg"):
-        tracer_id = packet.get("tracer_session_id")
-        packet_id = packet.get("packet_id")
-
-        if not tracer_id:
-            self.log(f"[TRACE][SKIP] Invalid trace packet: tracer={tracer_id}, packet_id={packet_id}")
-            return
-
-        comm_root = os.path.normpath(self.path_resolution["comm_path"])
-        parent_dir, last_component = os.path.split(comm_root)
-
-        if last_component != "comm":
-            self.log(f"[TRACE][ERROR] comm_path doesn't end in 'comm': {comm_root}")
-            return
-
-        base_dir = os.path.join(parent_dir, "boot_sessions", tracer_id)
-        os.makedirs(base_dir, exist_ok=True)
-
-        fname = f"{packet_id:03d}.{msg_type}"
-        full_path = os.path.join(base_dir, fname)
-
-        #try:
-            #with open(full_path, "w") as f:
-            #    json.dump(packet, f, indent=2)
-        #except Exception as e:
-        #    self.log(f"[TRACE][ERROR] Failed to write trace packet {fname}: {e}")
 
     def _throttled_worker_wrapper(self):
         """A wrapper that manages the execution of the main worker() method.
@@ -784,7 +756,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         os.makedirs(config_path, exist_ok=True)
         fpath=None
         identity=None
-        emit_beacon = self.check_for_thread_poke("worker", 5)
         last_dir_mtime = os.path.getmtime(config_path)
         last_worker_cycle_execution = 0
         try:
@@ -798,7 +769,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as e:
             self.log(f"Failed to process", error=e, block="main_try")
 
-        # 🔹 Optional pre-hook (called ONCE before loop)
+        # Optional pre-hook (called ONCE before loop)
         if hasattr(self, "worker_pre"):
             try:
                 self.worker_pre()
@@ -808,86 +779,75 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         while self.running:
 
-            if getattr(self, "can_proceed", True):
+            try:
+                # Wait for a signal from the throttler thread before proceeding.
+                # This call will block until an item is available in the queue.
+                self.throttle_queue.get()
+
+                config={}
+                _config = {} #temp config
 
                 try:
 
-                    self.can_proceed = False
+                    #ON EXECUTION, THIS WILL SCOOP UP ALL THE CONFIG PACKETS
+                    #BUT  ONLY SEND THE LAST ONE TO THE WORKER METHOD
+                    #AND DELETE THE REST OF THE PACKETS
+                    current_dir_mtime = os.path.getmtime(config_path)
+                    if current_dir_mtime != last_dir_mtime:
+                        last_dir_mtime = current_dir_mtime
 
-                    if self.is_worker_overridden():
+                        for fname in os.listdir(config_path):
 
-                        config={}
-                        _config = {} #temp config
-                        try:
+                            if not fname.endswith(".json"):
+                                continue
 
-                            #ON EXECUTION, THIS WILL SCOOP UP ALL THE CONFIG PACKETS
-                            #BUT  ONLY SEND THE LAST ONE TO THE WORKER METHOD
-                            #AND DELETE THE REST OF THE PACKETS
-                            current_dir_mtime = os.path.getmtime(config_path)
-                            if current_dir_mtime != last_dir_mtime:
-                                last_dir_mtime = current_dir_mtime
+                            #get json packet
+                            pk1 = self.get_delivery_packet("standard.general.json.packet", new=True)
 
-                                for fname in os.listdir(config_path):
+                            packet = ra.set_identifier(fname) \
+                                .set_packet(pk1) \
+                                .receive()
 
-                                    if not fname.endswith(".json"):
-                                        continue
+                            fpath = os.path.join(config_path, fname)  # get the file's path
 
-                                    #get json packet
-                                    pk1 = self.get_delivery_packet("standard.general.json.packet", new=True)
+                            _config = packet.get_packet()
 
-                                    packet = ra.set_identifier(fname) \
-                                        .set_packet(pk1) \
-                                        .receive()
+                            if ra.get_error_success() or packet is None:
+                                self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
 
-                                    fpath = os.path.join(config_path, fname)  # get the file's path
-
-                                    _config = packet.get_packet()
-
-                                    if ra.get_error_success() or packet is None:
-                                        self.log(f"Failed to receive data from reception agent or error: {ra.get_error_success_msg()}.")
-
-                                    if self.debug.is_enabled():
-                                        self.log(f"config: path: {fpath} {config}")
-
-                                    os.remove(fpath)
-
-                                    identity = ra.get_identity()
-
-                                    if isinstance(_config, dict):
-                                        config = _config.copy()
-
-                        except Exception as e:
-                            if fpath and os.path.isfile(fpath):
-                                os.remove(fpath)
-                            self.log(f"config {config}", error=e)
-
-                        #AVOID SPAMMING LOGS
-                        now = time.time()
-                        if (last_worker_cycle_execution + 30) < now:
-                            last_worker_cycle_execution = now
                             if self.debug.is_enabled():
-                                self.log(f"Executing worker cycle...")
+                                self.log(f"config: path: {fpath} {config}")
 
-                        #REMEMBER THIS ISN'T ENTERED LIKE PACKET_LISTENER
-                        #THERE MAY BE A LARGE TIMEOUT IN WORKER
-                        self.worker(config, identity)
+                            os.remove(fpath)
 
-                    else:
-                        if not hasattr(self, "_worker_skip_logged"):
-                            if self.debug.is_enabled():
-                                self.log("No worker() override detected — skipping worker loop.")
-                            self._worker_skip_logged = True
+                            identity = ra.get_identity()
 
-                    emit_beacon()
+                            if isinstance(_config, dict):
+                                config = _config.copy()
+
                 except Exception as e:
-                    self.emit_dead_poke("worker", str(e))
-                    self.log(error=e, block="main_try")
+                    if fpath and os.path.isfile(fpath):
+                        os.remove(fpath)
+                    self.log(f"config {config}", error=e)
 
-            else:
+                #AVOID SPAMMING LOGS
+                now = time.time()
+                if (last_worker_cycle_execution + 30) < now:
+                    last_worker_cycle_execution = now
+                    if self.debug.is_enabled():
+                        self.log(f"Executing worker cycle...")
 
-                time.sleep(0.05)
+                #REMEMBER THIS ISN'T ENTERED LIKE PACKET_LISTENER
+                #THERE MAY BE A LARGE TIMEOUT IN WORKER
 
-        # 🔹 Optional post-hook (called ONCE after loop exits)
+                self.worker(config, identity)
+
+            except Exception as e:
+                self.log(error=e, block="main_try")
+
+            time.sleep(1)
+
+        # Optional post-hook (called ONCE after loop exits)
         if hasattr(self, "worker_post"):
             try:
                 self.worker_post()
@@ -895,24 +855,36 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 self.log(error=e)
 
     #used to verify and map threads to verify consciousness
-    def check_for_thread_poke(self, thread_token="worker", interval=5):
-        timeout = self.thread_registry.get(thread_token, {}).get("timeout", 8)
-        poke_path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto", f"poke.{thread_token}")
-        last_emit = [0]
+    def check_for_thread_poke(self, thread_token="packet_listener",
+                              timeout=None, sleep_for=None, emit_to_file_interval=10):
+        """
+        Returns an emit() function that writes a heartbeat file no more often than
+        emit_to_file_interval seconds. File name encodes timeout/sleep info.
+        """
+        poke_dir = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto")
+        os.makedirs(poke_dir, exist_ok=True)
+
+        wake_due = int(time.time() + sleep_for) if sleep_for else 0
+        timeout_val = timeout if timeout else 0
+        sleep_val = sleep_for if sleep_for else 0
+        last_emit = [0]  # closure storage
 
         def emit():
             now = time.time()
-            if now - last_emit[0] >= interval:
-                with open(poke_path, "w", encoding="utf-8") as f:
-                    json.dump({
-                        "status": "alive",
-                        "last_seen": now,
-                        "timeout": timeout,
-                        "comment": f"Thread beacon from {thread_token}"
-                    }, f, indent=2)
-                last_emit[0] = now
-                if self.debug.is_enabled():
-                    print(f"[BEACON] {thread_token} emitted at {now}")
+            if now - last_emit[0] < emit_to_file_interval:
+                # too soon since last write, skip
+                return
+
+            filename = f"poke.{thread_token}.{timeout_val}.{sleep_val}.{wake_due}"
+            poke_path = os.path.join(poke_dir, filename)
+
+            # create/truncate empty file
+            with open(poke_path, "w"):
+                pass
+
+            last_emit[0] = now
+            if self.debug.is_enabled():
+                print(f"[BEACON] {thread_token} emitted as {filename} at {now}")
 
         return emit
 
@@ -939,24 +911,21 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
     def start_dynamic_throttle(self, min_delay=2, max_delay=10, max_load=2.0):
         def dynamic_throttle_loop():
-            last_throttle_cycle_execution=False
-            greatest_load=0
+            last_throttle_cycle_execution = False
+            greatest_load = 0
             while self.running:
                 try:
                     load_avg = self.get_load()
                     scale = min(1.0, (load_avg - max_load) / max_load) if load_avg > max_load else 0
                     delay = int(min_delay + scale * (max_delay - min_delay))
-                    if scale > 0:
 
-                        #avoid all the throttle print statements, uses outer else
+                    if scale > 0:
                         if not last_throttle_cycle_execution:
                             last_throttle_cycle_execution = True
                             if self.debug.is_enabled():
                                 self.log(f"[THROTTLE_STARTED] Load: {load_avg:.2f} → delay: {delay}s")
-
-                        if load_avg>greatest_load:
+                        if load_avg > greatest_load:
                             greatest_load = load_avg
-
                     else:
                         if last_throttle_cycle_execution:
                             last_throttle_cycle_execution = False
@@ -964,14 +933,34 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                 self.log(f"[THROTTLE_ENDED] Highest Load: {greatest_load:.2f}")
                             greatest_load = 0
 
-                    self.can_proceed = True
+                    # Signal the worker thread to proceed.
+                    try:
+                        self.throttle_queue.put_nowait(True)
+                    except queue.Full:
+                        # Queue is already full, meaning worker hasn't processed the last signal.
+                        # Do nothing and let the queue act as a buffer of size 1.
+                        pass
+
                     time.sleep(delay)
                 except Exception as e:
                     self.log(error=e)
                     time.sleep(min_delay)
 
-        self.can_proceed = False
         threading.Thread(target=dynamic_throttle_loop, daemon=True).start()
+
+    def get_nodes_by_role_with_priority(self, role, scope='any'):
+        nodes = self.get_nodes_by_role(role, scope=scope)
+        prioritized = []
+
+        for node in nodes:
+            config = node.get('config', {})
+            role_priority_map = config.get('priority', {})
+            priority = role_priority_map.get(role, role_priority_map.get('default', 1))  # default = 1
+
+            prioritized.append((priority, node))
+
+        prioritized.sort(key=lambda x: x[0])  # lower = higher priority
+        return [n for _, n in prioritized]
 
     def get_nodes_by_role(self, role: str, scope: str = "child", return_count: int = 0):
         """Finds other agents in the swarm based on their advertised roles.
@@ -1219,9 +1208,14 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         continue
 
                     # Skip if recent heartbeat is alive
-                    time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], node.get("universal_id"))
-                    if time_delta is not None and time_delta < time_delta_timeout:
-                        continue
+                    statuses = check_heartbeats(self.path_resolution['comm_path'], node.get("universal_id"))
+                    if statuses is None:
+                        # at least one thread failed, spawn
+                        self.log(f"[HEARTBEAT] {node.get('universal_id')} failed heartbeat check")
+                    else:
+                        # all threads are either alive or sleeping continue else respawn
+                        if all(s["status"] in ("alive", "sleeping") for s in statuses.values()):
+                            continue  # safe to skip further handling
 
                     #check to see if this agent is a cronjob
                     #This block first checks the node for a tag 'is_cron_job'
@@ -1328,6 +1322,21 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             spawner.set_verbose(self.verbose)
             spawner.set_debug(self.debug.is_enabled())
+
+            try:
+                #SAVE IDENTITY FILE to comm/{universal_id}/codex
+                identity={"identity": tree_node.get("vault",{}).get("identity", {}), "sig": tree_node.get("vault",{}).get("sig", {})}
+
+                dir = os.path.join(self.path_resolution["comm_path"], universal_id, "codex")
+                os.makedirs(dir, exist_ok=True)
+                fpath = os.path.join(dir, "signed_public_key.json")
+                with open(fpath, "w", encoding="utf-8") as f:
+                    json.dump(identity, f, indent=2)
+
+            except Exception as e:
+                self.log(error=e, block='write_signed_public_key')
+
+
 
             result = spawner.spawn_agent(
                 spawn_uuid=new_uuid,

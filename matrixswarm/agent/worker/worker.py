@@ -22,7 +22,7 @@ class Agent(BootAgent):
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
         self.do_task_once()
-        interruptible_sleep(self, 10)
+        interruptible_sleep(self, 10, ping_file=self.path_resolution["poke_worker_file"])
 
     def worker_post(self):
         self.log("[WORKER] WorkerAgent shutting down. Task queue suspended.")

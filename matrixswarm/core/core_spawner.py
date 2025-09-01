@@ -379,6 +379,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "incoming_path_template": os.path.join(self.comm_path, "$universal_id", "incoming"),
                     "comm_path_resolved": os.path.join(self.comm_path, universal_id),
                     "pod_path_resolved": os.path.join(self.pod_path, spawn_uuid),
+                    "poke_worker_file": os.path.join(self.comm_path, universal_id, "hello.moto", "poke.worker"),
                     "site_root_path": self.site_root_path,
                     "install_path": self.install_path,
                     # path of .matrixswarm dir - where session agent, boot_directive, and certs live

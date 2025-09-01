@@ -22,13 +22,15 @@ class Agent(BootAgent):
         self.output_dir = os.path.join(self.path_resolution["comm_path"], self.report_to, "payload")
         os.makedirs(self.watch_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
     def worker_pre(self):
         self.log("[SCRAPER] Cold metal online. Awaiting targets...")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        self._emit_beacon()
         self.check_jobs_once()
-        interruptible_sleep(self, 2)
+        interruptible_sleep(self, 20, ping_file=self.path_resolution["poke_worker_file"])
 
     def worker_post(self):
         self.log("[SCRAPER] No more pages to tear. Agent shutting down.")

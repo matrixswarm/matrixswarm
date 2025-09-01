@@ -31,6 +31,7 @@ class Agent(BootAgent):
         self.check_interval_sec = config.get("check_interval_sec", 30)
         self.report_to_role = config.get("report_to_role", "hive.forensics.data_feed")
         self.report_handler = config.get("report_handler", "cmd_ingest_status_report")
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
         # For traffic rate measurement
         self.prev_net_io = None
@@ -138,6 +139,8 @@ class Agent(BootAgent):
 
     def worker(self, config: dict = None, identity: IdentityObject = None):
         try:
+
+            self._emit_beacon()
             metrics = {}
 
             # 1. Interfaces and rates
@@ -172,8 +175,10 @@ class Agent(BootAgent):
                 # Routine, informational report (could throttle if you only want to send on change/issue)
                 self.send_status_report("healthy", "INFO", "Network health within normal bounds.", metrics)
 
+
         except Exception as e:
-            self.log(f"Error in NetworkHealthMonitor: {e}")
+
+            self.log(error=e, block="main_try")
 
         interruptible_sleep(self, self.check_interval_sec)
 

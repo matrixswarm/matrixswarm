@@ -27,6 +27,7 @@ class Agent(BootAgent):
         self.cpu_count = psutil.cpu_count(logical=True)
         self.last_bin_report = {}
         self.current_day = self.today()
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.sample_interval * 2, emit_to_file_interval=10)
 
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
@@ -126,15 +127,16 @@ class Agent(BootAgent):
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
         try:
-                if self.today() != self.current_day:
-                    # new day, flush report
-                    report = self.analyze()
-                    self.write_daily_summary(report)
-                    self.samples = []
-                    self.process_stats = Counter()
-                    self.current_day = self.today()
+            self._emit_beacon()
+            if self.today() != self.current_day:
+                # new day, flush report
+                report = self.analyze()
+                self.write_daily_summary(report)
+                self.samples = []
+                self.process_stats = Counter()
+                self.current_day = self.today()
 
-                self.sample()
+            self.sample()
 
         except Exception as e:
             err = str(e)

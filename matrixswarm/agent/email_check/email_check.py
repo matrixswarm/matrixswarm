@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
-
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
@@ -23,6 +23,7 @@ class Agent(BootAgent):
         self.mail_user = config.get("email") or os.getenv("EMAILCHECKAGENT_EMAIL")
         self.mail_pass = config.get("password") or os.getenv("EMAILCHECKAGENT_PASSWORD")
         self.report_to = config.get("report_to") or os.getenv("EMAILCHECKAGENT_REPORT_TO", "mailman-1")
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
     def worker_pre(self):
         import socket
@@ -68,6 +69,8 @@ class Agent(BootAgent):
 
         except Exception as e:
             self.log(f"[EMAIL][ERROR][WORKER] {e}")
+
+        interruptible_sleep(self, 20)
 
     def worker_post(self):
         if hasattr(self, 'mail') and self.mail:

@@ -1,4 +1,4 @@
-#Authored by Daniel F MacDonald
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
 # ╔════════════════════════════════════════════════════════╗
 # ║               🧹 SCAVENGER AGENT 🧹                    ║
 # ║   Runtime Sweeper · Pod Watchdog · Tombstone Handler   ║
@@ -26,6 +26,8 @@ from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
+        self._emit_beacon = self.check_for_thread_poke("patrol", timeout=300, emit_to_file_interval=10)
+
 
     def post_boot(self):
         try:

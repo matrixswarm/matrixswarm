@@ -16,6 +16,7 @@ from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.ident
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
     def pre_boot(self):
         self.log("[COMMANDER] Pre-boot check passed.")
@@ -26,7 +27,8 @@ class Agent(BootAgent):
     def worker(self, config:dict = None, identity:IdentityObject = None):
         self.track_agents()
         self.thread_registry["worker"]["timeout"] = 15
-        interruptible_sleep(self, 10)
+        self._emit_beacon()
+
 
     def track_agents(self):
         comm_root = self.path_resolution["comm_path"]

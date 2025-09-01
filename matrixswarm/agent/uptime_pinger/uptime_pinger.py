@@ -26,7 +26,7 @@ class Agent(BootAgent):
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
         self.ping_once()
-        interruptible_sleep(self, self.interval)
+        interruptible_sleep(self, self.interval, ping_file=self.path_resolution["poke_worker_file"])
 
     def worker_post(self):
         self.log("[PINGER] Pinger shutting down. Final signal sent.")

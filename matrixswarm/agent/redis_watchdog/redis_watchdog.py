@@ -38,7 +38,7 @@ class Agent(BootAgent, AgentSummaryMixin):
             "last_state": None,
             "last_change": time.time()
         }
-
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval*2, emit_to_file_interval=10)
         # test writing summary
         #self.stats["date"] = "1900-01-01"
 
@@ -138,27 +138,33 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.pass_packet(pk1, node["universal_id"])
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
-        self.maybe_roll_day('redis')
-        running = self.is_redis_running()
-        accessible = self.is_port_open() or self.is_socket_up()
-        last_state = self.stats["last_state"]  # snapshot before update
-        self.update_stats(running)
 
-        # ✅ Recovery alert logic
-        if running:
-            if last_state is False:  # just transitioned from down
-                if self.should_alert("redis-recovered"):
-                    self.alert_operator("✅ Redis has recovered and is now online.")
+        try:
+            self._emit_beacon()
+            self.maybe_roll_day('redis')
+            running = self.is_redis_running()
+            accessible = self.is_port_open() or self.is_socket_up()
+            last_state = self.stats["last_state"]  # snapshot before update
+            self.update_stats(running)
 
-            if not accessible:
-                self.alert_operator("⚠️ Redis is active but unreachable via port or socket.")
-            self.log("[HAMMER] ✅ Redis is running.")
+            # ✅ Recovery alert logic
+            if running:
+                if last_state is False:  # just transitioned from down
+                    if self.should_alert("redis-recovered"):
+                        self.alert_operator("✅ Redis has recovered and is now online.")
 
-        else:
-            if self.should_alert("redis-down"):
-                self.alert_operator("❌ Redis is DOWN. Attempting restart.")
-            self.log("[HAMMER] ❌ Redis is NOT running. Restarting.")
-            self.restart_redis()
+                if not accessible:
+                    self.alert_operator("⚠️ Redis is active but unreachable via port or socket.")
+                self.log("[HAMMER] ✅ Redis is running.")
+
+            else:
+                if self.should_alert("redis-down"):
+                    self.alert_operator("❌ Redis is DOWN. Attempting restart.")
+                self.log("[HAMMER] ❌ Redis is NOT running. Restarting.")
+                self.restart_redis()
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
         interruptible_sleep(self, self.interval)
 

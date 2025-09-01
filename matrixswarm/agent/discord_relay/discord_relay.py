@@ -2,6 +2,8 @@
 #Gemini, docstring-ing and added code enhancements.
 import sys
 import os
+import time
+import json
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 # ╔══════════════════════════════════════════════════════════╗
@@ -27,7 +29,7 @@ class Agent(BootAgent):
 
         # Inject full tree_node so BootAgent sees config
         self.directives = self.tree_node
-
+        self.interval=60
         self.inbox_paths=['incoming']
         path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(path, exist_ok=True)
@@ -45,10 +47,6 @@ class Agent(BootAgent):
 
     def worker_pre(self):
         self.log("[DISCORD] Worker alive, idling.")
-
-    def worker(self, config:dict = None, identity:IdentityObject = None):
-
-        interruptible_sleep(self, 2320)
 
     def post_boot(self):
         self.log("[DISCORD] Payload watcher thread starting...")
@@ -69,6 +67,18 @@ class Agent(BootAgent):
 
                 self.bot = commands.Bot(command_prefix="!", intents=intents)
 
+                # 💓 Beacon for discord_client loop
+                self.emit_discord_beacon = self.check_for_thread_poke(
+                    "discord_client",
+                    timeout=30,  # calibrate based on cycle
+                    emit_to_file_interval=10  # only write every 10s
+                )
+
+                async def heartbeat():
+                    while True:
+                        self.emit_discord_beacon()
+                        await asyncio.sleep(10)  # known max cycle
+
                 @self.bot.event
                 async def on_ready():
                     print("[ON_READY] Triggered!")
@@ -86,6 +96,8 @@ class Agent(BootAgent):
                     print("[DISCORD] run_bot() starting...")
                     await self.bot.start(self.token)
 
+                # Schedule heartbeat + bot together
+                loop.create_task(heartbeat())
                 loop.create_task(run_bot())
                 loop.run_forever()
 
@@ -167,6 +179,60 @@ class Agent(BootAgent):
     def format_message(self, data: dict):
         """Builds a detailed message from embed_data if present."""
         return data.get("formatted_msg") or data.get("msg") or "[SWARM] No content."
+
+#SEND A NON SPAMMING MESSAGE TO DISCORD TO BE RETRIEVED AT THE CONVENIENCE OF PHOENIX
+def send_text_message(self, message: str, tag: str = "SWARM_PAYLOAD", ttl_seconds: int = 3600):
+    try:
+        loop = self.bot.loop
+        channel = self.bot.get_channel(self.channel_id)
+        if not channel:
+            self.log("[DISCORD][ERROR] Channel not found.")
+            return
+
+        async def controlled_delivery():
+            # Step 1: Fetch last 10 messages from channel
+            messages = await channel.history(limit=10).flatten()
+            for msg in messages:
+                if tag in msg.content and msg.author == self.bot.user:
+                    try:
+                        payload_block = msg.content.split("```json")[1].split("```")[0]
+                        payload = json.loads(payload_block)
+                        # Step 2: Check TTL
+                        ts = payload.get("meta", {}).get("timestamp")
+                        ttl = payload.get("meta", {}).get("ttl")
+                        if ts and ttl:
+                            expire_at = ts + ttl
+                            if time.time() > expire_at:
+                                await msg.delete()
+                            else:
+                                self.log("[DISCORD] Skipping resend: active payload already exists.")
+                                return
+                        else:
+                            await msg.delete()  # Legacy/no-meta? Remove it.
+                    except Exception as e:
+                        self.log(f"[DISCORD][WARN] Message parse failed: {e}")
+                        await msg.delete()
+
+            # Step 3: Send new message
+            swarm_payload = {
+                "payload": message,
+                "meta": {
+                    "swarm_id": self.name,
+                    "timestamp": int(time.time()),
+                    "ttl": ttl_seconds
+                }
+            }
+            encoded = json.dumps(swarm_payload, indent=2)
+            formatted = f"{tag}\n```json\n{encoded}\n```"
+            await channel.send(formatted)
+            self.log("[DISCORD] Payload relayed with TTL + swarm tag.")
+
+        asyncio.run_coroutine_threadsafe(controlled_delivery(), loop)
+
+    except Exception as e:
+        self.log(f"[DISCORD][ERROR] Controlled delivery failed: {e}")
+
+
 
 if __name__ == "__main__":
     agent = Agent()

@@ -32,12 +32,14 @@ class Agent(BootAgent):
         self.mem_threshold = config.get("mem_threshold_percent", 95.0)
         self.cpu_threshold = config.get("cpu_threshold_percent", 90.0)
         self.disk_threshold = config.get("disk_threshold_percent", 95.0)
-        self.check_interval_sec = config.get("check_interval_sec", 60)
+        self.interval = config.get("check_interval_sec", 60)
         self.report_to_role = config.get("report_to_role", "hive.forensics.data_feed")
         self.report_handler = config.get("report_handler", "cmd_ingest_status_report")
 
         self.log(f"Monitoring configured: [Mem: {self.mem_threshold}%, CPU: {self.cpu_threshold}%, Disk: {self.disk_threshold}%]")
         self.log(f"Reporting to role '{self.report_to_role}' with handler '{self.report_handler}'")
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval*2, emit_to_file_interval=10)
+
 
     def send_status_report(self, service_name, status, severity, details):
         """Helper method to construct and send a status packet to the configured role."""
@@ -64,6 +66,7 @@ class Agent(BootAgent):
     def worker(self, config: dict = None, identity: IdentityObject = None):
         """Main execution loop for the agent."""
         try:
+            self._emit_beacon()
             # Check Memory
             mem = psutil.virtual_memory()
             if mem.percent > self.mem_threshold:
@@ -80,10 +83,11 @@ class Agent(BootAgent):
             if disk.percent > self.disk_threshold:
                 self.send_status_report("system.disk", "low_space", "WARNING",
                                         f"Root disk space is critical: {disk.percent:.2f}% full.")
-        except Exception as e:
-            self.log(f"An error occurred while checking system resources: {e}", level="ERROR")
 
-        interruptible_sleep(self, self.check_interval_sec)
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
+        interruptible_sleep(self, self.interval)
 
 if __name__ == "__main__":
     agent = Agent()

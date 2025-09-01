@@ -45,16 +45,6 @@ class Agent(BootAgent):
         self.password = config.get("password")
         self.to_address = config.get("to_address")
 
-    def worker(self, config: dict = None, identity: IdentityObject = None):
-        """
-        The main worker loop for this agent is intentionally left blank.
-
-        As a relay agent, its functionality is entirely event-driven through
-        the `cmd_send_alert_msg` handler. It does not need to perform any
-        actions on a recurring basis.
-        """
-        pass
-
     def cmd_send_alert_msg(self, content: dict, packet, identity: IdentityObject = None):
         """
         The main command handler for receiving and processing swarm alerts.

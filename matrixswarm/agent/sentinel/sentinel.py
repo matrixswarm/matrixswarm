@@ -14,7 +14,7 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 import threading
 
-from matrixswarm.core.class_lib.time_utils.heartbeat_checker import last_heartbeat_delta
+from matrixswarm.core.class_lib.time_utils.heartbeat_checker import check_heartbeats
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from matrixswarm.core.boot_agent import BootAgent
 
@@ -53,9 +53,7 @@ class Agent(BootAgent):
         self.watching = config.get("watching", "the Matrix")
         self.universal_id_under_watch = config.get("universal_id_under_watch", False)
         self.target_node = None
-        self.time_delta_timeout = config.get("timeout", 60)  # Default 60 sec if not set
-
-
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
     def post_boot(self):
         """
@@ -90,6 +88,8 @@ class Agent(BootAgent):
 
             while self.running:
 
+                self._emit_beacon()
+
                 try:
                     # The security_box contains the credentials needed to resurrect Matrix
                     if len(self.security_box)==0:
@@ -109,10 +109,14 @@ class Agent(BootAgent):
                         continue
 
                     # Check if the target's heartbeat is stale
-                    time_delta = last_heartbeat_delta(self.path_resolution['comm_path'], universal_id)
-                    if time_delta is not None and time_delta < self.time_delta_timeout:
-                        interruptible_sleep(self, 10)
-                        continue
+                    statuses = check_heartbeats(self.path_resolution['comm_path'], universal_id)
+                    if statuses is None:
+                        # at least one thread failed, spawn
+                        self.log(f"[HEARTBEAT] {universal_id} failed heartbeat check")
+                    else:
+                        # all threads are either alive or sleeping continue else respawn
+                        if all(s["status"] in ("alive", "sleeping") for s in statuses.values()):
+                            continue  # safe to skip further handling
 
                     # If heartbeat is stale, initiate respawn
                     try:

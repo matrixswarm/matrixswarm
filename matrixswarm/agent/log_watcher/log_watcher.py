@@ -34,10 +34,11 @@ class Agent(BootAgent):
             "WARNING": ["error", "warn", "warning", "denied", "failed"],
             "INFO": []  # Default
         })
-
+        self.interval = 10
         # State tracking for log rotation
         self._current_inode = None
         self._log_file = None
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval*2, emit_to_file_interval=10)
 
     def post_boot(self):
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – your logs tell many secrets...")
@@ -52,30 +53,32 @@ class Agent(BootAgent):
         Main worker loop that tails the log file and handles rotation.
         """
         try:
+            self._emit_beacon()
             if not self.log_path or not os.path.exists(self.log_path):
                 self.log(f"Log path '{self.log_path}' is invalid or not found. Worker will idle.", level="ERROR")
-                return
 
-            try:
-                # Check for log rotation
-                if not self._is_file_still_valid():
-                    self.log("Log rotation detected. Re-opening file handle.", level="INFO")
-                    self._open_log_file()
+            else:
 
-                # Read new lines
-                line = self._log_file.readline()
-                if line:
-                    self._process_line(line)
-                else:
-                    # If no new line, sleep briefly to avoid busy-waiting
-                    interruptible_sleep(self, 1)  # CHANGED: Was 0.5, must be an integer
+                try:
+                    # Check for log rotation
+                    if not self._is_file_still_valid():
+                        self.log("Log rotation detected. Re-opening file handle.", level="INFO")
+                        self._open_log_file()
 
-            except Exception as e:
-                self.log("Error during log watch cycle.", error=e, level="ERROR")
+                    # Read new lines
+                    line = self._log_file.readline()
+                    if line:
+                        self._process_line(line)
 
-            interruptible_sleep(self, 10)  # Longer sleep on error
+                except Exception as e:
+                    self.log("Error during log watch cycle.", error=e, level="ERROR")
+
+
         except Exception as e:
             self.log(error=e, block="main_try")
+
+        interruptible_sleep(self, self.interval)
+
 
     def _open_log_file(self):
         """Opens or re-opens the log file and seeks to the end."""

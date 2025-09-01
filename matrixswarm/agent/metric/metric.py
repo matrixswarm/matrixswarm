@@ -29,13 +29,14 @@ class Agent(BootAgent):
 
         os.makedirs(self.outbox, exist_ok=True)
         os.makedirs(self.oracle_payload, exist_ok=True)
-
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
         self.history = []
 
     def worker_pre(self):
         self.log("[METRICS] Agent initialized. Beginning observation.")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        self._emit_beacon()
         self.collect_and_report()
         interruptible_sleep(self, self.interval)
 

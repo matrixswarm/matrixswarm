@@ -18,15 +18,12 @@ class Agent(BootAgent):
         self.directory = {}
         self.tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
         self.incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
+        self._emit_beacon = self.check_for_thread_poke("scan_tree", timeout=30, emit_to_file_interval=10)
 
     def worker_pre(self):
         self.log("[RESOLVER] Booting service discovery...")
         self.scan_tree_once()
         threading.Thread(target=self.watch_files, daemon=True).start()
-
-    def worker(self, config:dict = None, identity:IdentityObject = None):
-        while self.running:
-            interruptible_sleep(self, 600)
 
     def scan_tree_once(self):
         if not os.path.exists(self.tree_path):

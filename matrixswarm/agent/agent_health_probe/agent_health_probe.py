@@ -14,6 +14,7 @@ class Agent(BootAgent):
 
         self.target = self.tree_node.get("config", {}).get("target")
         self.interval = self.tree_node.get("config", {}).get("interval", 5)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
 

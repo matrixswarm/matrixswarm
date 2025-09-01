@@ -101,7 +101,7 @@ class Agent(BootAgent):
             self._suspended = bool(self._private_config.get('suspended', 0))
             self.geoip_enabled = self._private_config.get("geoip_enabled", 1)
             self.alert_role = self._private_config.get("alert_to_role", "hive.alert.send_alert_msg")  # Optional
-
+            self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
             cfg_db = str(self._private_config.get("maxmind_db", "")).strip()
 
@@ -174,6 +174,7 @@ class Agent(BootAgent):
                 sender of the configuration packet. Not used in this agent.
         """
         try:
+            self._emit_beacon()
             if config and isinstance(config, dict):
                 self.log(f"[CONFIG] New configuration packet received.")
                 # This logic allows for both full and partial config updates

@@ -17,6 +17,7 @@ class Agent(BootAgent):
         os.makedirs(self.payload_dir, exist_ok=True)
         self.spawn_target = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
         os.makedirs(self.spawn_target, exist_ok=True)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
     def worker_pre(self):
         msg = "[REACTOR] Initializing reflex protocol. Listening for Oracle decisions."
@@ -24,6 +25,7 @@ class Agent(BootAgent):
         self.broadcast(msg)
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
+        self._emit_beacon()
         self.check_oracle_triggers_once()
         interruptible_sleep(self, 2)
 

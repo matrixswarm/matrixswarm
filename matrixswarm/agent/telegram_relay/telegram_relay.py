@@ -8,6 +8,7 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 import requests
 from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
     def __init__(self):
@@ -22,9 +23,14 @@ class Agent(BootAgent):
         os.makedirs(path, exist_ok=True)
         self.watch_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         os.makedirs(self.watch_path, exist_ok=True)
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
     def worker_pre(self):
         self.log("[TELEGRAM] Telegram relay activated. Awaiting message drops...")
+
+    def worker(self, config: dict = None, identity: IdentityObject = None):
+        self._emit_beacon()  # patrol beacon
+        interruptible_sleep(self, 30)
 
     def worker_post(self):
         self.log("[TELEGRAM] Relay shutting down. No more echoes for now.")

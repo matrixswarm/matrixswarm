@@ -20,6 +20,9 @@ class Agent(BootAgent):
         self._private_config = self.tree_node.get("config", {})
         self._last_price = None
         self.trigger_hits = 0
+        self.interval = int(self._private_config.get("poll_interval", 20))
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval*2, emit_to_file_interval=10)
+
 
     def cmd_update_agent_config(self):
 
@@ -44,6 +47,7 @@ class Agent(BootAgent):
     def worker(self,config:dict=None, identity:IdentityObject = None):
 
         try:
+            self._emit_beacon()
 
             if config and isinstance(config, dict):
                 self.log(f"config loaded: {config}")
@@ -64,33 +68,34 @@ class Agent(BootAgent):
 
             if not self._private_config.get("active", True):
                 self.log("🔇 Agent marked inactive. Exiting cycle.")
-                return
 
-            trigger = self._private_config.get("trigger_type", "price_change_above")
-
-            # Break it into base + direction (e.g., price_change_above → price_change + above)
-            if "_" in trigger:
-                base_trigger, direction = trigger.rsplit("_", 1)
             else:
-                base_trigger = trigger
-                direction = "above"
 
-            if base_trigger == "price_change":
-                self._run_price_change_monitor(direction)
-            elif base_trigger == "price_delta":
-                self._run_price_delta_monitor(direction)
-            elif base_trigger == "price":
-                self._run_price_threshold(direction)
-            elif base_trigger == "asset_conversion":
-                self._run_asset_conversion_check()
-            else:
-                self.log(f"[UNKNOWN TRIGGER] {trigger}")
+
+                trigger = self._private_config.get("trigger_type", "price_change_above")
+
+                # Break it into base + direction (e.g., price_change_above → price_change + above)
+                if "_" in trigger:
+                    base_trigger, direction = trigger.rsplit("_", 1)
+                else:
+                    base_trigger = trigger
+                    direction = "above"
+
+                if base_trigger == "price_change":
+                    self._run_price_change_monitor(direction)
+                elif base_trigger == "price_delta":
+                    self._run_price_delta_monitor(direction)
+                elif base_trigger == "price":
+                    self._run_price_threshold(direction)
+                elif base_trigger == "asset_conversion":
+                    self._run_asset_conversion_check()
+                else:
+                    self.log(f"[UNKNOWN TRIGGER] {trigger}")
 
         except Exception as e:
             self.log(error=e, block="main_try")
 
-        interval = int(self._private_config.get("poll_interval", 20))
-        interruptible_sleep(self, interval)
+        interruptible_sleep(self, self.interval)
 
     def _run_price_change_monitor(self, direction="above"):
         try:

@@ -44,6 +44,7 @@ class Agent(BootAgent, AgentSummaryMixin):
             "last_status_change": time.time(),
         }
         self.last_alerts = {}
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 
     def today(self):
         """
@@ -226,42 +227,47 @@ class Agent(BootAgent, AgentSummaryMixin):
             config (dict, optional): Configuration dictionary. Defaults to None.
             identity (IdentityObject, optional): Identity object for the agent. Defaults to None.
         """
-        self.maybe_roll_day("nginx")
-        is_healthy = self.is_nginx_running() and self.are_ports_open()
-        last_state = self.stats.get("last_state")
+        try:
 
-        # First run: establish baseline
-        if last_state is None:
-            self.log(f"[SENTINEL] Establishing baseline status for {self.service_name}...")
-            self.stats["last_state"] = is_healthy
-            self.stats["last_status_change"] = time.time()
-            interruptible_sleep(self, self.interval)
-            return
+            self.maybe_roll_day("nginx")
+            is_healthy = self.is_nginx_running() and self.are_ports_open()
+            last_state = self.stats.get("last_state")
 
-        # If state changed (UP/DOWN)
-        if is_healthy != last_state:
-            self.update_status_metrics(is_healthy)
-            if is_healthy:
-                self.log(f"[SENTINEL] ✅ {self.service_name} has recovered.")
-                self.send_simple_alert(f"✅ {self.service_name.capitalize()} has recovered and is now online.")
-                self.send_data_report("RECOVERED", "INFO", "Service is back online and ports are open.")
+            # First run: establish baseline
+            if last_state is None:
+                self.log(f"[SENTINEL] Establishing baseline status for {self.service_name}...")
+                self.stats["last_state"] = is_healthy
+                self.stats["last_status_change"] = time.time()
+
             else:
-                self.log(f"[SENTINEL] ❌ {self.service_name} is NOT healthy.")
-                diagnostics = self.collect_nginx_diagnostics()
-                if self.should_alert("nginx-down"):
-                    self.send_simple_alert(f"❌ {self.service_name.capitalize()} is DOWN or not binding required ports.")
-                self.send_data_report(
-                    status="DOWN", severity="CRITICAL",
-                    details=f"Service {self.service_name} is not running or required ports are not open.",
-                    metrics=diagnostics
-                )
-                self.restart_nginx()
-            self.stats["last_state"] = is_healthy
-        else:
-            # State stable, accumulate uptime/downtime
-            self.update_status_metrics(is_healthy)
-            if hasattr(self, "debug") and getattr(self.debug, "is_enabled", lambda: False)():
-                self.log(f"[SENTINEL] {'✅' if is_healthy else '❌'} {self.service_name} status is stable.")
+
+                # If state changed (UP/DOWN)
+                if is_healthy != last_state:
+                    self.update_status_metrics(is_healthy)
+                    if is_healthy:
+                        self.log(f"[SENTINEL] ✅ {self.service_name} has recovered.")
+                        self.send_simple_alert(f"✅ {self.service_name.capitalize()} has recovered and is now online.")
+                        self.send_data_report("RECOVERED", "INFO", "Service is back online and ports are open.")
+                    else:
+                        self.log(f"[SENTINEL] ❌ {self.service_name} is NOT healthy.")
+                        diagnostics = self.collect_nginx_diagnostics()
+                        if self.should_alert("nginx-down"):
+                            self.send_simple_alert(f"❌ {self.service_name.capitalize()} is DOWN or not binding required ports.")
+                        self.send_data_report(
+                            status="DOWN", severity="CRITICAL",
+                            details=f"Service {self.service_name} is not running or required ports are not open.",
+                            metrics=diagnostics
+                        )
+                        self.restart_nginx()
+                    self.stats["last_state"] = is_healthy
+                else:
+                    # State stable, accumulate uptime/downtime
+                    self.update_status_metrics(is_healthy)
+                    if hasattr(self, "debug") and getattr(self.debug, "is_enabled", lambda: False)():
+                        self.log(f"[SENTINEL] {'✅' if is_healthy else '❌'} {self.service_name} status is stable.")
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
         interruptible_sleep(self, self.interval)
 

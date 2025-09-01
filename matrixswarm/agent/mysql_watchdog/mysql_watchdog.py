@@ -48,6 +48,8 @@ class Agent(BootAgent, AgentSummaryMixin):
             "last_state": None
         }
         self.last_alerts = {}
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval*2, emit_to_file_interval=10)
+
 
     def today(self):
         """
@@ -157,51 +159,56 @@ class Agent(BootAgent, AgentSummaryMixin):
             identity (IdentityObject, optional): Identity object for the agent. Defaults to None.
         """
         # Handle daily summary/report roll
-        self.maybe_roll_day("mysql")
+        try:
 
-        # Health check
-        is_healthy = self.is_mysql_running() and self.is_mysql_listening()
-        last_state = self.stats.get("last_state")
+            self._emit_beacon()
+            self.maybe_roll_day("mysql")
 
-        # First run: establish baseline
-        if last_state is None:
-            self.log(f"[WATCHDOG] Establishing baseline status for {self.service_name}...")
-            self.stats["last_state"] = is_healthy
-            self.stats["last_status_change"] = time.time()
-            interruptible_sleep(self, self.interval)
-            return
+            # Health check
+            is_healthy = self.is_mysql_running() and self.is_mysql_listening()
+            last_state = self.stats.get("last_state")
 
-        # If state changed
-        if is_healthy != last_state:
-            self.update_status_metrics(is_healthy)
-
-            if is_healthy:
-                # Service just recovered
-                self.log(f"[WATCHDOG] ✅ {self.service_name} has recovered.")
-                self.send_simple_alert(f"✅ {self.service_name.capitalize()} has recovered and is now online.")
-                self.send_data_report("RECOVERED", "INFO", "Service is back online and ports are open.")
+            # First run: establish baseline
+            if last_state is None:
+                self.log(f"[WATCHDOG] Establishing baseline status for {self.service_name}...")
+                self.stats["last_state"] = is_healthy
+                self.stats["last_status_change"] = time.time()
             else:
-                # Service just failed
-                self.log(f"[WATCHDOG] ❌ {self.service_name} is NOT healthy.")
-                diagnostics = self.collect_mysql_diagnostics()
-                if self.should_alert("mysql-down"):
-                    self.send_simple_alert(f"❌ {self.service_name.capitalize()} is DOWN. Attempting restart...")
-                self.send_data_report(
-                    status="DOWN", severity="CRITICAL",
-                    details=f"Service {self.service_name} is not running or ports are not open.",
-                    metrics=diagnostics
-                )
-                self.restart_mysql()
+                # If state changed
+                if is_healthy != last_state:
+                    self.update_status_metrics(is_healthy)
 
-            # Always update last_state after alert/report
-            self.stats["last_state"] = is_healthy
-        else:
-            # Stable, just accumulate
-            self.update_status_metrics(is_healthy)
-            if hasattr(self, "debug") and getattr(self.debug, "is_enabled", lambda: False)():
-                self.log(f"[WATCHDOG] {'✅' if is_healthy else '❌'} {self.service_name} status is stable.")
+                    if is_healthy:
+                        # Service just recovered
+                        self.log(f"[WATCHDOG] ✅ {self.service_name} has recovered.")
+                        self.send_simple_alert(f"✅ {self.service_name.capitalize()} has recovered and is now online.")
+                        self.send_data_report("RECOVERED", "INFO", "Service is back online and ports are open.")
+                    else:
+                        # Service just failed
+                        self.log(f"[WATCHDOG] ❌ {self.service_name} is NOT healthy.")
+                        diagnostics = self.collect_mysql_diagnostics()
+                        if self.should_alert("mysql-down"):
+                            self.send_simple_alert(f"❌ {self.service_name.capitalize()} is DOWN. Attempting restart...")
+                        self.send_data_report(
+                            status="DOWN", severity="CRITICAL",
+                            details=f"Service {self.service_name} is not running or ports are not open.",
+                            metrics=diagnostics
+                        )
+                        self.restart_mysql()
+
+                    # Always update last_state after alert/report
+                    self.stats["last_state"] = is_healthy
+                else:
+                    # Stable, just accumulate
+                    self.update_status_metrics(is_healthy)
+                    if hasattr(self, "debug") and getattr(self.debug, "is_enabled", lambda: False)():
+                        self.log(f"[WATCHDOG] {'✅' if is_healthy else '❌'} {self.service_name} status is stable.")
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
         interruptible_sleep(self, self.interval)
+
 
     def should_alert(self, key):
         """

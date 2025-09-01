@@ -11,6 +11,7 @@ class Agent(BootAgent):
     def __init__(self):
         super().__init__()
 
+        exit("NOT PRODUCTION READY")
 
         if shutdown_all:
             self.log("[REBOOT] Triggering swarm-wide kill via bootloader.")
@@ -42,10 +43,6 @@ class Agent(BootAgent):
 
         self.log("[REBOOT] Self-termination complete.")
         self.running = False
-
-    def worker(self, config:dict = None):
-        # Keep this light since pre handled everything
-        time.sleep(2)
 
     def wait_for_swarm_shutdown(max_wait=20):
         for _ in range(max_wait):

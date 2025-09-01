@@ -28,12 +28,19 @@ class Agent(BootAgent):
         self.broadcast_to = config.get("broadcast_to", [])
         self.name = "GoogleCalendarAgent"
         self.service = self.setup_calendar_api()
+        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval * 2, emit_to_file_interval=10)
 
     def worker_pre(self):
         self.log("[CALENDAR] Calendar scout initialized.")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
-        self.check_upcoming_events()
+        try:
+            self._emit_beacon()
+            self.check_upcoming_events()
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
         interruptible_sleep(self, self.interval)
 
     def worker_post(self):
@@ -76,8 +83,8 @@ class Agent(BootAgent):
                     outbox = os.path.join(self.path_resolution["comm_path"], target, "incoming")
                     os.makedirs(outbox, exist_ok=True)
                     fname = f"{int(time.time())}_calendar.msg"
-                    with open(os.path.join(outbox, fname), "w", encoding="utf-8") as f:
-                        json.dump(message, f, indent=2)
+                    #with open(os.path.join(outbox, fname), "w", encoding="utf-8") as f:
+                    #    json.dump(message, f, indent=2)
 
                 self.log(f"[CALENDAR] Event broadcasted: {summary}")
 
