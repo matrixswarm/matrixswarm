@@ -1,5 +1,3 @@
-# matrix_gui/core/event_bus.py
-
 class EventBus:
     _listeners = {}
 

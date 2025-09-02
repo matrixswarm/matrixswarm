@@ -275,6 +275,17 @@ class Agent(BootAgent):
                         "agent": hello.get("agent"),
                         "started": time.time()
                     }
+
+                    async def ping_keepalive(ws, sid):
+                        while sid in self._sessions:
+                            try:
+                                await ws.ping()
+                            except Exception:
+                                break
+                            await asyncio.sleep(10)
+
+                    self.loop.create_task(ping_keepalive(websocket, sid))
+
                     self.update_broadcast_flag(session_id=sid)
                     self.log(f"[WS][SESSION] Bound to session_id={sid}")
                 else:
@@ -318,13 +329,15 @@ class Agent(BootAgent):
             await websocket.close(reason="Internal WebSocket exception")
 
 
+
         finally:
 
             self._websocket_clients.discard(websocket)
             if hasattr(websocket, "session_id"):
                 sid = websocket.session_id
-                self._sessions.pop(sid, None)
-                self.update_broadcast_flag(session_id=sid, remove=True)
+                if sid in self._sessions:
+                    self._sessions.pop(sid, None)
+                    self.update_broadcast_flag(session_id=sid, remove=True)
             self.log(f"[WS][CLEANUP] Client removed. Active={len(self._websocket_clients)}")
 
     def update_broadcast_flag(self, session_id=None, remove=False):

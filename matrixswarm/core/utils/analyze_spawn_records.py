@@ -1,6 +1,6 @@
 import os
 
-def analyze_spawn_records(comm_root, agent_id, flip_threshold=3, flip_window=60, spawn_dir="spawn_dir"):
+def analyze_spawn_records(comm_root, agent_id, flip_threshold=3, flip_window=60, spawn_dir="spawn"):
     """
     Scans the spawn directory for an agent and analyzes spawn frequency.
 

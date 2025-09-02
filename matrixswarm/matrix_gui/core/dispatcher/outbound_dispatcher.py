@@ -3,7 +3,7 @@ from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
-
+from matrix_gui.config.boot.globals import get_sessions
 class OutboundDispatcher:
     """
     Dispatches outbound messages from the GUI to the Matrix swarm.
@@ -46,47 +46,59 @@ class OutboundDispatcher:
         sig = pkcs1_15.new(key).sign(h)
         return base64.b64encode(sig).decode()
 
-    def _handle_outbound(self, **kwargs):
+    def _resolve_agent_uid(self, channel, dep):
+        certs = dep.get("certs", {})
+        if channel in certs:
+            return channel
+
+        parts = channel.split("-")
+        # progressively strip suffixes until we find a match
+        while len(parts) > 1:
+            parts = parts[:-1]
+            candidate = "-".join(parts)
+            if candidate in certs:
+                return candidate
+        return None
+
+    def _resolve_channel(self, ctx, channel):
+        # exact match first
+        if channel in ctx.channels:
+            return channel
+        # try stripping session suffix
+        if "-" in channel:
+            base = channel.rsplit("-", 1)[0]
+            if base in ctx.channels:
+                return base
+        # try stripping twice (handles matrix-https-xxxxxx-https)
+        if channel.count("-") > 1:
+            parts = channel.split("-")
+            for i in range(len(parts) - 1, 0, -1):
+                candidate = "-".join(parts[:i])
+                if candidate in ctx.channels:
+                    return candidate
+        return None
+
+    def _handle_outbound(self, session_id, channel, payload):
         try:
-            session_id = kwargs.get("session_id")
-            channel = kwargs.get("channel")
-            payload = kwargs.get("payload")
-
-            if not session_id or not channel or not payload:
-                print(f"[DISPATCHER] ❌ outbound.message missing fields: {kwargs}")
-                return
-
-            ctx = self.sessions.get(session_id)
-            if not ctx:
-                print(f"[DISPATCHER] ❌ No session {session_id}")
-                return
-
-            # parse agent uid from channel name
-            agent_uid = channel.rsplit("-", 1)[0] if "-" in channel else None
+            ctx = get_sessions().get(session_id)
             dep = ctx.group.get("deployment", {})
+
+            agent_uid = self._resolve_agent_uid(channel, dep)
             signing_key = None
 
             if agent_uid:
-                try:
-                    priv_pem = (
-                        dep.get("certs", {})
-                        .get(agent_uid, {})
-                        .get("signing", {})
-                        .get("remote_privkey")
-                    )
-                    if priv_pem:
-                        signing_key = RSA.import_key(priv_pem.encode())
-                except Exception as e:
-                    print(f"[DISPATCHER] ❌ Failed to load signing key for {agent_uid}: {e}")
+                priv_pem = dep.get("certs", {}).get(agent_uid, {}).get("signing", {}).get("remote_privkey")
+                if priv_pem:
+                    signing_key = RSA.import_key(priv_pem.encode())
 
             if channel.endswith("https"):
-                # wrap payload
-
-                sig = self._sign_payload(payload, signing_key)
-                outer = {"sig": sig, "content": payload}
+                if signing_key:
+                    sig = self._sign_payload(payload, signing_key)
+                    outer = {"sig": sig, "content": payload}
+                else:
+                    print(f"[DISPATCHER] ⚠️ No signing key for {channel} (agent_uid={agent_uid}), sending unsigned")
+                    outer = {"content": payload}
                 self._send(session_id, channel, outer)
-            else:
-                self._send(session_id, channel, payload)
 
         except Exception as e:
             emit_gui_exception_log("OutboundDispatcher._handle_outbound", e)

@@ -1594,7 +1594,7 @@ class Agent(BootAgent):
                         self.path_resolution["comm_path"],
                         uid,
                         flip_threshold=flip_threshold,
-                        flip_window=flip_window
+                        flip_window=flip_window,
                     )
                     spawn_report = {
                         "count": spawn_data["count"],

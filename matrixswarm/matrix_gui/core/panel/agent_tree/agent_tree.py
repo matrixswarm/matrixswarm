@@ -1,6 +1,6 @@
 from matrix_gui.core.event_bus import EventBus
 from matrix_gui.config.boot.globals import get_sessions
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QTreeWidget, QTreeWidgetItem, QSplitter
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy, QTreeWidget, QTreeWidgetItem, QSplitter
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QMovie
 
@@ -39,7 +39,15 @@ class PhoenixAgentTree(QWidget):
         self.spinner_movie = QMovie("assets/spinner.gif")
         self.layout.addWidget(self.spinner_label)
 
+        self.splitter.setStretchFactor(0, 3)  # Tree
+        self.splitter.setStretchFactor(1, 2)  # Detail
 
+        self.tree.setMinimumWidth(350)
+        self.tree.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.detail_panel.setMinimumWidth(300)
+        self.detail_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+
+        self.splitter.setSizes([350, 350])
 
         self._expanded_nodes = set()
         self.tree.itemExpanded.connect(self._track_expanded)

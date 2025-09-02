@@ -31,9 +31,8 @@ class InboundDispatcher:
             for agent_uid, cert_block in certs.items():
                 signing = cert_block.get("signing", {})
                 if signing.get("serial") == serial:
-                    signer_pubkey_pem = pem_fix(
-                        signing.get("pubkey") or signing.get("remote_pubkey")
-                    )
+
+                    signer_pubkey_pem = pem_fix(signing.get("pubkey"))
                     break
 
             if not signer_pubkey_pem:
@@ -49,28 +48,29 @@ class InboundDispatcher:
             # Verify sig on the envelope
             verify_signed_payload(payload, payload["sig"], signer_pubkey)
 
+            # === 2. Transport / Decrypt Stage ===
+            transport_uid = channel  # e.g. "matrix-https" or "websocket-relay"
 
             agent_priv_pem = signing.get("remote_privkey")
 
             inner_content = payload.get("content", {})
 
             if (
-                    isinstance(inner_content, dict)
-                    and "encrypted_key" in inner_content
-                    and agent_priv_pem
+                isinstance(inner_content, dict)
+                and "encrypted_key" in inner_content
+                and agent_priv_pem
             ):
                 try:
-
                     directive = decrypt_with_ephemeral_aes(inner_content, agent_priv_pem)
+
                     verified_payload = {
-                        "handler": directive.get("handler"),  # ✅ handler comes from decrypted body
-                        "content": directive.get("content", directive),
+                        "handler": directive.get("handler",""),
+                        "content": directive.get("content",{}),
                         "ts": ts,
                     }
                 except Exception as e:
                     print(f"[INBOUND] ❌ Decrypt failed: {e}")
                     return
-
             else:
                 verified_payload = {
                     "handler": payload.get("handler"),
@@ -80,7 +80,6 @@ class InboundDispatcher:
 
             # === 3. Emit Verified Events ===
             handler = verified_payload.get("handler")
-
             if handler:
                 EventBus.emit(
                     f"inbound.verified.{handler}",

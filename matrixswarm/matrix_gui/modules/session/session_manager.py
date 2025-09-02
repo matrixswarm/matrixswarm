@@ -4,7 +4,6 @@ from matrix_gui.core.event_bus import EventBus
 from dataclasses import dataclass, field
 from queue import Queue
 
-
 @dataclass
 class SessionContext:
     id: str

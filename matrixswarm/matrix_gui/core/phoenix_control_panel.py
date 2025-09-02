@@ -1,6 +1,6 @@
 from typing import Optional
 
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox
+from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox, QSizePolicy
 from PyQt5 import QtCore
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QComboBox
@@ -74,45 +74,68 @@ class PhoenixControlPanel(QWidget):
 
         # --- Style ---
         self.setStyleSheet("""
-                   QWidget {
-                       background-color: #fafafa;
-                       color: #222;
-                       font-family: 'Segoe UI', Arial, sans-serif;
-                       font-size: 12px;
-                    }
-                    QTabWidget::pane {
-                       border: 1px solid #ccc;
-                       background: #fff;
-                    }
-                    QTabBar::tab {
-                       background: #f2f2f2;
-                       border: 1px solid #ccc;
-                       padding: 6px 12px;
-                       margin-right: 2px;
-                    }
-                    QTabBar::tab:selected {
-                       background: #ffffff;
-                       border-bottom: 2px solid #0078d7;  /* enterprise blue accent */
-                    }
-                    QPushButton {
-                       background-color: #f4f4f4;
-                       border: 1px solid #ccc;
-                       color: #222;
-                       padding: 4px 10px;
-                       border-radius: 4px;
-                    }
-                    QPushButton:hover {
-                       background-color: #e6e6e6;
-                    }
-                    QPushButton#connect {
-                       border: 1px solid #0078d7;
-                       color: #0078d7;
-                    }
-                    QPushButton#changeVault {
-                       border: 1px solid #a94442;
-                       color: #a94442;
-                    }
-               """)
+            QWidget {
+                background-color: #f5f6fa;
+                color: #222;
+                font-family: 'Segoe UI', Arial, sans-serif;
+                font-size: 13px;
+            }
+            QComboBox {
+                background: #fff;
+                border: 1px solid #bbb;
+                border-radius: 5px;
+                padding: 2px 8px;
+                min-width: 70px;
+            }
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #fafdff, stop:1 #e4e8ee);
+                color: #222;
+                border: 1.3px solid #d4d7dd;
+                border-radius: 7px;
+                padding: 5px 16px 5px 16px;
+                margin: 0 2px 0 2px;
+                font-weight: 500;
+                transition: background 0.2s;
+            }
+            QPushButton:pressed {
+                background: #e3e7ee;
+            }
+            QPushButton:focus {
+                border: 1.7px solid #0078d7;
+                background: #f0f6ff;
+            }
+            QPushButton#connect {
+                border: 1.7px solid #0078d7;
+                color: #0078d7;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #eaf4ff, stop:1 #e3ecfa);
+                font-weight: 600;
+            }
+            QPushButton#connect:hover {
+                background: #dbefff;
+            }
+            QPushButton#changeVault {
+                border: 1.4px solid #b53c33;
+                color: #b53c33;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #fff3f1, stop:1 #fbe6e4);
+            }
+            QPushButton#changeVault:hover {
+                background: #f5cfc7;
+            }
+            QLabel {
+                font-weight: 500;
+            }
+            QLabel[vault_status="unlocked"] {
+                color: #19b551;
+                font-weight: 700;
+            }
+            QLabel[vault_status="locked"] {
+                color: #a94442;
+                font-weight: 700;
+            }
+        """)
 
         # defer sessions/dispatcher until vault is unlocked (needs keys)
         #self.sessions: Optional[SessionManager] = None

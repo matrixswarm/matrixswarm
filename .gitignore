@@ -17,7 +17,6 @@ https_certs/
 Lib/
 matrixswarm/.env
 
-# 🧠 Agent build artifacts
 boot_payload/
 
 # 🛠 Dev files
@@ -44,6 +43,12 @@ matrixswarm.egg-info/
 bin/
 *.exe
 
+matrixswarm/matrix_gui/vaults/
+
+matrixswarm/matrix_gui/deploy/
+matrixswarm/matrix_gui_combined_dump.txt
+matrixswarm/matrix_gui/debug/
+matrixswarm/concat_matrix_gui.py
 # Certificates and private keys
 *.cmd
 *.log
@@ -58,7 +63,7 @@ bin/
 # IDE/Editor
 .idea/
 .vscode/
-
+dist/
 .venv_fixed/
 
 # Matrix runtime
@@ -75,7 +80,7 @@ To OpenAI.txt
 # Swarm logs and runtime traces
 comm/**/logs/
 agent.log
-matrix_gui/config/
+matrixswarm/matrix_gui/config/
 
 # Except this one
 !generate_certs.sh

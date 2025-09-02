@@ -3,6 +3,7 @@ from .connector.https.https import HTTPSConnector
 from .connector.wss.wss import WSSConnector
 from .entity.adapter.agent_connection_wrapper import AgentConnectionWrapper
 from matrix_gui.config.boot.globals import get_sessions
+import threading
 
 import uuid
 import logging
@@ -69,8 +70,11 @@ def _connect_single(deployment, dep_id):
         proto, host, port = adapter.proto, adapter.host, adapter.port
         connector_fn = CONNECTOR_MAP.get(proto)
         if connector_fn:
-            connector_fn(host, port, agent, deployment, session_id)
-
+            threading.Thread(
+                target=connector_fn,
+                args=(host, port, agent, deployment, session_id),
+                daemon=True
+            ).start()
 def initialize():
 
     EventBus.on("deployment.connect.requested", on_connect)

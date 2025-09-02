@@ -35,7 +35,7 @@ class WSSConnector:
                 ws = WebSocket()
                 ws.settimeout(None)
                 ws.sock = tls_sock
-
+                #ws.settimeout(2.0)
                 hello = {
                     "type": "hello",
                     "session_id": session_id,

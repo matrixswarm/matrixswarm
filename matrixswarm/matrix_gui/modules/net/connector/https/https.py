@@ -53,7 +53,7 @@ class HTTPSConnector:
             print(f"[HTTPSConnector][{uid}] ✅ SPKI verified: {actual_pin}")
 
             # 4. Bind verified TLS socket to HTTPSConnection
-            https_conn = http.client.HTTPSConnection(host=host, port=port)
+            https_conn = http.client.HTTPSConnection(host=host, port=port, context=ctx_ssl)
             https_conn.sock = tls_sock
 
             uid = agent.get("universal_id")

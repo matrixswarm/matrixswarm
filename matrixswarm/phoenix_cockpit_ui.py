@@ -66,6 +66,7 @@ class PhoenixCockpit(QMainWindow):
         self.tab_stack._tab_widgets[self.home_idx] = self.static_panel
         self.tab_stack.tab_widget.setTabEnabled(self.home_idx, False)
 
+
         # === Legacy Controls (optional override) ===
         self.unlock_button = QPushButton("🔐 UNLOCK")
         self.unlock_button.setFixedSize(160, 60)
@@ -95,7 +96,7 @@ class PhoenixCockpit(QMainWindow):
 
         # Optional: decorate with glow
         shadow = QGraphicsDropShadowEffect(self.unlock_button)
-        shadow.setColor(QColor(0, 255, 0))
+        shadow.setColor(QColor( 0, 0, 255))
         shadow.setBlurRadius(30)
         shadow.setOffset(0, 0)
         self.unlock_button.setGraphicsEffect(shadow)
@@ -112,7 +113,6 @@ class PhoenixCockpit(QMainWindow):
         self.vault_path = None
         self.sessions = None
         self.dispatcher = None
-
 
 
         EventBus.on("vault.unlocked", self._on_vault_unlocked_ui_flip)

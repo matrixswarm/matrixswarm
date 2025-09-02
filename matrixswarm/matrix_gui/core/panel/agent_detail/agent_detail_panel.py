@@ -88,6 +88,8 @@ class AgentDetailPanel(QWidget):
         self.detail_splitter.setStretchFactor(1, 3)  # Threads panel priority
         self.detail_splitter.setStretchFactor(2, 2)  # Config panel secondary priority
 
+        self.layout.addStretch()
+
         # Initial splitter size distribution
         self.detail_splitter.setSizes([100, 300, 200])
 

@@ -4,7 +4,7 @@ setup(
     name='matrixswarm',
     version='1.0.19',
     description='Open-source automation and monitoring platform',
-    author='MatrixSwarm Core Team (Daniel F. MacDonald, ChatGPT) AKA The Generals, Gemini Docstring Engineer',
+    author='MatrixSwarm Core Team (Daniel F. MacDonald, ChatGPT) AKA The Generals',
     author_email='swarm@matrixswarm.com',
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown", 
@@ -53,6 +53,7 @@ setup(
     "watchdog",
     "openai",
     "bleach",
+    "rsa",
     ],
     entry_points={
         'console_scripts': [
@@ -61,6 +62,7 @@ setup(
             'matrixswarm-list=matrixswarm.site_list:main',
             'matrixswarm-encrypt-directive=matrixswarm.encrypt_directive:main',
             'matrixswarm-gencerts=matrixswarm.tools.generate_certs:main',
+            'matrixswarm-matrix_gui=phoenix_cockpit_ui.launcher:main',
         ],
     },
     python_requires='>=3.8',

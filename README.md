@@ -10,6 +10,37 @@
         Reflex. Resurrection. Real-time RPC.
 </pre>
 
+## Hive Status — Phoenix Ops
+
+[![Hive](https://img.shields.io/badge/Hive-Active-2ea44f?logo=apachespark&logoColor=white)]()
+[![Phoenix Cockpit](https://img.shields.io/badge/Phoenix%20Cockpit-Online-1f6feb?logo=qt)]()
+[![Sessions](https://img.shields.io/badge/Multi--session-Ready-0ea5e9)]()
+[![Verification](https://img.shields.io/badge/Inbound%20Verification-Live-10b981)]()
+[![Transport](https://img.shields.io/badge/HTTPS%20Signing+SPKI-Pinned-8b5cf6)]()
+[![Telemetry](https://img.shields.io/badge/Heartbeat+Spawn-Telemetry-ef4444)]()
+
+> **Last Active:** Sep 2025 — Phoenix cockpit stable with multi-session tabs; inbound verification emitting on UI thread; HTTPS signing restored with SPKI pinning; heartbeat + spawn (“flip-tripping”) telemetry surfaced in UI.
+
+### What’s hot right now
+- **UI stability:** fixed second-connection freeze; tab creation now reliably binds to the correct `session_id`.
+- **Layout:** left panel (Agent Tree + Detail) no longer squished; right-side **Agent Intel Logs** integrated in splitter with sane stretch factors.
+- **Style:** log view themed to match Phoenix (readable, focus states, subtle borders).
+- **Health:** `check_for_thread_poke()` beacons in critical loops; `heartbeat_checker` reports **alive / sleeping / failed** with deltas.
+- **Spawn intelligence:** `.spawn` analysis flags **crash loops** (flip-tripping) right in the tree (⚡N and ☢ markers).
+- **Security:** HTTPS request **signing** from vault keys; **SPKI** pin check keeps the trust surface tight.  
+- **WS relay:** per-client `session_id` binding + broadcast flags; explicit connect/disconnect logging; concurrent clients supported.
+
+### Status matrix
+| Subsystem | State | Notes |
+|---|---|---|
+| Phoenix Cockpit | ✅ Online | Multi-session tabs, splitter layout, styled log panel |
+| Inbound Dispatcher | ✅ Stable | UI-thread emits; crypto off UI thread |
+| HTTPS Connector | ✅ Signed & Pinned | Vault-backed PKCS#1 + SPKI |
+| WebSocket Relay | ✅ Multi-client | Session-bound broadcast flags |
+| Heartbeats | ✅ Live | Per-thread beacons + timeout logic |
+| Spawn Monitoring | ✅ Live | Count + flip-tripping detection |
+
+
 ## MatrixSwarm is the first autonomous, file-driven, swarm-based AI operating system.
 **No containers. No servers. No daemons. Just intelligent agents, spawned and coordinated entirely through folders, directives, and atomic file signals. Agents don’t run under you — they live beside you.
 ---
