@@ -28,16 +28,19 @@ class Agent(BootAgent):
         super().__init__()
         self.AGENT_VERSION = "2.0.0"
 
-        config = self.tree_node.get("config", {})
-        self.allowlist_ips = config.get("allowlist_ips", [])
-        self.port = config.get("port", 8765)
-        self._websocket_clients = set()
-        self._sessions = {}
-        self.loop = None
-        self.websocket_ready = False
-        self.interval = 10
-        self.first_run = True
+
         try:
+
+            config = self.tree_node.get("config", {})
+            self.allowlist_ips = config.get("allowlist_ips", [])
+            self.port = config.get("port", 8765)
+            self._websocket_clients = set()
+            self._sessions = {}
+            self.loop = None
+            self.websocket_ready = False
+            self.interval = 10
+            self.first_run = True
+
             security = self.tree_node.get("config", {}).get("security", {})  # dict now
             conn = security.get("connection", {}) or {}
 

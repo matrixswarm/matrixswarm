@@ -141,12 +141,18 @@ class Agent(BootAgent):
         @self.app.route("/matrix", methods=["POST"])
         def receive_command():
             try:
+
                 ip = request.remote_addr or "unknown"
 
                 # 0) IP allowlist gate
-                if self.allowlist_ips and ip not in self.allowlist_ips:
-                    self.log(f"[MATRIX-HTTPS][BLOCKED] IP not allowed: {ip}")
-                    return jsonify({"status": "error", "message": "Access denied"}), 403
+                if self.allowlist_ips:
+                    if ip not in self.allowlist_ips:
+                        self.log(f"[MATRIX-HTTPS][BLOCKED] IP {ip} not in allowlist")
+                        return jsonify({"status": "error", "message": "Access denied"}), 403
+                    else:
+                        self.log(f"[MATRIX-HTTPS][SECURITY] IP {ip} explicitly allowed by allowlist")
+                else:
+                    self.log("[MATRIX-HTTPS][SECURITY] No IP allowlist restriction in place")
 
                 # 1) TLS client-cert SPKI pin (bind transport to expected peer)
                 cert_bin = request.environ.get("peercert", None)
@@ -210,10 +216,14 @@ class Agent(BootAgent):
         def deny_unsupported_methods():
 
             ip = request.remote_addr or "unknown"
-
-            if self.allowlist_ips and ip not in self.allowlist_ips:
-                self.log(f"[MATRIX-HTTPS][BLOCKED] Request from disallowed IP: {ip}")
-                return jsonify({"status": "error", "message": "Access denied"}), 403
+            if self.allowlist_ips:
+                if ip not in self.allowlist_ips:
+                    self.log(f"[MATRIX-HTTPS][BLOCKED] Request from disallowed IP: {ip}")
+                    return jsonify({"status": "error", "message": "Access denied"}), 403
+                else:
+                    self.log(f"[MATRIX-HTTPS][SECURITY] IP {ip} explicitly allowed by allowlist")
+            else:
+                self.log("[MATRIX-HTTPS][SECURITY] No IP allowlist restriction in place")
 
             self.log(f"[MATRIX-HTTPS][TRAP] Got {request.method} from {request.remote_addr}")
             return self.make_spoof_response()
@@ -227,7 +237,7 @@ class Agent(BootAgent):
             self.log(f"[MATRIX-HTTPS][SCAN-TRAP] Bait endpoint hit by {request.remote_addr}")
             return self.make_spoof_response()
 
-
+    #Change this to what you want default apache or nginx page
     def make_spoof_response(self):
 
         msg = """<!DOCTYPE html>

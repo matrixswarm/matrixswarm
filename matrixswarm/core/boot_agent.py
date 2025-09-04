@@ -37,7 +37,7 @@ from matrixswarm.core.tree_parser import TreeParser
 from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
-from matrixswarm.core.utils.process_utils import find_jobs_by_prefix, reeeeeeebaaaangaaaaa
+from matrixswarm.core.utils.process_utils import find_jobs_by_prefix, reeeeeeebeeeengaaaaa
 
 from Crypto.PublicKey import RSA as PyCryptoRSA
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
@@ -413,16 +413,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     self.running = False
                     print(f"[ENFORCE] {self.command_line_args['universal_id']} hit punji — exiting...")
                     self.log(f"[ENFORCE] {self.command_line_args['universal_id']} hit punji — exiting...")
-                    pass
-
-
-
 
             # within 3secs if another instance detected, and this is the younger of the die
 
             interruptible_sleep(self, 3)
-
-
 
     def monitor_threads(self):
         while self.running:
@@ -1324,7 +1318,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 # 3. we've been looked up for a while now, it's time we blow this coop, 40secs(spawn_manager sleep interval *2) is long enough
                 else:
 
-                    self.log(reeeeeeebaaaangaaaaa(matches))
+                    self.log(reeeeeeebeeeengaaaaa(matches))
 
         except Exception as e:
             self.log(error=e, block="main_try")

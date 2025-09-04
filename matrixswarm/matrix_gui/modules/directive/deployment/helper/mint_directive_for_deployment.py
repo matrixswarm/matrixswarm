@@ -15,16 +15,17 @@ def mint_directive_for_deployment(template_directive: dict, wrapped_agents: list
         obj[key] = value
 
     def merge_config(dest: dict, src: dict):
-        """
-        Merge src dict into dest dict. Overwrites scalars,
-        merges nested dicts, and preserves other fields.
-        """
         for k, v in src.items():
             if v is None:
                 continue
             if isinstance(v, dict):
                 dest.setdefault(k, {})
                 merge_config(dest[k], v)
+            elif isinstance(v, list):
+                # Don’t overwrite non-empty list with an empty one
+                if not v and k in dest:
+                    continue
+                dest[k] = v[:]
             else:
                 dest[k] = deepcopy(v)
 
@@ -39,13 +40,21 @@ def mint_directive_for_deployment(template_directive: dict, wrapped_agents: list
         if not wrapper:
             return
 
-        config_overrides = wrapper.get_config_overrides()
+        node.setdefault("config", {})
+        config_overrides = wrapper.get_config_overrides() or {}
 
-        port = config_overrides.get("port")
-        if port is None:
-            print(f"[DEPLOYMENT MINT] Agent '{uid}' missing explicit port; port will be left unset.")
-        else:
-            print(f"[DEPLOYMENT MINT] Injecting port={port} for agent '{uid}'")
+        allowlist = config_overrides.get("allowlist_ips")
+        if allowlist is not None:
+            if allowlist:
+                print(f"[DEPLOYMENT MINT] Injecting allowlist_ips={allowlist} for agent '{uid}'")
+            else:
+                print(f"[DEPLOYMENT MINT] Agent '{uid}' has empty allowlist_ips (no restrictions).")
+
+        merge_config(node["config"], config_overrides)
+
+        if "allowlist_ips" in config_overrides:
+            print(f"[DEPLOYMENT MINT] Injecting allowlist_ips={config_overrides['allowlist_ips']} for agent '{uid}'")
+
 
         # ensure config block exists in node
         node.setdefault("config", {})

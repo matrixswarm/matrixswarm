@@ -1,12 +1,12 @@
 import os
 import sys
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel, QApplication,
-    QGraphicsDropShadowEffect, QHBoxLayout, QTextEdit, QLineEdit, QMessageBox, QSizePolicy
+    QMainWindow, QVBoxLayout, QApplication,
+    QGraphicsDropShadowEffect, QMessageBox
 )
 #initialize bus
 import matrix_gui.config.boot.boot
-from PyQt5.QtCore import Qt, QPropertyAnimation, QTimer
+from PyQt5.QtCore import Qt, QPropertyAnimation
 from PyQt5.QtGui import QColor
 from PyQt5.QtWidgets import QStatusBar
 

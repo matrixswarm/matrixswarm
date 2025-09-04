@@ -1,4 +1,5 @@
 import uuid
+import ipaddress
 from PyQt5 import QtWidgets
 
 def edit_connection_dialog(parent, default_proto="https", data=None, conn_id=None):
@@ -31,7 +32,13 @@ def edit_connection_dialog(parent, default_proto="https", data=None, conn_id=Non
 
     def add_field(name, default=""):
         box = QtWidgets.QLineEdit()
-        box.setText(str(data.get(name, default)) if data else str(default))
+        if data:
+            val = data.get(name, default)
+            if name == "allowlist_ips" and isinstance(val, list):
+                val = ", ".join(val)
+            box.setText(str(val))
+        else:
+            box.setText(str(default))
         if name == "serial":
             box.setReadOnly(True)
         field_layout.addRow(name.replace("_", " ").title(), box)
@@ -46,6 +53,7 @@ def edit_connection_dialog(parent, default_proto="https", data=None, conn_id=Non
             add_field("port")
             add_field("purpose")
             add_field("note")
+            add_field("allowlist_ips")
         elif p == "discord":
             add_field("channel_id")
             add_field("bot_token")
@@ -100,6 +108,23 @@ def edit_connection_dialog(parent, default_proto="https", data=None, conn_id=Non
             if val:
                 if k in ("port", "channel_id", "chat_id"):
                     result[k] = int(val)
+                elif k == "allowlist_ips":
+                    ips = [x.strip() for x in val.split(",") if x.strip()]
+                    bad = []
+                    good = []
+                    for ip in ips:
+                        try:
+                            ipaddress.ip_address(ip)
+                            good.append(ip)
+                        except ValueError:
+                            bad.append(ip)
+                    if bad:
+                        QtWidgets.QMessageBox.warning(
+                            dlg, "Invalid IPs",
+                            f"The following entries are not valid IP addresses:\n{', '.join(bad)}"
+                        )
+                        return None, None
+                    result[k] = good
                 else:
                     result[k] = val
 

@@ -37,9 +37,15 @@ class AgentDirectiveWrapper:
     def get_config_overrides(self) -> dict:
         connection = self.agent.get_item("connection") or {}
         port = connection.get("port")
-        return {
-            "port": port,
-        }
+        allowlist_ips = connection.get("allowlist_ips") or []
+
+        overrides = {}
+        if port is not None:
+            overrides["port"] = port
+        if allowlist_ips:
+            # only inject if non-empty list
+            overrides["allowlist_ips"] = allowlist_ips
+        return overrides
 
     def get_connection_snapshot(self) -> dict:
         return self.agent.get_item("connection") or {}

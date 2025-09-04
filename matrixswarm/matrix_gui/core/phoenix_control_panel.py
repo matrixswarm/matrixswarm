@@ -71,7 +71,7 @@ class PhoenixControlPanel(QWidget):
 
         # ---- bus ----
         EventBus.on("vault.unlocked", self.on_vault_unlocked)
-
+        EventBus.on("vault.update", self.on_vault_update)
         # --- Style ---
         self.setStyleSheet("""
             QWidget {
@@ -154,6 +154,12 @@ class PhoenixControlPanel(QWidget):
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.launch", e)
 
+    def on_vault_update(self, **kwargs):
+        try:
+            self.vault_data = kwargs.get("data", self.vault_data)
+            self.refresh_deployments()
+        except Exception as e:
+            emit_gui_exception_log("PhoenixControlPanel.on_vault_update", e)
 
     def launch_deployment_dialog(self):
         dep_id = self.deployment_selector.currentData()

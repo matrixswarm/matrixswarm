@@ -16,4 +16,11 @@ CERT_INJECTION_MAP = {
         },
         "proto_required": ["https", "wss"]
     },
+    "connection": {
+        "target": ["config"],
+        "fields": {
+            "": ["port", "allowlist_ips"]
+        },
+        "proto_required": ["https", "wss"]
+    },
 }
