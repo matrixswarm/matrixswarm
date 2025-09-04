@@ -11,7 +11,7 @@ import inspect
 import copy
 import queue
 from enum import Enum
-
+from pathlib import Path
 from matrixswarm.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 from matrixswarm.core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 from matrixswarm.core.class_lib.time_utils.heartbeat_checker import check_heartbeats
@@ -36,7 +36,9 @@ from matrixswarm.core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
 from matrixswarm.core.tree_parser import TreeParser
 from matrixswarm.core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
-from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.signing import sign_packet
+
+from matrixswarm.core.utils.process_utils import find_jobs_by_prefix, reeeeeeebaaaangaaaaa
+
 from Crypto.PublicKey import RSA as PyCryptoRSA
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
@@ -361,7 +363,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 #"sig": sign_packet(
             }
 
-            target = self.command_line_args.get("spawner", "matrix")
+            target = self.command_line_args.get("matrix")
 
             pk1 = self.get_delivery_packet("standard.command.packet")
             pk1.set_data(payload)
@@ -370,8 +372,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         except Exception as e:
             self.log("[TREE-REQUEST][ERROR]", error=e)
-
-
 
     def enforce_singleton(self):
 
@@ -405,10 +405,24 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             if count > 0:
                 self.running = False
                 print(f"[INFO]matrixswarm.core.agent.py: enforce_singleton: {self.command_line_args['universal_id']} die cookie ingested, going down easy...")
+                self.log(f"[INFO]matrixswarm.core.agent.py: enforce_singleton: {self.command_line_args['universal_id']} die cookie ingested, going down easy...")
 
-            # within 20secs if another instance detected, and this is the younger of the die
+            if self.running:
+                count, file_list = FileFinderGlob.find_files_with_glob(path, pattern="punji")
+                if count > 0:
+                    self.running = False
+                    print(f"[ENFORCE] {self.command_line_args['universal_id']} hit punji — exiting...")
+                    self.log(f"[ENFORCE] {self.command_line_args['universal_id']} hit punji — exiting...")
+                    pass
 
-            interruptible_sleep(self, 7)
+
+
+
+            # within 3secs if another instance detected, and this is the younger of the die
+
+            interruptible_sleep(self, 3)
+
+
 
     def monitor_threads(self):
         while self.running:
@@ -1141,6 +1155,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 self.subordinates[role] = uid
         self.log(f"[INTEL] Subordinate registry: {self.subordinates}")
 
+
+
     def spawn_manager(self):
 
         time_delta_timeout = 60
@@ -1157,8 +1173,13 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             "name": "agent_tree.json"
         }
 
+        emit_beacon = self.check_for_thread_poke("spawn_manager", timeout=60)
+
         while self.running:
             try:
+
+                emit_beacon()
+
                 if self.debug.is_enabled():
                     print(f"[SPAWN] Checking for delegated children of {self.command_line_args['universal_id']}")
 
@@ -1207,56 +1228,109 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         self.log(f"[SPAWN-BLOCKED] {node.get('universal_id')} has die file.")
                         continue
 
-                    # Skip if recent heartbeat is alive
-                    statuses = check_heartbeats(self.path_resolution['comm_path'], node.get("universal_id"))
-                    if statuses is None:
-                        # at least one thread failed, spawn
-                        self.log(f"[HEARTBEAT] {node.get('universal_id')} failed heartbeat check")
-                    else:
-                        # all threads are either alive or sleeping continue else respawn
-                        if all(s["status"] in ("alive", "sleeping") for s in statuses.values()):
-                            continue  # safe to skip further handling
+                    #Go time
+                    if self.clear_to_spawn(self.command_line_args.get("universe"), self.command_line_args["universal_id"], node.get("universal_id"), node.get("name")):
 
-                    #check to see if this agent is a cronjob
-                    #This block first checks the node for a tag 'is_cron_job'
-                    #if it contains that tag, it checks to see if a mission.complete file is in the hello.moto dir
-                    #if the file doesn't exist it exits the block and spawns the agent
-                    #if the file does exist it gets the interval from the node in secs or defaults 3600(6 min), and then
-                    #checks the mtime of the file and calculates if the cron_interval_sec has elapsed since the files creation
-                    #if it has the time has elapsed it removes the file and spawns the agent
-                    #if not, it goes directly to jail; no pass go.
-                    #once the agent carries out it's mission it drops the mission.complete file and the process goes continues forever, and ever, and ever.
-                    if node.get("is_cron_job", False):
-                        mission_complete_file = os.path.join(self.path_resolution['comm_path_resolved'],'hello.moto', 'mission.complete')
-                        if os.path.exists(mission_complete_file):
-                            last_run_time = os.path.getmtime(mission_complete_file)
-                            interval = node.get("cron_interval_sec", 3600)
-                            if (time.time() - last_run_time) >= interval:
-                                self.log(f"[CRON] Interval met for {node.get('universal_id')}. Removing die cookie to trigger next run.")
-                                os.remove(mission_complete_file)
-                            else:
-                                continue
+                        #check to see if this agent is a cronjob
+                        #This block first checks the node for a tag 'is_cron_job'
+                        #if it contains that tag, it checks to see if a mission.complete file is in the hello.moto dir
+                        #if the file doesn't exist it exits the block and spawns the agent
+                        #if the file does exist it gets the interval from the node in secs or defaults 3600(6 min), and then
+                        #checks the mtime of the file and calculates if the cron_interval_sec has elapsed since the files creation
+                        #if it has the time has elapsed it removes the file and spawns the agent
+                        #if not, it goes directly to jail; no pass go.
+                        #once the agent carries out it's mission it drops the mission.complete file and the process goes continues forever, and ever, and ever.
+                        is_cron_job_and_time_to_awake=False
+                        if node.get("is_cron_job", False):
+                            mission_complete_file= os.path.join(self.path_resolution['comm_path'], node.get("universal_id"), 'hello.moto', 'mission.complete')
+                            if os.path.exists(mission_complete_file):
+                                last_run_time = os.path.getmtime(mission_complete_file)
+                                interval = node.get("cron_interval_sec", 3600)
+                                if (time.time() - last_run_time) >= interval:
+                                    self.log(f"[CRON] Interval met for {node.get('universal_id')}. Removing die cookie to trigger next run.")
+                                    os.remove(mission_complete_file)
+                                else:
+                                    is_cron_job_and_time_to_awake=True
 
-
-
-                    #TODO: verify if the agent is in memory first, before spawning, if it is, launch a reaper
-                    #      wait for reaper to give all clear, removing die cookie to signal
-                    #  Deploy a mission-reaper(hit job), have it ensure the agent is gone, then have the reaper
-                    # remove the "die" cookie.
-                    # Also, have a 3 strikes and you're out, don't resurrect. Send out alert, that the agent is down permanently.
-
-                        # Call new tactical spawn function
-                    self.spawn_agent_direct(
-                        universal_id=node.get("universal_id"),
-                        agent_name=node.get("name"),
-                        tree_node=node,
-                        keychain=self.ring_keychain(node)
-                    )
+                        #if not a cronjob, enter; if is a cronjob and it's time to awake from slumber then
+                        if not is_cron_job_and_time_to_awake:
+                            # Call spawn function
+                            self.spawn_agent_direct(
+                                universe=self.command_line_args.get("universe"),
+                                spawner=self.command_line_args["universal_id"],
+                                universal_id=node.get("universal_id"),
+                                agent_name=node.get("name"),
+                                tree_node=node,
+                                keychain=self.ring_keychain(node)
+                            )
 
             except Exception as e:
                 self.log(error=e, block="main_try")
 
-            interruptible_sleep(self, 10)
+            interruptible_sleep(self, 20)
+
+    def clear_to_spawn(self, universe, spawner, universal_id, agent_name)->bool:
+
+        # THIS WHOLE BLOCK IS WHAT CONTROLS REBOOTING BASED ON ANY POKE.* FILE DETECTED AS STALE
+        clear_to_spawn = False
+
+        try:
+
+            # Skip if recent heartbeat is alive, all pokes are alive or sleeping
+            statuses = check_heartbeats(self.path_resolution['comm_path'], universal_id)
+            safe_to_continue=True
+            if statuses is None:
+                # at least one thread failed, spawn
+                self.log(f"[HEARTBEAT] {universal_id} failed heartbeat check")
+
+            else:
+                # all threads are either alive or sleeping continue else respawn
+                if all(s["status"] in ("alive", "sleeping") for s in statuses.values()):
+                    safe_to_continue = False  # safe to skip further handling
+
+            if safe_to_continue:
+                # defense, encase stray poke got inside hello.moto directory, which would initiate a phantom status, leading to stale poke file, leading to reboot
+                ss = os.path.join(self.path_resolution['comm_path'], universal_id, 'hello.moto')
+                for f in Path(ss).glob("poke.*"):
+                    try:
+                        f.unlink()
+                    except Exception as e:
+                        pass
+
+                # 1. Check the process list for agent with cmd line --job {universe=universe, defaults to ai}:{spawner=parent agent, obviously this agent}:{universal_id=agent getting spawned}:{agent_name=acutal agent being spawned comm/<agent><agent>}
+                #   for active propess in memroy
+                punji_file = os.path.join(self.path_resolution['comm_path'], universal_id, 'incoming', 'punji')
+                matches = find_jobs_by_prefix(universe, spawner, universal_id, agent_name, match_mode="exact")
+                # job_prefix = f"{universe}:{spawner}:{universal_id}:{agent_name}"
+
+                # no matches - assumed no agent in memory
+                if not matches:
+                    clear_to_spawn = True
+                    try:
+                        # make sure the punji file is deleted, because if not, and it exists next iteration then it will start a take-down again
+                        os.remove(punji_file)
+                    except Exception as e:
+                        if self.debug.is_enabled():
+                            self.log(error=e, block="main_try")
+
+                # 2. If the punji file exists that means the singleton_enforcement didn't shutdown agent, it had 20secs(spawn_manager sleep interval) to do so(bottom of this function interruptible_sleep(self, 20))
+                elif not os.path.exists(punji_file):
+                    try:
+                        Path(punji_file).write_text("ouch")
+                        self.log(f"[BOOT][PUNJI] Dropped punji for {universal_id}")
+                    except Exception as e:
+                        self.log(f"[BOOT][PUNJI][WARN] Could not drop punji file for {universal_id}", error=e)
+
+                # 3. we've been looked up for a while now, it's time we blow this coop, 40secs(spawn_manager sleep interval *2) is long enough
+                else:
+
+                    self.log(reeeeeeebaaaangaaaaa(matches))
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
+        return clear_to_spawn
+
 
     def ring_keychain(self, node:dict)->dict:
 
@@ -1280,6 +1354,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             cfg = node.get("config", {})
             #these items will be returned to Matrix encase of her early demise
+            #this block is basically only given to a sentinel, that's the only one that would need this
             if bool(cfg.get("matrix_secure_verified")) and len(keychain["security_box"])==0:
                 self.log("[TRUST] matrix_secure_verified: TRUE → injecting real Matrix private key.")
                 keychain["security_box"]["encryption_enabled"] = int(self.encryption_enabled)
@@ -1290,6 +1365,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 #keychain["security_box"]["private_key"] = self.private_key   in tree_node
                 keychain["security_box"]["swarm_key"] = self.swarm_key
                 keychain["security_box"]["node"] = self.tree_node.copy()
+                keychain["security_box"]["spawner"] = self.command_line_args["spawner"]
 
             return keychain
 
@@ -1298,7 +1374,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         return {}
 
-    def spawn_agent_direct(self, universal_id, agent_name, tree_node, keychain=None):
+    def spawn_agent_direct(self, universe, spawner, universal_id, agent_name, tree_node, keychain=None):
 
         try:
 
@@ -1306,7 +1382,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 self.log(f"[SPAWN-ERROR] Attempted to spawn deleted agent {universal_id}. Blocking.")
                 return
 
-            spawner = CoreSpawner(
+            cp = CoreSpawner(
                 site_root_path=self.path_resolution["site_root_path"],
                 python_site=self.path_resolution["python_site"],
                 detected_python=self.path_resolution["python_exec"],
@@ -1314,14 +1390,14 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             )
 
             if keychain and len(keychain) > 0:
-                spawner.set_keys(keychain)
+                cp.set_keys(keychain)
 
             comm_file_spec = []
-            spawner.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))
-            new_uuid, pod_path = spawner.create_runtime(universal_id)
+            cp.ensure_comm_channel(universal_id, comm_file_spec, tree_node.get("filesystem", {}))
+            new_uuid, pod_path = cp.create_runtime(universal_id)
 
-            spawner.set_verbose(self.verbose)
-            spawner.set_debug(self.debug.is_enabled())
+            cp.set_verbose(self.verbose)
+            cp.set_debug(self.debug.is_enabled())
 
             try:
                 #SAVE IDENTITY FILE to comm/{universal_id}/codex
@@ -1336,15 +1412,13 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             except Exception as e:
                 self.log(error=e, block='write_signed_public_key')
 
-
-
-            result = spawner.spawn_agent(
-                spawn_uuid=new_uuid,
-                agent_name=agent_name,
+            result = cp.spawn_agent(
+                universe=universe,
+                spawner=spawner,
                 universal_id=universal_id,
-                spawner=self.command_line_args["universal_id"],
+                agent_name=agent_name,
+                spawn_uuid=new_uuid,
                 tree_node=tree_node,
-                universe_id=self.command_line_args.get("universe")
             )
 
             if result is None:

@@ -70,11 +70,13 @@ def _connect_single(deployment, dep_id):
         proto, host, port = adapter.proto, adapter.host, adapter.port
         connector_fn = CONNECTOR_MAP.get(proto)
         if connector_fn:
+
             threading.Thread(
                 target=connector_fn,
                 args=(host, port, agent, deployment, session_id),
                 daemon=True
             ).start()
+
 def initialize():
 
     EventBus.on("deployment.connect.requested", on_connect)

@@ -6,9 +6,8 @@ from matrix_gui.modules.net.entity.adapter.agent_cert_wrapper import AgentCertWr
 from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.utils.cert_loader import load_cert_chain_from_memory
 from matrix_gui.core.event_bus import EventBus
-
 class HTTPSConnector:
-    def __call__(self, host, port, agent, deployment, session_id):
+    def __call__(self, host, port, agent, deployment, session_id, timeout=10):
 
         print(f"[DEBUG] {agent.get('universal_id')} attaching to session {session_id}")
 
@@ -39,7 +38,8 @@ class HTTPSConnector:
                 ctx_ssl.load_verify_locations(cadata=ca_pem)
 
             # 2. Connect raw socket + wrap in TLS
-            raw_sock = socket.create_connection((host, port))
+            raw_sock = socket.create_connection((host, port), timeout=timeout)
+
             tls_sock = ctx_ssl.wrap_socket(raw_sock, server_hostname=host)
 
             # 3. SPKI pin verification

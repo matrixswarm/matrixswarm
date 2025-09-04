@@ -4,6 +4,8 @@ from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.config.boot.globals import get_sessions
+from matrix_gui.core.utils import crypto_utils
+from Crypto.PublicKey import RSA
 class OutboundDispatcher:
     """
     Dispatches outbound messages from the GUI to the Matrix swarm.
@@ -25,26 +27,6 @@ class OutboundDispatcher:
         self.sessions = sessions
         self.vault_data = vault_data
         self.bus.on("outbound.message", self._handle_outbound)
-
-
-    def _sign_payload(self, packet: dict, key):
-        """
-        Generates a digital signature for a packet using a private key.
-
-        The packet is first serialized to a canonical JSON string, then
-        hashed and signed with RSASSA-PKCS1-v1_5.
-
-        Args:
-            packet: The dictionary payload to be signed.
-            key: The RSA private key object.
-
-        Returns:
-            The base64-encoded signature string.
-        """
-        canon = json.dumps(packet, separators=(",", ":"), sort_keys=True).encode()
-        h = SHA256.new(canon)
-        sig = pkcs1_15.new(key).sign(h)
-        return base64.b64encode(sig).decode()
 
     def _resolve_agent_uid(self, channel, dep):
         certs = dep.get("certs", {})
@@ -91,14 +73,15 @@ class OutboundDispatcher:
                 if priv_pem:
                     signing_key = RSA.import_key(priv_pem.encode())
 
-            if channel.endswith("https"):
-                if signing_key:
-                    sig = self._sign_payload(payload, signing_key)
-                    outer = {"sig": sig, "content": payload}
-                else:
-                    print(f"[DISPATCHER] ⚠️ No signing key for {channel} (agent_uid={agent_uid}), sending unsigned")
-                    outer = {"content": payload}
-                self._send(session_id, channel, outer)
+            if signing_key:
+                sig = crypto_utils.sign_data(payload, signing_key)
+                outer = {"sig": sig, "content": payload}
+            else:
+                print(f"[DISPATCHER] ⚠️ No signing key for {channel} (agent_uid={agent_uid}), sending unsigned")
+                outer = {"content": payload}
+
+            # Works for both HTTPS and WSS
+            self._send(session_id, channel, outer)
 
         except Exception as e:
             emit_gui_exception_log("OutboundDispatcher._handle_outbound", e)

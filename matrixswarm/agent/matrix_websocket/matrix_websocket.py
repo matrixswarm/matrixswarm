@@ -21,6 +21,7 @@ from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.utils.crypto_utils import pem_fix
 from matrixswarm.core.utils.cert_loader import load_cert_chain_from_memory
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
+from matrixswarm.core.utils import crypto_utils
 
 class Agent(BootAgent):
     def __init__(self):
@@ -57,6 +58,9 @@ class Agent(BootAgent):
 
             # --- Suspenders: load our signing private key (minted & embedded at deploy)
             signing_cfg = security.get("signing", {}) or {}
+            signing_cfg = security.get("signing", {})
+            peer_pub_pem = signing_cfg.get("remote_pubkey")
+            self.peer_pub_key = RSA.import_key(peer_pub_pem.encode()) if peer_pub_pem else None
             ws_priv_pem = signing_cfg.get("privkey")
             try:
                 self.ws_priv = RSA.import_key(ws_priv_pem.encode()) if ws_priv_pem else None
@@ -268,6 +272,18 @@ class Agent(BootAgent):
                 handshake = await asyncio.wait_for(websocket.recv(), timeout=5)
                 hello = json.loads(handshake)
                 if hello.get("type") == "hello" and "session_id" in hello:
+
+                    if "sig" not in hello:
+                        await websocket.close(reason="missing signature")
+                        return
+                    try:
+                        crypto_utils.verify_signed_payload(hello, hello["sig"], self.peer_pub_key)
+                        self.log(f"[WS][HELLO] signature accepted")
+                    except Exception as e:
+                        self.log(f"[WS][HELLO][DENY] Bad signature: {e}")
+                        await websocket.close(reason="bad hello signature")
+                        return
+
                     sid = hello["session_id"]
                     websocket.session_id = sid
                     self._sessions[sid] = {
@@ -299,11 +315,22 @@ class Agent(BootAgent):
 
             while True:
                 try:
-                    message = await websocket.recv()
-                    self.log(f"[WS][MESSAGE RECEIVED] {message}")
+                    raw = await websocket.recv()
+                    self.log(f"[WS][MESSAGE RECEIVED] {raw}")
 
-                    data = json.loads(message)
-                    self.log(f"[WS][VALID JSON] {data}")
+                    outer = json.loads(raw)
+
+                    sig_b64 = outer.get("sig")
+                    inner = outer.get("content", {})
+
+                    try:
+                        crypto_utils.verify_signed_payload(inner, sig_b64, self.peer_pub_key)
+                        data = inner
+                        self.log(f"[WS][HELLO] signature accepted")
+                    except Exception as e:
+                        self.log(f"[WS][SIG DENY] {e}")
+                        await websocket.close(reason="bad message signature")
+                        break
 
                     # Explicit echo acknowledgment
                     await websocket.send(json.dumps({

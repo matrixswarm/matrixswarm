@@ -160,8 +160,9 @@ class PhoenixControlPanel(QWidget):
         if not dep_id:
             QMessageBox.warning(self, "No Deployment", "Please select a deployment first.")
             return
-
         EventBus.emit("deployment.connect.requested", dep_id=dep_id, vault_data=self.vault_data)
+
+
     def launch_connection_manager(self):
         dlg = ConnectionManagerDialog(self.vault_data, self)
         dlg.exec_()

@@ -274,7 +274,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         except (FileNotFoundError, json.JSONDecodeError):
             return False, None
 
-    def spawn_agent(self, spawn_uuid, agent_name, universal_id, spawner, tree_node=None, universe_id=None):
+    def spawn_agent(self, universe, spawner, universal_id, agent_name, spawn_uuid, tree_node=None):
         """
         The main method to spawn a new agent process.
 
@@ -294,7 +294,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             spawner (str): The universal_id of the agent performing the spawn.
             tree_node (dict, optional): The configuration node for this agent from
                                       the directive. Defaults to None.
-            universe_id (str, optional): The ID of the universe or session this
+            universe (str, optional): The ID of the universe or session this
                                        spawn belongs to. Defaults to None.
 
         Returns:
@@ -305,8 +305,10 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             RuntimeError: If the agent source code cannot be found or if the
                           hash verification fails.
         """
-        logger = Logger(os.path.join(self.comm_path, universal_id))
+
+        logger=None
         try:
+            logger = Logger(os.path.join(self.comm_path, universal_id))
             if self._keychain.get("encryption_enabled"):
                 logger.set_encryption_key(self._keychain["swarm_key"])
 
@@ -389,10 +391,10 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 "args": {
                     "install_name": spawn_uuid,
                     "matrix": "matrix",
-                    "spawner": self._trust_tree.get("spawner_id", "matrix"),
+                    "spawner": spawner,
                     "universal_id": universal_id,
                     "agent_name": agent_name,
-                    "universe": universe_id,
+                    "universe": universe,
                     "site_root_path": self.site_root_path,
                     "verbose": int(self.verbose),
                     "debug": int(self.debug),
@@ -418,7 +420,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             })
 
             # --- Launch Process ---
-            cmd = [self.python_exec or "python3", run_path, "--job", f"{universe_id}:{spawner}:{universal_id}:{agent_name}", "--ts", timestamp]
+            cmd = [self.python_exec or "python3", run_path, "--job", f"{universe}:{spawner}:{universal_id}:{agent_name}", "--ts", timestamp]
             kwargs = {"preexec_fn": os.setsid} if os.name == "posix" else {}
             process = subprocess.Popen(
                 cmd,
@@ -445,8 +447,9 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
         except Exception as e:
             tb = traceback.format_exc()
-            logger.log(f"[SPAWN-ERROR] Failed to spawn agent '{agent_name}': {e}")
-            logger.log(f"[SPAWN-TRACEBACK] {tb}")
+            if logger:
+                logger.log(f"[SPAWN-ERROR] Failed to spawn agent '{agent_name}': {e}")
+                logger.log(f"[SPAWN-TRACEBACK] {tb}")
             raise RuntimeError(f"[SPAWN-FAIL] Unhandled exception during spawn of {agent_name}: {e}")
 
         return process.pid, cmd

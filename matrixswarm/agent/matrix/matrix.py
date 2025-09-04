@@ -216,6 +216,7 @@ class Agent(BootAgent):
     #called at the end of every packet_listener cycle
     def packet_listener_post(self):
         self.perform_agent_consciousness_scan()
+        self.perform_tree_master_validation()
 
     def canonize_gospel(self):
         gospel = {
@@ -1383,6 +1384,7 @@ class Agent(BootAgent):
             self.log(error=e, block="main_try")
 
     #checks everyone's tree against Matrix's agent_tree_master, using a hash of the agents tree
+    #this also ensures services are updated for agents added and removed
     def perform_tree_master_validation(self):
 
         try:

@@ -1,12 +1,15 @@
 from __future__ import annotations
 import socket
-from typing import Dict, Any, Optional
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QTabWidget
+from typing import Dict, Any
+from PyQt5.QtWidgets import QWidget, QTabWidget
 from PyQt5.QtCore import Qt, QTimer
-from matrix_gui.core.panel.agent_tree.agent_tree import PhoenixAgentTree
 from matrix_gui.core.event_bus import EventBus
 from matrix_gui.config.boot.globals import get_sessions
-from PyQt5.QtWidgets import QSplitter, QTextEdit, QGroupBox, QVBoxLayout, QSizePolicy
+from PyQt5.QtWidgets import (
+    QWidget, QSplitter, QTextEdit, QVBoxLayout, QHBoxLayout,
+    QGroupBox, QSizePolicy, QLabel, QPushButton
+)
+from matrix_gui.core.panel.agent_tree.agent_tree import PhoenixAgentTree
 
 # Pinned global session constant
 GLOBAL_SESSION_ID = "GLOBAL"
@@ -130,73 +133,76 @@ class PhoenixTabStack(QWidget):
             self.feed_console.append(self._fmt_packet(payload))
 
     def add_session_tab(self, session_id, widget_cls=None, label=None):
+
         if widget_cls is None:
             widget_cls = PhoenixAgentTree
 
-        # Outer horizontal splitter
+        main_tab = QWidget()
+        main_layout = QVBoxLayout(main_tab)
+        main_layout.setContentsMargins(4, 4, 4, 4)
+        main_layout.setSpacing(6)
 
-        splitter = QSplitter(Qt.Horizontal, self.tab_widget)
-        w = widget_cls(bound_session_id=session_id, parent=splitter)
-        splitter.addWidget(w)
+        # Agent Tree widget (holds detail_panel too)
+        agent_tree = widget_cls(bound_session_id=session_id, parent=main_tab)
+        detail_panel = agent_tree.detail_panel
 
+        # === Command Bar ===
+        cmd_bar = QHBoxLayout()
+        kill_btn = QPushButton("☠️ Kill")
+        respawn_btn = QPushButton("🔁 Respawn")
+        logs_btn = QPushButton("📜 Logs")
+        #threads_btn = QPushButton("🧵 Threads")
+        config_btn = QPushButton("⚙️ Config")
+        cmd_bar.addWidget(kill_btn)
+        cmd_bar.addWidget(respawn_btn)
+        cmd_bar.addWidget(logs_btn)
+        #cmd_bar.addWidget(threads_btn)
+        cmd_bar.addWidget(config_btn)
+        cmd_bar.addStretch()
+        cmd_bar.addWidget(QLabel("Status:"))
+        cmd_bar.addWidget(QLabel("●"))
 
-        # Right: log panel
+        main_layout.addLayout(cmd_bar)
+
+        # === Inspector Panel (above splitter, toggled) ===
+        inspector = detail_panel.inspector_group
+        inspector.setVisible(False)
+        main_layout.addWidget(inspector)
+
+        # === Splitter (tree | logs) — owns all vertical stretch ===
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Left = Tree
+        agent_tree.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        splitter.addWidget(agent_tree)
+
+        # Right = Logs
         log_box = QGroupBox("📡 Agent Intel Logs")
-        log_box.setStyleSheet("""
-            QGroupBox {
-                border: 1.2px solid #33384c;
-                border-radius: 8px;
-                margin-top: 8px;
-                font-family: 'Segoe UI', Arial, sans-serif;
-                font-size: 13px;
-                color: #4fc3f7;
-                background-color: #232336;
-                font-weight: bold;
-            }
-            QGroupBox:title {
-                subcontrol-origin: margin;
-                left: 14px;
-                padding: 0 6px 0 6px;
-                background: #232336;
-            }
-        """)
         log_layout = QVBoxLayout(log_box)
         log_console = QTextEdit()
         log_console.setReadOnly(True)
-        log_console.setStyleSheet("""
-            QTextEdit {
-                background-color: #1a1a22;
-                color: #e0e0e0;
-                font-family: 'Segoe UI', Arial, sans-serif;
-                font-size: 13px;
-                border: 1px solid #33384c;
-                border-radius: 8px;
-                padding: 8px;
-            }
-            QTextEdit:focus {
-                border: 1.5px solid #0078d7;
-                background: #21213c;
-            }
-        """)
-        log_layout.addWidget(log_console)
-
-
-        log_box.setMinimumHeight(150)  # always usable
-        log_box.setMinimumWidth(150)
         log_console.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
+        log_layout.addWidget(log_console)
         splitter.addWidget(log_box)
-        splitter.setSizes([900, 400])
-        splitter.setStretchFactor(0, 3)  # Tree+Detail gets 3x space
-        splitter.setStretchFactor(1, 1)  # Logs get 1x
 
-        idx = self.tab_widget.addTab(splitter, label or session_id[:6])
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+
+        # === Add splitter directly to layout and give it space ===
+        main_layout.addWidget(splitter)
+
+        # === Hook toggles ===
+        #threads_btn.clicked.connect(lambda: inspector.setVisible(not inspector.isVisible()))
+        config_btn.clicked.connect(lambda: inspector.setVisible(not inspector.isVisible()))
+
+        # === Final tab setup ===
+        idx = self.tab_widget.addTab(main_tab, label or session_id[:6])
         self._tab_sessions[idx] = session_id
-        self._tab_widgets[idx] = w
-        w.console = log_console  # if you want logs attached
+        self._tab_widgets[idx] = agent_tree
         self.tab_widget.setCurrentIndex(idx)
 
-        print(f"[UI] addTab returned index {idx} for {session_id}")
+        agent_tree.console = log_console
         return idx
 
     def display_feed(self, payload: dict):

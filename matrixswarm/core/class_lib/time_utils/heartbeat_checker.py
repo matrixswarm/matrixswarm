@@ -1,4 +1,4 @@
-import os, time
+import random, json, os, time
 
 def check_heartbeats(comm_root, agent_id, time_delta_timeout=0):
     """
@@ -24,41 +24,45 @@ def check_heartbeats(comm_root, agent_id, time_delta_timeout=0):
 
     try:
         files = [f for f in os.listdir(base) if f.startswith("poke.")]
+        for fname in files:
+
+            parts = fname.split(".")
+            if len(parts) < 5:
+                continue  # malformed file
+
+            _, thread, timeout, sleep_for, wake_due = parts[:5]
+
+            timeout = int(timeout) if timeout.isdigit() else 0
+            sleep_for = int(sleep_for) if sleep_for.isdigit() else 0
+            wake_due = int(wake_due) if wake_due.isdigit() else 0
+
+            fpath = os.path.join(base, fname)
+            last_seen = os.path.getmtime(fpath)
+
+            # decide status
+            if wake_due and now < wake_due:
+                status = "sleeping"
+                delta = now - wake_due  # negative until wake expires
+            else:
+                delta = now - last_seen
+                # check against both per-thread timeout and global buffer
+                fail_cutoff = max(timeout, time_delta_timeout)
+                status = "alive" if fail_cutoff == 0 or delta < fail_cutoff else "failed"
+
+            statuses[thread] = {
+                "thread": thread,
+                "status": status,
+                "last_seen": last_seen,
+                "timeout": timeout,
+                "sleep_for": sleep_for,
+                "wake_due": wake_due,
+                "delta": delta,
+            }
+
     except FileNotFoundError:
-        return None
+        statuses = None
 
-    for fname in files:
-        parts = fname.split(".")
-        if len(parts) < 5:
-            continue  # malformed file
-
-        _, thread, timeout, sleep_for, wake_due = parts[:5]
-
-        timeout = int(timeout) if timeout.isdigit() else 0
-        sleep_for = int(sleep_for) if sleep_for.isdigit() else 0
-        wake_due = int(wake_due) if wake_due.isdigit() else 0
-
-        fpath = os.path.join(base, fname)
-        last_seen = os.path.getmtime(fpath)
-
-        # decide status
-        if wake_due and now < wake_due:
-            status = "sleeping"
-            delta = now - wake_due  # negative until wake expires
-        else:
-            delta = now - last_seen
-            # check against both per-thread timeout and global buffer
-            fail_cutoff = max(timeout, time_delta_timeout)
-            status = "alive" if fail_cutoff == 0 or delta < fail_cutoff else "failed"
-
-        statuses[thread] = {
-            "thread": thread,
-            "status": status,
-            "last_seen": last_seen,
-            "timeout": timeout,
-            "sleep_for": sleep_for,
-            "wake_due": wake_due,
-            "delta": delta,
-        }
+    if not statuses:
+        statuses = None
 
     return statuses

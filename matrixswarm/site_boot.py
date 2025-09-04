@@ -403,7 +403,7 @@ def main():
     #socket_certs_dir = config["socket_certs"]
     #env_path = config["env"]
 
-    universe_id = args.universe.strip()
+    universe = args.universe.strip()
     directive_file = args.directive.strip()
     reboot = args.reboot
     #show realtime log prints - be warned you will need to open another terminal to
@@ -469,10 +469,10 @@ def main():
         print(f"[Override] --python-bin  = {args.python_bin}")
 
     # === PRE-BOOT GUARD ===
-    validate_universe_id(universe_id)
+    validate_universe_id(universe)
     if not reboot:
-        enforce_single_matrix_instance(universe_id)
-    os.environ["UNIVERSE_ID"] = universe_id
+        enforce_single_matrix_instance(universe)
+    os.environ["UNIVERSE_ID"] = universe
 
     # === BOOT SESSION SETUP ===
     SwarmSessionRoot.inject_boot_args(site_root=PACKAGE_ROOT)
@@ -492,7 +492,7 @@ def main():
     # === REBOOT? ===
     if reboot:
         print("[REBOOT] 💣 Full MIRV deployment initiated.")
-        Reaper(pod_root=pod_path, comm_root=comm_path).kill_universe_processes(universe_id)
+        Reaper(pod_root=pod_path, comm_root=comm_path).kill_universe_processes(universe)
         time.sleep(3)
 
     # === LOAD TREE ===
@@ -629,7 +629,7 @@ def main():
     matrix_node['children'] = []
     # 🚀 Create pod and deploy Matrix
     new_uuid, pod_path = cp.create_runtime(MATRIX_UUID)
-    cp.spawn_agent(new_uuid, MATRIX_UUID, MATRIX_UUID, "site_boot", matrix_node,  universe_id=universe_id)
+    cp.spawn_agent(universe, "site_boot", MATRIX_UUID, MATRIX_UUID, new_uuid, matrix_node)
 
     print("[✅] Matrix deployed at:", pod_path)
     print("[🔐] Matrix public key fingerprint:", fp)

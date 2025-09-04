@@ -6,7 +6,7 @@ import os
 from matrix_gui.core.utils.spki_utils import verify_spki_pin
 from matrix_gui.core.utils.cert_loader import load_cert_chain_from_memory
 from matrix_gui.modules.net.entity.adapter.agent_cert_wrapper import AgentCertWrapper
-def _establish_tls_socket(host, port, agent, deployment, session_id):
+def _establish_tls_socket(host, port, agent, deployment, timeout=5):
     cert_adapter = AgentCertWrapper(agent, deployment)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
@@ -15,7 +15,7 @@ def _establish_tls_socket(host, port, agent, deployment, session_id):
     if cert_adapter.ca_root_cert:
         context.load_verify_locations(cadata=cert_adapter.ca_root_cert)
 
-    raw_sock = socket.create_connection((host, port))
+    raw_sock = socket.create_connection((host, port), timeout=timeout)
     tls_sock = context.wrap_socket(raw_sock, server_hostname=host)
 
     peer_cert = tls_sock.getpeercert(binary_form=True)

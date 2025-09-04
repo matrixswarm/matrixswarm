@@ -8,6 +8,8 @@ from PyQt5.QtWidgets import (
 import matrix_gui.config.boot.boot
 from PyQt5.QtCore import Qt, QPropertyAnimation, QTimer
 from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import QStatusBar
+
 from matrix_gui.modules.vault.crypto.vault_handler import load_vault_singlefile
 from matrix_gui.modules.vault.services.vault_singleton import VaultSingleton
 from matrix_gui.modules.vault.services.vault_obj import VaultObj
@@ -94,6 +96,10 @@ class PhoenixCockpit(QMainWindow):
         self.main_layout.addLayout(button_row)
         self.main_layout.addStretch(1)
 
+        self.main_layout.setStretchFactor(self.control_panel, 0)  # fixed top
+        self.main_layout.setStretchFactor(self.tab_stack, 1)  # greedy middle
+        #self.main_layout.setStretchFactor(self.status_bar, 0)  # fixed bottom
+
         # Optional: decorate with glow
         shadow = QGraphicsDropShadowEffect(self.unlock_button)
         shadow.setColor(QColor( 0, 0, 255))
@@ -114,6 +120,14 @@ class PhoenixCockpit(QMainWindow):
         self.sessions = None
         self.dispatcher = None
 
+        #status bar
+        #self.status_bar = QStatusBar()
+        #self.status_bar.setStyleSheet("color: #33ff33; background-color: #111; font-family: Courier;")
+        #self.status_bar.setFixedHeight(24)
+        #self.main_layout.addWidget(self.status_bar)
+
+        #self.status_bar.addPermanentWidget(QLabel("Matrix Ready"))
+        #self.status_bar.addPermanentWidget(QLabel("WS: Connected"))
 
         EventBus.on("vault.unlocked", self._on_vault_unlocked_ui_flip)
         EventBus.on("vault.reopen.requested", self._on_vault_reopen_requested)

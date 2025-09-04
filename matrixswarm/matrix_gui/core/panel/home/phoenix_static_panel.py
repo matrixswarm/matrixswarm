@@ -97,7 +97,9 @@ class PhoenixStaticPanel(QWidget):
         payload.setdefault("sender", "phoenix_static_panel")
 
         for sid, ctx in get_sessions()._by_id.items():
+
             for channel_name in ctx.channels.keys():
+
                 if channel_name.endswith("-https"):
                     EventBus.emit("outbound.message",
                                   session_id=sid,

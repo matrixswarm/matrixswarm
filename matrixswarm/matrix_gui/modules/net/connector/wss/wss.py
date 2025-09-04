@@ -1,18 +1,88 @@
+import os
 import threading
-import time
-import json
+import tempfile
 import socket
-from websocket import WebSocket
 from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.event_bus import EventBus
-from .establish_tls_socket import _establish_tls_socket
+import ssl, json, time
+from websocket import create_connection
+from matrix_gui.modules.net.entity.adapter.agent_cert_wrapper import AgentCertWrapper
+from matrix_gui.core.utils.spki_utils import verify_spki_pin
+from matrix_gui.core.utils import crypto_utils
+from Crypto.PublicKey import RSA
+
+def write_temp_pem(data: str, suffix=".pem"):
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(fd, "w") as f:
+        f.write(data)
+    return path
+
+def establish_ws_connection(host, port, agent, deployment, session_id, timeout=5):
+    cert_adapter = AgentCertWrapper(agent, deployment)
+
+    # Write cert + key to temp files (Windows safe)
+    cert_path = write_temp_pem(cert_adapter.cert)
+    key_path  = write_temp_pem(cert_adapter.key)
+
+    try:
+        url = f"wss://{host}:{port}/ws"
+        ws = create_connection(
+            url,
+            timeout=timeout,
+            sslopt={
+                "certfile": cert_path,
+                "keyfile": key_path,
+                "cert_reqs": ssl.CERT_NONE,   # critical: disable CA chain checks
+                "check_hostname": False,      # skip hostname match
+            }
+        )
+
+        ws.settimeout(None)  # block forever for reads
+
+        # SPKI pin verification
+        peer_cert = ws.sock.getpeercert(binary_form=True)
+        ok, actual_pin = verify_spki_pin(peer_cert, cert_adapter.spki_pin)
+        if not ok:
+            ws.close()
+            raise ConnectionError(f"SPKI mismatch: expected {cert_adapter.spki_pin}, got {actual_pin}")
+
+        ws.settimeout(None)
+
+        # Build hello
+        hello = {
+            "type": "hello",
+            "session_id": session_id,
+            "agent": agent.get("universal_id"),
+            "ts": int(time.time())
+        }
+
+        # Load signing key from deployment if present
+        priv_pem = deployment.get("certs", {}).get(agent.get("universal_id"), {}).get("signing", {}).get("remote_privkey")
+        if priv_pem:
+            priv_key = RSA.import_key(priv_pem.encode())
+            hello["sig"] = crypto_utils.sign_data(hello, priv_key)
+
+        ws.send(json.dumps(hello))
+        return ws
+
+    except Exception as e:
+        print(f"[WSSConnector][{agent.get('universal_id')}] connect error: {e}")
+
+    finally:
+        for p in [cert_path, key_path]:
+            if p and os.path.exists(p):
+                os.remove(p)
+
 
 class WSSConnector:
     def __init__(self, running=True):
         self._running = {}
         EventBus.on("session.closed", self._on_session_closed)
 
-    def __call__(self, host, port, agent, deployment, session_id):
+    def __call__(self, host, port, agent, deployment, session_id, timeout=10):
+
+        print(f"[DEBUG] {agent.get('universal_id')} attaching to session {session_id}")
+
         channel_name = f"{agent.get('universal_id')}-wss"
         self._running[session_id] = True
         thread = threading.Thread(
@@ -31,20 +101,9 @@ class WSSConnector:
         while self._running.get(session_id, False):  # high-level reconnect loop
             ws = None
             try:
-                tls_sock = _establish_tls_socket(host, port, agent, deployment, session_id)
-                ws = WebSocket()
-                ws.settimeout(None)
-                ws.sock = tls_sock
-                #ws.settimeout(2.0)
-                hello = {
-                    "type": "hello",
-                    "session_id": session_id,
-                    "agent": agent.get("universal_id"),
-                    "ts": int(time.time())
-                }
-                ws.send(json.dumps(hello))
+                ws = establish_ws_connection(host, port, agent, deployment, session_id, timeout=10)
 
-                # register channel
+                # Register channel
                 ctx.channels[channel_name] = ws
                 ctx.status[channel_name] = "connected"
                 EventBus.emit("channel.status", session_id=session_id,

@@ -84,71 +84,80 @@ class Agent(BootAgent):
         """
         self.log("[SENTINEL] Watch cycle started.")
 
-        if self.universal_id_under_watch:
+        try:
+            if self.universal_id_under_watch and self.security_box:
+                # The security_box contains the credentials needed to resurrect Matrix
+                keychain = {}
+                node = self.security_box.get('node', {})
+                keychain["priv"] = node.get("vault", {}).get("priv", {})
+                keychain["pub"] = node.get("vault", {}).get("identity", {}).get('pub', {})
+                keychain["swarm_key"] = self.swarm_key
+                keychain['private_key'] = node.get("vault", {}).get("private_key")
+                keychain["matrix_pub"] = self.matrix_pub
+                # Use the real Matrix private key from the security box
+                keychain["matrix_priv"] = self.security_box["matrix_priv"]
+                keychain["encryption_enabled"] = int(self.encryption_enabled)
+                keychain["security_box"] = self.security_box.copy()
 
-            while self.running:
+                while self.running:
 
-                self._emit_beacon()
-
-                try:
-                    # The security_box contains the credentials needed to resurrect Matrix
-                    if len(self.security_box)==0:
-                        break
-
-                    universal_id = self.security_box.get('node').get("universal_id")
-
-                    if not universal_id:
-                        self.log("Target node missing universal_id. Breathing idle.", block="WATCHING")
-                        break
-
-                    # Respect intentional shutdown signals
-                    die_file = os.path.join(self.path_resolution['comm_path'], universal_id, 'incoming', 'die')
-                    if os.path.exists(die_file):
-                        self.log(f"{universal_id} has die file. Skipping Loop.", block="WATCHING_DIE_FILE")
-                        interruptible_sleep(self, 10)
-                        continue
-
-                    # Check if the target's heartbeat is stale
-                    statuses = check_heartbeats(self.path_resolution['comm_path'], universal_id)
-                    if statuses is None:
-                        # at least one thread failed, spawn
-                        self.log(f"[HEARTBEAT] {universal_id} failed heartbeat check")
-                    else:
-                        # all threads are either alive or sleeping continue else respawn
-                        if all(s["status"] in ("alive", "sleeping") for s in statuses.values()):
-                            continue  # safe to skip further handling
-
-                    # If heartbeat is stale, initiate respawn
                     try:
-                        keychain = {}
-                        node = self.security_box.get('node', {})
-                        keychain["priv"] = node.get("vault", {}).get("priv", {})
-                        keychain["pub"] = node.get("vault", {}).get("identity", {}).get('pub', {})
-                        keychain["swarm_key"] = self.swarm_key
-                        keychain['private_key'] = node.get("vault", {}).get("private_key")
-                        keychain["matrix_pub"] = self.matrix_pub
-                        # Use the real Matrix private key from the security box
-                        keychain["matrix_priv"] = self.security_box["matrix_priv"]
-                        keychain["encryption_enabled"] = int(self.encryption_enabled)
-                        keychain["security_box"] = self.security_box.copy()
+                        self._emit_beacon()
 
-                        self.spawn_agent_direct(
-                            universal_id=universal_id,
-                            agent_name=node.get("name"),
-                            tree_node=node,
-                            keychain=keychain,
-                        )
-                        self.log(f"{universal_id} respawned successfully.")
+                        universal_id = self.security_box.get('node').get("universal_id")
+
+                        if not universal_id:
+                            self.log("Target node missing universal_id. Breathing idle.", block="WATCHING")
+                            break
+
+                        # Respect intentional shutdown signals
+                        die_file = os.path.join(self.path_resolution['comm_path'], universal_id, 'incoming', 'die')
+                        if os.path.exists(die_file):
+                            self.log(f"{universal_id} has die file. Skipping Loop.", block="WATCHING_DIE_FILE")
+                            interruptible_sleep(self, 10)
+                            continue
+
+                        # Check if the target's heartbeat is stale
+                        statuses = check_heartbeats(self.path_resolution['comm_path'], universal_id)
+                        if statuses is None:
+                            # at least one thread failed, spawn
+                            self.log(f"[HEARTBEAT] {universal_id} failed heartbeat check")
+                        else:
+                            # all threads are either alive or sleeping continue else respawn
+                            if all(s["status"] in ("alive", "sleeping") for s in statuses.values()):
+                                continue  # safe to skip further handling
+
+                        if self.clear_to_spawn(self.command_line_args.get("universe"),
+                                               keychain["security_box"]["spawner"],
+                                               node.get("universal_id"),
+                                               node.get("name")):
+
+                            # If heartbeat is stale, initiate respawn
+                            try:
+
+                                self.spawn_agent_direct(
+                                    universe=self.command_line_args.get("universe"),
+                                    spawner=keychain["security_box"]["spawner"],
+                                    universal_id=node.get("universal_id"),
+                                    agent_name=node.get("name"),
+                                    tree_node=node,
+                                    keychain=keychain
+                                )
+
+
+                                self.log(f"{universal_id} respawned successfully.")
+
+                            except Exception as e:
+                                self.log(f"failed to spawn agent", error=e, block="keep_alive", level="error")
+
 
                     except Exception as e:
-                        self.log(f"failed to spawn agent", error=e, block="keep_alive", level="error")
+                        self.log(f"failed to spawn agent", error=e, block="main_try", level="error")
 
+                    interruptible_sleep(self, 10)
 
-                except Exception as e:
-                    self.log(f"failed to spawn agent", error=e, block="main_try", level="error")
-
-                interruptible_sleep(self, 10)
-
+        except Exception as e:
+            self.log(error=e, block="main_try")
 
 if __name__ == "__main__":
     agent = Agent()
