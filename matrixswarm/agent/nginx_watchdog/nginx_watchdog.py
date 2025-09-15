@@ -35,6 +35,7 @@ class Agent(BootAgent, AgentSummaryMixin):
         self.alert_cooldown = cfg.get("alert_cooldown", 300)
         self.alert_role = cfg.get("alert_to_role", None)
         self.report_role = cfg.get("report_to_role", None)
+        self.last_recovery_alert = 0
         self.stats = {
             "date": self.today(),
             "uptime_sec": 0,
@@ -141,6 +142,18 @@ class Agent(BootAgent, AgentSummaryMixin):
             return True
         return False
 
+    def is_service_enabled(self):
+        """
+        Checks if the nginx service is enabled in systemd.
+        Returns True if enabled, False otherwise.
+        """
+        try:
+            result = subprocess.run(["systemctl", "is-enabled", "--quiet", self.service_name], check=False)
+            return result.returncode == 0
+        except Exception as e:
+            self.log(f"[SENTINEL][ERROR] systemctl is-enabled failed: {e}")
+            return False
+
     def post_restart_check(self):
         """
         Performs a check after a restart attempt to ensure the service
@@ -151,6 +164,17 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.log(f"[SENTINEL][CRIT] Nginx restarted but ports {self.ports} are still not listening.")
             self.send_simple_alert(f"🚨 Nginx restarted but ports {self.ports} are still not open.")
 
+    def update_stats(self, running):
+        now = time.time()
+        elapsed = now - self.stats["last_change"]
+        if self.stats["last_state"] is not None:
+            if self.stats["last_state"]:
+                self.stats["uptime_sec"] += elapsed
+            else:
+                self.stats["downtime_sec"] += elapsed
+        self.stats["last_state"] = running
+        self.stats["last_change"] = now
+
     def send_simple_alert(self, message):
         """
         Sends a formatted, human-readable alert to agents with the designated alert role.
@@ -158,33 +182,38 @@ class Agent(BootAgent, AgentSummaryMixin):
         Args:
             message (str): The core message of the alert.
         """
-        if not self.alert_role:
-            return
-        alert_nodes = self.get_nodes_by_role(self.alert_role)
-        if not alert_nodes:
-            self.log("[SENTINEL][ALERT] No alert-compatible agents found.")
-            return
-
-        pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": "cmd_send_alert_msg"})
         try:
-            server_ip = requests.get("https://api.ipify.org").text.strip()
-        except Exception:
-            server_ip = "Unknown"
-        pk2 = self.get_delivery_packet("notify.alert.general")
-        pk2.set_data({
-            "server_ip": server_ip,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "universal_id": self.command_line_args.get("universal_id"),
-            "level": "critical",
-            "msg": message,
-            "formatted_msg": f"📣 Swarm Message\n{message}",
-            "cause": "Nginx Sentinel Alert",
-            "origin": self.command_line_args.get("universal_id")
-        })
-        pk1.set_packet(pk2, "content")
-        for node in alert_nodes:
-            self.pass_packet(pk1, node["universal_id"])
+            endpoints = self.get_nodes_by_role(self.alert_role)
+            if not endpoints:
+                self.log("[WATCHDOG][ALERT] No alert-compatible agents found for '{self.alert_role}'.")
+                return
+
+            pk1 = self.get_delivery_packet("standard.command.packet")
+            pk1.set_data({"handler": "dummy_handler"})
+            try:
+                server_ip = requests.get("https://api.ipify.org").text.strip()
+            except Exception:
+                server_ip = "Unknown"
+            pk2 = self.get_delivery_packet("notify.alert.general")
+            pk2.set_data({
+                "server_ip": server_ip,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "universal_id": self.command_line_args.get("universal_id"),
+                "level": "critical",
+                "msg": message,
+                "formatted_msg": f"📣 Swarm Message\n{message}",
+                "cause": "Nginx Sentinel Alert",
+                "origin": self.command_line_args.get("universal_id")
+            })
+
+            pk1.set_packet(pk2, "content")
+
+            for ep in endpoints:
+                pk1.set_payload_item("handler", ep.get_handler())
+                self.pass_packet(pk1, ep.get_universal_id())
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
 
     def send_data_report(self, status, severity, details="", metrics=None):
         """
@@ -197,74 +226,108 @@ class Agent(BootAgent, AgentSummaryMixin):
             details (str, optional): A human-readable description of the event.
             metrics (dict, optional): A dictionary of diagnostic information.
         """
-        if not self.report_role:
-            return
-        report_nodes = self.get_nodes_by_role(self.report_role)
-        if not report_nodes:
-            return
 
-        pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": "cmd_ingest_status_report"})
-        pk2 = self.get_delivery_packet("standard.status.event.packet")
-        pk2.set_data({
-            "source_agent": self.command_line_args.get("universal_id"),
-            "service_name": "nginx",
-            "status": status,
-            "details": details,
-            "severity": severity,
-            "metrics": metrics if metrics is not None else {}
-        })
-        pk1.set_packet(pk2, "content")
-        for node in report_nodes:
-            self.pass_packet(pk1, node["universal_id"])
+        try:
+            endpoints = self.get_nodes_by_role(self.report_role)
+            if not endpoints:
+                self.log(f"[WATCHDOG][ALERT] No alert-compatible agents found for '{self.report_role}'.")
+                return
 
-    def worker(self, config:dict = None, identity:IdentityObject = None):
+            pk1 = self.get_delivery_packet("standard.command.packet")
+            pk1.set_data({"handler": "cmd_ingest_status_report"})
+            pk2 = self.get_delivery_packet("standard.status.event.packet")
+            pk2.set_data({
+                "source_agent": self.command_line_args.get("universal_id"),
+                "service_name": "nginx",
+                "status": status,
+                "details": details,
+                "severity": severity,
+                "metrics": metrics if metrics is not None else {}
+            })
+            pk1.set_packet(pk2, "content")
+            for ep in endpoints:
+                pk1.set_payload_item("handler", ep.get_handler())
+                self.pass_packet(pk1, ep.get_universal_id())
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
+
+    def worker(self, config: dict = None, identity: IdentityObject = None):
         """
-        The main worker loop. It performs the health check, handles state changes,
-        triggers restarts, and sends reports as needed.
-
-        Args:
-            config (dict, optional): Configuration dictionary. Defaults to None.
-            identity (IdentityObject, optional): Identity object for the agent. Defaults to None.
+        Main loop for the Nginx watchdog. Mirrors MySQL watchdog behavior:
+        - Emits a beacon
+        - Checks systemd enabled + active status + port binding
+        - Alerts if nginx is down at startup
+        - Handles state changes with alerts, reports, restarts
+        - Logs stability when unchanged
         """
         try:
-
+            self._emit_beacon()
             self.maybe_roll_day("nginx")
+
+            enabled = self.is_service_enabled()
             is_healthy = self.is_nginx_running() and self.are_ports_open()
-            last_state = self.stats.get("last_state")
 
-            # First run: establish baseline
-            if last_state is None:
-                self.log(f"[SENTINEL] Establishing baseline status for {self.service_name}...")
+            # If systemd disabled, hold fire until it's enabled
+            if not enabled:
+                self.log(f"[WATCHDOG] ⚠️ {self.service_name} is DISABLED in systemd. Waiting for it to be enabled...")
+                self.stats["last_state"] = False
+                interruptible_sleep(self, self.interval)
+                return
+
+            # First run: establish baseline + alert if already down
+            if self.stats["last_state"] is None:
+                self.log(
+                    f"[WATCHDOG] First run — {self.service_name} initial state is {'UP' if is_healthy else 'DOWN'}")
                 self.stats["last_state"] = is_healthy
-                self.stats["last_status_change"] = time.time()
+                self.stats["last_change"] = time.time()
+                if not is_healthy:
+                    diagnostics = self.collect_nginx_diagnostics()
+                    if self.should_alert("nginx-down"):
+                        self.send_simple_alert(f"❌ {self.service_name.capitalize()} is DOWN at startup.")
+                    self.send_data_report(
+                        status="DOWN", severity="CRITICAL",
+                        details=f"Service {self.service_name} not running or required ports closed (startup baseline).",
+                        metrics=diagnostics
+                    )
+                return
 
-            else:
+            # Compare with last known state
+            last_state_was_healthy = self.stats["last_state"]
 
-                # If state changed (UP/DOWN)
-                if is_healthy != last_state:
-                    self.update_status_metrics(is_healthy)
-                    if is_healthy:
-                        self.log(f"[SENTINEL] ✅ {self.service_name} has recovered.")
+            if is_healthy != last_state_was_healthy:
+                # State change
+                self.update_status_metrics(is_healthy)
+
+                if is_healthy:
+                    now = time.time()
+                    if now - self.last_recovery_alert > 60:  # cooldown window
+                        self.log(f"[WATCHDOG] ✅ {self.service_name} has recovered.")
                         self.send_simple_alert(f"✅ {self.service_name.capitalize()} has recovered and is now online.")
                         self.send_data_report("RECOVERED", "INFO", "Service is back online and ports are open.")
-                    else:
-                        self.log(f"[SENTINEL] ❌ {self.service_name} is NOT healthy.")
-                        diagnostics = self.collect_nginx_diagnostics()
-                        if self.should_alert("nginx-down"):
-                            self.send_simple_alert(f"❌ {self.service_name.capitalize()} is DOWN or not binding required ports.")
-                        self.send_data_report(
-                            status="DOWN", severity="CRITICAL",
-                            details=f"Service {self.service_name} is not running or required ports are not open.",
-                            metrics=diagnostics
-                        )
-                        self.restart_nginx()
-                    self.stats["last_state"] = is_healthy
+                        self.last_recovery_alert = now
                 else:
-                    # State stable, accumulate uptime/downtime
-                    self.update_status_metrics(is_healthy)
-                    if hasattr(self, "debug") and getattr(self.debug, "is_enabled", lambda: False)():
-                        self.log(f"[SENTINEL] {'✅' if is_healthy else '❌'} {self.service_name} status is stable.")
+                    # Service just failed
+                    self.log(f"[WATCHDOG] ❌ {self.service_name} is NOT healthy.")
+                    diagnostics = self.collect_nginx_diagnostics()
+                    if self.should_alert("nginx-down"):
+                        self.send_simple_alert(f"❌ {self.service_name.capitalize()} is DOWN. Attempting restart...")
+                    self.send_data_report(
+                        status="DOWN", severity="CRITICAL",
+                        details=f"Service {self.service_name} is not running or required ports are not open.",
+                        metrics=diagnostics
+                    )
+                    self.restart_nginx()
+
+                self.stats["last_state"] = is_healthy
+
+            else:
+                # State unchanged
+                self.update_status_metrics(is_healthy)
+                if is_healthy:
+                    self.log(f"[WATCHDOG] ✅ {self.service_name} status is stable.")
+                else:
+                    self.log(f"[WATCHDOG] ❌ {self.service_name} is still NOT healthy.")
 
         except Exception as e:
             self.log(error=e, block="main_try")

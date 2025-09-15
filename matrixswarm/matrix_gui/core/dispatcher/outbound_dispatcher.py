@@ -1,11 +1,6 @@
-import json, base64
-from Crypto.Signature import pkcs1_15
-from Crypto.Hash import SHA256
-from Crypto.PublicKey import RSA
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.config.boot.globals import get_sessions
-from matrix_gui.core.utils import crypto_utils
-from Crypto.PublicKey import RSA
+from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 class OutboundDispatcher:
     """
     Dispatches outbound messages from the GUI to the Matrix swarm.
@@ -60,57 +55,34 @@ class OutboundDispatcher:
                     return candidate
         return None
 
-    def _handle_outbound(self, session_id, channel, payload):
+    def _handle_outbound(self, session_id, channel, packet:Packet):
         try:
             ctx = get_sessions().get(session_id)
-            dep = ctx.group.get("deployment", {})
+            dep = ctx.group.get("deployment", {}) if ctx else {}
 
-            agent_uid = self._resolve_agent_uid(channel, dep)
-            signing_key = None
+            # Find the agent by channel role
+            agent = None
+            for a in dep.get("agents", []):
+                if a.get("connection", {}).get("channel") == channel:
+                    agent = a
+                    break
 
-            if agent_uid:
-                priv_pem = dep.get("certs", {}).get(agent_uid, {}).get("signing", {}).get("remote_privkey")
-                if priv_pem:
-                    signing_key = RSA.import_key(priv_pem.encode())
+            if not agent:
+                print(f"[DISPATCHER] ❌ Channel role '{channel}' not found in deployment {dep.get('label')}")
+                return
 
-            if signing_key:
-                sig = crypto_utils.sign_data(payload, signing_key)
-                outer = {"sig": sig, "content": payload}
-            else:
-                print(f"[DISPATCHER] ⚠️ No signing key for {channel} (agent_uid={agent_uid}), sending unsigned")
-                outer = {"content": payload}
+            # Resolve actual channel in session
+            resolved_channel = next(
+                (ch for ch in ctx.channels.keys() if ch.startswith(agent["universal_id"])),
+                None
+            )
+            if not resolved_channel:
+                print(f"[DISPATCHER] ❌ No active connector for {agent['universal_id']} in session {session_id}")
+                return
 
-            # Works for both HTTPS and WSS
-            self._send(session_id, channel, outer)
+            conn = ctx.channels[resolved_channel]
+
+            conn.send(packet)  # fallback for connectors using _send
 
         except Exception as e:
             emit_gui_exception_log("OutboundDispatcher._handle_outbound", e)
-
-    def _send(self, session_id, channel, packet):
-        ctx = self.sessions.get(session_id)
-        if not ctx:
-            print(f"[DISPATCHER] ❌ No session {session_id}")
-            return
-        conn = ctx.channels.get(channel)
-        if not conn:
-            print(f"[DISPATCHER] ❌ No channel {channel} in session {session_id}")
-            return
-
-        try:
-            body = json.dumps(packet, separators=(",", ":")).encode()
-
-            if channel.endswith("-https"):
-                conn.request("POST", "/matrix", body=body,
-                             headers={"Content-Type": "application/json"})
-                resp = conn.getresponse()
-                data = resp.read().decode(errors="ignore")
-                print(f"[DISPATCHER] 🚀 Sent {packet.get('handler')} → HTTPS {resp.status}")
-                if data:
-                    print(f"[DISPATCHER] ↩️ Response: {data[:200]}")
-
-            elif channel.endswith("-wss"):
-                conn.send(body)
-                print(f"[DISPATCHER] 🚀 Sent {packet.get('handler')} → WSS")
-
-        except Exception as e:
-            print(f"[DISPATCHER] ❌ Send error {e}")

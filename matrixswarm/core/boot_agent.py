@@ -12,6 +12,7 @@ import copy
 import queue
 from enum import Enum
 from pathlib import Path
+from matrixswarm.core.class_lib.service.service_endpoint import ServiceEndpoint
 from matrixswarm.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 from matrixswarm.core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 from matrixswarm.core.class_lib.time_utils.heartbeat_checker import check_heartbeats
@@ -160,6 +161,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             private_key=self.private_key
         )
 
+
         #this option will be pulled from the command line as debug
         #all packets all directives, using the self.swarm_key
         self.packet_encryption=True
@@ -179,6 +181,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         debug = bool(self.command_line_args.get('debug',0))
 
+        #don't need to use a singleton
+        self.rug_pull = bool(self.command_line_args.get('rug_pull', 0))
+
         self.debug.set_enabled(enabled = debug)
         if self.debug.is_enabled():
             status="enabled"
@@ -191,6 +196,24 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         else:
             status = "disabled"
         self.log(f"Encryption: {status}")
+
+        status="disabled"
+        if self.rug_pull:
+            # kick the chair out
+            status = "enabled"
+        self.log(f"Rug pull: {status}")
+
+        if self.rug_pull:
+            # kick the chair out
+            ppath = os.path.join(self.path_resolution["pod_path_resolved"], "run")
+            try:
+                os.unlink(ppath)
+                print(f"[RUG-PULL] 🪓 Deleted {ppath}")
+                self.log(f"[RUG-PULL] 🪓 Deleted {ppath}")
+
+            except Exception as e:
+                print(f"[RUG-PULL][FAIL] Could not delete {ppath}: {e}")
+                self.log(f"[RUG-PULL][FAIL] Could not delete {ppath}", error=e, level="ERROR")
 
         self._loaded_tree_nodes={}
         self._service_manager_services = {}
@@ -322,6 +345,23 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as fallback:
             print(f"[LOG-FAIL] Logging system failure: {fallback}")
 
+    def log_proto(self, message: str, level: str = "INFO", block: str = None):
+        """
+        A standardized logging proto for use across agents.
+
+        Args:
+            message (str): The message body.
+            level (str): One of INFO, WARN, ERROR, CRITICAL, DEBUG.
+            block (str): Optional subsystem/block label.
+        """
+        try:
+            prefix = f"[{self.command_line_args.get('agent_name', 'UNKNOWN').upper()}]"
+            if block:
+                prefix += f"[{block.upper()}]"
+            self.log(f"{prefix} {message}", level=level)
+        except Exception as e:
+            print(f"[LOG-PROTO-FAIL] {e}")
+
 
     def send_message(self, message):
         self.log(f"[SEND] {json.dumps(message)}")
@@ -341,7 +381,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 else:
                     current_mtime = os.path.getmtime(directive_path)
                     if current_mtime != self.last_tree_mtime:
-                        self.log("[TREE-WATCH] Detected update to agent_tree.json")
+                        if self.debug.is_enabled():
+                            self.log("[TREE-WATCH] Detected update to agent_tree.json")
+
                         self.last_tree_mtime = current_mtime
 
             except Exception as e:
@@ -970,82 +1012,68 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         prioritized.sort(key=lambda x: x[0])  # lower = higher priority
         return [n for _, n in prioritized]
 
-    def get_nodes_by_role(self, role: str, scope: str = "child", return_count: int = 0):
-        """Finds other agents in the swarm based on their advertised roles.
 
-        This method is the core of the swarm's service discovery system. It
-        searches the agent tree for any node whose 'service-manager' config
-        block contains a matching role. This allows agents to find service
-        providers (e.g., alert relays) without needing to know their specific
-        universal_id.
+    def _resolve_scope(self, scope: str):
+        """
+        Normalize scope string into a depth_limit.
+        Returns None for unlimited depth (whole swarm).
+        """
+        if not scope or scope in ("any", "child(0)"):
+            return None  # full swarm
+        if scope.startswith("child("):
+            try:
+                return int(scope.split("(")[1].split(")")[0])
+            except Exception:
+                return 1
+        if scope == "child":
+            return 1
+        return None
 
-        Args:
-            role (str): The role to search for. Supports wildcards (e.g., "comm.security.*").
-            scope (str): The search scope (e.g., "child", "any").
-            return_count (int): The maximum number of nodes to return. 0 for all.
-
-        Returns:
-            list: A list of agent node dictionaries that match the requested role.
+    def get_nodes_by_role(self, role: str, return_count: int = 0):
+        """
+        Finds agents in the swarm based on advertised roles.
+        Expects 'role' to be a string or comma-separated list.
+        Returns a list of ServiceEndpoint objects.
         """
         try:
-            role_list = [r.strip() for r in role.split(",") if r.strip()]
-            if not role_list:
+            role_patterns = [r.strip().lower() for r in role.split(",") if r.strip()]
+            if not role_patterns:
                 return []
 
-            # Determine depth limit
-            depth_limit = None
-            if scope.startswith("child("):
-                try:
-                    depth_limit = int(scope.split("(")[1].split(")")[0])
-                except:
-                    depth_limit = 1
-            elif scope == "child":
-                depth_limit = 1
-            elif scope == "any" or scope == "child(0)":
-                depth_limit = None
-            else:
-                depth_limit = 1
-
             nodes = self.get_cached_service_managers()
-
-            seen_uids = set()
-
-            matches = []
+            endpoints = []
 
             for node in nodes:
+                uid = node.get("universal_id")
                 for svc in node.get("config", {}).get("service-manager", []):
-                    raw_roles = svc.get("role", [])
-                    flat_roles = []
-                    for role_entry in raw_roles:
-                        if isinstance(role_entry, str):
-                            if "," in role_entry:
-                                flat_roles.extend(r.strip() for r in role_entry.split(","))
-                            else:
-                                flat_roles.append(role_entry.strip())
+                    for role_entry in svc.get("role", []):  # already a list
+                        role_entry = role_entry.strip()
+                        if "@" in role_entry:
+                            role_name, handler = [x.strip() for x in role_entry.split("@", 1)]
+                        else:
+                            role_name, handler = role_entry.strip(), None
 
-                    for role in flat_roles:
-                        for pattern in role_list:
-                            if fnmatch.fnmatch(role, pattern):
-                                uid = node.get("universal_id")
-                                if uid and uid not in seen_uids:
-                                    seen_uids.add(uid)
-                                    matches.append(node)
-                                break
+                        for pattern in role_patterns:
+                            if fnmatch.fnmatch(role_name.lower(), pattern):
+                                ep = ServiceEndpoint({
+                                    "role": role_name,
+                                    "handler": handler,
+                                    "universal_id": uid,
+                                })
+                                if ep.is_clear():
+                                    endpoints.append(ep)
+                                break  # one match is enough per entry
 
-            unique_matches = {}
-            for m in matches:
-                uid = m.get("universal_id")
-                if uid and uid not in unique_matches:
-                    unique_matches[uid] = m
+                if return_count > 0 and len(endpoints) >= return_count:
+                    break
 
-            result = list(unique_matches.values())
-            return result if return_count <= 0 else result[:return_count]
+            return endpoints if return_count <= 0 else endpoints[:return_count]
 
         except Exception as e:
             self.log(f"[INTEL][ERROR] get_nodes_by_role failed: {e}")
             return []
 
-    def get_nodes_by_subscription(self, topic: str, scope: str = "child", return_count: int = 0):
+    def get_nodes_by_subscription(self, topic: str, scope: str = "any", return_count: int = 0):
         """Finds nodes with services subscribed to a specific topic.
 
         This function queries the agent's cached data to find and return a
@@ -1208,18 +1236,21 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     node = tp.nodes.get(child_id)
                     if not node:
                         self.log(f"[SPAWN] Could not find node for {child_id}")
+                        interruptible_sleep(self, 5)
                         continue
 
                     # Skip deleted nodes
                     if node.get("deleted", False) is True:
                         if self.debug.is_enabled():
                             self.log(f"[SPAWN-BLOCKED] {node.get('universal_id')} is marked deleted.")
+                        interruptible_sleep(self, 5)
                         continue
 
                     # Skip if die token exists
                     die_file = os.path.join(self.path_resolution['comm_path'], node.get("universal_id"), 'incoming', 'die')
                     if os.path.exists(die_file):
                         self.log(f"[SPAWN-BLOCKED] {node.get('universal_id')} has die file.")
+                        interruptible_sleep(self, 5)
                         continue
 
                     #Go time
@@ -1261,7 +1292,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             except Exception as e:
                 self.log(error=e, block="main_try")
 
-            interruptible_sleep(self, 20)
+            interruptible_sleep(self, 15)
 
     def clear_to_spawn(self, universe, spawner, universal_id, agent_name)->bool:
 
@@ -1271,16 +1302,22 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         try:
 
             # Skip if recent heartbeat is alive, all pokes are alive or sleeping
-            statuses = check_heartbeats(self.path_resolution['comm_path'], universal_id)
-            safe_to_continue=True
-            if statuses is None:
-                # at least one thread failed, spawn
-                self.log(f"[HEARTBEAT] {universal_id} failed heartbeat check")
+            result = check_heartbeats(self.path_resolution['comm_path'], universal_id)
+            meta = result["meta"]
+            threads = result["threads"]
 
+            safe_to_continue=True
+            if meta["error_success"]:
+                self.log(f"[HEARTBEAT] {universal_id} failed: {meta['error']}")
             else:
-                # all threads are either alive or sleeping continue else respawn
-                if all(s["status"] in ("alive", "sleeping") for s in statuses.values()):
-                    safe_to_continue = False  # safe to skip further handling
+                # log failed threads with deltas
+                for t, s in threads.items():
+                    if s["status"] == "failed":
+                        self.log(f"[HEARTBEAT] {universal_id}:{t} failed delta={s['delta']}s (timeout={s['timeout']})")
+
+                if all(s["status"] in ("alive", "sleeping") for s in threads.values()):
+                    safe_to_continue = False  # healthy, no respawn
+
 
             if safe_to_continue:
                 # defense, encase stray poke got inside hello.moto directory, which would initiate a phantom status, leading to stale poke file, leading to reboot
@@ -1291,7 +1328,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     except Exception as e:
                         pass
 
-                # 1. Check the process list for agent with cmd line --job {universe=universe, defaults to ai}:{spawner=parent agent, obviously this agent}:{universal_id=agent getting spawned}:{agent_name=acutal agent being spawned comm/<agent><agent>}
+                # 1. Check the process list for agent with cmd line --job {universe=universe, defaults to ai}:{spawner=parent agent, obviously this agent}:{universal_id=agent getting spawned}:{agent_name=actual agent being spawned comm/<agent><agent>}
                 #   for active propess in memroy
                 punji_file = os.path.join(self.path_resolution['comm_path'], universal_id, 'incoming', 'punji')
                 matches = find_jobs_by_prefix(universe, spawner, universal_id, agent_name, match_mode="exact")
@@ -1301,13 +1338,13 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 if not matches:
                     clear_to_spawn = True
                     try:
-                        # make sure the punji file is deleted, because if not, and it exists next iteration then it will start a take-down again
+                        # make sure the punji file is deleted, because if not, and it exists next iteration then it will restart a take-down
                         os.remove(punji_file)
                     except Exception as e:
                         if self.debug.is_enabled():
                             self.log(error=e, block="main_try")
 
-                # 2. If the punji file exists that means the singleton_enforcement didn't shutdown agent, it had 20secs(spawn_manager sleep interval) to do so(bottom of this function interruptible_sleep(self, 20))
+                # 2. If the punji file exists that means singleton_enforcement didn't shutdown the agent, it had 20secs(spawn_manager sleep interval * 1) to do so(bottom of this function interruptible_sleep(self, 20))
                 elif not os.path.exists(punji_file):
                     try:
                         Path(punji_file).write_text("ouch")
@@ -1315,7 +1352,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     except Exception as e:
                         self.log(f"[BOOT][PUNJI][WARN] Could not drop punji file for {universal_id}", error=e)
 
-                # 3. we've been looked up for a while now, it's time we blow this coop, 40secs(spawn_manager sleep interval *2) is long enough
+                # 3. we've been locked up for a while now, time we blow the coop, 40secs(spawn_manager sleep interval *2) is long enough
                 else:
 
                     self.log(reeeeeeebeeeengaaaaa(matches))
@@ -1324,7 +1361,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.log(error=e, block="main_try")
 
         return clear_to_spawn
-
 
     def ring_keychain(self, node:dict)->dict:
 
@@ -1392,6 +1428,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             cp.set_verbose(self.verbose)
             cp.set_debug(self.debug.is_enabled())
+            cp.set_rug_pull(self.rug_pull)
 
             try:
                 #SAVE IDENTITY FILE to comm/{universal_id}/codex

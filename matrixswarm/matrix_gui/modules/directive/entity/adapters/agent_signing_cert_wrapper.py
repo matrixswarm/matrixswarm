@@ -5,6 +5,9 @@ class AgentSigningCertWrapper(SigningCertConsumer):
         self.agent = agent
         self._has_cert = False
 
+    def get_serial(self):
+        return self.agent.get_item('agent').get('serial',"")
+
     def requires_signing(self) -> bool:
         agent_tags = self.agent.get_item("agent").get("tags", {})
         packet_signing = agent_tags.get("packet_signing", {})

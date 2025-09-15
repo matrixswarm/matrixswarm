@@ -278,9 +278,6 @@ def create_user_dirs_and_copy_bases(install_path=None):
 
 def main():
 
-    # Path prep
-    import os
-
     #if the directive is encrypted, decrypt
     def decrypt_directive(encrypted_path, swarm_key_b64):
 
@@ -347,6 +344,7 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--switch", help="Switch to a new .matrixswarm location and update .swarm pointer")
     parser.add_argument("--show-path", action="store_true", help="Print active .matrixswarm path and exit")
+    parser.add_argument("--rug-pull", action="store_true", help="Delete the /pod/{uuid}/run file immediately after boot")
 
     args, unknown = parser.parse_known_args()
 
@@ -411,6 +409,7 @@ def main():
     verbose = args.verbose
     #turns debugging on
     debug = args.debug
+    rug_pull = args.rug_pull
 
     encryption_enabled = not args.encryption_off
 
@@ -527,11 +526,17 @@ def main():
     MATRIX_UUID = matrix_directive.get("universal_id", "matrix")
 
     cp = CoreSpawner(path_manager=pm, site_root_path=PACKAGE_ROOT, python_site=python_site, detected_python=python_exec, install_path=config["install_path"] )
+
     if verbose:
         cp.set_verbose(True)
 
     if debug:
         cp.set_debug(True)
+
+    if rug_pull:
+        cp.set_rug_pull(True)
+
+
 
     # 🔐 Generate Matrix's keypair and fingerprint
     matrix_keys = generate_agent_keypair()
@@ -617,7 +622,7 @@ def main():
         "encryption_enabled": int(encryption_enabled),
         "pub": matrix_pub,
         "priv": matrix_priv,
-        "swarm_key": swarm_key_b64,
+        "swarm_key": swarm_key_b64, #this swarm key is different then the one used to encrypt the directive, if encrypted
         "private_key": matrix_key_b64,
         "matrix_pub": matrix_pub,
         "matrix_priv": matrix_priv,

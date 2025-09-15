@@ -2,24 +2,27 @@ import time, uuid
 from matrix_gui.core.class_lib.packet_delivery.interfaces.base_packet import BasePacket
 
 class Packet(BasePacket):
+    """
+        GUI-side command packet.
+        Wraps outbound messages into the same standardized structure that
+        Matrix/agents expect (handler, timestamp, content, etc.).
+        For internal use by the GUI's OutboundDispatcher.
+        """
 
     def set_data(self, data: dict):
         try:
-            required = ["handler"]
-            for r in required:
-                if r not in data:
-                    raise ValueError(f"Missing required field: {r}")
+            # Derive handler if not explicitly given
+            control = data.get("control", "gui")
+            action = data.get("action", "noop")
+            handler = data.get("handler") or f"{control}.{action}"
 
             self._payload = {
                 "timestamp": int(time.time()),
-                "nonce": uuid.uuid4().hex,  # or os.urandom(16).hex() for a cryptographic nonce
-                "handler": data.get("handler"),  #msg.send.warning.message_do_something
-                "origin": data.get("origin", "unknown"),
-                "sig": data.get("sig", "unknown"),
-                "hash": data.get("hash", "unknown"),
-                "service_injection": data.get("service_injection", {}), #if set locate the service under matrixswarm.core.* and inject data then inject inside handler
-                "content": data.get("content", {}),
-                # if set locate the service under matrixswarm.core.* and inject data then inject inside handler
+                "nonce": uuid.uuid4().hex,
+                "handler": handler,
+                "origin": data.get("origin", "gui"),
+                "session_id": data.get("session_id", "none"),
+                "content": data
             }
             self._data = data
             self._error_code = 0
@@ -28,4 +31,3 @@ class Packet(BasePacket):
             self._valid = False
             self._error_code = 1
             self._error_msg = str(e)
-

@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QDialog, QLabel, QComboBox, QPushButton, QVBoxLayout, QHBoxLayout
-from PyQt5.QtCore import Qt
+from matrix_gui.modules.directive.maps.base import CERT_INJECTION_MAP
 
 
 class ConnectionAssignmentDialog(QDialog):
@@ -55,6 +55,8 @@ class ConnectionAssignmentDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _check_row(self, wrapper, cb, lbl):
+        from matrix_gui.modules.directive.maps.base import CERT_INJECTION_MAP
+
         data = cb.currentData()
         if not data:
             lbl.setText("❌ unresolved")
@@ -64,27 +66,23 @@ class ConnectionAssignmentDialog(QDialog):
 
         proto, conn_id = data
         conn = (self._conn_mgr.get(proto, {}) or {}).get(conn_id, {})
-        host = conn.get("host")
-        port = conn.get("port")
 
-        if proto in ("https", "wss"):
-            ok = bool(host and port)
-            why = "ok" if ok else "missing host or port"
-        elif proto == "discord":
-            ok = bool(conn.get("channel_id"))
-            why = "channel_id required"
-        elif proto == "telegram":
-            ok = bool(conn.get("chat_id"))
-            why = "chat_id required"
-        elif proto == "email":
-            ok = bool(conn.get("smtp_server"))
-            why = "smtp_server required"
-        elif proto == "slack":
-            ok = bool(conn.get("webhook_url"))
-            why = "webhook_url required"
-        else:
-            ok = False
-            why = "unknown proto"
+        ok = False
+        why = "unknown proto"
+
+        # Map-driven check
+        connection_map = CERT_INJECTION_MAP.get("connection", {})
+        if proto in connection_map:
+            required_fields = connection_map[proto].get("fields", [])
+            if isinstance(required_fields, dict):
+                # some entries may use dict style, flatten values
+                all_fields = []
+                for v in required_fields.values():
+                    all_fields.extend(v)
+                required_fields = all_fields
+
+            ok = all(conn.get(f) for f in required_fields) if required_fields else False
+            why = "ok" if ok else f"missing required: {', '.join(required_fields)}"
 
         lbl.setText("✅ resolved" if ok else "❌ unresolved")
         lbl.setToolTip(f"{proto}: {why}")
@@ -113,7 +111,6 @@ class ConnectionAssignmentDialog(QDialog):
         }
 
     def apply_assignments(self):
-        """Apply selected connections directly to each wrapped agent."""
         for wrapper, cb, _ in self._rows:
             data = cb.currentData()
             if not data:
@@ -122,3 +119,12 @@ class ConnectionAssignmentDialog(QDialog):
             connection = (self._conn_mgr.get(proto, {}) or {}).get(conn_id, {})
             if connection:
                 wrapper.accept_connection(connection)
+
+                # Attach a clean structured dict to the agent
+                wrapper.agent.add_item("connection_info", {
+                    "proto": proto,
+                    "vault_ref": conn_id,  # link back to connection manager
+                    "details": {
+                        k: v for k, v in connection.items() if k not in ("proto",)
+                    }
+                })

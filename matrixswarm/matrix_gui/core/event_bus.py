@@ -1,26 +1,44 @@
+import inspect, traceback
+
 class EventBus:
     _listeners = {}
 
     @classmethod
-    def on(cls, event_name, callback):
-        cls._listeners.setdefault(event_name, []).append(callback)
-        cls._listeners[event_name].sort(key=lambda x: getattr(x, '__priority__', 100))
+    def on(self, event_name, handler):
+        caller = inspect.stack()[1]
+        self._listeners.setdefault(event_name, []).append(handler)
 
     @classmethod
-    def emit(cls, event_name, *args, **kwargs):
-        listeners = cls._listeners.get(event_name, [])
-        print(f"[EVENT] {event_name} fired → {len(listeners)} listeners")
+    def emit(self, event_name, *args, **kwargs):
+        listeners = self._listeners.get(event_name, [])
         for cb in listeners:
             try:
+                print(f"    ↳ calling {cb.__module__}.{cb.__name__}")
                 cb(*args, **kwargs)
-            except Exception as e:
-                print(f"[EVENT ERROR] Listener on '{event_name}' failed: {e}")
+            except Exception:
+                traceback.print_exc()
+
+
+    @classmethod
+    def off(cls, event_name, callback=None):
+        """Remove listeners for an event. If callback is None, remove all."""
+        if event_name not in cls._listeners:
+            return
+        if callback is None:
+            cls._listeners.pop(event_name, None)
+        else:
+            try:
+                cls._listeners[event_name].remove(callback)
+                if not cls._listeners[event_name]:
+                    cls._listeners.pop(event_name)
+            except ValueError:
+                pass
 
     @classmethod
     def query(cls, event_name, *args, **kwargs):
         responses = []
         listeners = cls._listeners.get(event_name, [])
-        print(f"[QUERY] {event_name} queried → {len(listeners)} listeners")
+
         for cb in listeners:
             try:
                 result = cb(*args, **kwargs)

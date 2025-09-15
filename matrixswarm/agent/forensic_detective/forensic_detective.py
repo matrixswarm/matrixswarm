@@ -27,7 +27,7 @@ class Agent(BootAgent):
 
         config = self.tree_node.get("config", {})
         self.alert_cooldown = config.get("alert_cooldown_sec", 300)
-        self.alert_role = config.get("alert_to_role", "hive.alert.send_alert_msg")
+        self.alert_role = config.get("alert_to_role", "hive.alert")
 
         # --- Oracle Integration Config ---
         # This feature is off by default. To enable, add an "oracle_analysis"
@@ -59,9 +59,13 @@ class Agent(BootAgent):
 
     def send_simple_alert(self, message, incident_id, critical_event, title_prefix="🔬 Forensic Report"):
         """Constructs and sends a unified alert packet with both text and embed data."""
-        if not self.alert_role: return
-        alert_nodes = self.get_nodes_by_role(self.alert_role)
-        if not alert_nodes: return
+        if not self.alert_role:
+            self.log("missing an alert_role self.alert_role", level="ERROR")
+            return
+        endpoints = self.get_nodes_by_role("hive.alert")
+        if not endpoints:
+            self.log(f"No alert-compatible agents found for '{self.alert_role}'.", level="ERROR")
+            return
 
         trigger_service = critical_event.get('service_name', 'unknown')
         trigger_status = critical_event.get('status', 'unknown')
@@ -91,8 +95,9 @@ class Agent(BootAgent):
         cmd_pk.set_data({"handler": "cmd_send_alert_msg"})
         cmd_pk.set_packet(pk, "content")
 
-        for node in alert_nodes:
-            self.pass_packet(cmd_pk, node["universal_id"])
+        for ep in endpoints:
+            cmd_pk.set_payload_item("handler", ep.get_handler())
+            self.pass_packet(cmd_pk, ep.get_universal_id())
 
     def cmd_ingest_status_report(self, content, packet, identity=None):
         """Handler for receiving data. Triggers forensics on CRITICAL events."""
@@ -144,8 +149,8 @@ class Agent(BootAgent):
 
     def _request_oracle_analysis(self, incident_id, critical_event, correlated_events):
         """Asks the Oracle for a deeper analysis of the incident."""
-        oracle_nodes = self.get_nodes_by_role(self.oracle_role)
-        if not oracle_nodes:
+        endpoints =  self.get_nodes_by_role(self.oracle_role, return_count=1)
+        if not endpoints:
             self.log(f"Oracle analysis enabled, but no agent with role '{self.oracle_role}' found.", level="WARNING")
             return
 
@@ -200,7 +205,10 @@ class Agent(BootAgent):
         })
 
         # Send the request to the first available Oracle
-        self.pass_packet(pk, oracle_nodes[0]['universal_id'])
+        for ep in endpoints:
+            pk.set_payload_item("handler", ep.get_handler())
+            self.pass_packet(pk, ep.get_universal_id())
+
         self.log(f"Requested Oracle analysis for incident {incident_id}.")
 
     def cmd_oracle_forensics_response(self, content, packet, identity=None):

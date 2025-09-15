@@ -113,7 +113,7 @@ matrix_directive = {
                     "reflex.health.status_report": {}
                 },
                 "service-manager": [{
-                    "role": ["hive.alert.send_alert_msg, hive.rpc.route, hive.log.delivery"],
+                    "role": ["hive.alert@cmd_send_alert_msg, hive.rpc@cmd_rpc_route"],
                     "scope": ["parent", "any"],  # who it serves
                     "priority": {  # lower = more preferred
                         "hive.log.delivery": -1,

@@ -11,7 +11,7 @@ def edit_connection_dialog(parent, default_proto="https", data=None, conn_id=Non
     fields = {}
 
     type_selector = QtWidgets.QComboBox()
-    type_selector.addItems(["https", "wss", "discord", "telegram", "email", "slack"])
+    type_selector.addItems(["https", "wss", "discord", "telegram", "openai", "email", "slack"])
     layout.addRow("Connection Type", type_selector)
 
     pre_proto = (data or {}).get("proto", default_proto)
@@ -48,6 +48,7 @@ def edit_connection_dialog(parent, default_proto="https", data=None, conn_id=Non
         clear_fields()
         p = type_selector.currentText()
         add_field("label")
+
         if p in ("https", "wss"):
             add_field("host")
             add_field("port")
@@ -66,9 +67,40 @@ def edit_connection_dialog(parent, default_proto="https", data=None, conn_id=Non
             add_field("smtp_server")
             add_field("username")
             add_field("note")
+        elif p == "openai":
+            add_field("api_key")
+            add_field("note")
         elif p == "slack":
             add_field("webhook_url")
             add_field("note")
+
+        # Default channel role dropdown
+        channel_box = QtWidgets.QComboBox()
+        if p == "https":
+            channel_box.addItems(["outgoing.command"])
+        elif p == "wss":
+            channel_box.addItems(["payload.reception"])
+        elif p == "discord":
+            channel_box.addItems(["alerts"])
+        elif p == "telegram":
+            channel_box.addItems(["alerts"])
+        elif p == "openai":
+            channel_box.addItems(["oracle"])
+        elif p == "email":
+            channel_box.addItems(["alerts"])
+        elif p == "slack":
+            channel_box.addItems(["alerts"])
+        else:
+            channel_box.addItems(["outgoing.command"])
+
+        prev_default = (data or {}).get("default_channel")
+        if prev_default:
+            idx = channel_box.findText(prev_default)
+            if idx >= 0:
+                channel_box.setCurrentIndex(idx)
+
+        field_layout.addRow("Default Channel Role", channel_box)
+        fields["default_channel"] = channel_box
 
         # Always attach/generate a serial
         serial = str((data or {}).get("serial") or uuid.uuid4().hex[:8])
@@ -104,7 +136,11 @@ def edit_connection_dialog(parent, default_proto="https", data=None, conn_id=Non
 
         # build result
         for k, widget in fields.items():
-            val = widget.text().strip()
+            val=None
+            if isinstance(widget, QtWidgets.QComboBox):
+                result[k] = widget.currentText()
+            else:
+                val = widget.text().strip()
             if val:
                 if k in ("port", "channel_id", "chat_id"):
                     result[k] = int(val)

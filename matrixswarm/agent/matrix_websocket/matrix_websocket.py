@@ -60,7 +60,6 @@ class Agent(BootAgent):
                 self.log("[WS][SPKI][WARN] Could not compute local SPKI pin", error=e)
 
             # --- Suspenders: load our signing private key (minted & embedded at deploy)
-            signing_cfg = security.get("signing", {}) or {}
             signing_cfg = security.get("signing", {})
             peer_pub_pem = signing_cfg.get("remote_pubkey")
             self.peer_pub_key = RSA.import_key(peer_pub_pem.encode()) if peer_pub_pem else None
@@ -281,7 +280,7 @@ class Agent(BootAgent):
                         return
                     try:
                         crypto_utils.verify_signed_payload(hello, hello["sig"], self.peer_pub_key)
-                        self.log(f"[WS][HELLO] signature accepted")
+                        self.log(f"[WS][HELLO] Signature Accepted")
                     except Exception as e:
                         self.log(f"[WS][HELLO][DENY] Bad signature: {e}")
                         await websocket.close(reason="bad hello signature")
@@ -329,7 +328,7 @@ class Agent(BootAgent):
                     try:
                         crypto_utils.verify_signed_payload(inner, sig_b64, self.peer_pub_key)
                         data = inner
-                        self.log(f"[WS][HELLO] signature accepted")
+                        self.log(f"[WS][HELLO] Signature Accepted")
                     except Exception as e:
                         self.log(f"[WS][SIG DENY] {e}")
                         await websocket.close(reason="bad message signature")
@@ -385,12 +384,38 @@ class Agent(BootAgent):
         os.utime(flag, None)
 
     def cmd_rpc_route(self, content, packet, identity:IdentityObject = None):
+        """
+            Routes an RPC-style packet to a specific GUI session if session_id is provided.
+            Otherwise, falls back to broadcasting to all websocket clients.
+            """
         try:
-            self.log("Incoming routed RPC packet.")
-            self.cmd_broadcast(content, content)
-            #self.log(f"Routed response_id={content.get('response_id')} status={content.get('status')}")
+
+            session_id = packet.get("session_id")
+            #Note: never depend on origin, you should only depend on identity, and that is only live when encryption is turned on for the swarm
+            #      because that is cryptigraphically certain to be the agent
+            if identity and identity.has_verified_identity():
+                sender=identity.get_sender_uid()
+            else:
+                sender=packet.get("origin", "not specified")
+
+            if session_id and session_id in self._sessions:
+                websocket = self._sessions[session_id]["ws"]
+                if self.debug.is_enabled() or 1==1:
+                    self.log(f"[WS][ROUTER] Directing to session {session_id} : Sender: {sender}")
+
+                data = json.dumps(content, separators=(",", ":"), sort_keys=False)
+                asyncio.run_coroutine_threadsafe(websocket.send(data), self.loop)
+
+            else:
+                if session_id:
+                    self.log(f"[WS][ROUTER][DISPOSED] Session '{session_id}' not found — disposing: Sender: {sender}")
+                else:
+                    self.log("[WS][ROUTER] No session_id — broadcasting to all.")
+                    self.cmd_broadcast(content, content)
+
         except Exception as e:
-            self.log(error=e)  # Optional: write full trace to logs
+            self.log("[WS][ROUTER][ERROR] Failed to route RPC packet", error=e)
+
 
     def cmd_send_alert_msg(self, content, packet, identity:IdentityObject = None):
         try:

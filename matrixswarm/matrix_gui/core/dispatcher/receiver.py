@@ -1,39 +1,31 @@
-from .inbound_dispatcher import InboundDispatcher
-from .outbound_dispatcher import OutboundDispatcher
-from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.event_bus import EventBus
 
-_dispatchers = None
+# Stores vault metadata globally if needed by cockpit/UI
+_vault_data = None
+
 
 def on_vault_unlocked(**kwargs):
     """
-    Called when the vault is unlocked.
-    Arms Inbound and Outbound dispatchers once per process.
+    Global hook for vault unlock.
+    Stores vault metadata for cockpit/UI modules.
+    Session dispatchers are no longer armed here – they are armed
+    per-session against their SessionBus inside the subprocess.
     """
-    vault_data = kwargs.get("vault_data")
-    password = kwargs.get("password")
+    global _vault_data
+    _vault_data = kwargs.get("vault_data")
     vault_path = kwargs.get("vault_path")
+    password = kwargs.get("password")
 
-    # 🔎 Vault info print
-    print("[SWARM] Vault unlocked!")
+    print("[SWARM] Vault unlocked → metadata stored")
     print(f"        Vault: {vault_path}")
-    print(f"        Password (masked): {'*' * len(password) if password else 'N/A'}")
+    print(f"        Password length: {len(password) if password else 'N/A'}")
 
-    global _dispatchers
-    if _dispatchers:
-        return  # already armed
-
-    try:
-        inbound = InboundDispatcher(EventBus)
-        outbound = OutboundDispatcher(EventBus, get_sessions(), vault_data)
-        _dispatchers = (inbound, outbound)
-        print("[DISPATCHERS] ✅ Inbound/Outbound dispatchers armed")
-    except Exception as e:
-        print(f"[DISPATCHERS] ❌ Failed to initialize dispatchers: {e}")
 
 def initialize():
     """
     Module entrypoint: register vault unlock hook.
+    Only global vault lifecycle events are handled here.
     """
     EventBus.on("vault.unlocked", on_vault_unlocked)
-    print("[DISPATCHERS] Online. Listening for vault.unlocked...")
+    print("[DISPATCHERS] Online (global). Listening for vault.unlocked...")
+

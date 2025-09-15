@@ -1,5 +1,4 @@
-from typing import Optional
-
+import uuid
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox, QSizePolicy
 from PyQt5 import QtCore
 from PyQt5.QtGui import QIcon
@@ -72,6 +71,7 @@ class PhoenixControlPanel(QWidget):
         # ---- bus ----
         EventBus.on("vault.unlocked", self.on_vault_unlocked)
         EventBus.on("vault.update", self.on_vault_update)
+        #EventBus.on("deployment.connect.requested", self.launch_deployment_dialog)
         # --- Style ---
         self.setStyleSheet("""
             QWidget {
@@ -166,8 +166,26 @@ class PhoenixControlPanel(QWidget):
         if not dep_id:
             QMessageBox.warning(self, "No Deployment", "Please select a deployment first.")
             return
-        EventBus.emit("deployment.connect.requested", dep_id=dep_id, vault_data=self.vault_data)
 
+        if not self.vault_data or "deployments" not in self.vault_data:
+            QMessageBox.warning(self, "No Vault", "Vault data not loaded or invalid.")
+            return
+
+        deployment = self.vault_data["deployments"].get(dep_id)
+        if not deployment:
+            QMessageBox.warning(self, "Invalid Deployment", f"Deployment {dep_id} not found in vault.")
+            return
+
+        # Generate a unique session ID
+        session_id = str(uuid.uuid4())
+
+        # Emit session.open.requested with proper signature
+        EventBus.emit(
+            "session.open.requested",
+            session_id=session_id,
+            deployment=deployment,
+            vault_data=self.vault_data
+        )
 
     def launch_connection_manager(self):
         dlg = ConnectionManagerDialog(self.vault_data, self)

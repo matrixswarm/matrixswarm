@@ -30,7 +30,7 @@ class Agent(BootAgent):
         self.top_n_procs = config.get("top_n_procs", 5)
         self.check_interval_sec = config.get("check_interval_sec", 30)
         self.report_to_role = config.get("report_to_role", "hive.forensics.data_feed")
-        self.report_handler = config.get("report_handler", "cmd_ingest_status_report")
+
         self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
         # For traffic rate measurement
@@ -41,101 +41,128 @@ class Agent(BootAgent):
 
     def send_status_report(self, status, severity, details, metrics=None):
         """Sends status to the configured role."""
-        content = {
-            "handler": self.report_handler,
-            "content": {
+        try:
+            if not self.report_to_role:
+                self.log(f"alert handler {self.report_to_role} not provided.", level='ERROR')
+                return
+
+            endpoints = self.get_nodes_by_role(self.report_to_role)
+            if not endpoints:
+                self.log(f"No alert-compatible agents found for '{self.report_to_role}'", level='ERROR')
+                return
+
+            pk_inner = self.get_delivery_packet("standard.status.event.packet")
+            pk_inner.set_data({
                 "source_agent": self.name,
                 "service_name": "system.network",
                 "status": status,
                 "details": details,
                 "severity": severity,
-                "metrics": metrics or {},
-            }
-        }
-        report_nodes = self.get_nodes_by_role(self.report_to_role)
-        if not report_nodes:
-            return
+                "metrics": metrics or {}
+            })
 
-        pk = self.get_delivery_packet("standard.command.packet")
-        pk.set_data(content)
-        for node in report_nodes:
-            self.pass_packet(pk, node["universal_id"])
-            self.log(f"Sent '{severity}' for 'system.network' to role '{self.report_to_role}'", level="INFO")
+            pk = self.get_delivery_packet("standard.command.packet")
+            pk.set_data({
+                "handler": "dummy_handler"
+            })
+            pk.set_packet(pk_inner, "content")
 
+            for ep in endpoints:
+                pk.set_payload_item("handler", ep.get_handler())
+                self.pass_packet(pk, ep.get_universal_id())
+                if self.debug.is_enabled():
+                    self.log(f"Sent '{severity}' for 'system.network' to role '{self.report_to_role}'", level="INFO")
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
 
     def get_network_summary(self):
         """Collects interface/IP status and errors/drops."""
-        metrics = {}
-        if_stats = psutil.net_if_stats()
-        if_addrs = psutil.net_if_addrs()
-        if_io = psutil.net_io_counters(pernic=True)
-        now = datetime.now().isoformat()
 
-        # Rate measurement setup
-        tx_rates = {}
-        rx_rates = {}
-        if self.prev_net_io and self.prev_time:
-            dt = (datetime.now() - self.prev_time).total_seconds()
-            for iface in if_io:
-                if iface in self.prev_net_io:
-                    tx_bps = (if_io[iface].bytes_sent - self.prev_net_io[iface].bytes_sent) / dt * 8
-                    rx_bps = (if_io[iface].bytes_recv - self.prev_net_io[iface].bytes_recv) / dt * 8
-                    tx_rates[iface] = round(tx_bps / 1e6, 2)  # Mbps
-                    rx_rates[iface] = round(rx_bps / 1e6, 2)  # Mbps
+        try:
+            metrics = {}
+            if_stats = psutil.net_if_stats()
+            if_addrs = psutil.net_if_addrs()
+            if_io = psutil.net_io_counters(pernic=True)
+            now = datetime.now().isoformat()
 
-        summary = []
-        for iface, stats in if_stats.items():
-            if iface in self.iface_exclude:
-                continue
-            addr_info = [a.address for a in if_addrs.get(iface, []) if a.family == socket.AF_INET]
-            io = if_io.get(iface)
-            line = {
-                "iface": iface,
-                "ip": addr_info,
-                "up": stats.isup,
-                "speed_mbps": stats.speed,
-                "tx_errs": io.errout if io else 0,
-                "rx_errs": io.errin if io else 0,
-                "drops": (io.dropin + io.dropout) if io else 0,
-                "tx_rate_mbps": tx_rates.get(iface, 0),
-                "rx_rate_mbps": rx_rates.get(iface, 0),
-            }
-            summary.append(line)
-        metrics["interfaces"] = summary
-        self.prev_net_io = if_io
-        self.prev_time = datetime.now()
-        return metrics
+            # Rate measurement setup
+            tx_rates = {}
+            rx_rates = {}
+            if self.prev_net_io and self.prev_time:
+                dt = (datetime.now() - self.prev_time).total_seconds()
+                for iface in if_io:
+                    if iface in self.prev_net_io:
+                        tx_bps = (if_io[iface].bytes_sent - self.prev_net_io[iface].bytes_sent) / dt * 8
+                        rx_bps = (if_io[iface].bytes_recv - self.prev_net_io[iface].bytes_recv) / dt * 8
+                        tx_rates[iface] = round(tx_bps / 1e6, 2)  # Mbps
+                        rx_rates[iface] = round(rx_bps / 1e6, 2)  # Mbps
+
+            summary = []
+            for iface, stats in if_stats.items():
+                if iface in self.iface_exclude:
+                    continue
+                addr_info = [a.address for a in if_addrs.get(iface, []) if a.family == socket.AF_INET]
+                io = if_io.get(iface)
+                line = {
+                    "iface": iface,
+                    "ip": addr_info,
+                    "up": stats.isup,
+                    "speed_mbps": stats.speed,
+                    "tx_errs": io.errout if io else 0,
+                    "rx_errs": io.errin if io else 0,
+                    "drops": (io.dropin + io.dropout) if io else 0,
+                    "tx_rate_mbps": tx_rates.get(iface, 0),
+                    "rx_rate_mbps": rx_rates.get(iface, 0),
+                }
+                summary.append(line)
+            metrics["interfaces"] = summary
+            self.prev_net_io = if_io
+            self.prev_time = datetime.now()
+            return metrics
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
+            return []
+
 
     def get_conn_summary(self):
         """Summarizes active TCP/UDP connections."""
-        conns = psutil.net_connections()
-        count = len(conns)
-        by_status = {}
-        for c in conns:
-            key = c.status if hasattr(c, 'status') else 'UNKNOWN'
-            by_status[key] = by_status.get(key, 0) + 1
-        return {"total_connections": count, "by_status": by_status}
+        try:
+            conns = psutil.net_connections()
+            count = len(conns)
+            by_status = {}
+            for c in conns:
+                key = c.status if hasattr(c, 'status') else 'UNKNOWN'
+                by_status[key] = by_status.get(key, 0) + 1
+            return {"total_connections": count, "by_status": by_status}
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
 
     def get_top_process_hogs(self):
         """Returns top processes by network bytes, CPU, and memory."""
-        proc_list = []
-        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info', 'io_counters']):
-            try:
-                net_io = proc.io_counters() if proc.io_counters else None
-                info = {
-                    "pid": proc.info['pid'],
-                    "name": proc.info['name'],
-                    "cpu_percent": proc.info['cpu_percent'],
-                    "rss_mb": proc.info['memory_info'].rss / (1024 ** 2) if proc.info['memory_info'] else 0,
-                    "write_bytes": net_io.write_bytes if net_io else 0,
-                    "read_bytes": net_io.read_bytes if net_io else 0,
-                }
-                proc_list.append(info)
-            except Exception:
-                continue
-        # Sort by cpu_percent, then rss, then write_bytes
-        proc_list.sort(key=lambda x: (x['cpu_percent'], x['rss_mb'], x['write_bytes']), reverse=True)
-        return proc_list[:self.top_n_procs]
+        try:
+            proc_list = []
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info', 'io_counters']):
+                try:
+                    net_io = proc.io_counters() if proc.io_counters else None
+                    info = {
+                        "pid": proc.info['pid'],
+                        "name": proc.info['name'],
+                        "cpu_percent": proc.info['cpu_percent'],
+                        "rss_mb": proc.info['memory_info'].rss / (1024 ** 2) if proc.info['memory_info'] else 0,
+                        "write_bytes": net_io.write_bytes if net_io else 0,
+                        "read_bytes": net_io.read_bytes if net_io else 0,
+                    }
+                    proc_list.append(info)
+                except Exception:
+                    continue
+            # Sort by cpu_percent, then rss, then write_bytes
+            proc_list.sort(key=lambda x: (x['cpu_percent'], x['rss_mb'], x['write_bytes']), reverse=True)
+            return proc_list[:self.top_n_procs]
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
+            return []
 
     def worker(self, config: dict = None, identity: IdentityObject = None):
         try:

@@ -246,7 +246,7 @@ def signing_cert_factory(wrapped_agents):
                 "remote_pubkey": remote_pubkey,
                 "remote_privkey": remote_privkey, #remote server will sign packets with this
                 "created_at": datetime.utcnow().isoformat() + "Z",
-                "serial": str(hashlib.sha256(f"{uuid.uuid4()}-{time.time()}".encode()).hexdigest())
+                #"serial": wrapper.get_serial()
             }
 
             wrapper.set_signing_cert(signing_profile)

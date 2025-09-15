@@ -81,6 +81,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
 
         self.verbose=False
         self.debug = False
+        self.rug_pull = False
 
         self.python_site=python_site
         self.python_exec= detected_python
@@ -144,6 +145,10 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             verbose (bool): If True, spawned agents will print to stdout/stderr.
         """
         self.verbose = bool(verbose)
+
+    def set_rug_pull(self, rug_pull:bool=True):
+
+        self.rug_pull = bool(rug_pull)
 
     def set_debug(self, debug):
         """
@@ -398,6 +403,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "site_root_path": self.site_root_path,
                     "verbose": int(self.verbose),
                     "debug": int(self.debug),
+                    "rug_pull": int(self.rug_pull),
                 },
                 "tree_node": tree_node,
                 "secure_keys": {

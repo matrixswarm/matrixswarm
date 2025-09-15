@@ -4,7 +4,6 @@ import hashlib
 import uuid
 import base64
 from copy import deepcopy
-from datetime import datetime
 from PyQt5 import QtWidgets, QtCore
 
 from PyQt5.QtWidgets import (
@@ -25,7 +24,6 @@ from matrix_gui.modules.directive.deployment.helper.mint_directive_for_deploymen
 from matrix_gui.modules.directive.deployment.helper.mint_deployment_metadata import mint_deployment_metadata
 
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
-from matrix_gui.modules.vault.tagging.security_tags import get_security_tags
 from PyQt5.QtWidgets import QInputDialog
 from matrix_gui.modules.vault.crypto.cert_utils import set_hash_bang
 from PyQt5.QtWidgets import QListWidget, QPushButton, QTextEdit, QLabel
@@ -480,17 +478,18 @@ class DirectiveManagerDialog(QDialog):
                 return
             opts = opts_dialog.get_options()
 
-            # step 7. Preview the newly minted directive (only once)
+
+            # step 7.  Encrypt the directive
+            clown_car = bool(opts["clown_car"])
+            hashbang = bool(opts["hashbang"])
+            bundle, aes_key, directive_hash = generate_swarm_encrypted_directive(directive_staging, clown_car, hashbang)
+
+
+            # step 8. Preview the newly minted directive (only once)
             staging_dialog = EncryptionStagingDialog(json.dumps(directive_staging, indent=2), self)
             if staging_dialog.exec_() != QDialog.Accepted:
                 QMessageBox.information(self, "Cancelled", "Directive encryption cancelled by operator.")
                 return
-
-            clown_car = bool(opts["clown_car"])
-            hashbang = bool(opts["hashbang"])
-
-            # step 8.  Encrypt the directive
-            bundle, aes_key, directive_hash = generate_swarm_encrypted_directive(directive_staging, clown_car, hashbang)
 
             # step 9. Choose save location (default under /deploy/)
             base_path = resolve_matrixswarm_base()

@@ -13,6 +13,19 @@ from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from datetime import datetime
 
 from matrixswarm.core.mixin.agent_summary_mixin import AgentSummaryMixin
+
+
+# Agent Metadata
+__AGENT_META__ = {
+    "name": "redis_watchdog",
+    "universal_id": None,   # assigned by Matrix if missing
+    "roles": ["hive.alert", "hive.forensics.data_feed"],
+    "config_defaults": {
+        "check_interval_sec": 10,
+        "restart_limit": 3
+    }
+}
+
 class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
         super().__init__()
@@ -25,6 +38,8 @@ class Agent(BootAgent, AgentSummaryMixin):
         self.socket_path = cfg.get("socket_path", "/var/run/redis/redis-server.sock")
         self.restart_limit = cfg.get("restart_limit", 3)
         self.always_alert = bool(cfg.get("always_alert", 1))
+        self.alert_role = cfg.get("alert_to_role", None)
+        self.report_role = cfg.get("report_to_role", None)  # Optional
         self.failed_restarts = 0
         self.disabled = False
         self.alerts = {}
@@ -104,38 +119,114 @@ class Agent(BootAgent, AgentSummaryMixin):
 
     def alert_operator(self, message=None):
 
-        if not message:
-            message = "🚨 REDIS REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
+        try:
 
-        pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": "cmd_send_alert_msg"})
+            if not message:
+                message = "🚨 REDIS REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
+
+            endpoints = self.get_nodes_by_role(self.alert_role)
+            if not endpoints:
+                self.log(f"[WATCHDOG][ALERT] No alert-compatible agents found for '{self.alert_role}'.")
+                return
+
+            pk1 = self.get_delivery_packet("standard.command.packet")
+            pk1.set_data({"handler": "dummy_handler"})
+
+            try:
+                server_ip = requests.get("https://api.ipify.org").text.strip()
+            except Exception:
+                server_ip = "Unknown"
+
+            pk2 = self.get_delivery_packet("notify.alert.general")
+            pk2.set_data({
+                "server_ip": server_ip,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "universal_id": self.command_line_args.get("universal_id", "unknown"),
+                "level": "critical",
+                "msg": message,
+                "formatted_msg": f"📣 Redis Watchdog\n{message}",
+                "cause": "Redis Sentinel Alert",
+                "origin": self.command_line_args.get("universal_id", "unknown")
+            })
+
+            pk1.set_packet(pk2, "content")
+
+            for ep in endpoints:
+                pk1.set_payload_item("handler", ep.get_handler())
+                self.pass_packet(pk1, ep.get_universal_id())
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
+
+    def send_data_report(self, status, severity, details="", metrics=None):
+        """Sends a structured data packet for analysis, with optional metrics."""
 
         try:
-            server_ip = requests.get("https://api.ipify.org").text.strip()
-        except Exception:
-            server_ip = "Unknown"
+            if not self.report_role:
+                return
 
-        pk2 = self.get_delivery_packet("notify.alert.general")
-        pk2.set_data({
-            "server_ip": server_ip,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "universal_id": self.command_line_args.get("universal_id", "unknown"),
-            "level": "critical",
-            "msg": message,
-            "formatted_msg": f"📣 Redis Watchdog\n{message}",
-            "cause": "Apache Sentinel Alert",
-            "origin": self.command_line_args.get("universal_id", "unknown")
-        })
+            endpoints = self.get_nodes_by_role(self.report_role)
+            if not endpoints:
+                self.log(f"[WATCHDOG][ALERT] No report-compatible agents found for '{self.report_role}'.")
+                return
 
-        pk1.set_packet(pk2,"content")
+            pk1 = self.get_delivery_packet("standard.command.packet")
+            pk1.set_data({"handler": "cmd_ingest_status_report"})
 
-        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
-        if not alert_nodes:
-            self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
-            return
+            pk2 = self.get_delivery_packet("standard.status.event.packet")
+            pk2.set_data({
+                "source_agent": self.command_line_args.get("universal_id"),
+                "service_name": "redis",
+                "status": status,
+                "details": details,
+                "severity": severity,
+                "metrics": metrics if metrics is not None else {}
+            })
 
-        for node in alert_nodes:
-            self.pass_packet(pk1, node["universal_id"])
+            pk1.set_packet(pk2, "content")
+
+            for ep in endpoints:
+                pk1.set_payload_item("handler", ep.get_handler())
+                self.pass_packet(pk1, ep.get_universal_id())
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
+
+    def collect_redis_diagnostics(self):
+        """
+        Gathers Redis-specific diagnostics:
+        - systemctl status
+        - redis-cli INFO (if available)
+        - error log tail
+        """
+        info = {}
+        # systemd status
+        try:
+            info['systemd_status'] = subprocess.check_output(
+                ["systemctl", "status", self.service_name],
+                text=True, stderr=subprocess.STDOUT
+            ).strip()
+        except Exception as e:
+            info['systemd_status'] = f"Error: {e}"
+
+        # redis-cli info
+        try:
+            out = subprocess.check_output(["redis-cli", "info"], text=True, timeout=5)
+            info['redis_info'] = out
+        except Exception as e:
+            info['redis_info'] = f"Error: {e}"
+
+        # log tail
+        for log_path in ["/var/log/redis/redis-server.log", "/var/log/redis/redis.log"]:
+            if os.path.exists(log_path):
+                try:
+                    out = subprocess.check_output(["tail", "-n", "20", log_path], text=True)
+                    info['error_log'] = out
+                except Exception as e:
+                    info['error_log'] = f"Error: {e}"
+                break
+
+        return info
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
 
@@ -158,9 +249,16 @@ class Agent(BootAgent, AgentSummaryMixin):
                 self.log("[HAMMER] ✅ Redis is running.")
 
             else:
+                diagnostics = self.collect_redis_diagnostics()
                 if self.should_alert("redis-down"):
                     self.alert_operator("❌ Redis is DOWN. Attempting restart.")
-                self.log("[HAMMER] ❌ Redis is NOT running. Restarting.")
+                if self.report_role:
+                    self.send_data_report(
+                        status="DOWN",
+                        severity="CRITICAL",
+                        details="Redis is not running or unreachable.",
+                        metrics=diagnostics
+                    )
                 self.restart_redis()
 
         except Exception as e:

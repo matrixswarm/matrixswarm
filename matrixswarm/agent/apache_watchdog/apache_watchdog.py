@@ -1,11 +1,12 @@
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
 #Gemini, docstring-ing and added code enhancements.
-
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
+import shutil
+import threading
 import subprocess
 import time
 import requests
@@ -18,32 +19,35 @@ from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.ident
 class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
         super().__init__()
-        self.name = "ApacheSentinel"
-        cfg = self.tree_node.get("config", {})
-        self.interval = cfg.get("check_interval_sec", 10)
-        self.service_name = cfg.get("service_name", "httpd")  # or "httpd" on RHEL
-        self.ports = cfg.get("ports", [80, 443])
-        # New configuration to read both roles
-        self.alert_role = cfg.get("alert_to_role", None) #Optional
-        self.report_role = cfg.get("report_to_role", None)  # Optional
-        self.restart_limit = cfg.get("restart_limit", 3)
-        self.mod_status_url = cfg.get("mod_status_url", None)
-        self.failed_restarts = 0
-        self.disabled = False
-        self.alerts = {}
-        self.always_alert = bool(cfg.get("always_alert", 1))
-        self.alert_cooldown = cfg.get("alert_cooldown", 300)
-        self.last_status = None
-        self.stats = {
-            "date": self.today(),
-            "uptime_sec": 0,
-            "downtime_sec": 0,
-            "restarts": 0,
-            "last_state": None,
-            "last_change": time.time()
-        }
-        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
+        try:
+            self.name = "ApacheSentinel"
+            cfg = self.tree_node.get("config", {})
+            self.interval = cfg.get("check_interval_sec", 10)
+            self.service_name = cfg.get("service_name", "httpd")  # or "httpd" on RHEL
+            self.ports = cfg.get("ports", [80, 443])
+            # New configuration to read both roles
+            self.alert_role = cfg.get("alert_to_role", None) #Optional
+            self.report_role = cfg.get("report_to_role", None)  # Optional
+            self.restart_limit = cfg.get("restart_limit", 3)
+            self.mod_status_url = cfg.get("mod_status_url", None)
+            self.failed_restarts = 0
+            self.disabled = False
+            self.alerts = {}
+            self.always_alert = bool(cfg.get("always_alert", 1))
+            self.alert_cooldown = cfg.get("alert_cooldown", 300)
+            self.last_status = None
+            self.stats = {
+                "date": self.today(),
+                "uptime_sec": 0,
+                "downtime_sec": 0,
+                "restarts": 0,
+                "last_state": None,
+                "last_change": time.time()
+            }
+            self._emit_beacon = self.check_for_thread_poke("worker", timeout=90, emit_to_file_interval=10)
 
+        except Exception as e:
+            self.log(f"[__INIT__]", error=e, block="main_try", level="CRITICAL")
 
     def today(self):
         return datetime.now().strftime("%Y-%m-%d")
@@ -66,27 +70,59 @@ class Agent(BootAgent, AgentSummaryMixin):
         except Exception:
             return False
 
-    def restart_apache(self):
+    def build_restart_cmd(self, service_name):
+        if shutil.which("systemctl"):
+            return ["systemctl", "restart", service_name]
+        elif shutil.which("service"):
+            return ["service", service_name, "restart"]
+        else:
+            raise RuntimeError("No known service manager found")
+
+    def restart_service(self, service_name=None):
+        """
+        Restart a service in a background thread with timeout protection.
+        Works across watchdog agents.
+        """
         if self.disabled:
             self.log("[WATCHDOG] Watchdog disabled. Restart skipped.")
             return
-        try:
-            subprocess.run(["systemctl", "restart", self.service_name], check=True)
-            self.log("[WATCHDOG] ✅ Apache successfully restarted.")
-            self.failed_restarts = 0
-            self.stats["restarts"] += 1
-        except Exception as e:
-            self.failed_restarts += 1
-            self.log(f"[WATCHDOG][FAIL] Restart failed: {e}")
-            if self.failed_restarts >= self.restart_limit:
-                self.disabled = True
-                # Send a simple alert if configured
-                if self.alert_role:
-                    self.send_simple_alert("💀 Apache Watchdog disabled after repeated restart failures.")
 
-                # Send a detailed data report if configured
-                if self.report_role:
-                    self.send_data_report("DISABLED", "INFO", "Watchdog has been disabled due to max restart failures.")
+        # Default command (Apache on your box is `service httpd start`)
+        cmd = self.build_restart_cmd(service_name)
+
+        def _do_restart():
+            try:
+                for attempt in range(self.restart_limit):
+                    try:
+                        self._emit_beacon()
+                        self.log(f"[WATCHDOG] ⚙️ Running restart command: {' '.join(cmd)} (attempt {attempt + 1})")
+                        result = subprocess.run(
+                            cmd, capture_output=True, text=True, timeout=300, check=True
+                        )
+                        self._emit_beacon()
+                        self.log(f"[WATCHDOG] ✅ {service_name} restarted. stdout: {result.stdout.strip()}")
+                        self.failed_restarts = 0
+                        self.stats["restarts"] += 1
+                        return  # success, bail out
+                    except subprocess.TimeoutExpired:
+                        self.failed_restarts += 1
+                        self.log(f"[WATCHDOG][FAIL] Restart attempt {attempt + 1} timed out after 300s.", level="ERROR")
+                    except subprocess.CalledProcessError as e:
+                        self.failed_restarts += 1
+                        self.log(f"[WATCHDOG][FAIL] Restart attempt {attempt + 1} failed: {e.stderr}", level="ERROR")
+
+                # If we’re here, all attempts failed
+                self.disabled = True
+                self.log(f"[WATCHDOG] 💀 Disabled after {self.restart_limit} failed restarts.", level="CRITICAL")
+            except Exception as e:
+                self.failed_restarts += 1
+                self.log(f"[WATCHDOG][FAIL] Unexpected restart error", error=e, level="ERROR")
+
+        # Launch restart in background so worker/beacon loop never freezes
+        threading.Thread(target=_do_restart, daemon=True).start()
+
+    def restart_apache(self):
+        self.restart_service(service_name=self.service_name)
 
     def update_stats(self, running):
         now = time.time()
@@ -110,67 +146,88 @@ class Agent(BootAgent, AgentSummaryMixin):
         return False
 
     def send_simple_alert(self, message=None):
-        if not message:
-            message = "🚨 APACHE REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
-
-        pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": "cmd_send_alert_msg"})
 
         try:
-            server_ip = requests.get("https://api.ipify.org").text.strip()
-        except Exception:
-            server_ip = "Unknown"
 
-        pk2 = self.get_delivery_packet("notify.alert.general")
-        pk2.set_data({
-            "server_ip": server_ip,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "universal_id": self.command_line_args.get("universal_id", "unknown"),
-            "level": "critical",
-            "msg": message,
-            "formatted_msg": f"📣 Apache Watchdog\n{message}",
-            "cause": "Apache Sentinel Alert",
-            "origin": self.command_line_args.get("universal_id", "unknown")
-        })
+            if not message:
+                message = "🚨 APACHE REFLEX TERMINATION\n\nReflex loop failed (exit_code = -1)"
 
-        pk1.set_packet(pk2,"content")
 
-        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
-        if not alert_nodes:
-            self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
-            return
+            endpoints = self.get_nodes_by_role(self.alert_role)
+            if not endpoints:
+                self.log("[WATCHDOG][ALERT] No alert-compatible agents found for 'hive.alert'.")
+                return
 
-        for node in alert_nodes:
-            self.pass_packet(pk1, node["universal_id"])
+            pk1 = self.get_delivery_packet("standard.command.packet")
+
+            try:
+                server_ip = requests.get("https://api.ipify.org").text.strip()
+            except Exception:
+                server_ip = "Unknown"
+
+            pk2 = self.get_delivery_packet("notify.alert.general")
+            pk2.set_data({
+                "server_ip": server_ip,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "universal_id": self.command_line_args.get("universal_id", "unknown"),
+                "level": "critical",
+                "msg": message,
+                "formatted_msg": f"📣 Apache Watchdog\n{message}",
+                "cause": "Apache Sentinel Alert",
+                "origin": self.command_line_args.get("universal_id", "unknown")
+            })
+
+            self.log_proto(
+                f"ALERT dispatched for user { self.command_line_args.get("universal_id", "unknown")} from {server_ip}",
+                level="WARN",
+                block="DROP_ALERT"
+            )
+
+            pk1.set_packet(pk2,"content")
+
+            for ep in endpoints:
+                pk1.set_payload_item("handler", ep.get_handler())
+                self.pass_packet(pk1, ep.get_universal_id())
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
+
 
     def send_data_report(self, status, severity, details="", metrics=None):
         """Sends a structured data packet for analysis, now with optional metrics."""
-        if not self.report_role:
-            return
 
-        report_nodes = self.get_nodes_by_role(self.report_role)
-        if not report_nodes:
-            return
+        try:
+            if not self.report_role:
+                return
 
-        pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": "cmd_ingest_status_report"})
+            endpoints = self.get_nodes_by_role(self.report_role)
+            if not endpoints:
+                self.log(f"[WATCHDOG][ALERT] No alert-compatible agents found for '{self.report_role}'.")
+                return
 
-        pk2 = self.get_delivery_packet("standard.status.event.packet")
+            pk1 = self.get_delivery_packet("standard.command.packet")
+            pk1.set_data({"handler": "cmd_ingest_status_report"})
 
-        # Include the diagnostic metrics in the packet's data payload.
-        pk2.set_data({
-            "source_agent": self.command_line_args.get("universal_id"),
-            "service_name": "apache",
-            "status": status,
-            "details": details,
-            "severity": severity,
-            "metrics": metrics if metrics is not None else {}
-        })
+            pk2 = self.get_delivery_packet("standard.status.event.packet")
 
-        pk1.set_packet(pk2, "content")
+            # Include the diagnostic metrics in the packet's data payload.
+            pk2.set_data({
+                "source_agent": self.command_line_args.get("universal_id"),
+                "service_name": "apache",
+                "status": status,
+                "details": details,
+                "severity": severity,
+                "metrics": metrics if metrics is not None else {}
+            })
 
-        for node in report_nodes:
-            self.pass_packet(pk1, node["universal_id"])
+            pk1.set_packet(pk2, "content")
+
+            for ep in endpoints:
+                pk1.set_payload_item("handler", ep.get_handler())
+                self.pass_packet(pk1, ep.get_universal_id())
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
 
     def collect_apache_diagnostics(self):
         info = {}
@@ -205,9 +262,10 @@ class Agent(BootAgent, AgentSummaryMixin):
 
     def worker(self, config: dict = None, identity: IdentityObject = None):
 
-        self._emit_beacon = self.check_for_thread_poke("worker", timeout=self.interval*2, emit_to_file_interval=10)
 
         try:
+
+            self._emit_beacon()
             # This mixin method will reset stats daily, making the check below essential.
             self.maybe_roll_day("apache")
             is_healthy = self.is_apache_running() and self.are_ports_open()
@@ -225,6 +283,7 @@ class Agent(BootAgent, AgentSummaryMixin):
 
                 # Only take action if the service state has actually changed.
                 if is_healthy != last_state_was_healthy:
+
                     self.update_stats(is_healthy)
 
                     # Case 1: Service just recovered (it was down, now it's up)
@@ -258,7 +317,10 @@ class Agent(BootAgent, AgentSummaryMixin):
 
                 # Case 3: Service state is unchanged
                 else:
-                    self.log(f"[WATCHDOG] {'✅' if is_healthy else '❌'} Apache status is stable.")
+                    if is_healthy:
+                        self.log("[WATCHDOG] ✅ Apache status is stable.")
+                    else:
+                        self.log("[WATCHDOG] ❌ Apache is still NOT healthy.")
 
         except Exception as e:
             self.log(error=e, block="main_try")

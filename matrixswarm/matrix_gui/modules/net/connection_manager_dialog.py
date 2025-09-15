@@ -14,11 +14,11 @@ class ConnectionManagerDialog(QtWidgets.QDialog):
 
         # Track tables by proto
         self.tables = {}
-        for proto in ["https", "wss", "discord"]:
+        for proto in ["https", "wss", "discord", "telegram", "openai", "email", "slack"]:
             table = QtWidgets.QTableWidget()
-            table.setColumnCount(5)
+            table.setColumnCount(6)
             table.setHorizontalHeaderLabels(
-                ["Label", "Host / Target", "Port / Channel", "Used In", "Serial"]
+                ["Label", "Host / Target", "Port / Channel", "Default Channel", "Used In", "Serial"]
             )
             table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
             table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -69,11 +69,22 @@ class ConnectionManagerDialog(QtWidgets.QDialog):
         for conn_id, data in cm.items():
             row = table.rowCount()
             table.insertRow(row)
-            table.setItem(row, 0, QtWidgets.QTableWidgetItem(data.get("label", conn_id)))
-            table.setItem(row, 1, QtWidgets.QTableWidgetItem(data.get("host") or data.get("channel_id", "")))
-            table.setItem(row, 2, QtWidgets.QTableWidgetItem(str(data.get("port") or "")))
-            table.setItem(row, 3, QtWidgets.QTableWidgetItem(", ".join(self.find_usage(conn_id))))
-            table.setItem(row, 4, QtWidgets.QTableWidgetItem(data.get("serial", "")))
+
+            # Label
+            label = data.get("label", conn_id)
+            table.setItem(row, 0, QtWidgets.QTableWidgetItem(str(label)))
+            # Host / Target
+            host_or_target = data.get("host") or data.get("channel_id") or ""
+            table.setItem(row, 1, QtWidgets.QTableWidgetItem(str(host_or_target)))
+            # Port / Channel
+            port_or_channel = data.get("port") or data.get("chat_id") or data.get("api_key", "")[:6] + "…" or ""
+            table.setItem(row, 2, QtWidgets.QTableWidgetItem(str(port_or_channel)))
+            # Default Channel
+            table.setItem(row, 3, QtWidgets.QTableWidgetItem(str(data.get("default_channel", ""))))
+            # Used In
+            table.setItem(row, 4, QtWidgets.QTableWidgetItem(", ".join(self.find_usage(conn_id))))
+            # Serial
+            table.setItem(row, 5, QtWidgets.QTableWidgetItem(str(data.get("serial", ""))))
 
     def current_proto_and_table(self):
         idx = self.tabs.currentIndex()
@@ -109,7 +120,10 @@ class ConnectionManagerDialog(QtWidgets.QDialog):
         if row < 0:
             return
 
-        label = table.item(row, 0).text()
+        item = table.item(row, 0)
+        if not item:
+            return  # nothing selected or row not populated
+        label = item.text()
         conn_id = self.find_conn_id_by_label(proto, label)
         cm_all = self.get_connection_manager()
         cm_old = cm_all.get(proto, {})

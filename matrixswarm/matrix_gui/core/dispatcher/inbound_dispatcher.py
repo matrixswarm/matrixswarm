@@ -12,7 +12,6 @@ class InboundDispatcher:
     def __init__(self, bus):
         self.bus = bus
         bus.on("inbound.message", self._handle_inbound)
-        print("[DISPATCHER][INBOUND] ✅ Armed and listening for inbound.message")
 
     def _handle_inbound(self, session_id, channel, source, payload, ts=None, **_):
         try:
@@ -25,15 +24,21 @@ class InboundDispatcher:
                 print("[INBOUND] ❌ Missing serial in inbound packet")
                 return
 
-            # Look up signing pubkey from vault by serial
-            certs = deployment.get("certs", {})
             signer_pubkey_pem = None
-            for agent_uid, cert_block in certs.items():
-                signing = cert_block.get("signing", {})
-                if signing.get("serial") == serial:
+            signing = None
 
-                    signer_pubkey_pem = pem_fix(signing.get("pubkey"))
+            # === First check: agent root serials ===
+            agents = deployment.get("agents", [])
+            uid_match = None
+            for agent in agents:
+                if agent.get("serial") == serial:
+                    uid_match = agent.get("universal_id")
                     break
+
+            if uid_match:
+                cert_block = deployment.get("certs", {}).get(uid_match, {})
+                signing = cert_block.get("signing", {})
+                signer_pubkey_pem = pem_fix(signing.get("pubkey"))
 
             if not signer_pubkey_pem:
                 print(f"[INBOUND] ❌ No cert found for serial {serial}")
@@ -80,28 +85,16 @@ class InboundDispatcher:
 
             # === 3. Emit Verified Events ===
             handler = verified_payload.get("handler")
-            if handler:
-                EventBus.emit(
-                    f"inbound.verified.{handler}",
-                    session_id=session_id,
-                    channel=channel,
-                    source=source,
-                    payload=verified_payload,
-                    ts=ts,
-                )
+            scoped_handler = f"{handler}.{session_id}"
 
-                # also wildcard events for namespace
-                parts = handler.split(".")
-                for i in range(1, len(parts)):
-                    ns = ".".join(parts[:i]) + ".*"
-                    EventBus.emit(
-                        f"inbound.verified.{ns}",
-                        session_id=session_id,
-                        channel=channel,
-                        source=source,
-                        payload=verified_payload,
-                        ts=ts,
-                    )
+            EventBus.emit(
+                f"inbound.verified.{scoped_handler}",
+                session_id=session_id,
+                channel=channel,
+                source=source,
+                payload=verified_payload,
+                ts=ts,
+            )
 
         except Exception as e:
             print(f"[INBOUND] ❌ Verification/decrypt failed: {e}")

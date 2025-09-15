@@ -20,7 +20,11 @@ class AgentCertWrapper:
         return self._get_cert_block().get("ca_root", {}).get("cert")
 
     @property
-    def spki_pin(self):
+    def client_spki_pin(self):
+        return self._get_cert_block().get("client_cert", {}).get("spki_pin")
+
+    @property
+    def server_spki_pin(self):
         return self._get_cert_block().get("server_cert", {}).get("spki_pin")
 
     @property

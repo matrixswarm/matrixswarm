@@ -12,6 +12,8 @@ from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from matrixswarm.core.class_lib.time_utils.heartbeat_checker import check_heartbeats
 from matrixswarm.core.utils.analyze_spawn_records import analyze_spawn_records
+
+
 class Agent(BootAgent):
     """
     The AgentDoctor is a diagnostic agent that monitors the health and status of all other agents in the swarm.
@@ -118,7 +120,7 @@ class Agent(BootAgent):
         Returns:
             list: A list of agent universal IDs.
         """
-        comm_path = self.path_resolution.get("comm_path", "/matrix/ai/latest/comm")
+        comm_path = self.path_resolution.get("comm_path")
         agents = []
         for agent_id in os.listdir(comm_path):
             base = os.path.join(comm_path, agent_id)

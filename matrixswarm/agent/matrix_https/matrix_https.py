@@ -54,6 +54,7 @@ class Agent(BootAgent):
             key_pem = server_cert.get("key")
             ca_pem = ca_root.get("cert")
 
+
             if not cert_pem or not key_pem:
                 raise ValueError("Missing server TLS cert/key in connection.server_cert")
 
@@ -86,6 +87,13 @@ class Agent(BootAgent):
             self._emit_beacon = self.check_for_thread_poke(
                 "https_service", timeout=60, emit_to_file_interval=10
             )
+
+            self.log(f"[SERVER-CERT-DEBUG] uid={self.command_line_args['universal_id']} "
+                  f"cert_len={len(cert_pem or '')} "
+                  f"key_len={len(key_pem or '')} "
+                  f"ca_len={len(ca_pem or '')} "
+                  f"spki_pin={self.expected_peer_spki}")
+
             self.log("[CERT-LOADER] In-memory TLS certs loaded successfully.")
             self.configure_routes()
 
@@ -200,10 +208,7 @@ class Agent(BootAgent):
                 self.log(f"[MATRIX-HTTPS][RELAY] {handler} from {ip}")
 
                 pk = self.get_delivery_packet("standard.command.packet", new=True)
-                pk.set_data(inner)  # relay the verified inner command
-
-                wrapper = self.get_delivery_packet("standard.general.json.packet", new=True)
-                pk.set_packet(wrapper, "content")
+                pk.set_data(inner.get('content'))  # relay the verified inner command
 
                 self.pass_packet(pk, target_uid="matrix")
                 return jsonify({"status": "ok", "message": "Relayed to Matrix"})
@@ -301,7 +306,7 @@ class Agent(BootAgent):
                 )
 
                 # Limit how long handshakes can sit idle
-                httpd.socket.settimeout(5)  # 5-second handshake window
+                httpd.socket.settimeout(30)  # 5-second handshake window
 
                 self.log(f"[HTTPS] Listening on port {self.port}")
 

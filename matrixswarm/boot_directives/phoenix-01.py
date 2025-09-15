@@ -88,14 +88,13 @@ matrix_directive = {
                     # 'ip2'
                 ],
                 "service-manager": [{
-                    "role": ["hive.alert.send_alert_msg, hive.rpc.route, hive.log.delivery"],
+                    "role": ["hive.alert@cmd_send_alert_msg, hive.rpc@cmd_rpc_route, hive.log@cmd_stream_log"],
                     "scope": ["parent", "any"],  # who it serves
                     "priority": {  # lower = more preferred
                         "hive.log.delivery": -1,
                         "hive.proxy.route": 5,
                         "default": 10
                     },
-                    "exclusive": False  # can other services respond?
                 }],
 
             },
@@ -103,6 +102,23 @@ matrix_directive = {
                 "proto": "wss"
               },
             }
+          },
+          {
+            "universal_id": "log_sentinel",
+            "name": "log_sentinel",
+            "config": {
+
+                "service-manager": [{
+                    "role": ["hive.log@cmd_stream_log"],
+                    "scope": ["parent", "any"],  # who it serves
+                    "priority": {  # lower = more preferred
+                        "hive.log.delivery": -1,
+                        "hive.proxy.route": 5,
+                        "default": 10
+                    },
+                }],
+
+            },
           }
         ]
       }

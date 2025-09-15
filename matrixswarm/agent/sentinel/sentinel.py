@@ -153,8 +153,8 @@ class Agent(BootAgent):
 
                     except Exception as e:
                         self.log(f"failed to spawn agent", error=e, block="main_try", level="error")
-
-                    interruptible_sleep(self, 10)
+                    finally:
+                        interruptible_sleep(self, 10)
 
         except Exception as e:
             self.log(error=e, block="main_try")

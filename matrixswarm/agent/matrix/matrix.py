@@ -96,7 +96,7 @@ class Agent(BootAgent):
             priv_pem=pem_fix(priv_pem)
             self._signing_key_obj = RSA.import_key(priv_pem.encode() if isinstance(priv_pem, str) else priv_pem)
 
-        self._serial_num= self.tree_node.get('config', {}).get('security', {}).get('serial', {})
+        self._serial_num= self.tree_node.get('serial', {})
 
         self._seed_acl()  # builds dict-shaped ACL entries for matrix + dominion
 
@@ -324,8 +324,8 @@ class Agent(BootAgent):
 
                 pk1.set_packet(pk2, "content")
 
-                for node in alert_nodes:
-                    self.pass_packet(pk1, target_uid=node["universal_id"])
+                for ep in alert_nodes:
+                    self.pass_packet(pk1, target_uid=ep.get_universal_id())
 
         except Exception as e:
             self.log("Failed to process cmd_delete_agent", error=e, block="main-try")
@@ -812,7 +812,7 @@ class Agent(BootAgent):
 
             reaper_node['config']['death_warrant'] = signed_warrant
 
-            # Inject Reaper
+            # Inject Reaper as a Matrix child
             reaper_packet = {
                 "target_universal_id": "matrix",
                 "subtree": reaper_node
@@ -1063,8 +1063,8 @@ class Agent(BootAgent):
 
                 pk1.set_packet(pk2, "content")
 
-                for node in alert_nodes:
-                    self.pass_packet(pk1, node["universal_id"])
+                for ep in alert_nodes:
+                    self.pass_packet(pk1, ep.get_universal_id())
 
         except Exception as e:
             self.log(error=e, block="main_try")
@@ -1403,6 +1403,59 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main_try")
 
+    def cmd_service_request(self, content, packet, identity: IdentityObject = None):
+        """
+        Dispatch a generic service request to one or more agents that advertise a role.
+
+        Args:
+            content (dict): {
+                "service": "<role pattern>",     # e.g. "hive.log"
+                "payload": { ... }               # inner content to send
+            }
+            packet (dict): The raw inbound packet.
+            identity (IdentityObject): Verified identity of the sender.
+        """
+        try:
+
+            self.log(f'content: {content}')
+
+            service_role = content.get("service")
+            payload = content.get("payload", {})
+
+            if not service_role:
+                self.log("[SERVICE-REQ][ERROR] Missing 'service' field.")
+                return
+
+            # Use refactored get_nodes_by_role → ServiceEndpoint objects
+            endpoints = self.get_nodes_by_role(service_role)
+            if not endpoints:
+                self.log(f"[SERVICE-REQ] No agents found for role '{service_role}'")
+                return
+
+            for ep in endpoints:
+
+                target_uid = ep.get_universal_id()
+                handler = ep.get_handler()
+
+                if not handler or not target_uid:
+                    self.log(f"[SERVICE-REQ][WARN] Skipping endpoint {ep}")
+                    continue
+
+                # Build command packet
+                pk = self.get_delivery_packet("standard.command.packet")
+                pk.set_data({
+                    "handler": handler,
+                    "content": payload,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "origin": self.command_line_args.get("universal_id", "matrix")
+                })
+
+                self.pass_packet(pk, target_uid)
+                self.log(f"[SERVICE-REQ] Routed '{service_role}' → {target_uid} ({handler})")
+
+        except Exception as e:
+            self.log(error=e, block="main_try")
+
     # gives a given agent its agent_tree.json
     #2 types of trees roll through here: Matrix agent_tree_master.json and agents agent_tree.json
     #if encryption is on: every node will have a vault dict, inside contains the node's public key, timestamp issued
@@ -1520,38 +1573,39 @@ class Agent(BootAgent):
                     self.log("[TREE] agent_tree_master saved.")
 
             #deliver agent listing to gui
-            alert_role = self.tree_node.get("rpc_router_role", "hive.rpc.route")
+            alert_role = self.tree_node.get("rpc_router_role", "hive.rpc")
             if push_tree_home and alert_role:
-
-                # Encrypt for hive
                 remote_pub_pem = self._signing_keys.get("remote_pubkey")
 
-                data = {
-                        "content": self._agent_tree_master.root,
-                        "handler": "agent_tree_master.update"
+                # Ask each relay for its alive sessions
+                for ep in self.get_nodes_by_role(alert_role):
+                    relay_uid = ep.get_universal_id()
+                    alive_sessions = self.has_fresh_broadcast_flag(relay_uid)
+
+                    for sess in alive_sessions:
+                        data = {
+                            "handler": "agent_tree_master.update",
+                            "session_id": sess,
+                            "content": self._agent_tree_master.root,
                         }
 
-                #encrypt the random aes key with remote pubkey
-                sealed = encrypt_with_ephemeral_aes(data, remote_pub_pem)
+                        sealed = encrypt_with_ephemeral_aes(data, remote_pub_pem)
+                        content = {
+                            "serial": self._serial_num,
+                            "content": sealed,
+                            "timestamp": int(time.time())
+                        }
+                        sig = sign_data(content, self._signing_key_obj)
+                        content["sig"] = sig
 
-                if not self._serial_num:
-                    raise ValueError("[OUTBOUND] ❌ Missing serial in signing keys")
-
-                content = {
-                    "serial": self._serial_num,
-                    "content": sealed,
-                    "timestamp": int(time.time())
-                }
-                 # Sign with Matrix privkey
-                sig = sign_data(content, self._signing_key_obj)
-                content["sig"] = sig
-
-                pk1 = self.get_delivery_packet("standard.command.packet")
-                pk1.set_data({"handler": "cmd_rpc_route", "content":content})
-
-                # Broadcast to all gang members with that role
-                for node in self.get_nodes_by_role(alert_role):
-                    self.pass_packet(pk1, node["universal_id"])
+                        pk1 = self.get_delivery_packet("standard.command.packet")
+                        pk1.set_data({
+                            "handler": ep.get_handler(),
+                            "origin": self.command_line_args['universal_id'],
+                            "session_id": sess,  # outer too, for websocket routing
+                            "content": content
+                        })
+                        self.pass_packet(pk1, relay_uid)
 
             return True
 
@@ -1577,19 +1631,21 @@ class Agent(BootAgent):
                     if not uid:
                         return
 
-                    statuses = check_heartbeats(self.path_resolution["comm_path"], uid, time_delta_timeout)
+                    result  = check_heartbeats(self.path_resolution["comm_path"], uid, time_delta_timeout)
                     thread_status = {}
-                    if statuses is None:
-                        thread_status = {"error": "❌ no beacon files"}
+                    if result["meta"]["error_success"]:
+                        thread_status = {"error": f"❌ {result['meta']['error']}"}
                     else:
-                        for t, info in statuses.items():
+                        for t, info in result["threads"].items():
                             delta = round(info["delta"], 1)
-                            if info["status"] == "sleeping":
-                                thread_status[t] = f"😴 sleep (wake in {abs(delta)}s)"
-                            elif info["status"] == "alive":
-                                thread_status[t] = f"✅ {delta}s"
-                            else:
-                                thread_status[t] = f"💥 failed ({delta}s)"
+                            thread_status[t] = {
+                                "status": info["status"],
+                                "last_seen": info["last_seen"],
+                                "delta": delta,
+                                "timeout": info["timeout"],
+                                "sleep_for": info.get("sleep_for", "-"),
+                                "wake_due": info.get("wake_due", "-"),
+                            }
 
                     #Spawn analysis
                     spawn_data = analyze_spawn_records(
@@ -1604,6 +1660,20 @@ class Agent(BootAgent):
                         "flip_tripping": spawn_data["flip_tripping"]
                     }
 
+                    # Load raw spawn records for GUI
+                    spawn_dir = os.path.join(self.path_resolution["comm_path"], uid, "spawn")
+                    spawn_records = []
+                    try:
+                        for f in sorted(Path(spawn_dir).glob("*.spawn"), reverse=True)[:5]:  # last 5
+                            with open(f, encoding="utf-8") as fh:
+                                info = json.load(fh)
+                                spawn_records.append({
+                                    "timestamp": info.get("timestamp"),
+                                    "note": info.get("uuid", "")
+                                })
+                    except Exception:
+                        pass
+
                     if spawn_report["flip_tripping"]:
                         spawn_report["note"] = "flip-tripping detected"
 
@@ -1613,16 +1683,47 @@ class Agent(BootAgent):
                         "spawn": spawn_report
                     }
 
+                    summary = {
+                        "thread_count": result["meta"].get("thread_count", 0),
+                        "latest_delta": round(result["meta"].get("latest_delta", 0), 1),
+                        "last_seen_any": result["meta"].get("last_seen_any"),
+                        "error": result["meta"].get("error"),
+                        "error_success": result["meta"].get("error_success"),
+                    }
+
+                    node.setdefault("meta", {})
+
+                    node["meta"].update({
+                        "threads": [
+                            {
+                                "thread": t,
+                                "status": info.get("status", "-"),
+                                "delta": round(info.get("delta", 0), 1),
+                                "timeout": info.get("timeout", "-"),
+                                "sleep_for": info.get("sleep_for", "-"),
+                                "wake_due": info.get("wake_due", "-"),
+                            }
+                            for t, info in result["threads"].items()
+                        ],
+                        "summary": summary,
+                        "spawn": spawn_report.get("count", 0),
+                        "flipping": spawn_report.get("flip_tripping", False),
+                        "name": node["name"],
+                        "universal_id": uid
+                    })
+
+                    node["meta"]["spawn_info"] = spawn_records
+
                     for child in node.get("children", []):
                         recurse(child)
 
                 recurse(self._agent_tree_master.root)
 
                 # Push tree if relays are alive
-                alert_role = self.tree_node.get("rpc_router_role", "hive.rpc.route")
+                alert_role = self.tree_node.get("rpc_router_role", "hive.rpc")
                 live_relays = [
-                    n for n in self.get_nodes_by_role(alert_role)
-                    if self.has_fresh_broadcast_flag(n["universal_id"])
+                    ep for ep in self.get_nodes_by_role(alert_role)
+                    if self.has_fresh_broadcast_flag(ep.get_universal_id())
                 ]
 
                 if live_relays:

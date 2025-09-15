@@ -1,3 +1,6 @@
+import hashlib
+import uuid
+import time
 from matrix_gui.modules.directive.entity.agent import Agent
 from matrix_gui.modules.directive.aggregator.agent import AgentAggregator
 from matrix_gui.modules.directive.entity.adapters.agent_connection_wrapper import AgentConnectionWrapper
@@ -12,6 +15,7 @@ def agent_aggregator_wrapper(template):
         a = Agent()
         a.add_item("agent", {
             "universal_id": node.get("universal_id"),
+            "serial": str(hashlib.sha256(f"{uuid.uuid4()}-{time.time()}".encode()).hexdigest()),
             "name": node.get("name"),
             "tags": node.get("tags", {}),
             "config": node.get("config", {}),

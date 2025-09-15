@@ -23,7 +23,6 @@ class Agent(BootAgent):
     def __init__(self):
         super().__init__()
 
-
         # Load targets, kill ID, and initialize paths
         config = self.tree_node.get("config", {})
         self.is_mission = bool(config.get("is_mission", False))
@@ -100,7 +99,6 @@ class Agent(BootAgent):
         self.log("[INFO] Mission completed and the agent is now stopping.")
         self.leave_tombstone_and_die()
 
-    #TODO verify Matrix sig
     def verify_hit_cookie(self, payload, signature):
         try:
             pass
@@ -204,50 +202,7 @@ class Agent(BootAgent):
         finally:
             self.running = False  # Always stop running, even if tombstone writing fails
 
-    def attempt_kill(self, universal_id):
-        """
-        Deliver 'die' and 'tombstone' signals to a directory and wait for graceful shutdown.
-        Escalates with Permanent ID Handler if the process resists termination.
-        """
-        # Paths for the target
-        pod_path = os.path.join(self.path_resolution['pod_path'], universal_id)
-        comm_path = os.path.join(self.path_resolution['comm_path'], universal_id)
 
-        # Send 'die' and 'tombstone' signals via `comm_path`
-        incoming = os.path.join(comm_path, "incoming")
-        os.makedirs(incoming, exist_ok=True)
-        with open(os.path.join(incoming, "die"), "w", encoding="utf-8") as f:
-            json.dump({"cmd": "die", "force": False}, f)
-        with open(os.path.join(incoming, "tombstone"), "w", encoding="utf-8") as f:
-            f.write("true")
-
-        self.log(f"[DISPOSABLE-REAPER] Die and tombstone delivered to {universal_id}")
-
-        # Monitor shutdown success via hello.moto file
-        hello_path = os.path.join(pod_path, "hello.moto")
-        max_wait = 18
-        elapsed = 0
-        while elapsed < max_wait:
-            if not os.path.exists(hello_path):
-                self.log(f"[DISPOSABLE-REAPER] {universal_id} down gracefully.")
-                return True
-            time.sleep(3)
-            elapsed += 3
-
-        # Escalate with PID handler if process resists
-        self.log(f"[DISPOSABLE-REAPER] {universal_id} resisted — invoking Full PID Handler escalation.")
-        self.escalate_with_pid_handler(universal_id)
-        return False
-
-    def escalate_with_pid_handler(self, universal_id):
-        """
-        Escalate the shutdown process using the Permanent ID handler for the specified target.
-        """
-        try:
-            self.universal_id_handler.shutdown_processes(universal_id, universal_id)
-            self.log(f"[DISPOSABLE-REAPER] PID Handler escalation complete for {universal_id}")
-        except Exception as e:
-            self.log(f"[DISPOSABLE-REAPER] PID Handler escalation FAILED for {universal_id}: {e}")
 
     def deliver_death_warrant(self, signed_warrant):
 
@@ -272,25 +227,6 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"Sync request failed: {e}")
 
-
-
-    def send_mission_report(self, results):
-        """
-        Generate and save a mission report including results for each target.
-        """
-        payload = {
-            "kill_id": self.kill_id,
-            "targets": self.targets,
-            "results": results,
-            "timestamp": time.time(),
-            "message": f"Kill operation {self.kill_id} complete."
-        }
-
-        report_path = os.path.join(self.outbox_path, f"reaper_mission_{self.kill_id}.json")
-        with open(report_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-
-        self.log(f"[DISPOSABLE-REAPER] Mission report written: {report_path}")
 
 if __name__ == "__main__":
     agent = Agent()

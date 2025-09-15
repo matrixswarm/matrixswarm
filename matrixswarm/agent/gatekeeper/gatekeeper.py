@@ -32,6 +32,7 @@ class Agent(BootAgent):
         self.geoip_enabled = cfg.get("geoip_enabled", 1)
         self.always_alert = bool(cfg.get("always_alert", 1))
         self.cooldown_sec = 300
+        self.interval=10
         self.last_alerts = {}
 
         cfg_db = str(cfg.get("maxmind_db", "")).strip()
@@ -44,7 +45,7 @@ class Agent(BootAgent):
 
         self.log_dir = os.path.join(self.path_resolution["comm_path"], "gatekeeper")
         os.makedirs(self.log_dir, exist_ok=True)
-        self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
+        self._emit_beacon = self.check_for_thread_poke("tail_log", timeout=60, emit_to_file_interval=10)
 
     def should_alert(self, key):
 
@@ -76,11 +77,15 @@ class Agent(BootAgent):
             self.log(f"[GATEKEEPER][GEOIP][ERROR] {e}")
             return {"ip": ip}
 
+
     def drop_alert(self, info):
 
-        pk1 = self.get_delivery_packet("standard.command.packet")
-        pk1.set_data({"handler": "cmd_send_alert_msg"})
+        endpoints = self.get_nodes_by_role("hive.alert")
+        if not endpoints:
+            self.log("[WATCHDOG][ALERT] No alert-compatible agents found for 'hive.alert'.")
+            return
 
+        pk1 = self.get_delivery_packet("standard.command.packet")
         pk2 = self.get_delivery_packet("notify.alert.general")
 
         try:
@@ -108,57 +113,69 @@ class Agent(BootAgent):
             "origin": self.command_line_args.get("universal_id", "unknown")
         })
 
+        self.log_proto(
+            f"ALERT dispatched for user {info.get('user')} from {info.get('ip')}",
+            level="WARN",
+            block="DROP_ALERT"
+        )
+
         pk1.set_packet(pk2, "content")
 
-        alert_nodes = self.get_nodes_by_role("hive.alert.send_alert_msg")
-        if not alert_nodes:
-            self.log("[WATCHDOG][ALERT] No alert-compatible agents found.")
-            return
-
-        for node in alert_nodes:
-            self.pass_packet(pk1, node["universal_id"])
+        for ep in endpoints:
+            pk1.set_payload_item("handler", ep.get_handler())
+            self.pass_packet(pk1, ep.get_universal_id())
 
     def tail_log(self):
+
         self.log(f"[GATEKEEPER] Tailing: {self.log_path}")
-        with subprocess.Popen(["tail", "-n", "0", "-F", self.log_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
-            for line in proc.stdout:
-                if "Accepted" in line and "from" in line:
-                    try:
-                        timestamp = " ".join(line.strip().split()[0:3])
-                        if "password" in line:
-                            auth_method = "password"
-                        elif "publickey" in line:
-                            auth_method = "public key"
-                        else:
-                            auth_method = "unknown"
-
-                        user = line.split("for")[1].split("from")[0].strip()
-                        ip = line.split("from")[1].split()[0].strip()
-
+        self._emit_beacon()
+        try:
+            with subprocess.Popen(["tail", "-n", "0", "-F", self.log_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as proc:
+                if proc.stdout is None:
+                    self.log("[GATEKEEPER] ❌ tail stdout unavailable, aborting.")
+                for line in proc.stdout:
+                    self._emit_beacon()
+                    if "Accepted" in line and "from" in line:
                         try:
-                            ipaddress.ip_address(ip)
-                        except ValueError:
-                            self.log(f"[GATEKEEPER][SKIP] Invalid IP: {ip}")
-                            return
+                            timestamp = " ".join(line.strip().split()[0:3])
+                            if "password" in line:
+                                auth_method = "password"
+                            elif "publickey" in line:
+                                auth_method = "public key"
+                            else:
+                                auth_method = "unknown"
 
-                        tty = "unknown"
-                        geo = self.resolve_ip(ip)
-                        alert_data = {
-                            "user": user,
-                            "ip": ip,
-                            "tty": tty,
-                            "auth_method": auth_method,
-                            "timestamp": timestamp,
-                            **geo
-                        }
+                            user = line.split("for")[1].split("from")[0].strip()
+                            ip = line.split("from")[1].split()[0].strip()
 
-                        if self.should_alert(ip):
-                            self.drop_alert(alert_data)
+                            try:
+                                ipaddress.ip_address(ip)
+                            except ValueError:
+                                self.log(f"[GATEKEEPER][SKIP] Invalid IP: {ip}")
+                                return
 
-                        self.persist(alert_data)
+                            tty = "unknown"
+                            geo = self.resolve_ip(ip)
+                            alert_data = {
+                                "user": user,
+                                "ip": ip,
+                                "tty": tty,
+                                "auth_method": auth_method,
+                                "timestamp": timestamp,
+                                **geo
+                            }
 
-                    except Exception as e:
-                        self.log(f"[GATEKEEPER][PARSER][ERROR] Failed to parse login line: {e}")
+                            if self.should_alert(ip):
+                                self.drop_alert(alert_data)
+
+                            self.persist(alert_data)
+
+                        except Exception as e:
+                            self.log(f"[GATEKEEPER][PARSER][ERROR] Failed to parse login line: {e}")
+
+        except Exception as e:
+            self.log(f"Unexpected restart error", error=e, level="ERROR", block="main_try")
+
 
     def persist(self, data):
         fname = f"ssh_{self.today()}.log"
@@ -170,9 +187,13 @@ class Agent(BootAgent):
         return datetime.now().strftime("%Y-%m-%d")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
-        self._emit_beacon()
-        self.tail_log()
-        interruptible_sleep(self, 10)
+
+        try:
+            self.tail_log()
+        except Exception as e:
+            self.log("[GATEKEEPER] tail_log crashed in worker, respawning...", error=e)
+
+        interruptible_sleep(self, self.interval)
 
 if __name__ == "__main__":
     agent = Agent()

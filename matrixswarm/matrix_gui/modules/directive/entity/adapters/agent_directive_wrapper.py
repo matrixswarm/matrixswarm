@@ -7,6 +7,9 @@ class AgentDirectiveWrapper:
     def uid(self) -> str:
         return self.agent.universal_id
 
+    def get_serial(self):
+        return self.agent.get_item('agent').get('serial',"")
+
     def name(self) -> str:
         return self.agent.name
 

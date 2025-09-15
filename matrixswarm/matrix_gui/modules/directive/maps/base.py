@@ -17,10 +17,26 @@ CERT_INJECTION_MAP = {
         "proto_required": ["https", "wss"]
     },
     "connection": {
-        "target": ["config"],
-        "fields": {
-            "": ["port", "allowlist_ips"]
+        'wss':{
+            "target": ["config"],
+            "fields": ["port", "allowlist_ips"]
         },
-        "proto_required": ["https", "wss"]
+        'https':{
+            "target": ["config"],
+            "fields": ["port", "allowlist_ips"]
+        },
+        'discord':{
+            "target": ["config"],
+            "fields": ["bot_token", "channel_id"],
+        },
+        'telegram':{
+            "target": ["config"],
+            "fields": ["bot_token", "chat_id"],
+        },
+        'openai': {
+            "target": ["config"],
+            "fields": ["api_key"],
+        },
     },
+
 }

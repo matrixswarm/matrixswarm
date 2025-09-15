@@ -38,6 +38,16 @@ class BasePacket(ABC):
     def get_error_success_msg(self) -> str:
         return self._error_msg
 
+    def set_payload_item(self, keyword: str, data) -> None:
+        """Attach a field under a keyword (overwrite if already exists)."""
+        self._payload[keyword] = data
+
+    def has_payload_item(self, keyword: str) -> bool:
+        return keyword in self._payload
+
+    def get_payload_item(self, keyword: str):
+        return self._payload.get(keyword)
+
     @abstractmethod
     def set_data(self, data: dict):
         """

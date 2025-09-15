@@ -32,17 +32,19 @@ class Agent(BootAgent):
         """
         super().__init__()
 
-        self.AGENT_VERSION = "1.0.0"
+        try:
+            self.AGENT_VERSION = "1.0.2"
 
-        config = self.tree_node.get("config", {})
-        self.api_key = config.get("api_key", os.getenv("OPENAI_API_KEY_2"))
-        self.log(self.api_key)
-        self.client = OpenAI(api_key=self.api_key)
-        self.processed_query_ids = set()
-        self.outbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "outbox")
-        os.makedirs(self.outbox_path, exist_ok=True)
-        self.use_dummy_data = False
-
+            config = self.tree_node.get("config", {})
+            self.api_key = config.get("api_key")
+            self.model = config.get("model", "gpt-3.5-turbo")
+            self.client = OpenAI(api_key=self.api_key)
+            self.processed_query_ids = set()
+            self.outbox_path = os.path.join(self.path_resolution["comm_path_resolved"], "outbox")
+            os.makedirs(self.outbox_path, exist_ok=True)
+            self.use_dummy_data = False
+        except Exception as e:
+            self.log(error=e, block='main_try', level='ERROR')
 
     def post_boot(self):
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – have a cookie.")
@@ -103,11 +105,11 @@ class Agent(BootAgent):
 
             self.log(f"[ORACLE] Response mode: {response_mode}")
 
-            messages = [{"role": "user", "content": prompt_text}]
+            messages = history + [{"role": "user", "content": prompt_text}]
 
             # Call the OpenAI API
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=self.model,
                 messages=messages,
                 temperature=0,
             ).choices[0].message.content.strip()
@@ -135,7 +137,7 @@ class Agent(BootAgent):
             self.log(f"[ORACLE] Sent {return_handler} reply to {target_uid} for query_id {query_id}")
 
         except Exception as e:
-            self.log(error=e, block='cmd_msg_prompt')
+            self.log(error=e, block='main_try', level='ERROR')
 
 
 if __name__ == "__main__":

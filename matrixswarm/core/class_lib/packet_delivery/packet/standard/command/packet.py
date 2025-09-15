@@ -14,7 +14,8 @@ class Packet(BasePacket):
                 "timestamp": int(time.time()),
                 "nonce": uuid.uuid4().hex,  # or os.urandom(16).hex() for a cryptographic nonce
                 "handler": data.get("handler"),  #msg.send.warning.message_do_something
-                "origin": data.get("origin", "unknown"),
+                "session_id": data.get("session_id", "none"),
+                "origin": data.get("origin", "none"),
                 "sig": data.get("sig", "unknown"),
                 "hash": data.get("hash", "unknown"),
                 "service_injection": data.get("service_injection", {}), #if set locate the service under matrixswarm.core.* and inject data then inject inside handler

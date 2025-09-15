@@ -38,12 +38,15 @@ def mint_deployment_metadata(
             agents_out.append({
                 "universal_id": uid,
                 "name": wrapper.name(),
+                "serial": wrapper.get_serial(),
                 "security-tag": wrapper.get_security_tag() or node.get("security-tag"),
                 "connection": {
                     **({"proto":  conn.get("proto")}  if conn.get("proto")  else {}),
                     **({"host":   conn.get("host")}   if conn.get("host")   else {}),
                     **({"port":   conn.get("port")}   if conn.get("port")   else {}),
-                    **({"serial": conn.get("serial")} if conn.get("serial") else {})
+                    **({"serial": conn.get("serial")} if conn.get("serial") else {}),
+                    **({"channel": conn.get("default_channel")} if conn.get("default_channel") else {})
+
                 }
             })
 
