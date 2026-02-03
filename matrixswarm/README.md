@@ -1,6 +1,6 @@
 # **MATRIXSWARM**
 
-# ⚠️ Project Moved — Active Development Has Relocated
+# ⚠️ Project Moved — Active Development Has Relocated 
 
 MatrixSwarm (this repository) is no longer the active development home.
 
