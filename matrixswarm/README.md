@@ -1,4 +1,21 @@
 # **MATRIXSWARM**
+
+# ⚠️ Project Moved — Active Development Has Relocated
+
+MatrixSwarm (this repository) is no longer the active development home.
+
+### The current, fully-maintained system lives here:
+
+• **MatrixOS** — core runtime, services, agents  
+  https://github.com/matrixswarm/matrixos
+
+• **Phoenix** — GUI cockpit, sessions, connectors, deployment tools  
+  https://github.com/matrixswarm/phoenix
+
+All updates, issues, releases, and documentation now occur in those two repositories.
+
+👉 This repo remains archived for historical reference only.
+
 <pre>
 ███████╗██╗    ██╗ █████╗ ██████╗ ███╗   ███╗
 ██╔════╝██║    ██║██╔══██╗██╔══██╗████╗ ████║
