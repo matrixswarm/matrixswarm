@@ -90,7 +90,7 @@ class MultiplexerPanel(QDialog):
                 self.incoming_dropdown.addItem(f"{name} ({uid})", uid)
 
             # Prefer explicitly flagged default_payload_reception
-            # rule: last flagged true wins
+            # Match deployment boot policy: first flagged default wins.
             preferred_incoming_index = 0
             found_default_payload = False
 
@@ -99,6 +99,7 @@ class MultiplexerPanel(QDialog):
                 if bool(conn.get("default_payload_reception", False)):
                     preferred_incoming_index = i
                     found_default_payload = True
+                    break
 
             # Fallback: prefer websocket if no explicit default set
             if not found_default_payload:

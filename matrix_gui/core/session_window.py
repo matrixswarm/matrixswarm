@@ -294,11 +294,12 @@ class SessionWindow(QMainWindow):
                     if ch == "payload.reception":
                         incoming_agents.append(a)
 
-                # rule: last one flagged true wins
+                # Match deployment boot policy: first flagged default wins.
                 for a in incoming_agents:
                     conn = a.get("connection", {}) or {}
                     if bool(conn.get("default_payload_reception", False)):
                         incoming_candidate = a
+                        break
 
                 # fallback: websocket if no explicit default set
                 if not incoming_candidate:
