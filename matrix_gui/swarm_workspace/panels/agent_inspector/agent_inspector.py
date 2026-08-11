@@ -183,11 +183,6 @@ class AgentInspector(QWidget):
 
             self.constraint_layout.addWidget(row)
 
-            try:
-                self.workspace.save()
-            except Exception as e:
-                emit_gui_exception_log("AgentInspector._reload_constraints", e)
-
     # ------------------------------------------------------------
     # ASSIGN EXISTING ROW
     # ------------------------------------------------------------

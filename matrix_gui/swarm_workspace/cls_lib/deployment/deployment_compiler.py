@@ -41,9 +41,6 @@ class DeploymentCompiler:
                 # Preserve existing connection block instead of overwriting
                 try:
 
-                    if(agent_ir.name=="matrix_email"):
-                        print(con.get_meta())
-
                     #now we inject the connection details into the deployment
                     editor=con.get_editor()
                     if editor.is_connection():
@@ -54,8 +51,6 @@ class DeploymentCompiler:
                     #a connection to be injected into the deployment, e.g. matrix_email;
                     elif con.inject_into_connection():
                         node["connection"].update(con.get_fields())
-                        #print(f"XXXXXXXXXXXXXXXXXXXXXXXXXXXXX{node['universal_id']} -> {node["connection"]}")
-
 
                 except Exception as e:
                     print(f"{con.get_constraint_name()} has no handler {e}")

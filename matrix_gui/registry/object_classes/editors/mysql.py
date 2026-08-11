@@ -52,7 +52,8 @@ class MYSQL(BaseEditor):
             "port": int(self.port.text() or 3306),
             "username": self.username.text().strip(),
             "password": self.password.text().strip(),
-            "database": self.database.text().strip()
+            "database": self.database.text().strip(),
+            "sensitive_fields": {"password": "1"},
         }
 
     def on_load(self, data):

@@ -1,22 +1,42 @@
 # Commander & ChatGPT — Victory Always Edition
-# MULTIPLEXER PANEL — Switch outbound transport channels
-from PyQt6.QtWidgets import QVBoxLayout, QLabel, QComboBox, QGroupBox, QPushButton
+# MULTIPLEXER PANEL — Switch transport channels
+from PyQt6.QtWidgets import (
+    QVBoxLayout, QLabel, QComboBox, QGroupBox,
+    QPushButton, QDialog, QHBoxLayout
+)
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QDialog
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
+
+
 class MultiplexerPanel(QDialog):
     """
-    Transport Multiplexer UI Panel
-    --------------------------------
-    Provides 2 dropdowns:
-      • payload.reception   (incoming)
-      • outgoing.command    (outgoing)
+    Transport Multiplexer UI Panel.
 
-    Incoming is fixed to matrix_websocket (greyed out).
-    Outgoing defaults to matrix_https but adds matrix_email if deployed.
+    Provides a graphical interface to view and switch transport channels for a session.
+    It manages two types of transports:
+      • Incoming (payload.reception): Informational only.
+      • Outgoing (outgoing.command): Can be switched live to change the outbound command route.
+
+    Attributes:
+        session_id (str): The unique identifier for the session.
+        bus (object): The message bus instance.
+        node (object): The node instance.
+        session_window (QMainWindow): The main session window reference.
+        deployment (dict): The deployment configuration containing agent information.
+        incoming_dropdown (QComboBox): Dropdown for incoming transport selection.
+        outgoing_dropdown (QComboBox): Dropdown for outgoing transport selection.
     """
 
     def __init__(self, session_id, bus, node, session_window):
+        """
+        Initialize the MultiplexerPanel.
+
+        Args:
+            session_id (str): The ID of the current session.
+            bus (object): The communication bus.
+            node (object): The local node instance.
+            session_window (QMainWindow): Reference to the parent session window.
+        """
         super().__init__(session_window)
         try:
             self.session_id = session_id
@@ -26,142 +46,232 @@ class MultiplexerPanel(QDialog):
             self.deployment = session_window.deployment
 
             self.setWindowTitle("Multiplexer")
-            self.setMinimumSize(400, 200)
-            self.setModal(False)  # Non-blocking
-
-
+            self.setMinimumSize(460, 240)
+            self.setModal(False)
 
             layout = QVBoxLayout(self)
             layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            layout.setSpacing(10)
 
-            # Title
             title = QLabel("⚡ Transport Multiplexer")
             title.setStyleSheet("font-size: 18px; font-weight: bold;")
             layout.addWidget(title)
 
+            incoming_agents = []
+            outgoing_agents = []
+
+            for a in self.deployment.get("agents", []):
+                conn = a.get("connection", {}) or {}
+                channel = (conn.get("channel") or "").strip().lower()
+                uid = a.get("universal_id", "")
+                name = a.get("name", uid)
+                proto = conn.get("proto", "")
+
+                print("[MUX][AGENT]", name, uid, proto, channel)
+
+                if channel == "payload.reception":
+                    incoming_agents.append(a)
+
+                elif channel == "outgoing.command":
+                    outgoing_agents.append(a)
+
             # ------------------------------
-            # Incoming Transport (reception)
+            # Incoming Transport
             # ------------------------------
             incoming_group = QGroupBox("Incoming Transport (payload.reception)")
             ig_layout = QVBoxLayout()
             incoming_group.setLayout(ig_layout)
 
             self.incoming_dropdown = QComboBox()
-            self.incoming_dropdown.addItem("matrix_websocket (contact swarm@matrixswarm.com)")
-            self.incoming_dropdown.setEnabled(False)
+
+            for a in incoming_agents:
+                uid = a.get("universal_id", "")
+                name = a.get("name", uid)
+                self.incoming_dropdown.addItem(f"{name} ({uid})", uid)
+
+            # Prefer explicitly flagged default_payload_reception
+            # rule: last flagged true wins
+            preferred_incoming_index = 0
+            found_default_payload = False
+
+            for i, a in enumerate(incoming_agents):
+                conn = a.get("connection", {}) or {}
+                if bool(conn.get("default_payload_reception", False)):
+                    preferred_incoming_index = i
+                    found_default_payload = True
+
+            # Fallback: prefer websocket if no explicit default set
+            if not found_default_payload:
+                for i, a in enumerate(incoming_agents):
+                    conn = a.get("connection", {}) or {}
+                    proto = (conn.get("proto") or "").strip().lower()
+                    name = (a.get("name") or "").strip().lower()
+                    if proto == "wss" or "websocket" in name:
+                        preferred_incoming_index = i
+                        break
+
+            if self.incoming_dropdown.count() > 0:
+                self.incoming_dropdown.setCurrentIndex(preferred_incoming_index)
+
+            # Keep visible/inspectable, but informational only
+            self.incoming_dropdown.setToolTip(
+                "Select the active ingress transport for payload.reception. "
+                "Applying will stop other ingress connectors and launch the selected one."
+            )
 
             ig_layout.addWidget(self.incoming_dropdown)
             layout.addWidget(incoming_group)
 
             # ------------------------------
-            # Outgoing Transport (commands)
+            # Outgoing Transport
             # ------------------------------
             outgoing_group = QGroupBox("Outgoing Transport (outgoing.command)")
             og_layout = QVBoxLayout()
             outgoing_group.setLayout(og_layout)
 
             self.outgoing_dropdown = QComboBox()
-
-            # Default: matrix_https
-            self.outgoing_dropdown.addItem("matrix_https")
-
-            # Add matrix_email if present in deployment
-            agents = self.deployment.get("agents", [])
-            agent_names = [a.get("name", "").lower() for a in agents]
-            if "matrix_email" in agent_names:
-                self.outgoing_dropdown.addItem("matrix_email")
+            for a in outgoing_agents:
+                uid = a.get("universal_id", "")
+                name = a.get("name", uid)
+                self.outgoing_dropdown.addItem(f"{name} ({uid})", uid)
 
             og_layout.addWidget(self.outgoing_dropdown)
-
-            # Apply Button
-            apply_btn = QPushButton("Apply Transport Route")
-            apply_btn.clicked.connect(self._apply_route)
-            og_layout.addWidget(apply_btn)
-
             layout.addWidget(outgoing_group)
 
-            layout.addStretch(1)
+            # ------------------------------
+            # Bottom Action Row
+            # ------------------------------
+            btn_row = QHBoxLayout()
+
+            apply_incoming_btn = QPushButton("Apply Incoming")
+            apply_incoming_btn.setToolTip(
+                "Switch only the payload.reception ingress connector."
+            )
+            apply_incoming_btn.clicked.connect(self._apply_incoming_route)
+            btn_row.addWidget(apply_incoming_btn)
+
+            apply_outgoing_btn = QPushButton("Apply Outgoing")
+            apply_outgoing_btn.setToolTip(
+                "Switch only the outgoing.command egress connector."
+            )
+            apply_outgoing_btn.clicked.connect(self._apply_outgoing_route)
+            btn_row.addWidget(apply_outgoing_btn)
 
             close_btn = QPushButton("Close")
             close_btn.clicked.connect(self.close)
-            layout.addWidget(close_btn)
+            btn_row.addWidget(close_btn)
+
+            layout.addLayout(btn_row)
 
         except Exception as e:
             emit_gui_exception_log("MultiplexerPanel.__init__", e)
 
     # ----------------------------------------------------------
-    # APPLY TRANSPORT SELECTION
+    # APPLY TRANSPORT SELECTIONS
     # ----------------------------------------------------------
-    def _apply_route(self):
+    def _apply_outgoing_route(self):
+        """Switch only the selected outgoing.command connector."""
         try:
-            selected = self.outgoing_dropdown.currentText().strip()
+            selected_out_uid = self.outgoing_dropdown.currentData()
+            if not selected_out_uid:
+                return
 
             outbound = self.session_window.outbound_dispatcher
-            outbound.preferred_channel = selected
-
-            # Resolve the actual universal_id of the selected transport
             for a in self.deployment.get("agents", []):
-                if a.get("name", "").lower() == selected.lower():
+                if a.get("universal_id") == selected_out_uid:
                     outbound.set_outbound_connector(a)
+                    self.session_window.outgoing_badge.setText(f"Outgoing: {selected_out_uid}  ⚪")
+                    self.session_window.status_label.setText(
+                        f"Status: Outgoing command route set to {self.outgoing_dropdown.currentText().strip()}"
+                    )
+                    print(f"[MUX][OUTGOING] Switched egress to: {selected_out_uid}")
                     break
-
-                self.session_window.outgoing_badge.setText(f"Outgoing: {selected}  ⚪")
-
-            self.session_window.status_label.setText(
-                f"Status: Outgoing command transport set to {selected}"
-            )
-
-            print(f"[MULTIPLEXER] Outgoing transport updated → {selected}")
+            else:
+                print(f"[MUX][OUTGOING] Unknown outgoing connector: {selected_out_uid}")
 
         except Exception as e:
-            emit_gui_exception_log("MultiplexerPanel._apply_route", e)
+            emit_gui_exception_log("MultiplexerPanel._apply_outgoing_route", e)
+
+    def _apply_incoming_route(self):
+        """Switch only the selected payload.reception connector."""
+        try:
+            selected_in_uid = self.incoming_dropdown.currentData()
+            if not selected_in_uid:
+                return
+
+            if selected_in_uid == getattr(self.session_window, "preferred_incoming_uid", None):
+                self.session_window.status_label.setText(
+                    f"Status: Incoming route already set to {self.incoming_dropdown.currentText().strip()}"
+                )
+                return
+
+            if self.session_window.switch_inbound_connector(selected_in_uid):
+                self.session_window.status_label.setText(
+                    f"Status: Incoming payload route set to {self.incoming_dropdown.currentText().strip()}"
+                )
+                print(f"[MUX][INCOMING] Switched ingress to: {selected_in_uid}")
+
+        except Exception as e:
+            emit_gui_exception_log("MultiplexerPanel._apply_incoming_route", e)
 
     def sync_with_current_connector(self):
         """
-        Sync dropdown selection to match the actual active outbound connector.
-        Handles both proto name ('smtp', 'https') and agent name ('matrix_email', 'matrix_https').
+        Sync dropdown selections to match live session state.
+
+        This method is UI-only:
+          - does NOT launch/stop connectors
+          - does NOT modify dispatcher state
+          - only updates dropdown selection to reflect current reality
         """
         try:
+            # --------------------------
+            # Sync outgoing dropdown
+            # --------------------------
             outbound = getattr(self.session_window, "outbound_dispatcher", None)
-            if not outbound:
-                print("[MULTIPLEXER] No outbound dispatcher found.")
-                return
+            if outbound:
+                agent = outbound.get_outbound_connection()
+                if agent and isinstance(agent, dict):
+                    current_out_uid = agent.get("universal_id", "")
+                    matched = False
 
-            agent = outbound.get_outbound_connection()
-            if not agent or not isinstance(agent, dict):
-                print("[MULTIPLEXER] No active agent found.")
-                return
+                    for i in range(self.outgoing_dropdown.count()):
+                        item_uid = self.outgoing_dropdown.itemData(i)
+                        if item_uid == current_out_uid:
+                            self.outgoing_dropdown.setCurrentIndex(i)
+                            matched = True
+                            break
 
-            connection = agent.get("connection",{})
-            if not connection or not isinstance(connection, dict):
-                print("[MULTIPLEXER] No active outbound connector found.")
-                return
+                    if not matched:
+                        print(f"[MULTIPLEXER][SYNC] No outgoing dropdown match for uid={current_out_uid}")
+                    else:
+                        print(f"[MULTIPLEXER][SYNC] Outgoing dropdown synced → {self.outgoing_dropdown.currentText()}")
 
-            current_proto = (connection.get("proto") or "").lower()
+            # --------------------------
+            # Sync incoming dropdown
+            # --------------------------
+            current_in_uid = getattr(self.session_window, "preferred_incoming_uid", None)
 
-            # Try to extract the agent name (matrix_email, matrix_https, etc.)
-            agent_name = agent.get("name", "").lower()
+            # optional fallback to dispatcher if session state not set
+            if not current_in_uid:
+                inbound = getattr(self.session_window, "inbound_dispatcher", None)
+                if inbound:
+                    in_agent = inbound.get_inbound_connection()
+                    if in_agent and isinstance(in_agent, dict):
+                        current_in_uid = in_agent.get("universal_id", "")
 
-            print(f"[MULTIPLEXER][SYNC] active proto={current_proto}, agent={agent_name}")
+            if current_in_uid:
+                matched = False
+                for i in range(self.incoming_dropdown.count()):
+                    item_uid = self.incoming_dropdown.itemData(i)
+                    if item_uid == current_in_uid:
+                        self.incoming_dropdown.setCurrentIndex(i)
+                        matched = True
+                        break
 
-            matched = False
-            for i in range(self.outgoing_dropdown.count()):
-                item = self.outgoing_dropdown.itemText(i).strip().lower()
-                # broaden match to catch both proto and agent names
-                if (
-                        current_proto in item
-                        or item.endswith(current_proto)
-                        or (agent_name and agent_name in item)
-                ):
-                    self.outgoing_dropdown.setCurrentIndex(i)
-                    matched = True
-                    break
-
-            if not matched:
-                print(f"[MULTIPLEXER][SYNC] No dropdown match for proto={current_proto} agent={agent_name}")
-            else:
-                print(f"[MULTIPLEXER][SYNC] Dropdown synced → {self.outgoing_dropdown.currentText()}")
+                if not matched:
+                    print(f"[MULTIPLEXER][SYNC] No incoming dropdown match for uid={current_in_uid}")
+                else:
+                    print(f"[MULTIPLEXER][SYNC] Incoming dropdown synced → {self.incoming_dropdown.currentText()}")
 
         except Exception as e:
             emit_gui_exception_log("MultiplexerPanel.sync_with_current_connector", e)
-

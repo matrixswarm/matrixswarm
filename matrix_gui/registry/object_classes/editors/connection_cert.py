@@ -33,6 +33,7 @@ class ConnectionCert(BaseEditor):
                 "server_cert": {"cert": server_cert_pem, "key": server_key_pem, "spki_pin": spki_pin_from_pem(server_cert_pem)},
                 "client_cert": {"cert": client_cert_pem, "key": client_key_pem, "spki_pin": spki_pin_from_pem(client_cert_pem)},
                 "ca_root": {"cert": ca_cert_pem, "key": ca_key_pem},
+                "sensitive_fields": {"server_cert": "1", "client_cert": "1", "ca_root": "1"},
             }
             self._is_valid = True
         except Exception as e:

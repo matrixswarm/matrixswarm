@@ -1,10 +1,13 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
 import importlib
 import threading
+import copy
 
 import time
 import uuid
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
+from matrix_gui.modules.net.connector.interfaces.connector_spec import ConnectorSpec, ConnectorPolicy
+
 class ConnectionLauncher:
     """
     ConnectionLauncher — Swarm Thread Orchestrator
@@ -14,7 +17,6 @@ class ConnectionLauncher:
     • Supports ephemeral and persistent workers
     • Centralized logging via BootAgent.log
     """
-
     def __init__(self):
         """
         Initialize the ConnectionLauncher with empty registries and lock.
@@ -26,93 +28,104 @@ class ConnectionLauncher:
             _lock (threading.Lock): Ensures thread-safe registry updates.
         """
         self._threads = {}        # thread_id -> Thread
-        self._registry = {}       # thread_id -> metadata
-        self._shared_state = {}   # thread_id -> shared dict
+        self._registry = {}       # uid -> ConnectorSpec
+        self._shared_state = {}   # uid -> shared dict
         self._lock = threading.Lock()
 
         print("ConnectionLauncher initialized")
 
     # --------------------------------------------------
-    def load(self, universal_id, class_path, context=None, check_interval=30):
+    def load_spec(self, spec: ConnectorSpec, check_interval=30):
         """
-        Register a connector class under a universal identifier.
-
-        Args:
-            universal_id (str): Unique key to refer to this connector.
-            class_path (str): Dotted path to the connector class.
-            context (dict, optional): Initial context passed into connector instances.
-            check_interval (int, optional): Heartbeat check interval in seconds.
-
-        Returns:
-            ConnectionLauncher: Self for fluent chaining.
+        Register a connector spec under its universal_id (uid).
+        Spec contains class_path + policy + context.
         """
-        context = context or {}
-
         with self._lock:
-            self._registry[universal_id] = {
-                "universal_id": universal_id,
-                "class_path": class_path,
-                "context": context,
-                "persist": True,  # persistent by definition
-                "check_interval": check_interval,
-                "thread_id": None,
-            }
+            self._registry[spec.uid] = spec
 
-            self._shared_state[universal_id] = {
-                "universal_id": universal_id,
+            self._shared_state[spec.uid] = {
+                "universal_id": spec.uid,
                 "thread_id": None,
-                "class_path": class_path,
-                "context": context,
+                "class_path": spec.class_path,
+                "context": spec.context,
                 "started_at": None,
                 "last_heartbeat": None,
                 "stop": False,
-                "reboot_now": False #a way for the thread to signal to reboot itself
+                "reboot_now": False,
             }
 
-        #print(f"[ConnectionLauncher][LOAD] Registered {class_path} as {universal_id}")
+            # optional per-spec config
+            spec.context.setdefault("check_interval", check_interval)
+
         return self
 
-    def launch(self, universal_id, packet:dict=None, fire_catapult=False):
+    def update_policy(self, uid: str, **patch):
         """
-        Instantiate and start the connector as a daemon thread.
+        Patch policy fields for a connector without needing it instantiated.
+        Example: update_policy(uid, monitor=True, auto_start=False, ready=True)
+        """
+        with self._lock:
+            spec = self._registry.get(uid)
+            if not spec:
+                return False
 
-        Args:
-            universal_id (str): Identifier under which the class was loaded.
-            packet (dict, optional): Initial packet data to inject into context.
-            fire_catapult (bool, optional): Force immediate launch even if run_on_launch=False.
+            for k, v in patch.items():
+                if hasattr(spec.policy, k):
+                    setattr(spec.policy, k, v)
+            return True
 
-        Returns:
-            threading.Thread | None: The thread object if launched, else None.
+    def launch(self, uid: str, packet=None, fire_catapult=False):
+        """
+        Start a connector thread if policy allows.
+        - No instantiation is required to evaluate policy gates.
         """
         try:
             with self._lock:
-                meta = self._registry.get(universal_id)
-                if not meta:
-                    print(f"[LAUNCH][ERROR] No such universal_id {universal_id}")
+                spec: ConnectorSpec = self._registry.get(uid)
+                if not spec:
+                    print(f"[LAUNCH][ERROR] No such uid {uid}")
                     return None
 
-                class_path = meta["class_path"]
-                context = meta["context"]
-                thread_id = uuid.uuid4().hex
+                pol = spec.policy
+                shared = self._shared_state.get(uid)
+                if not shared:
+                    print(f"[LAUNCH][ERROR] Missing shared_state for {uid}")
+                    return None
 
-                shared = self._shared_state[universal_id]
-                shared["thread_id"] = thread_id
-                shared["started_at"] = time.time()
-                shared["last_heartbeat"] = time.time()
-                shared["reboot_now"] = False
-                shared["stop"] = False
+                # ---- policy gates (no connector instance required) ----
+                if not pol.ready:
+                    print(f"[LAUNCH][SKIP] {uid}: not ready ({pol.reason})")
+                    return None
 
-            cls = self._load_class(class_path)
-            persist = getattr(cls, "persistent", False)
-            run_on_launch = getattr(cls, "run_on_launch", False)
+                if pol.requires_packet and packet is None:
+                    print(f"[LAUNCH][SKIP] {uid}: requires packet ({pol.reason})")
+                    return None
 
-            with self._lock:
-                self._registry[universal_id]["persist"] = persist
+                tid = spec.thread_id
+                existing = self._threads.get(tid) if tid else None
 
-            t=None
-            if fire_catapult or run_on_launch:
-                # Update the shared dict (never replace it)
-                shared.update({
+                if pol.monitor and existing and existing.is_alive():
+                    print(
+                        f"[LAUNCH][SKIP] {uid}: persistent connector "
+                        f"already alive thread={tid}"
+                    )
+                    return existing
+
+                if not fire_catapult and not pol.auto_start:
+                    return None
+
+                # ---- establish runtime shared context ----
+                context = spec.context or {}
+
+                # Persistent connectors share their registered control state.
+                # Every one-shot SMTP/HTTPS launch receives an isolated state dict,
+                # preventing a later launch from overwriting its packet.
+                if pol.monitor:
+                    runtime_shared = shared
+                else:
+                    runtime_shared = dict(shared)
+
+                runtime_shared.update({
                     "session_id": context.get("session_id"),
                     "agent": context.get("agent"),
                     "deployment": context.get("deployment"),
@@ -120,128 +133,166 @@ class ConnectionLauncher:
                     "packet": packet,
                 })
 
-                instance = cls(shared=shared)
+                thread_id = uuid.uuid4().hex
+                runtime_shared["thread_id"] = thread_id
+                runtime_shared["started_at"] = time.time()
+                runtime_shared["last_heartbeat"] = time.time()
+                runtime_shared["reboot_now"] = False
+                runtime_shared["stop"] = False
 
-                t = threading.Thread(
-                    target=instance.run,
-                    name=f"thread:{class_path}",
-                    daemon=True,
-                )
-                if persist:
-                    with self._lock:
-                        meta["thread_id"] = thread_id
-                        self._threads[thread_id] = t
+                # Only persistent/monitored connectors own canonical runtime state.
+                if pol.monitor:
+                    spec.thread_id = thread_id
 
-                t.start()
+                class_path = spec.class_path
 
-                print(f"[ConnectionLauncher][LAUNCH] Started {universal_id} as thread {thread_id}")
+            # ---- instantiate AFTER gates pass ----
+            cls = self._load_class(class_path)
+            instance = cls(shared=runtime_shared)
 
+            t = threading.Thread(
+                target=instance.run,
+                name=f"thread:{class_path}",
+                daemon=True,
+            )
+
+            # Only register threads in monitor list if policy.monitor True
+            if pol.monitor:
+                with self._lock:
+                    self._threads[thread_id] = t
+
+            t.start()
+            print(f"[ConnectionLauncher][LAUNCH] Started {uid} thread={thread_id} monitor={pol.monitor}")
             return t
 
         except Exception as e:
             emit_gui_exception_log("ConnectionLauncher.launch()", e)
+            return None
 
     # --------------------------------------------------
-    def kill_thread(self, universal_id: str):
+    def kill_thread(self, uid: str):
         """
-        Terminate and clean up a managed thread.
+        Stop and detach a managed connector thread.
 
-        Args:
-            universal_id (str): registry key to locate the thread to kill.
+        Important:
+          - Never join while holding the launcher lock.
+          - Never reacquire the same non-reentrant lock inside itself.
+          - Keep the spec registered so it can be relaunched.
         """
         with self._lock:
-
-            thread_id = self._registry.get(universal_id,{}).get("thread_id", False)
-            if not thread_id:
-                print(f"[NUKER] No active thread_id to nuke using {universal_id}.")
+            spec = self._registry.get(uid)
+            if not spec or not spec.thread_id:
+                print(f"[NUKER] No active thread_id to nuke using {uid}.")
                 return
 
-            t = self._threads.get(thread_id, False)
-            if not t or not isinstance(t, threading.Thread):
-                print(f"[NUKER] No active thread {thread_id} to nuke.")
-                return
+            tid = spec.thread_id
+            t = self._threads.get(tid)
 
-            print(f"[NUKER] Nuking thread {thread_id}")
-            try:
-                if t.is_alive():
-                    # Try to stop gracefully if possible
-                    shared = self._shared_state.get(universal_id)
-                    if shared:
-                        shared["stop"] = True
-                    # force cleanup
-                    t.join(timeout=1)
-            except Exception as e:
-                print(f"[NUKER][WARN] Exception during kill: {e}")
-            finally:
-                self._threads.pop(thread_id, None)
+            shared = self._shared_state.get(uid)
+            if shared:
+                shared["stop"] = True
+
+        # Join outside the lock so the thread can finish without blocking launcher state.
+        if t and t.is_alive():
+            print(f"[NUKER] Nuking thread {tid}")
+            t.join(timeout=1)
+        else:
+            print(f"[NUKER] Thread {tid} already dead; cleaning registry.")
+
+        # Cleanup after join, with a fresh lock acquisition.
+        with self._lock:
+            self._threads.pop(tid, None)
+
+            spec = self._registry.get(uid)
+            if spec:
+                spec.thread_id = None
+
+            shared = self._shared_state.get(uid)
+            if shared:
+                # Keep stop=True after explicit kill.
+                # launch() will reset it to False when intentionally restarted.
+                shared["thread_id"] = None
 
    # --------------------------------------------------
-    def start_auto_monitor(self, check_interval: int = 10):
-        """
-        Starts an internal background monitor thread that keeps
-        all persistent threads alive. Auto-relaunches any that
-        die or stop heartbeating.
-        """
+    def start_monitor(self, check_interval: int = 10):
         if hasattr(self, "_monitor_thread") and self._monitor_thread.is_alive():
-            return  # already running
+            return
 
         def _monitor_loop():
             print("[ConnectionLauncher][MONITOR] Auto-monitor active.")
             while True:
                 try:
-                    now = time.time()
                     restarts = []
 
                     with self._lock:
-                        for uid, meta in self._registry.items():
-                            tid = meta["thread_id"]
-                            t = self._threads.get(tid)
-                            shared = self._shared_state.get(uid)
+                        for uid, spec in self._registry.items():
+                            pol = spec.policy
+                            if not pol.monitor:
+                                continue
+
+                            tid = spec.thread_id
+                            t = self._threads.get(tid) if tid else None
+                            shared = self._shared_state.get(uid) or {}
                             alive = t.is_alive() if t else False
 
-                            # restart conditions:
-                            if not alive and bool(meta['persist']) and not bool(shared["stop"]):
+                            if (not alive) and (not bool(shared.get("stop"))):
                                 restarts.append(uid)
-                            elif bool(meta['persist']) and bool(shared["reboot_now"]): #thread wants to get rebooted if true
-                                restarts.append(uid)
-                            elif bool(meta['persist']) and not bool(shared["stop"]):
-                                hb = shared.get("last_heartbeat", 0)
-                                if now - hb > meta["check_interval"] * 2:
-                                    print("heatbeat failure")
-                                    restarts.append(uid)
 
-                    for uid in restarts:
+                            if bool(shared.get("reboot_now")):
+                                restarts.append(uid)
+
+                    for uid in set(restarts):
                         print(f"[MONITOR] Restarting {uid}")
                         self.kill_thread(uid)
-                        self.launch(uid)
+                        self.launch(uid, fire_catapult=True)
 
-                    time.sleep(10)
+                    time.sleep(check_interval)
 
                 except Exception as e:
                     emit_gui_exception_log("ConnectionLauncher.auto_monitor()", e)
                     time.sleep(check_interval)
 
-        self._monitor_thread = threading.Thread(target=_monitor_loop, name="thread_launcher_monitor", daemon=True)
+        self._monitor_thread = threading.Thread(
+            target=_monitor_loop,
+            name="thread_launcher_monitor",
+            daemon=True,
+        )
         self._monitor_thread.start()
 
     # --------------------------------------------------
     def stop_uid(self, universal_id):
+        """
+        Signal a registered connector to stop by UID.
+
+        _registry stores ConnectorSpec objects, not metadata dicts, so runtime
+        fields must be read as attributes. Keep a dict fallback for older
+        registry entries that may still exist during migration/testing.
+        """
         with self._lock:
-            meta = self._registry.get(universal_id)
-            if not meta:
+            spec = self._registry.get(universal_id)
+            if not spec:
                 print(f"[STOP] No such universal_id {universal_id}")
                 return False
 
-            # retrieve the thread_id
-            tid = meta.get("thread_id")
-            if not tid:
-                print(f"[STOP] No thread for {universal_id}")
-                return False
-
-            # mark the shared stop flag
             shared = self._shared_state.get(universal_id)
+
+            # Mark stop first so the monitor will not immediately restart it.
             if shared:
                 shared["stop"] = True
+
+            # retrieve the thread_id from the ConnectorSpec, with legacy dict fallback
+            if isinstance(spec, dict):
+                tid = spec.get("thread_id")
+            else:
+                tid = getattr(spec, "thread_id", None)
+
+            # Shared state is also updated by launch(); use it as a fallback.
+            if not tid and shared:
+                tid = shared.get("thread_id")
+
+            if not tid:
+                print(f"[STOP] No active thread for {universal_id}; stop flag set")
+                return False
 
             print(f"[STOP] Signal sent to {universal_id} → thread {tid}")
             return True

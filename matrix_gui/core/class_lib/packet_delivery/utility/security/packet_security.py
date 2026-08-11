@@ -1,11 +1,11 @@
+# Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
 import time, json
 from Crypto.PublicKey import RSA
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.core.utils.crypto_utils import encrypt_with_ephemeral_aes, sign_data
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 
-
-def wrap_packet_securely(inner_data, deployment, sign=False, encrypt=False, target_uid="matrix"):
+def wrap_packet_securely(inner_data, deployment, sign=False, encrypt=False, target_uid="matrix", extra_fields=None):
     if not (sign or encrypt):
         # fallback passthrough
         pk = Packet()
@@ -30,6 +30,11 @@ def wrap_packet_securely(inner_data, deployment, sign=False, encrypt=False, targ
         "content": sealed_data,
         "timestamp": int(time.time())
     }
+    if isinstance(extra_fields, dict):
+        for k, v in extra_fields.items():
+            if k in {"content", "timestamp", "sig"}:
+                raise ValueError(f"Reserved secure wrapper field: {k}")
+            packet_content[k] = v
 
     if sign:
         if not signer_privkey:

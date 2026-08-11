@@ -5,15 +5,19 @@ from .entity.adapter.agent_connection_wrapper import AgentConnectionWrapper
 from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.dispatcher.session_bus import SessionBus
 from matrix_gui.core.connector_bus import ConnectorBus
+from matrix_gui.modules.net.connector.interfaces.connector_spec import ConnectorSpec, ConnectorPolicy
 
 # Supported connector types for outbound/inbound agent protocols
 SUPPORTED_PROTOS = {"https", "wss", "smtp"}
+PERSISTENT_PROTOS = {"wss", "imap"}   # loop connectors
+EPHEMERAL_PROTOS  = {"https", "smtp"} # one-shot connectors (adjust if smtp becomes loop)
 
 # Mapping of protocol type → full class path of connector implementation
 CONNECTOR_MAP = {
     "https": "matrix_gui.modules.net.connector.egress.https.https.HTTPSConnector",
     "wss": "matrix_gui.modules.net.connector.ingress.wss.wss.WSSConnector",
     "smtp": "matrix_gui.modules.net.connector.egress.smtp.smtp.SMTPConnector",
+    "imap": "matrix_gui.modules.net.connector.ingress.imap.imap.IMAPIngressConnector",
     # Future connector types (examples):
     # "discord": connect_discord,
     # "telegram": connect_telegram,
@@ -23,20 +27,14 @@ CONNECTOR_MAP = {
 
 def _connect_single(deployment, session_id, dep_id):
     """
-    Initializes a full swarm connection group and its launch sequence.
+    Create a SessionContext and register + launch connector threads for a deployment.
 
-    This function:
-      - Creates a new session context in the global session manager
-      - Instantiates a ConnectionLauncher for the session
-      - Binds ConnectorBus events into the session's SessionBus
-      - Iterates over all agents in the deployment and launches
-        their associated connectors (if supported)
-
-    @param deployment: Dict containing deployment structure, agents, and metadata
-    @param session_id: Unique ID assigned to this session
-    @param dep_id: Deployment ID reference (used in logs and labels)
-
-    @return: SessionContext object with bus, launcher, and agents initialized
+    Design rules:
+      - Outgoing connectors (outgoing.command) launch immediately.
+      - Ingress connectors (payload.reception) launch ONLY if they are the *selected primary ingress*.
+        All other ingress connectors are registered but held until the Multiplexer activates them.
+      - If multiple agents are marked default_payload_reception, we don't block deployment:
+        we deterministically pick the *first* one encountered (deployment order).
     """
     try:
         sessions = get_sessions()
@@ -44,7 +42,7 @@ def _connect_single(deployment, session_id, dep_id):
             print("[ERROR] No global sessions instance")
             return
 
-        connection_launcher = ConnectionLauncher()
+        launcher = ConnectionLauncher()
 
         group = {
             "id": session_id,
@@ -52,19 +50,19 @@ def _connect_single(deployment, session_id, dep_id):
             "proto": "deployment",
             "deployment_id": dep_id,
             "deployment": deployment,
-            "connection_launcher": connection_launcher
+            "connection_launcher": launcher,
         }
 
-        # Register session in SessionManager
+        # -----------------------------
+        # SessionContext + bus wiring
+        # -----------------------------
         ctx = sessions.create(group)
-        ctx.channels = {}
-        ctx.status = {}
+        ctx.channels = {}   # channel_uid -> agent dict (metadata)
+        ctx.status = {}     # channel_uid -> status string (optional)
 
-        # Assign a session-bound event bus
         ctx.bus = SessionBus(session_id)
-        ctx._bus_refs = []  # Track ConnectorBus bindings for later cleanup
+        ctx._bus_refs = []  # track bus bindings for cleanup
 
-        # Proxy connectors → bus
         def inbound_proxy(**kw):
             ctx.bus.emit("inbound.message", **kw)
 
@@ -76,37 +74,121 @@ def _connect_single(deployment, session_id, dep_id):
 
         ctx._bus_refs.extend([
             ("inbound.raw", inbound_proxy),
-            ("channel.status", status_proxy)
+            ("channel.status", status_proxy),
         ])
 
         print(f"[BRIDGE] ConnectorBus wired into SessionBus for {session_id}")
 
-        # Launch all agent connectors (if supported)
+        # ---------------------------------------------------------
+        # Choose PRIMARY ingress deterministically.
+        # If multiple defaults are flagged, "first wins" by deployment order.
+        # ---------------------------------------------------------
+        primary_ingress_uid = None
+
+        # Pass 1: pick the first agent flagged default_payload_reception
         for agent in deployment.get("agents", []):
+            conn = (agent.get("connection") or {})
+            channel = (conn.get("channel") or "").strip().lower()
+            if channel == "payload.reception" and bool(conn.get("default_payload_reception")):
+                primary_ingress_uid = agent.get("universal_id")
+                break
+
+        # Pass 2: if none flagged, prefer websocket/wss ingress
+        if not primary_ingress_uid:
+            incoming = []
+            for agent in deployment.get("agents", []):
+                conn = (agent.get("connection") or {})
+                if (conn.get("channel") or "").strip().lower() == "payload.reception":
+                    incoming.append(agent)
+
+            # Prefer wss / websocket by proto or name
+            for agent in incoming:
+                proto = ((agent.get("connection") or {}).get("proto") or "").strip().lower()
+                name = (agent.get("name") or "").strip().lower()
+                if proto == "wss" or "websocket" in name:
+                    primary_ingress_uid = agent.get("universal_id")
+                    break
+
+            # Final fallback: first payload.reception in deployment order
+            if not primary_ingress_uid and incoming:
+                primary_ingress_uid = incoming[0].get("universal_id")
+
+        # ---------------------------------------------------------
+        # Register connectors. Launch only what should be live at boot.
+        # NOTE: launcher.load() expects registry key = universal_id.
+        # ---------------------------------------------------------
+        for agent in deployment.get("agents", []):
+            uid = agent.get("universal_id")
+            if not uid:
+                continue
+
+            # Expose agent metadata in ctx for UI/debug (not the thread object)
+            ctx.channels[uid] = agent
+
+            # Resolve connector implementation from directive proto
             adapter = AgentConnectionWrapper(agent, deployment)
-            proto, host, port = adapter.proto, adapter.host, adapter.port
+            proto = adapter.proto
+            connector_class_path = CONNECTOR_MAP.get(proto)
+            if not connector_class_path:
+                continue
 
-            connector_fn = CONNECTOR_MAP.get(proto, False)
-            if connector_fn:
-                args = {
-                    "agent": agent,
-                    "deployment": deployment,
-                    "session_id": session_id
-                }
-                try:
-                    channel_name = agent.get("universal_id")
-                    ctx.channels[channel_name] = agent
+            conn = (agent.get("connection") or {})
+            channel = (conn.get("channel") or "").strip().lower()
 
-                    connection_launcher.load(channel_name, connector_fn, context=args)
-                    connection_launcher.launch(channel_name)
+            is_ingress = (channel == "payload.reception")
+            is_egress  = (channel == "outgoing.command")
+            is_primary_ingress = (uid == primary_ingress_uid)
 
-                except Exception as e:
-                    emit_gui_exception_log(
-                        f"[CONNECT][ERROR] Failed to launch {proto} connector for {agent.get('universal_id')}", e
-                    )
 
-        #auto monitor threads that need to persist
-        connection_launcher.start_auto_monitor()
+            should_monitor = proto in PERSISTENT_PROTOS
+
+            # ingress: only keep the chosen one alive
+            if is_ingress:
+                should_monitor = (proto in PERSISTENT_PROTOS) and is_primary_ingress
+
+            # Context passed into connector instance via shared state
+            context = {
+                "agent": agent,
+                "deployment": deployment,
+                "session_id": session_id,
+                # Optional: can be used by launch gating if you implement auto_launch
+                # "auto_launch": should_monitor,
+            }
+
+            # --- policy: monitor/autostart/packet gating ---
+            requires_packet = (proto in EPHEMERAL_PROTOS)  # https/smtp one-shot
+            monitor = should_monitor  # only loop connectors we want alive
+            auto_start = (is_ingress and is_primary_ingress and monitor) or (is_egress and monitor)
+
+            policy = ConnectorPolicy(
+                auto_start=auto_start,
+                monitor=monitor,
+                requires_packet=requires_packet,
+                ready=True,  # optional: you can compute readiness here (host/port present etc.)
+                reason=(
+                    "primary ingress" if (is_ingress and is_primary_ingress) else
+                    "egress" if is_egress else
+                    "dormant ingress"
+                )
+            )
+
+            spec = ConnectorSpec(
+                uid=uid,
+                class_path=connector_class_path,
+                context=context,
+                policy=policy
+            )
+
+            launcher.load_spec(spec)
+
+            # -----------------------------
+            # Launch policy
+            # -----------------------------
+            # Only starts if policy allows; ephemerals won't start without packet
+            launcher.launch(uid)
+
+        # Start watchdog after registration/initial launches are complete
+        launcher.start_monitor()
         return ctx
 
     except Exception as e:

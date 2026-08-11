@@ -1,5 +1,5 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-from PyQt6.QtWidgets import QComboBox, QFormLayout, QLineEdit
+from PyQt6.QtWidgets import QCheckBox,QComboBox, QFormLayout, QLineEdit
 from .base_editor import BaseEditor
 from matrix_gui.core.class_lib.validation.network.ip_utils import IPUtils
 from matrix_gui.core.class_lib.validation.network.port_utils import PortUtils
@@ -11,6 +11,8 @@ class WSS(BaseEditor):
         self.default_channel = QComboBox()
         default_channel_options = default_channel_options or ["payload.reception"]
         self.default_channel.addItems(default_channel_options)
+        self.default_payload_reception = QCheckBox("Primary Payload Reception Transport")
+        self.default_payload_reception.setToolTip("Mark this connector as the default route for incoming payloads.")
 
         self.path_selector = QComboBox()
         # node directive path - add as you see fit - I'll fix this in the future - add config/https
@@ -34,6 +36,7 @@ class WSS(BaseEditor):
         layout.addRow("Port", self.port or 443)
         layout.addRow("Note", self.note)
         layout.addRow("Allowlist IPs", self.allowlist_ips)
+        layout.addRow("", self.default_payload_reception)
         layout.addRow("Channel", self.default_channel)
         layout.addRow("Directive Path", self.path_selector)  #  this is json node path where the agent's config is written
         layout.addRow("Serial", self.serial)
@@ -46,6 +49,7 @@ class WSS(BaseEditor):
         self.port.setText(str(data.get("port", 443)))
         self.note.setText(data.get("note", ""))
         self.allowlist_ips.setText(", ".join(data.get("allowlist_ips", [])))
+        self.default_payload_reception.setChecked(bool(data.get("default_payload_reception", False)))
         self.default_channel.setCurrentText(data.get("channel", ""))
         self.serial.setText(data.get("serial"))
 
@@ -58,6 +62,7 @@ class WSS(BaseEditor):
                 ip.strip() for ip in self.allowlist_ips.text().split(",") if ip.strip()
             ],
             "channel": self.default_channel.currentText(),
+            "default_payload_reception": self.default_payload_reception.isChecked(),
         }
 
     def serialize(self):
@@ -71,6 +76,7 @@ class WSS(BaseEditor):
                 ip.strip() for ip in self.allowlist_ips.text().split(",") if ip.strip()
             ],
             "channel": self.default_channel.currentText(),
+            "default_payload_reception": self.default_payload_reception.isChecked(),
             "serial": self.serial.text().strip(),
         }
 

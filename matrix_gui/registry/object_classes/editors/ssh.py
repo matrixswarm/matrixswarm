@@ -203,11 +203,12 @@ class SSH(BaseEditor):
             out["private_key"] = "None"
             out["private_key_passphrase"] = "None"
 
-
         elif out["auth_type"] == "private_key":
             out["private_key"] = self.private_key.toPlainText().strip()
             out["private_key_passphrase"] = self.passphrase.text().strip() or "None"
             out["password"] = self.password.text().strip() or "None"
+
+        out['sensitive_fields']={"username": "1", "password": "1", "private_key": "1", "private_key_passphrase": "1"},
 
         return out
 

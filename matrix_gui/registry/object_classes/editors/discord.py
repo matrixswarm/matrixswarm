@@ -48,7 +48,8 @@ class Discord(BaseEditor):
         return {
             "channel_id": self.channel_id.text().strip(),
             "bot_token": self.bot_token.text().strip(),
-            "serial": self.serial.text().strip()
+            "serial": self.serial.text().strip(),
+            "sensitive_fields": {"bot_token": "1", "channel_id": "1"},
         }
 
     def serialize(self):

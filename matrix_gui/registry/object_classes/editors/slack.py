@@ -47,6 +47,7 @@ class Slack(BaseEditor):
         return {
             "webhook_url": self.webhook_url.text().strip(),
             "channel": self.default_channel.currentText(),
+            "sensitive_fields": {"webhook_url": "1"},
         }
 
     def serialize(self):

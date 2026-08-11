@@ -23,6 +23,8 @@ class AgentRootSelector:
 
 from pathlib import Path
 
+print(f"[CLOWN-CAR][MODULE LOAD] agent_root_selector loaded from: {__file__}")
+
 LANG_EXT_MAP = {
     "python": "py",
     "go": "go",
@@ -32,7 +34,6 @@ LANG_EXT_MAP = {
     "cpp": "cpp",
     "c": "c"
 }
-
 
 class AgentRootSelector:
     """
@@ -51,6 +52,7 @@ class AgentRootSelector:
         Returns:
             Path to the /agents directory.
         """
+
         base = Path(base_dir).resolve()
         if not base.exists():
             raise FileNotFoundError(f"[CLOWN-CAR] Invalid base directory: {base_dir}")
@@ -76,20 +78,50 @@ class AgentRootSelector:
         raise FileNotFoundError(f"[CLOWN-CAR] Could not resolve agents root from: {base_dir}")
 
     @staticmethod
-    def find_agent_source(agent_name: str, base_dir: str, lang: str = "python") -> str:
+    def find_agent_source(agent_name: str, lang: str, base_dir: str) -> str | None:
         """
-        Locate a specific agent source file (e.g., matrix_core/gatekeeper/gatekeeper.py)
-        under /agents.
+        Locate an agent source file.
+
+        Supports:
+          - flat file: matrix.py
+          - package: matrix/matrix.py
+          - package entry: matrix/__init__.py
         """
         agents_root = AgentRootSelector.resolve_agents_root(base_dir)
-        ext = LANG_EXT_MAP.get(lang.lower(), "py")
 
-        for file in agents_root.rglob(f"{agent_name}.{ext}"):
+        ext = {
+            "python": "py",
+            "go": "go",
+            "cpp": "cpp"
+        }.get(lang, "py")
+
+        print(f"[CLOWN-CAR][TRACE] find_agent_source() LIVE FILE = {__file__}")
+        print(f"[CLOWN-CAR][TRACE] Searching for {agent_name}.{ext} under {agents_root}")
+
+        matches = list(agents_root.rglob(f"{agent_name}.{ext}"))
+        print(f"[CLOWN-CAR][TRACE] Matches = {matches}")
+
+        for file in matches:
             if file.is_file():
-                return str(file.resolve())
+                print(f"[CLOWN-CAR][TRACE] Found flat file: {file}")
+                return str(file)
+
+        for folder in agents_root.rglob(agent_name):
+            if folder.is_dir():
+                candidate = folder / f"{agent_name}.{ext}"
+                if candidate.exists():
+                    print(f"[CLOWN-CAR][TRACE] Found package file: {candidate}")
+                    return str(candidate)
+
+        for folder in agents_root.rglob(agent_name):
+            if folder.is_dir():
+                init_file = folder / "__init__.py"
+                if init_file.exists():
+                    print(f"[CLOWN-CAR][TRACE] Found package init: {init_file}")
+                    return str(init_file)
 
         print(f"[CLOWN-CAR][WARN] Not found: {agent_name} ({lang}) under {agents_root}")
-        return ""
+        return None
 
     @staticmethod
     def verify_all_sources(directive_root: dict, base_dir: str) -> list[str]:
@@ -105,7 +137,7 @@ class AgentRootSelector:
             name = node.get("name")
             lang = node.get("lang", "python")
             if name:
-                src_path = AgentRootSelector.find_agent_source(name, base_dir, lang)
+                src_path = AgentRootSelector.find_agent_source(name, lang, base_dir)
                 if not src_path:
                     missing.append(name)
             for child in node.get("children", []):

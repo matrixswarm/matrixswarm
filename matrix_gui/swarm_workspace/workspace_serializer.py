@@ -7,6 +7,11 @@ def collect_scene_nodes(scene):
     """
     Return list of AgentNode.get_node() from all items in scene.
     """
+    workspace = getattr(scene, "workspace", None)
+    controller = getattr(workspace, "controller", None)
+    if controller is not None and hasattr(controller, "serialize"):
+        return controller.serialize()
+
     nodes = []
     for item in scene.items():
         if hasattr(item, "node"):

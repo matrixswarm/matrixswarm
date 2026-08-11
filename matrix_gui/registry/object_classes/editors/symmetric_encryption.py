@@ -17,6 +17,7 @@ class SymmetricEncryption(BaseEditor):
         self.bundle = {
             "key": base64.b64encode(os.urandom(32)).decode(),
             "type": "aes",
+            "sensitive_fields": {"key": "1"},
         }
 
     def get_deployment_path(self, universal_id):

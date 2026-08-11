@@ -38,6 +38,7 @@ class OpenAI(BaseEditor):
         return {
             "api_key": self.api_key.text().strip(),
             "channel": self.default_channel.currentText(),
+            "sensitive_fields": {"api_key": "1"},
         }
 
     def on_load(self, data):

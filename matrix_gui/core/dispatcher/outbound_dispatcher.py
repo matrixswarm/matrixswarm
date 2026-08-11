@@ -151,6 +151,7 @@ class OutboundDispatcher:
             )
 
             uid = self._resolved_channel.get("universal_id")
+
             launcher.launch(uid, packet=packet, fire_catapult=True)
 
         except Exception as e:

@@ -8,17 +8,12 @@ class BaseConnector(ABC):
     """
     Standard interface for all connectors (HTTPS, WSS, SMTP, etc).
 
-    Persistent connectors (like WSS) run continuous loops and self-manage.
-    Ephemeral connectors (like HTTPS/SMTP) perform a single mission and exit.
 
     Subclasses should override:
-      - run_once()   → for single-shot tasks
-      - run_loop()   → for persistent sockets or repeating tasks
-      - send() / close()   → core communication methods
+      - run_once()→ for single-shot tasks
+      - run_loop()→ for persistent sockets or repeating tasks
+      - send() / close()→ core communication methods
     """
-
-    persistent = False  # default mode: single-shot
-    run_on_launch = True  # compatible with ConnectionLauncher
 
     def __init__(self, shared=None):
         """
@@ -36,16 +31,19 @@ class BaseConnector(ABC):
             self.deployment = shared.get("deployment")
             self._shared = shared
 
+            self._persistent = False
+            self._run_on_launch = False
+
             self._closed = False
             self._status = "disconnected"
             self._channel_name = None
             self._mission = None
             self._stop_flag = False
-
-            # optional hooks for telemetry
             self._shared.setdefault("last_heartbeat", time.time())
+
         except Exception as e:
             emit_gui_exception_log("BaseConnector.__init__()", e)
+
 
     # ------------------------------------------------------------------
     # Abstracts for communication primitives
@@ -109,27 +107,59 @@ class BaseConnector(ABC):
         if self._shared:
             self._shared["reboot_now"] = True
 
-    # ------------------------------------------------------------------
-    # Unified run logic
-    # ------------------------------------------------------------------
+    # -------------------------------
+    # Mode inference (no flags needed)
+    # -------------------------------
+    def _overrides(self, method_name: str) -> bool:
+        """
+        Return True if the subclass overrides method_name from BaseConnector.
+        """
+        sub_impl = getattr(self.__class__, method_name, None)
+        base_impl = getattr(BaseConnector, method_name, None)
+        return sub_impl is not None and base_impl is not None and sub_impl is not base_impl
+
+    def infer_mode(self) -> str:
+        """
+        Decide execution mode by inspecting subclass overrides.
+
+        Returns:
+            "loop"  -> persistent connector; uses run_loop() calling loop_tick()
+            "once"  -> ephemeral connector; uses run_once()
+        """
+        # If loop_tick is overridden, it's a loop connector.
+        if self._overrides("loop_tick"):
+            return "loop"
+
+        # If run_once is overridden, it's a one-shot connector.
+        if self._overrides("run_once"):
+            return "once"
+
+        # Otherwise connector is incomplete / misconfigured.
+        return "invalid"
+
     def run(self):
         """
         Entry point executed by ConnectionLauncher threads.
 
-        Chooses run_once() or run_loop() based on self.persistent flag,
-        sets status accordingly, and ensures cleanup on exit.
+        Automatically infers whether this connector is loop-based or one-shot
+        by inspecting subclass method overrides.
         """
         try:
+            mode = self.infer_mode()
 
-            if self.persistent:
+            if mode == "loop":
                 self.run_loop()
-            else:
+            elif mode == "once":
                 self.run_once()
+            else:
+                raise NotImplementedError(
+                    f"{self.__class__.__name__} must implement either loop_tick() "
+                    f"(persistent) or run_once() (one-shot)."
+                )
 
         except Exception as e:
             emit_gui_exception_log(f"{self.__class__.__name__}.run()", e)
         finally:
-            # allow graceful cleanup
             try:
                 self.close(self.session_id, self._channel_name)
             except Exception:

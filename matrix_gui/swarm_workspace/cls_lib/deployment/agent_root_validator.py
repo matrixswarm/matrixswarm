@@ -5,6 +5,7 @@ from matrix_gui.core.dialog.agent_root_check_dialog import AgentRootCheckDialog
 from matrix_gui.core.class_lib.paths.agent_root_selector import AgentRootSelector
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
 
+
 class AgentRootValidator:
     """
     Commander Edition – Full Clown-Car orchestration class.
@@ -14,10 +15,10 @@ class AgentRootValidator:
         ❌ User cancels.
     """
 
-    def __init__(self, directive_staging, cached_path=None):
+    def __init__(self, directive_staging, cached_paths=None):
         self.directive_staging = directive_staging
         self.vcs = VaultCoreSingleton.get()
-        self.cached_path = Path(cached_path) if cached_path else None
+        self.cached_paths = [Path(p) for p in (cached_paths or []) if p]
         self.verified_root = None
         self.missing_agents = []
 
@@ -27,17 +28,15 @@ class AgentRootValidator:
         Begin verification loop.
         Returns verified root path (str) or None if cancelled.
         """
-
         try:
-
             print("[CLOWN-CAR][TRACE] Starting AgentRootValidator...")
 
-            # If we have a cached path, try it first
-            candidate = self.cached_path
-            if candidate and candidate.exists():
-                if self._validate(candidate):
-                    self._cache(candidate)
-                    return str(candidate)
+            # Try cached paths first, in order
+            for candidate in self.cached_paths:
+                if candidate.exists():
+                    if self._validate(candidate):
+                        self._cache(candidate)
+                        return str(candidate)
 
             # Enter persistent loop
             while True:
@@ -46,7 +45,8 @@ class AgentRootValidator:
 
                 if not new_path:
                     QMessageBox.warning(
-                        None, "Cancelled",
+                        None,
+                        "Cancelled",
                         "Deployment cancelled — agent source directory required."
                     )
                     return None
@@ -67,6 +67,7 @@ class AgentRootValidator:
                     "Agents Missing",
                     f"The following agents could not be located:\n\n{agents}\n\nPlease select a new directory."
                 )
+
         except Exception as e:
             QMessageBox.critical(None, "AgentRootValidator Failed", str(e))
             print(f"[AgentRootValidator][ERROR] {e}")
@@ -98,7 +99,18 @@ class AgentRootValidator:
 
     # ---------------------------------------------------------
     def _cache(self, verified_path: Path):
-        """Cache verified agent path in vault for future deployments."""
+        """Cache verified agent root in vault for future deployments."""
         print(f"[CLOWN-CAR] Caching verified agent root: {verified_path}")
-        self.vcs.data["last_agent_path"] = str(verified_path)
-        self.vcs.patch("last_agent_path", str(verified_path))
+
+        verified_str = str(verified_path)
+
+        roots = list(self.vcs.data.get("agent_roots", []))
+        if verified_str in roots:
+            roots.remove(verified_str)
+        roots.insert(0, verified_str)
+
+        self.vcs.data["last_agent_path"] = verified_str
+        self.vcs.data["agent_roots"] = roots
+
+        self.vcs.patch("last_agent_path", verified_str)
+        self.vcs.patch("agent_roots", roots)

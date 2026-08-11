@@ -37,15 +37,10 @@ class DirectiveCompiler:
                 fields = con.fields
 
             path = editor.get_directory_path()
-
             if path:
                 # drop redundant "config" root if present
                 if path[0] == "config":
                     path = path[1:]
-
-                if node['name'] == "matrix_email":
-                    #print(f"ZZZZZZZZZZZ{cname} ->{path}")
-                    pass
 
                 # if path is empty after trimming, write directly under config
                 if not path:

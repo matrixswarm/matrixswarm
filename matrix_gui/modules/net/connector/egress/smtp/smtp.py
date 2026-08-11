@@ -1,4 +1,5 @@
-import smtplib, ssl, json, base64, time
+# Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
+import smtplib, ssl, json, base64, time, hashlib
 from email.message import EmailMessage
 from matrix_gui.core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
@@ -23,8 +24,6 @@ class SMTPConnector(BaseConnector):
         smtp_pass (str): Password for SMTP authentication.
         to_addr (str): Destination email address for packet delivery.
     """
-    persistent = False
-    run_on_launch = False  # ConnectionLauncher auto-fires this
 
     def __init__(self, shared=None):
         """
@@ -75,6 +74,15 @@ class SMTPConnector(BaseConnector):
         finally:
             self.close(self.session_id, self.agent.get("universal_id"))
 
+    @staticmethod
+    def _recipient_hash(serial):
+        """Return the signed mailbox-routing tag for a MATRIX_EMAIL agent."""
+        if not isinstance(serial, str) or not serial.strip():
+            return None
+        return hashlib.sha256(
+            f"{serial.strip()}matrix-email-ingress".encode("utf-8")
+        ).hexdigest()
+
     # ------------------------------------------------------------------
     # Transmission
     # ------------------------------------------------------------------
@@ -103,6 +111,12 @@ class SMTPConnector(BaseConnector):
             ctx.bus.emit("channel.packet.sent", start_end=1)
 
         try:
+            target_serial = self.agent.get("serial") if isinstance(self.agent, dict) else None
+            recipient_hash = self._recipient_hash(target_serial)
+            if not recipient_hash:
+                print("[SMTPConnector] ❌ Target MATRIX_EMAIL serial is required for signed mailbox routing.")
+                return False
+
             # Wrap and encrypt payload
             inner = {
                 "matrix_packet": packet.get_packet(),
@@ -115,7 +129,9 @@ class SMTPConnector(BaseConnector):
                 sign=True,
                 encrypt=True,
                 target_uid=self.agent.get("universal_id"),
+                extra_fields={"hash": recipient_hash},
             )
+
             payload_b64 = base64.b64encode(
                 json.dumps(envelope.get_packet()).encode()
             ).decode()
@@ -125,7 +141,6 @@ class SMTPConnector(BaseConnector):
             msg = EmailMessage()
             msg["From"] = self.smtp_user
             msg["To"] = self.to_addr
-            msg["Subject"] = f"Phoenix → Swarm Packet ({self.agent.get('universal_id')})"
             msg.set_content(payload_b64)
 
             # Secure connection

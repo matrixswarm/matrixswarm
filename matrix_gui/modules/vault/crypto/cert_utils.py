@@ -30,6 +30,7 @@ Constants:
 
 import base64, hashlib
 from pathlib import Path
+from matrix_gui.core.class_lib.paths.agent_root_selector import AgentRootSelector
 
 # Language-to-extension map
 LANG_EXT_MAP = {
@@ -64,35 +65,7 @@ def resolve_agent_source(agent_name: str, base_path: str, lang_hint: str = "pyth
         >>> resolve_agent_source("gatekeeper", "/project/agents", "python")
         '/project/agents/gatekeeper.py'
     """
-    base = Path(base_path).resolve()
-    if not base.exists():
-        print(f"[CLOWN-CAR][ERROR] Invalid agent base path: {base}")
-        return ""
-
-    ext_map = {
-        "python": "py",
-        "go": "go",
-        "bash": "sh",
-        "rust": "rs",
-        "javascript": "js",
-        "cpp": "cpp",
-        "c": "c",
-    }
-    ext = ext_map.get(lang_hint.lower(), "py")
-
-    # direct path including language core
-    candidate = base / f"{lang_hint.lower()}_core" / agent_name / f"{agent_name}.{ext}"
-    if candidate.exists():
-        print(f"[CLOWN-CAR][FOUND] {agent_name} → {candidate}")
-        return str(candidate.resolve())
-
-    # fallback: search recursively just in case
-    for file in (base / f"{lang_hint.lower()}_core").rglob(f"{agent_name}.{ext}"):
-        return str(file.resolve())
-
-    print(f"[CLOWN-CAR][WARN] Not found: {agent_name} ({lang_hint}) under {base}")
-    return ""
-
+    return AgentRootSelector.find_agent_source(agent_name, lang_hint, base_path) or ""
 
 def embed_agent_sources(directive, base_path=None):
     """

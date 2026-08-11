@@ -25,8 +25,6 @@ class HTTPSConnector(BaseConnector):
         host (str): Remote hostname for the HTTPS endpoint.
         port (int): Remote port number for the HTTPS endpoint.
     """
-    persistent = False
-    run_on_launch = False   # launcher will start it automatically
 
     def __init__(self, shared=None):
         """
@@ -67,6 +65,7 @@ class HTTPSConnector(BaseConnector):
             self._set_status("connecting")
 
             packet = self._shared.get("packet")
+
             if not packet:
                 print("[HTTPSConnector] ❌ No packet provided in shared context.")
                 return
@@ -183,7 +182,7 @@ class HTTPSConnector(BaseConnector):
             channel_name (str, optional): Channel name, defaults to 'https'.
         """
 
-        self._emit_status("disconnected")
+        self._emit_status("idle")
 
         #check if we already closed in the base_connector
         if getattr(self, "_closed", False):

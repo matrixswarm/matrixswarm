@@ -21,7 +21,7 @@ class PacketSigning(BaseEditor):
             "pubkey": pub,
             "privkey": priv,
             "remote_pubkey": remote_pub,
-            "remote_privkey": remote_priv
+            "remote_privkey": remote_priv,
         }
 
     def get_deployment_path(self, universal_id):
@@ -36,11 +36,14 @@ class PacketSigning(BaseEditor):
     def deploy_fields(self):
         return self.bundle.copy()
 
+    #when you don't want to export the whole bundle to the directive
     def directive_fields(self):
         # Extract only privkey and remote_pubkey
+        #"sensitive" tells the agent returning the agent tree to phoenix not to include these fields
         return {
             "privkey": self.bundle["privkey"],
-            "remote_pubkey": self.bundle["remote_pubkey"]
+            "remote_pubkey": self.bundle["remote_pubkey"],
+            "sensitive_fields": {"privkey": "1", "remote_pubkey": "1"},
         }
 
     def serialize(self):

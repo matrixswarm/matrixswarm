@@ -153,20 +153,6 @@ class AgentItem(QGraphicsRectItem):
 
     def update_status_color(self):
         if self.node.all_constraints_met():
-            # All good → blue highlight
-            self.setStyleSheet("""
-                QGraphicsWidget {
-                    border: 2px solid #369CFF;
-                    border-radius: 6px;
-                    background-color: #111;
-                }
-            """)
+            self.setPen(QPen(QColor("#369CFF"), 3))
         else:
-            # Default grey border
-            self.setStyleSheet("""
-                QGraphicsWidget {
-                    border: 2px solid #555;
-                    border-radius: 6px;
-                    background-color: #111;
-                }
-            """)
+            self.setPen(QPen(QColor("#555"), 2))

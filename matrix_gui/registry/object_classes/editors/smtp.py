@@ -73,6 +73,7 @@ class Smtp(BaseEditor):
             "smtp_encryption": self.smtp_encryption.currentText(),
             "default_outgoing": self.default_outgoing.isChecked(),
             "channel": self.default_channel.currentText(),
+            "sensitive_fields": {"smtp_username": "1","smtp_password": "1"},
         }
 
     # --------------------------------

@@ -38,11 +38,10 @@ def run_session(session_id, conn):
     """
     Executes a session, initializing its configurations, inter-process communication, and monitoring tools.
 
-    Parameters:
-        - Configuration data (varies depending on the implementation).
+    @param str session_id: Unique identifier for the session.
+    @param multiprocessing.Connection conn: IPC connection for communication with the parent process.
 
-    Returns:
-        - Session instance: The configured session object.
+    @return None
     """
 
     app = QApplication.instance() or QApplication(sys.argv)
@@ -81,24 +80,23 @@ def run_session(session_id, conn):
             agents = deployment.get("agents", [])
             missing = []
 
-            # Search for channels and update as needed
-            i=0
+            has_outgoing = False
+            has_incoming = False
+
             for agent in agents:
-                # do we have any agents acting as channels for "outgoing.command"
-                if agent.get("connection", {}).get("channel","") == "outgoing.command":
-                    i=i+1
-                    break
+                channel = (agent.get("connection", {}).get("channel") or "").strip().lower()
 
-            #payload recieve will be updated; right now, just use websocket
+                if channel == "outgoing.command":
+                    has_outgoing = True
 
+                elif channel == "payload.reception":
+                    has_incoming = True
 
-            if not i:
-                missing.append("need at least one agent with egress capability")
+            if not has_outgoing:
+                missing.append("need at least one agent with outgoing.command capability")
 
-            # Validate the presence of required agents (after updating)
-            agent_names = [a.get("name", "").lower() for a in agents]
-            if "matrix_websocket" not in agent_names:
-                missing.append("matrix_websocket (egress)")
+            if not has_incoming:
+                missing.append("need at least one agent with payload.reception capability")
 
             if missing:
 
@@ -121,7 +119,7 @@ def run_session(session_id, conn):
             emit_gui_exception_log(f"[SESSION][WARN] Preflight check failed", e)
 
         ctx = _connect_single(deployment, session_id, deployment.get("id"))
-        inbound = InboundDispatcher(ctx.bus)
+        inbound = InboundDispatcher(ctx.bus, session_id)
         outbound = OutboundDispatcher(ctx.bus, session_id)
         ctx.inbound, ctx.outbound = inbound, outbound
 
@@ -168,7 +166,26 @@ def run_session(session_id, conn):
 
 
 class SessionWindow(QMainWindow):
+    """
+    Main window class for a Phoenix session, managing the UI layout, agent tree, logs, and dispatchers.
+
+    @extends QMainWindow
+    """
+
     def __init__(self, deployment_id, session_id, cockpit_id, deployment, conn, bus, inbound, outbound, ctx):
+        """
+        Initializes the SessionWindow with all necessary backend and frontend components.
+
+        @param str deployment_id: The ID of the deployment.
+        @param str session_id: The unique ID of this session.
+        @param str cockpit_id: The cockpit's internal session ID.
+        @param dict deployment: Deployment configuration data.
+        @param multiprocessing.Connection conn: IPC connection.
+        @param ConnectorBus bus: Event bus for internal communication.
+        @param InboundDispatcher inbound: Dispatcher for incoming messages.
+        @param OutboundDispatcher outbound: Dispatcher for outgoing commands.
+        @param SessionContext ctx: The session context object.
+        """
         super().__init__()
         try:
 
@@ -192,6 +209,7 @@ class SessionWindow(QMainWindow):
             self.bus = bus
             self.inbound_dispatcher = inbound
             self.outbound_dispatcher = outbound
+            self.preferred_incoming_uid = None
             self.ctx = ctx
             self._panel_cache = {}
 
@@ -247,6 +265,7 @@ class SessionWindow(QMainWindow):
             #multiplexor setup
             self.outgoing_connectors = {}
             default_found = False
+            ## EGRESS AGENT
             for a in deployment.get("agents", []):
                 ch = a.get("connection", {}).get("channel")
                 if ch == "outgoing.command":
@@ -266,12 +285,39 @@ class SessionWindow(QMainWindow):
                 self.outgoing_badge.setText(f"Outgoing: {first_uid}  ⚪")
 
             try:
-                for a in deployment.get("agents", []):
-                    if a.get("name", "").lower() == "matrix_websocket":
-                        uid = a.get("universal_id")
-                        self.incoming_badge.setText(f"Incoming: {uid}  ⚪")
-                        break
+                incoming_candidate = None
+                incoming_agents = []
 
+                # collect all payload.reception agents in deployment order
+                for a in deployment.get("agents", []):
+                    ch = (a.get("connection", {}).get("channel") or "").strip().lower()
+                    if ch == "payload.reception":
+                        incoming_agents.append(a)
+
+                # rule: last one flagged true wins
+                for a in incoming_agents:
+                    conn = a.get("connection", {}) or {}
+                    if bool(conn.get("default_payload_reception", False)):
+                        incoming_candidate = a
+
+                # fallback: websocket if no explicit default set
+                if not incoming_candidate:
+                    for a in incoming_agents:
+                        name = (a.get("name") or "").strip().lower()
+                        proto = (a.get("connection", {}).get("proto") or "").strip().lower()
+                        if proto == "wss" or "websocket" in name:
+                            incoming_candidate = a
+                            break
+
+                # final fallback: first payload.reception connector
+                if not incoming_candidate and incoming_agents:
+                    incoming_candidate = incoming_agents[0]
+
+                if incoming_candidate:
+                    uid = incoming_candidate.get("universal_id")
+                    self.preferred_incoming_uid = uid
+                    self.inbound_dispatcher.set_inbound_connector(incoming_candidate)
+                    self.incoming_badge.setText(f"Incoming: {uid}  ⚪")
 
             except Exception as e:
                 print("[INIT_BADGES_ERROR]", e)
@@ -294,11 +340,18 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window.__init__", e)
 
     def start_pipe_timer(self):
+        """
+        Starts the timer that polls the IPC connection for external messages.
+        """
         self._pipe_timer = QTimer(self)
         self._pipe_timer.timeout.connect(self._poll_conn)
         self._pipe_timer.start(200)
 
     def _poll_conn(self):
+        """
+        Polls the IPC connection for incoming messages, such as force close signals.
+        @private
+        """
         if not self.conn:
             return
         try:
@@ -314,6 +367,10 @@ class SessionWindow(QMainWindow):
             self._pipe_timer.stop()
 
     def _send_heartbeat(self):
+        """
+        Sends a periodic heartbeat signal back to the parent process.
+        @private
+        """
         try:
             if self.conn:
                 self.conn.send({"type": "heartbeat", "session_id": self.cockpit_id})
@@ -323,6 +380,14 @@ class SessionWindow(QMainWindow):
             return
 
     def _set_active_log_token(self, session_id, token, agent_title=None, **_):
+        """
+        Sets the active log token to filter and display logs for a specific agent.
+
+        @param str session_id: The session ID.
+        @param str token: The log token to follow.
+        @param str|None agent_title: The human-readable title of the agent.
+        @private
+        """
         try:
             self.active_log_token = token
             self.current_log_title = agent_title or "Unknown"
@@ -333,20 +398,46 @@ class SessionWindow(QMainWindow):
 
     def _handle_channel_status(self, session_id, channel, status, info=None, **_):
         try:
-
             dot = self._status_to_dot(status)
 
-            if "websocket" in channel:
-                self.incoming_badge.setText(f"Incoming: {channel}  {dot}")
+            # Resolve channel -> agent config
+            matched_agent = None
+            for a in self.deployment.get("agents", []):
+                if a.get("universal_id") == channel:
+                    matched_agent = a
+                    break
 
-            #preferred = self.outbound.preferred_channel
-            #if preferred and preferred.lower() in channel.lower():
-            #    self.outgoing_badge.setText(f"Outgoing: {channel}  {dot}")
+            if matched_agent:
+                ch = (matched_agent.get("connection", {}).get("channel") or "").strip().lower()
+
+                if ch == "payload.reception":
+                    # only update the selected/preferred incoming transport
+                    if not self.preferred_incoming_uid or channel == self.preferred_incoming_uid:
+                        self.incoming_badge.setText(f"Incoming: {channel}  {dot}")
+
+
+                elif ch == "outgoing.command":
+
+                    # Only let the currently selected outgoing connector update the badge
+                    try:
+                        active = self.outbound_dispatcher.get_outbound_connection()
+                    except Exception:
+                        active = None
+
+                    active_uid = active.get("universal_id") if isinstance(active, dict) else None
+                    if active_uid and channel != active_uid:
+                        return
 
         except Exception as e:
             emit_gui_exception_log("session_window._handle_channel_status", e)
 
     def _handle_packet_sent(self, start_end=1):
+        """
+        Triggers a UI blink update when a packet is sent.
+
+        @param int start_end: 1 to start blink (green), 0 to reset (white).
+        @private
+        """
         QMetaObject.invokeMethod(
             self,
             "_handle_packet_sent_ui",
@@ -356,6 +447,12 @@ class SessionWindow(QMainWindow):
 
     @pyqtSlot(int)
     def _handle_packet_sent_ui(self, start_end):
+        """
+        Updates the outgoing badge UI to reflect packet transmission status.
+
+        @param int start_end: 1 for green indicator, 0 for white indicator.
+        @private
+        """
         try:
             # determine symbol
             dot = "🟢" if start_end else "⚪"
@@ -384,10 +481,23 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log(f"[BLINK][ERROR] packet.sent handler", e)
 
     def _reset_outgoing_badge(self, style):
+        """
+        Resets the style of the outgoing badge.
+
+        @param str style: The CSS stylesheet to apply.
+        @private
+        """
         self.outgoing_badge.setStyleSheet(style)
         self._blink_in_progress = False
 
     def _status_to_dot(self, status):
+        """
+        Maps a status string to a colored emoji dot.
+
+        @param str status: The status string.
+        @return str: Emoji dot representing the status.
+        @private
+        """
         return {
             "connected": "🟢",
             "ready": "🟢",
@@ -398,6 +508,12 @@ class SessionWindow(QMainWindow):
 
     # --- Builders ---
     def _build_tree_panel(self):
+        """
+        Constructs the agent tree panel.
+
+        @return QGroupBox: The group box containing the agent tree.
+        @private
+        """
         try:
             box = QGroupBox("🦉 Agent Tree")
             layout = QVBoxLayout()
@@ -412,6 +528,14 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window._build_tree_panel", e)
 
     def _handle_agent_selected(self, session_id, node, panels=None, **_):
+        """
+        Handles agent selection in the tree, updating the control bar with custom panel buttons.
+
+        @param str session_id: The session ID.
+        @param dict node: The selected agent node data.
+        @param list|None panels: List of custom panels available for this agent.
+        @private
+        """
 
         if not panels:
             # No specialty panels -> stay where you are
@@ -455,6 +579,14 @@ class SessionWindow(QMainWindow):
             return None
 
     def _load_custom_panel(self, panel_name, node):
+        """
+        Dynamically loads and initializes a custom panel class.
+
+        @param str panel_name: The dot-separated path to the panel.
+        @param dict node: The agent node for which the panel is loaded.
+        @return QWidget|None: The initialized panel instance or None if loading fails.
+        @private
+        """
 
         try:
 
@@ -487,6 +619,12 @@ class SessionWindow(QMainWindow):
             return None
 
     def _build_inspector_panel(self):
+        """
+        Constructs the agent inspector panel.
+
+        @return AgentDetailPanel: The inspector panel instance.
+        @private
+        """
 
         try:
             self.detail_panel = AgentDetailPanel(session_id=self.session_id, bus=self.bus)
@@ -509,6 +647,11 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("SessionWindow.show_default_panel", e)
 
     def show_specialty_panel(self, panel: QWidget):
+        """
+        Switches the main view to a specialty panel and updates the control bar.
+
+        @param QWidget panel: The panel to display.
+        """
 
         try:
             if self.stacked.currentWidget() == panel:
@@ -538,6 +681,12 @@ class SessionWindow(QMainWindow):
 
 
     def _build_log_panel(self):
+        """
+        Constructs the agent logs panel.
+
+        @return QGroupBox: The group box containing the log view.
+        @private
+        """
 
         try:
             box = QGroupBox("📄 Agent Logs")
@@ -561,6 +710,12 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window._build_log_panel", e)
 
     def _setup_main_layout(self, main_layout):
+        """
+        Sets up the default layout for the cockpit view (tree + details + logs).
+
+        @param QLayout main_layout: The layout to populate.
+        @private
+        """
         try:
             right_column = QVBoxLayout()
             right_column.setContentsMargins(0, 0, 0, 0)
@@ -583,6 +738,15 @@ class SessionWindow(QMainWindow):
 
     # --- Log Update ---
     def _handle_log_update(self, session_id, channel, source, payload, **_):
+        """
+        Handles incoming log updates and appends them to the log view if the token matches.
+
+        @param str session_id: The session ID.
+        @param str channel: The channel name.
+        @param str source: The source of the log.
+        @param dict payload: The log data payload.
+        @private
+        """
         try:
             content = payload.get("content", {})
             token = content.get("token")
@@ -605,10 +769,19 @@ class SessionWindow(QMainWindow):
 
 
     def _on_log_count_changed(self, count: int):
+        """
+        Callback triggered when the number of lines in the log view changes.
+
+        @param int count: The new line count.
+        @private
+        """
         self._last_log_count = count
         self._update_log_status_bar()
 
     def toggle_config_panel(self):
+        """
+        Toggles the visibility of the agent configuration group.
+        """
         try:
             group = self.detail_panel.config_group
             visible = not group.isVisible()
@@ -618,6 +791,9 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window.toggle_config_panel", e)
 
     def toggle_threads_panel(self):
+        """
+        Toggles the visibility of the agent inspector/threads group.
+        """
         try:
             group = self.detail_panel.inspector_group
             visible = not group.isVisible()
@@ -627,6 +803,10 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window.toggle_threads_panel", e)
 
     def _toggle_log_pause(self):
+        """
+        Toggles the paused state of the log view.
+        @private
+        """
 
         try:
             self.log_paused = not self.log_paused
@@ -636,6 +816,12 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window._toggle_log_pause", e)
 
     def _launch_restart_agent(self, uid: str = None):
+        """
+        Launches the restart agent modal for a specific agent.
+
+        @param str|None uid: The universal ID of the agent.
+        @private
+        """
         try:
             if not isinstance(self._restart_agent_panel, RestartAgentPanel):
                 self._restart_agent_panel = RestartAgentPanel(
@@ -652,6 +838,12 @@ class SessionWindow(QMainWindow):
         # --- Delete Agent ---
 
     def _launch_delete_agent(self, uid: str = None):
+        """
+        Launches the delete agent modal for a specific agent.
+
+        @param str|None uid: The universal ID of the agent to delete.
+        @private
+        """
 
         try:
             if not isinstance(self._delete_agent_panel, DeleteAgentPanel):
@@ -668,6 +860,10 @@ class SessionWindow(QMainWindow):
 
 
     def _launch_replace_agent_source(self):
+        """
+        Launches the replace agent source panel.
+        @private
+        """
         try:
 
             if not isinstance(self._replace_panel, ReplaceAgentPanel):
@@ -683,6 +879,10 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window._launch_replace_agent_source", e)
 
     def _launch_multiplexer(self):
+        """
+        Launches the multiplexer panel for managing outgoing connections.
+        @private
+        """
         try:
             if not hasattr(self, "_multiplexer_dialog") or not isinstance(self._multiplexer_dialog, MultiplexerPanel):
                 self._multiplexer_dialog = MultiplexerPanel(
@@ -701,7 +901,103 @@ class SessionWindow(QMainWindow):
         except Exception as e:
             emit_gui_exception_log("session_window._launch_multiplexer", e)
 
+    def _get_connection_launcher(self):
+        """
+        Fetch the session ConnectionLauncher if available.
+        """
+        try:
+            if self.ctx and isinstance(self.ctx.group, dict):
+                return self.ctx.group.get("connection_launcher")
+        except Exception as e:
+            emit_gui_exception_log("SessionWindow._get_connection_launcher", e)
+        return None
+
+    def switch_inbound_connector(self, selected_uid: str):
+        """
+        Make one payload.reception connector authoritative.
+
+        Behavior:
+          1. Update preferred incoming UID
+          2. Update inbound dispatcher selector
+          3. Stop all other payload.reception connector threads
+          4. Launch the selected payload.reception connector
+          5. Update badge/status text
+        """
+        try:
+            if not selected_uid:
+                print("[SESSION][INBOUND] No selected_uid provided.")
+                return False
+
+            selected_agent = None
+            incoming_agents = []
+
+            for a in self.deployment.get("agents", []):
+                conn = a.get("connection", {}) or {}
+                channel = (conn.get("channel") or "").strip().lower()
+                if channel == "payload.reception":
+                    incoming_agents.append(a)
+                    if a.get("universal_id") == selected_uid:
+                        selected_agent = a
+
+            if not selected_agent:
+                print(f"[SESSION][INBOUND] No payload.reception agent found for uid={selected_uid}")
+                return False
+
+            launcher = self._get_connection_launcher()
+            if not launcher:
+                print("[SESSION][INBOUND] No connection_launcher available.")
+                return False
+
+            # 2) Make only the selected ingress live/monitored, then launch it
+            try:
+                for a in incoming_agents:
+                    uid = a.get("universal_id")
+                    is_selected = (uid == selected_uid)
+
+                    launcher.update_policy(
+                        uid,
+                        auto_start=is_selected,
+                        monitor=is_selected,
+                        ready=True,
+                        reason="selected ingress" if is_selected else "dormant ingress",
+                    )
+
+                    if not is_selected:
+                        launcher.kill_thread(uid)
+
+                t = launcher.launch(selected_uid, fire_catapult=True)
+
+                if not t:
+                    print(f"[SESSION][INBOUND] Launch returned no thread for {selected_uid}")
+                    return False
+
+                print(f"[SESSION][INBOUND] Launched ingress connector → {selected_uid}")
+
+            except Exception as e:
+                emit_gui_exception_log(f"SessionWindow.switch_inbound_connector.launch:{selected_uid}", e)
+                return False
+
+            # 2) Update session preference + dispatcher binding
+            self.preferred_incoming_uid = selected_uid
+            self.inbound_dispatcher.set_inbound_connector(selected_agent)
+
+            # 3) Update UI
+            self.incoming_badge.setText(f"Incoming: {selected_uid}  ⚪")
+            self.status_label.setText(f"Status: Incoming payload.reception set to {selected_uid}")
+
+            return True
+
+        except Exception as e:
+            emit_gui_exception_log("SessionWindow.switch_inbound_connector", e)
+            return False
+
     def _launch_hotswap_agent_modal(self, uid: str = None):
+        """
+        Launches the hotswap agent modal.
+
+        @param str|None uid: The universal ID of the agent.
+        @private
+        """
         try:
 
             if not isinstance(self._hotswap_panel, HotswapAgentPanel):
@@ -720,6 +1016,12 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("SessionWindow._launch_hotswap_agent_modal", e)
 
     def _launch_inject_agent_modal(self, uid: str = None):
+        """
+        Launches the inject agent modal.
+
+        @param str|None uid: The universal ID of the agent.
+        @private
+        """
         try:
 
             if not isinstance(self._inject_panel, InjectAgentPanel):
@@ -738,6 +1040,10 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("SessionWindow._launch_inject_agent_modal", e)
 
     def _launch_matrix_reboot(self):
+        """
+        Launches the matrix reboot / redeploy dialog.
+        @private
+        """
         try:
 
             # Ask cockpit for the full registry
@@ -764,6 +1070,9 @@ class SessionWindow(QMainWindow):
             print(f"[CONTROL][ERROR] {e}")
 
     def show_crypto_alert_panel(self):
+        """
+        Displays the crypto alert specialty panel.
+        """
         if "crypto_alert_panel" not in self._panel_cache:
             panel = CryptoAlertPanel(
                 session_id=self.session_id,
@@ -779,6 +1088,10 @@ class SessionWindow(QMainWindow):
 
 
     def _update_log_status_bar(self):
+        """
+        Updates the internal status label for the log panel with current state.
+        @private
+        """
         try:
             time_str = (
                 datetime.datetime.fromtimestamp(self.last_log_ts).strftime("%H:%M:%S")
@@ -797,9 +1110,20 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window._update_log_status_bar", e)
 
     # --- Other unchanged methods ---
-    def _send_cmd(self, cmd): pass
+    def _send_cmd(self, cmd):
+        """
+        Placeholder for sending a command. (Unused)
+
+        @param any cmd: The command to send.
+        @private
+        """
+        pass
 
     def _setup_status_bar(self):
+        """
+        Initializes and populates the bottom status bar with info badges.
+        @private
+        """
         try:
             status_bar = QToolBar("Session Status", self)
             status_bar.setMovable(False)
@@ -827,6 +1151,15 @@ class SessionWindow(QMainWindow):
             emit_gui_exception_log("session_window._setup_status_bar", e)
 
     def _handle_swarm_alert(self, session_id, channel, source, payload, **_):
+        """
+        Handles swarm feed alerts and passes them up to the parent cockpit via IPC.
+
+        @param str session_id: The session ID.
+        @param str channel: The channel name.
+        @param str source: The source of the alert.
+        @param dict payload: The alert data.
+        @private
+        """
         try:
             if self.conn:
 
@@ -837,12 +1170,17 @@ class SessionWindow(QMainWindow):
 
 
     def _handle_external_close(self):
-        """Called when cockpit sends {'type': 'force_close'} over the pipe."""
+        """
+        Closes the session window when a force close signal is received from the parent.
+        @private
+        """
         print(f"[SESSION] Received external close for {self.session_id}")
         self.close()
 
     def unhook_bus_handlers(self):
-        """Detach all ConnectorBus event bindings held by a ctx."""
+        """
+        Detach all ConnectorBus event bindings held by a ctx.
+        """
 
         try:
 
@@ -860,6 +1198,11 @@ class SessionWindow(QMainWindow):
             print(f"[BUS][ERROR] Failed to unhook bus handlers: {e}")
 
     def closeEvent(self, event):
+        """
+        Handles the window close event, performing cleanup of dispatchers, panels, and signaling the parent.
+
+        @param QCloseEvent event: The close event.
+        """
 
         print(f"[SESSION] {self.cockpit_id} closing, destroying session")
         try:

@@ -90,8 +90,17 @@ class Deploy():
             hashbang = clown_car
 
             if clown_car:
-                cached_path = vcs.data.get("last_agent_path")
-                validator = AgentRootValidator(directive_staging, cached_path)
+                cached_paths = []
+
+                last_agent_path = vcs.data.get("last_agent_path")
+                if last_agent_path:
+                    cached_paths.append(last_agent_path)
+
+                for p in vcs.data.get("agent_roots", []):
+                    if p not in cached_paths:
+                        cached_paths.append(p)
+
+                validator = AgentRootValidator(directive_staging, cached_paths)
                 verified_path = validator.run()
 
                 if not verified_path:

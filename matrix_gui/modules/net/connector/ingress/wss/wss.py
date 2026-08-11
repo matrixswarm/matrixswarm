@@ -4,7 +4,6 @@ from websocket import create_connection
 from Crypto.PublicKey import RSA
 
 from websocket._exceptions import WebSocketTimeoutException
-from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.modules.net.entity.adapter.agent_cert_wrapper import AgentCertWrapper
 from matrix_gui.core.utils.spki_utils import verify_spki_pin
@@ -12,7 +11,6 @@ from matrix_gui.core.utils import crypto_utils
 from matrix_gui.core.connector_bus import ConnectorBus
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.modules.net.connector.interfaces.base_connector import BaseConnector
-
 
 def _write_temp_pem(data: str, suffix=".pem"):
     """
@@ -112,8 +110,6 @@ class WSSConnector(BaseConnector):
         _websocket (websocket.WebSocket): Active WebSocket instance or None.
         _last_pong (float): Timestamp of the last successful receive or ping.
     """
-    persistent = True
-    run_on_launch = True
 
     def __init__(self, shared=None):
         """

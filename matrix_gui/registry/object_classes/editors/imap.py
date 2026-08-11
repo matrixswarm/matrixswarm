@@ -49,6 +49,7 @@ class Imap(BaseEditor):
             "incoming_password": self.in_pass.text().strip(),
             "incoming_encryption": self.in_encryption.currentText(),
             "channel": self.default_channel.currentText(),
+            "sensitive_fields": {"incoming_username": "1", "incoming_password": "1"},
         }
 
     def on_load(self, data):

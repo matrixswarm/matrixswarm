@@ -47,6 +47,7 @@ class Telegram(BaseEditor):
             "chat_id": self.chat_id.text().strip(),
             "bot_token": self.bot_token.text().strip(),
             "channel": self.default_channel.currentText(),
+            "sensitive_fields": {"bot_token": "1", "chat_id": "1", "channel": "1"},
         }
 
     def serialize(self):

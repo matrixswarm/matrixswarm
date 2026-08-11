@@ -9,6 +9,23 @@
             }
         },
         "tick_rate": 5,
+        "alert_cooldown": 60,
+        "startup_quiet_seconds": 120,
+        "signout_grace_seconds": 30,
+        "max_command_hashes": 5000,
+        "max_session_commands": 2000,
+        "baseline_shell_history": true,
+        "alert_on_signin": false,
+        "alert_on_signout": false,
+        "alert_on_file_event": false,
+        "alert_on_suspicious_command": true,
+        "report_to_role": "hive.forensics.data_feed",
+        "alert_to_role": "hive.alert",
+        "install_prompt_command": false,
+        "prompt_paths": [
+            "/etc/bash.bashrc",
+            "~/.bashrc"
+        ],
         "watch_paths": [
             "/etc/passwd",
             "/etc/shadow",
@@ -26,7 +43,9 @@
             "vim /etc",
             "sudo",
             "su",
-            "chmod 777"
+            "chmod 777",
+            "systemctl stop",
+            "service stop"
         ]
     }
 }
