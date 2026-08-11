@@ -1,6 +1,10 @@
 import time
 class FeedFormatter:
     ICONS = {
+        "replace": "✅",
+        "delete": "☠️",
+        "restart": "🔁",
+        "hotswap": "⚡",
         "info": "📰",
         "warning": "⚠️",
         "error": "❌",

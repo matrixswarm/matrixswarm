@@ -58,7 +58,7 @@ class RestartAgentDialog(QDialog):
             confirm = QMessageBox.question(
                 self, "Confirm Restart",
                 f"Are you sure you want to restart '{self.agent_id}'"
-                + (" and its full subtree?" if full_subtree else " and its immediate subtree?"),
+                + (" and its full subtree?" if full_subtree else " only?"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if confirm != QMessageBox.StandardButton.Yes:
@@ -72,7 +72,7 @@ class RestartAgentDialog(QDialog):
                     "restart_full_subtree": full_subtree,
                     "session_id": self.session_id,
                     "token": str(uuid.uuid4()),
-                    "confirm_response": 0,
+                    "confirm_response": 1,
                     "return_handler": "restart_dialog.result"
                 },
                 "ts": time.time()
@@ -85,10 +85,3 @@ class RestartAgentDialog(QDialog):
         except Exception as e:
             emit_gui_exception_log("RestartAgentDialog.deploy", e)
             QMessageBox.warning(self, "Error", f"Restart failed: {e}")
-
-
-
-    def _emit_resume(self, resume):
-        pk2 = Packet(); pk2.set_data(resume)
-        self.bus.emit("outbound.message", session_id=self.session_id,
-                      channel="outgoing.command", packet=pk2)

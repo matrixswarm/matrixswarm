@@ -1,10 +1,10 @@
-import os, base64, hashlib, time, re, ast, json, ast
+import os
+import json
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QDialog, QVBoxLayout, QLabel,
     QComboBox, QPushButton, QFileDialog,
     QMessageBox
 )
-from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 
 class HotswapAgentDialog(QDialog):
@@ -64,28 +64,4 @@ class HotswapAgentDialog(QDialog):
         if not self.file_path or not target_uid:
             QMessageBox.warning(self, "Error", "Missing file or agent target.")
             return
-
-        with open(self.file_path, "rb") as f:
-            code = f.read()
-            encoded = base64.b64encode(code).decode("utf-8")
-            file_hash = hashlib.sha256(code).hexdigest()
-
-        payload = {
-            "handler": "cmd_hotswap_agent",
-            "timestamp": time.time(),
-            "content": {
-                "target_universal_id": target_uid,
-                "source_payload": {
-                    "payload": encoded,
-                    "sha256": file_hash
-                },
-                "meta": self.meta,
-                "update_tree": False,
-                "update_source": True,
-                "restart": True
-            }
-        }
-        pk = Packet()
-        pk.set_data(payload)
-        self.bus.emit("outbound.message", session_id=self.session_id, channel="outgoing.command", packet=pk)
-        QMessageBox.information(self, "Hotswap", f"Agent {target_uid} hotswapped.\nSHA256: {file_hash[:12]}…")
+        self.accept()

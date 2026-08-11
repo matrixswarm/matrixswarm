@@ -75,7 +75,6 @@ class HotswapAgentPanel(QObject):
         if result != QDialog.DialogCode.Accepted:
             self._cleanup()
             return
-        self.clear_to_show = True
         file_path = self._dlg.file_path
         meta = self._dlg.meta or {}
         uid = self._dlg.agent_dropdown.currentText()
