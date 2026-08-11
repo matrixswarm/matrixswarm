@@ -45,3 +45,13 @@ class ConnectorBus:
         if session_id not in cls._buses:
             cls._buses[session_id] = ConnectorBus(session_id)
         return cls._buses[session_id]
+
+    @classmethod
+    def release(cls, session_id):
+        """Remove a closed session's connector bus and remaining listeners."""
+        bus = cls._buses.pop(session_id, None)
+        if bus is None:
+            return
+
+        bus._listeners.clear()
+        print(f"[CONN-BUS[{str(session_id)[:8]}]] Released")

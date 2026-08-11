@@ -31,6 +31,8 @@ class ConnectionLauncher:
         self._registry = {}       # uid -> ConnectorSpec
         self._shared_state = {}   # uid -> shared dict
         self._lock = threading.Lock()
+        self._monitor_stop = threading.Event()
+        self._monitor_thread = None
 
         print("ConnectionLauncher initialized")
 
@@ -215,12 +217,14 @@ class ConnectionLauncher:
 
    # --------------------------------------------------
     def start_monitor(self, check_interval: int = 10):
-        if hasattr(self, "_monitor_thread") and self._monitor_thread.is_alive():
+        if self._monitor_thread and self._monitor_thread.is_alive():
             return
+
+        self._monitor_stop.clear()
 
         def _monitor_loop():
             print("[ConnectionLauncher][MONITOR] Auto-monitor active.")
-            while True:
+            while not self._monitor_stop.is_set():
                 try:
                     restarts = []
 
@@ -242,15 +246,21 @@ class ConnectionLauncher:
                                 restarts.append(uid)
 
                     for uid in set(restarts):
+                        if self._monitor_stop.is_set():
+                            break
                         print(f"[MONITOR] Restarting {uid}")
                         self.kill_thread(uid)
                         self.launch(uid, fire_catapult=True)
 
-                    time.sleep(check_interval)
+                    if self._monitor_stop.wait(check_interval):
+                        break
 
                 except Exception as e:
                     emit_gui_exception_log("ConnectionLauncher.auto_monitor()", e)
-                    time.sleep(check_interval)
+                    if self._monitor_stop.wait(check_interval):
+                        break
+
+            print("[ConnectionLauncher][MONITOR] Auto-monitor stopped.")
 
         self._monitor_thread = threading.Thread(
             target=_monitor_loop,
@@ -340,6 +350,17 @@ class ConnectionLauncher:
         """
         try:
             print("[ConnectionLauncher][DESTROY] Commencing full shutdown sequence...")
+            self._monitor_stop.set()
+            monitor_thread = self._monitor_thread
+
+            if (
+                monitor_thread
+                and monitor_thread.is_alive()
+                and monitor_thread is not threading.current_thread()
+            ):
+                print("[DESTROY] Stopping monitor thread...")
+                monitor_thread.join(timeout=2)
+
             with self._lock:
                 # signal stop
                 for tid, shared in list(self._shared_state.items()):
@@ -360,10 +381,7 @@ class ConnectionLauncher:
                 self._registry.clear()
                 self._shared_state.clear()
 
-            # stop monitor loop if any
-            if hasattr(self, "_monitor_thread") and self._monitor_thread.is_alive():
-                print("[DESTROY] Stopping monitor thread...")
-                self._monitor_thread = None  # daemon thread will exit on its own
+            self._monitor_thread = None
 
             print("[ConnectionLauncher][DESTROY] ✅ All connections destroyed.")
         except Exception as e:
@@ -371,6 +389,7 @@ class ConnectionLauncher:
                 emit_gui_exception_log("ConnectionLauncher.destroy_all()", e)
             else:
                 # fallback: hard purge everything
+                self._monitor_stop.set()
                 self._threads.clear()
                 self._registry.clear()
                 self._shared_state.clear()

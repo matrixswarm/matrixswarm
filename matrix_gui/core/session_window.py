@@ -24,6 +24,7 @@ from matrix_gui.modules.net.deployment_connector import _connect_single
 from matrix_gui.core.dispatcher.inbound_dispatcher import InboundDispatcher
 from matrix_gui.core.dispatcher.outbound_dispatcher import OutboundDispatcher
 from matrix_gui.config.boot.globals import get_sessions
+from matrix_gui.core.connector_bus import ConnectorBus
 from matrix_gui.core.panel.restart_agent_panel import RestartAgentPanel
 from matrix_gui.core.panel.replace_agent_panel import ReplaceAgentPanel
 from matrix_gui.core.panel.hotswap_agent_panel import HotswapAgentPanel
@@ -1184,12 +1185,17 @@ class SessionWindow(QMainWindow):
         """
 
         try:
+            connector_bus = ConnectorBus.get(self.ctx.id)
 
-            if hasattr(self.ctx, "_bus_refs"):
-                for event_name, handler in self.ctx._bus_refs:
-                    self.bus.off(event_name, handler)
+            try:
+                for event_name, handler in list(
+                    getattr(self.ctx, "_bus_refs", [])
+                ):
+                    connector_bus.off(event_name, handler)
                     print(f"[BUS] 🔌 Unhooked {event_name} from {self.ctx.id}")
-                self.ctx._bus_refs.clear()
+            finally:
+                getattr(self.ctx, "_bus_refs", []).clear()
+                ConnectorBus.release(self.ctx.id)
 
             if hasattr(self.ctx, "bus"):
                 self.ctx.bus.clear()  # Clears SessionBus listeners
@@ -1226,12 +1232,13 @@ class SessionWindow(QMainWindow):
                 launcher = self.ctx.group.get("connection_launcher", None)
                 if launcher:
                     launcher.destroy_all()
-                    self.unhook_bus_handlers()
                     print("[SESSION_WINDOW] ✅ All connections destroyed.")
                 else:
                     print("[SESSION_WINDOW] ⚠️ No launcher found in ctx.")
             except Exception as e:
                 print(f"[SESSION_WINDOW][ERROR] during shutdown: {e}")
+            finally:
+                self.unhook_bus_handlers()
 
             self._panel_cache.clear()
 
