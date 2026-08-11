@@ -1,59 +1,37 @@
-import os, base64, hashlib, time, re, ast, json, ast
+# Authored by Daniel F MacDonald and ChatGPT 5 aka The Generals
+import os, uuid, base64, hashlib, time, re, ast, json, ast
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QTextEdit, QPushButton, QFileDialog,
-    QCheckBox, QMessageBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
 )
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 
+
 class ReplaceAgentDialog(QDialog):
-    def __init__(self, session_id, bus, parent=None):
+    def __init__(self, session_id, bus, conn, deployment, parent=None):
         super().__init__(parent)
         self.setWindowTitle("♻️ Replace Agent Source")
-        self.resize(600, 500)
-
+        self.resize(400, 150)
+        self.deployment=deployment
+        self.conn = conn
         self.session_id = session_id
+        self.active_log_token = None
         self.bus = bus
         self.file_path = None
-        self.meta = {}
+        self.agent_name = None
 
         layout = QVBoxLayout(self)
 
         # File picker
         self.file_label = QLabel("No file selected")
-        btn_pick = QPushButton("📂 Select .py Source")
+        btn_pick = QPushButton("📂 Select Agent Source")
         btn_pick.clicked.connect(self.pick_file)
 
         row1 = QHBoxLayout()
         row1.addWidget(self.file_label)
         row1.addWidget(btn_pick)
         layout.addLayout(row1)
-
-        # Name field
-        layout.addWidget(QLabel("Agent Name"))
-        self.name_edit = QLineEdit()
-        layout.addWidget(self.name_edit)
-
-        # Roles
-        layout.addWidget(QLabel("Roles (comma separated)"))
-        self.roles_edit = QLineEdit()
-        layout.addWidget(self.roles_edit)
-
-        # Config defaults
-        layout.addWidget(QLabel("Config Defaults (JSON)"))
-        self.config_edit = QTextEdit()
-        self.config_edit.setPlaceholderText("{\n  \"check_interval_sec\": 10\n}")
-        layout.addWidget(self.config_edit)
-
-        # Operation toggles
-        self.chk_update_tree = QCheckBox("Update Tree")
-        self.chk_update_source = QCheckBox("Update Source")
-        self.chk_restart = QCheckBox("Restart Agent")
-        self.chk_update_source.setChecked(True)
-        layout.addWidget(self.chk_update_tree)
-        layout.addWidget(self.chk_update_source)
-        layout.addWidget(self.chk_restart)
+        self.openQbox=None
 
         # Buttons
         row2 = QHBoxLayout()
@@ -65,93 +43,46 @@ class ReplaceAgentDialog(QDialog):
         row2.addWidget(btn_cancel)
         layout.addLayout(row2)
 
+        if self.bus:
+            self.bus.on(
+                f"inbound.verified.replace_agent_source.confirm.{self.session_id}",
+                self._handle_source_update
+            )
+
     def pick_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Agent Source", "", "Python (*.py)"
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "Select Agent Source", "", "Python (*.py);;All Files (*)")
         if not path:
             return
         self.file_path = path
         self.file_label.setText(os.path.basename(path))
-        self.parse_meta(path)
-
-    import ast
-    from PyQt5.QtWidgets import QMessageBox
-
-    def parse_meta(self, path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                code = f.read()
-
-            # Parse file into AST
-            tree = ast.parse(code, filename=path)
-
-            meta_dict = None
-            for node in tree.body:
-                if isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name) and target.id == "__AGENT_META__":
-                            # Evaluate only safe literals
-                            meta_dict = ast.literal_eval(node.value)
-                            break
-                if meta_dict is not None:
-                    break
-
-            if not meta_dict:
-                self.meta = {
-                    "name": os.path.splitext(os.path.basename(path))[0],
-                    "roles": [],
-                    "config_defaults": {}
-                }
-            else:
-                self.meta = meta_dict
-
-            # Populate dialog fields
-            self.name_edit.setText(self.meta.get("name", ""))
-            self.roles_edit.setText(",".join(self.meta.get("roles", [])))
-            config_str = json.dumps(self.meta.get("config_defaults", {}), indent=2)
-            self.config_edit.setPlainText(config_str)
-
-        except Exception as e:
-            QMessageBox.warning(self, "Parse Error", f"Could not parse metadata: {e}")
-
+        # infer agent name from filename or directory
+        self.agent_name = os.path.splitext(os.path.basename(path))[0]
 
     def deploy(self):
-        if not self.file_path:
-            QMessageBox.warning(self, "No File", "Select a source file first.")
+        if not self.file_path or not self.agent_name:
+            QMessageBox.warning(self, "Error", "Select a valid agent source file first.")
             return
 
         try:
-            # Update meta from fields
-            roles = [r.strip() for r in self.roles_edit.text().split(",") if r.strip()]
-            config = {}
-            if self.config_edit.toPlainText().strip():
-                config = json.loads(self.config_edit.toPlainText())
-
-            self.meta.update({
-                "name": self.name_edit.text().strip(),
-                "roles": roles,
-                "config_defaults": config
-            })
-
             with open(self.file_path, "rb") as f:
                 code = f.read()
                 encoded = base64.b64encode(code).decode("utf-8")
                 file_hash = hashlib.sha256(code).hexdigest()
 
+            self.active_log_token = str(uuid.uuid4())
+
             payload = {
                 "handler": "cmd_replace_source",
-                "timestamp": time.time(),
+                "ts": time.time(),
                 "content": {
-                    "target_universal_id": self.meta["name"],  # use name as UID fallback
-                    "source_payload": {
-                        "payload": encoded,
-                        "sha256": file_hash
-                    },
-                    "meta": self.meta,
-                    "update_tree": self.chk_update_tree.isChecked(),
-                    "update_source": self.chk_update_source.isChecked(),
-                    "restart": self.chk_restart.isChecked()
+                    "target_agent_name": self.agent_name,
+                    "payload": {
+                        "session_id": self.session_id,
+                        "token": self.active_log_token,
+                        "source": encoded,
+                        "sha256": file_hash,
+                        "return_handler": "replace_agent_source.confirm"
+                    }
                 }
             }
 
@@ -160,10 +91,33 @@ class ReplaceAgentDialog(QDialog):
             self.bus.emit("outbound.message", session_id=self.session_id,
                           channel="outgoing.command", packet=pk)
 
-            QMessageBox.information(self, "Deployed",
-                f"Agent {self.meta['name']} replaced.\nSHA256: {file_hash[:12]}…")
-            self.accept()
-
         except Exception as e:
             emit_gui_exception_log("ReplaceAgentDialog.deploy", e)
             QMessageBox.warning(self, "Error", f"Deployment failed: {e}")
+
+    def _handle_source_update(self, session_id, channel, source, payload, ts):
+        content = payload.get("content", {})
+        agent = content.get("target_agent_name", "unknown")
+        status = content.get("status", "n/a")
+        sha = content.get("sha256", "")[:12]
+        message = content.get("message", "")
+        trace = content.get("token")
+
+        if self.conn:
+            event = {
+                "event_type": "replace",
+                "agent": agent,
+                "status": status,
+                "sha": sha,
+                "details": message,
+                "trace": trace,
+                "session_id": self.session_id,
+                "deployment": self.deployment.get("label", "unknown"),
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "level": "INFO"
+            }
+            self.conn.send({
+                "type": "swarm_feed",
+                "session_id": self.session_id,
+                "event": event
+            })

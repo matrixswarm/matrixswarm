@@ -1,5 +1,5 @@
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
-#Gemini, doc-rocking the Swarm to perfection.
+# Docstrings by Gemini
 import os
 import time
 import traceback
@@ -506,6 +506,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
        """
         try:
             self.pre_boot()
+
             pm = PathManager(use_session_root=True, site_root_path=self.path_resolution["site_root_path"])
             cp = CoreSpawner(path_manager=pm)
             fail_success, self.boot_log = cp.get_boot_log(self.path_resolution["pod_path_resolved"])
@@ -1385,7 +1386,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             cfg = node.get("config", {})
             #these items will be returned to Matrix encase of her early demise
             #this block is basically only given to a sentinel, that's the only one that would need this
-            if bool(cfg.get("matrix_secure_verified")) and len(keychain["security_box"])==0:
+            #len of keychain["security_box"] is checked because multiple iterations will cause it
+            #to be overridden
+            if bool(cfg.get("matrix_secure_verified")) and len(keychain["security_box"])==4:
                 self.log("[TRUST] matrix_secure_verified: TRUE → injecting real Matrix private key.")
                 keychain["security_box"]["encryption_enabled"] = int(self.encryption_enabled)
                 keychain["security_box"]["matrix_priv"] = self.matrix_priv

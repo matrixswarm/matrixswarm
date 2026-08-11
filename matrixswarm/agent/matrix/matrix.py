@@ -46,6 +46,7 @@ from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.ident
 from matrixswarm.core.agent_factory.reaper.reaper_factory import make_reaper_node
 from matrixswarm.core.agent_factory.scavenger.scavenger_factory import make_scavenger_node
 from matrixswarm.core.utils.crypto_utils import generate_signed_payload, verify_signed_payload, encrypt_with_ephemeral_aes,  sign_data, pem_fix
+from matrixswarm.core.class_lib.directive.boot_directive_info import BootDirectiveInfo
 from matrixswarm.core.class_lib.packet_delivery.utility.security.packet_size import guard_packet_size
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.verify_packet_signature import verify_packet_signature
 from matrixswarm.core.class_lib.time_utils.heartbeat_checker import check_heartbeats
@@ -66,52 +67,78 @@ class Agent(BootAgent):
         """
         super().__init__()
 
-        self.AGENT_VERSION = "1.3.0"
-        self._agent_tree_master = None
 
-        #no need to delegate any agents at start
-        self._last_tree_verify = time.time()
+        try:
+            self.AGENT_VERSION = "1.3.0"
+            self._agent_tree_master = None
 
-        self._last_consciousness_scan = time.time()
-
-        self.tree_path = os.path.join( self.path_resolution["comm_path_resolved"], "directive", "agent_tree_master.json")
+            self.boot_directive_info = BootDirectiveInfo(self.security_box)
 
 
-        self.tree_path_dict = {
-             "path": self.path_resolution["comm_path"],
-             "address": self.command_line_args.get("universal_id"),
-             "drop": "directive",
-             "name": "agent_tree_master.json"
-        }
+            try:
+                #{"boot_directives_path": config["boot_directives"], "boot_directive_filename": directive_file, "boot_directive_encrypted":is_directive_encrypted, "boot_directive_swarm_key": boot_directive_swarm_key}
+                self.log(f"boot directive path: {self.security_box.get('boot_directives_path',{})}")
+                self.log(f"boot directive filename: {self.security_box.get('boot_directive_filename',{})}")
+                self.log(f"boot directive encrypted: {bool(self.security_box.get('boot_directive_encrypted',{}))}")
+                self.log(f"agent install path: {self.path_resolution['agent_path']}")
+                self.log(f"install path: {self.path_resolution['install_path']}")
 
-        self._acl = {}
+                #self.log(f"boot directive swarm key: {self.security_box.get('boot_directive_swarm_key', {})}")
+                #self.log(f"real swarm_key: {self.swarm_key}")
+            except Exception as e:
+                self.log("boot directive path and or filename not defined", error=e)
 
-        # make sure signing keys are loaded BEFORE seeding
-        self._signing_keys = self.tree_node.get('config', {}).get('security', {}).get('signing', {})
-        self._has_signing_keys = bool(self._signing_keys.get('privkey')) and bool(
-        self._signing_keys.get('remote_pubkey'))
 
-        if self._has_signing_keys:
-            priv_pem = self._signing_keys.get("privkey")
-            priv_pem=pem_fix(priv_pem)
-            self._signing_key_obj = RSA.import_key(priv_pem.encode() if isinstance(priv_pem, str) else priv_pem)
 
-        self._serial_num= self.tree_node.get('serial', {})
 
-        self._seed_acl()  # builds dict-shaped ACL entries for matrix + dominion
+            #no need to delegate any agents at start
+            self._last_tree_verify = time.time()
 
-        # delegate Matrix her Tree
-        self.delegate_tree_to_agent("matrix", self.tree_path_dict)
+            self._last_consciousness_scan = time.time()
 
-        self._signing_keys = self.tree_node.get('config',{}).get('security',{}).get('signing',{})
-        self._has_signing_keys = self._signing_keys.get('privkey',False) and self._signing_keys.get('remote_pubkey',False)
+            self.tree_path = os.path.join( self.path_resolution["comm_path_resolved"], "directive", "agent_tree_master.json")
 
-        # Inject payload_path if it's not already present
-        if "payload_path" not in self.path_resolution:
-            self.path_resolution["payload_path"] = os.path.join(
-                self.path_resolution["comm_path_resolved"],
-                "payload"
-            )
+
+            self.tree_path_dict = {
+                 "path": self.path_resolution["comm_path"],
+                 "address": self.command_line_args.get("universal_id"),
+                 "drop": "directive",
+                 "name": "agent_tree_master.json"
+            }
+
+            self._acl = {}
+
+            # make sure signing keys are loaded BEFORE seeding
+            self._signing_keys = self.tree_node.get('config', {}).get('security', {}).get('signing', {})
+            self._has_signing_keys = bool(self._signing_keys.get('privkey')) and bool(
+            self._signing_keys.get('remote_pubkey'))
+
+            if self._has_signing_keys:
+                priv_pem = self._signing_keys.get("privkey")
+                priv_pem=pem_fix(priv_pem)
+                self._signing_key_obj = RSA.import_key(priv_pem.encode() if isinstance(priv_pem, str) else priv_pem)
+
+            self._serial_num= self.tree_node.get('serial', {})
+
+            self._seed_acl()  # builds dict-shaped ACL entries for matrix + dominion
+
+            # delegate Matrix her Tree
+            self.delegate_tree_to_agent("matrix", self.tree_path_dict)
+
+            self._signing_keys = self.tree_node.get('config',{}).get('security',{}).get('signing',{})
+            self._has_signing_keys = self._signing_keys.get('privkey',False) and self._signing_keys.get('remote_pubkey',False)
+
+            # Inject payload_path if it's not already present
+            if "payload_path" not in self.path_resolution:
+                self.path_resolution["payload_path"] = os.path.join(
+                    self.path_resolution["comm_path_resolved"],
+                    "payload"
+                )
+
+        except Exception as e:
+            self.log(error=e, level="ERROR")
+
+
 
     PRIVILEGED_MATRIX_HANDLERS = {
         "cmd_deliver_agent_tree_to_child",
@@ -276,39 +303,32 @@ class Agent(BootAgent):
 
             #is a response expected
             confirm_response = bool(content.get("confirm_response", 0))
-            #role of the handler if a response is required
-            handler_role = content.get("handler_role")
-            #the handler that will return the response to the client
-            handler = content.get("handler")
             #this is the client rpc handler which handles the response
-            response_handler = content.get("response_handler")
-            response_id = content.get("response_id", 0)
+            return_handler = content.get("return_handler")
+            token = content.get("token", 0)
+            session_id = content.get("session_id")
 
             result = self._cmd_delete_agent(content, packet)
 
             #RPC-DELETE
             if (confirm_response and
-                handler_role and
-                handler and
-                response_handler):
+                return_handler):
 
-                alert_nodes = self.get_nodes_by_role(handler_role)
-
-                if not alert_nodes:
-                    self.log("No agent found with role", error=None, block="RPC-DELETE")
+                # --- RPC Confirmation ---
+                rpc_role = self.tree_node.get("rpc_router_role", "hive.rpc")
+                endpoints = self.get_nodes_by_role(rpc_role, return_count=1)
+                if not endpoints:
+                    self.log("No hive.rpc-compatible agents found for 'hive.rpc'.")
                     return
 
+                remote_pub_pem = self._signing_keys.get("remote_pubkey")
 
-                pk1 = self.get_delivery_packet("standard.command.packet")
-                pk1.set_data({"handler": handler})
-
-                pk2 = self.get_delivery_packet("standard.rpc.handler.general.packet")
-                pk2.set_data({
-                    "handler": response_handler,
-                    "origin": self.command_line_args.get("universal_id", "matrix"),
+                payload = {
+                    "handler": return_handler,
                     "content": {
+                        "session_id": session_id,
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "response_id": response_id,
+                        "token": token,
                         "status": result.get("status", "error"),
                         "error_code": result.get("error_code", 99),
                         "message": result.get("message", "Deletion result."),
@@ -320,12 +340,29 @@ class Agent(BootAgent):
                             "deleted": result.get("deleted", 0)
                         }
                     }
+                }
+
+                sealed = encrypt_with_ephemeral_aes(payload, remote_pub_pem)
+                content = {
+                    "serial": self._serial_num,
+                    "content": sealed,
+                    "timestamp": int(time.time()),
+                }
+                sig = sign_data(content, self._signing_key_obj)
+                content["sig"] = sig
+
+                pk1 = self.get_delivery_packet("standard.command.packet")
+                pk1.set_data({
+                    "handler": "dummy_handler",  # if a handler isn't set the packet will not set, without a handler
+                    "origin": self.command_line_args['universal_id'],
+                    "session_id": session_id,
+                    "content": content,
                 })
 
-                pk1.set_packet(pk2, "content")
+                for ep in endpoints:
+                    pk1.set_payload_item("handler", ep.get_handler())
+                    self.pass_packet(pk1, ep.get_universal_id())
 
-                for ep in alert_nodes:
-                    self.pass_packet(pk1, target_uid=ep.get_universal_id())
 
         except Exception as e:
             self.log("Failed to process cmd_delete_agent", error=e, block="main-try")
@@ -392,6 +429,7 @@ class Agent(BootAgent):
 
                 self.drop_hit_cookies(kill_list)
 
+                #since no mission has been assigned, it will patrol perpetually
                 reaper_node = make_reaper_node(mission_name="reaper-guardian")
 
                 # Inject Reaper
@@ -603,81 +641,6 @@ class Agent(BootAgent):
         except Exception as e:
             self.log("[WARRANT][ERROR] Warrant processing failed", error=e)
 
-    def cmd_agent_status_report(self, content, packet, identity:IdentityObject = None):
-
-        uid = content.get("target_universal_id")
-        reply_to = content.get("reply_to", "matrix")
-        if not uid:
-            self.log("[STATUS_REPORT][ERROR] No target_universal_id.")
-            return
-
-        comm_root = self.path_resolution["comm_path"]
-        report = {
-            "universal_id": uid,
-            "status": "unknown",
-            "uptime_seconds": None,
-            "boot_time": None,
-            "pid": None,
-            "cli": None,
-            "last_heartbeat": None,
-            "spawn_records": [],
-            "runtime_uuid": None,
-            "delegates": []
-        }
-
-        # 💓 Heartbeat check
-        try:
-            ping_path = os.path.join(comm_root, uid, "hello.moto", "poke.heartbeat")
-            if os.path.exists(ping_path):
-                delta = time.time() - os.path.getmtime(ping_path)
-                report["last_heartbeat"] = round(delta, 2)
-                report["status"] = "alive" if delta < 20 else "stale"
-        except Exception as e:
-            self.log("Heartbeat not beating.", error=e, block="delete-external")
-
-        # 🐣 SPAWN_RECORD_LOOKUP
-        try:
-            spawn_dir = os.path.join(comm_root, uid, "spawn")
-            spawns = sorted(Path(spawn_dir).glob("*.spawn"), reverse=True)
-            if spawns:
-                with open(spawns[0], encoding="utf-8") as f:
-                    info = json.load(f)
-                report["runtime_uuid"] = info.get("uuid")
-                report["boot_time"] = info.get("timestamp")
-                report["cli"] = " ".join(info.get("cmd", []))
-                report["pid"] = info.get("pid")
-
-                # ⏱ uptime from PID
-                now = time.time()
-                from psutil import process_iter
-                for proc in process_iter(['pid', 'create_time']):
-                    if proc.info['pid'] == report["pid"]:
-                        report["uptime_seconds"] = round(now - proc.info["create_time"])
-                        break
-        except Exception as e:
-            self.log(error=e, block="SPAWN_RECORD_LOOKUP")
-
-        try:
-            from matrixswarm.core.live_tree import LiveTree
-            tree = LiveTree()
-            tree.load(self.tree_path)
-            report["delegates"] = tree.get_delegates(uid)
-        except Exception as e:
-            self.log(error=e, block="tree-err")
-        #REPLY_ERROR
-        try:
-            inbox = os.path.join(comm_root, reply_to, "incoming")
-            os.makedirs(inbox, exist_ok=True)
-            fname = f"status_{uid}_{int(time.time())}.msg"
-
-            #REFACTOR INTO PACKET
-            #with open(os.path.join(inbox, fname), "w") as f:
-            #    json.dump(report, f, indent=2)
-
-
-            self.log(f"[STATUS] Sent report on {uid} to {reply_to}")
-        except Exception as e:
-            self.log(error=e, block="reply-error")
 
     def cmd_forward_command(self, content, packet, identity:IdentityObject = None):
         try:
@@ -785,12 +748,10 @@ class Agent(BootAgent):
 
             # 🎯 Gather kill list and full field set
             kill_list = [target_uid]
-            universal_ids = {target_uid: target_uid}
 
             # 🛠 Create reaper node with full config
             reaper_node = make_reaper_node(
-                kill_list,
-                universal_ids,
+                targets=kill_list,
                 tombstone_comm=True,
                 tombstone_pod=True,
                 delay=4,
@@ -982,6 +943,91 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="main_try")
 
+    def cmd_replace_source(self, content, packet, identity=None):
+        """
+        Minimal source replacement for an agent. Called by GUI ReplaceAgentDialog.
+        """
+        try:
+
+            target_agent_name = content.get("target_agent_name")
+            payload = content.get("payload", {})
+
+            session_id = payload.get("session_id")
+            token = payload.get("token")
+            encoded = payload.get("source")
+            sha256_expected = payload.get("sha256")
+            return_handler = payload.get("return_handler")
+
+            if not target_agent_name or not encoded or not sha256_expected:
+                self.log("[REPLACE] ❌ Missing fields in replace request")
+                return
+
+            # Decode + verify
+            decoded = base64.b64decode(encoded).decode()
+            sha256_actual = hashlib.sha256(decoded.encode()).hexdigest()
+            if sha256_actual != sha256_expected:
+                self.log(f"[REPLACE] ❌ SHA mismatch for {target_agent_name} — expected {sha256_expected}, got {sha256_actual}")
+                return
+
+            # Save to agent dir
+            agent_dir = os.path.join(self.path_resolution["agent_path"], target_agent_name)
+            os.makedirs(agent_dir, exist_ok=True)
+            agent_path = os.path.join(agent_dir, f"{target_agent_name}.py")
+
+            with open(agent_path, "w", encoding="utf-8") as f:
+                f.write(decoded)
+
+            self.log(f"[REPLACE] ✅ Source written to {agent_path}")
+
+            # --- RPC Confirmation ---
+            rpc_role = self.tree_node.get("rpc_router_role", "hive.rpc")
+            endpoints = self.get_nodes_by_role(rpc_role, return_count=1)
+            if not endpoints:
+                self.log("No hive.rpc-compatible agents found for 'hive.rpc'.")
+                return
+
+            remote_pub_pem = self._signing_keys.get("remote_pubkey")
+
+            # expected matrixswarm/matrix_gui/core/dispatcher/inbound_dispatcher.py
+            payload = {
+                "handler": return_handler,
+                "content": {
+                    "target_agent_name": target_agent_name,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "session_id": session_id,
+                    "token": token,
+                    "status": "success",
+                    "sha256": sha256_actual,
+                    "agent_dir": agent_dir,
+                    "agent_name": f"{target_agent_name}.py",
+                    "message": f"Source replaced at {agent_path}"
+                }
+            }
+            sealed = encrypt_with_ephemeral_aes(payload, remote_pub_pem)
+            content = {
+                "serial": self._serial_num,
+                "content": sealed,
+                "timestamp": int(time.time()),
+            }
+            sig = sign_data(content, self._signing_key_obj)
+            content["sig"] = sig
+
+            pk1 = self.get_delivery_packet("standard.command.packet")
+            pk1.set_data({
+                "handler": "dummy_handler",  # if a handler isn't set the packet will not set, without a handler
+                "origin": self.command_line_args['universal_id'],
+                "session_id": session_id,
+                "content": content,
+            })
+
+            for ep in endpoints:
+                pk1.set_payload_item("handler", ep.get_handler())
+                self.pass_packet(pk1, ep.get_universal_id())
+
+            self.log(f"[REPLACE] 📡 Confirmation sent for {target_agent_name} (session={session_id})")
+
+        except Exception as e:
+            self.log("[REPLACE] ❌ Failed in cmd_replace_source", error=e, level="ERROR")
 
 
     def cmd_inject_agents(self, content, packet, identity:IdentityObject = None):
@@ -1006,9 +1052,7 @@ class Agent(BootAgent):
             response_handler = content.get("response_handler", None)  #sent back to gui, so it knows what handler to call
             response_id = content.get("response_id", 0)
 
-
             ret = self._cmd_inject_agents(content, packet)
-
 
             if confirm_response and handler_role and handler and response_handler:
 
@@ -1167,8 +1211,6 @@ class Agent(BootAgent):
 
                         injected_ids = tp.insert_node(subtree, parent_universal_id=parent, matrix_priv_obj=self.matrix_priv_obj)
 
-
-
                         ret["injected"] = tp.get_added_nodes()
                         ret["rejected"] = tp.get_rejected_nodes()
                         ret["duplicates"] = tp.get_duplicates()
@@ -1280,6 +1322,91 @@ class Agent(BootAgent):
             self.log(error=e, block="main_try")
 
         return ret
+
+    def cmd_restart_subtree(self, content, packet, identity: IdentityObject = None):
+        """Gracefully restarts an agent or its entire subtree.
+
+        By default, restarts only the target agent.
+        If content["restart_full_subtree"] = True, restarts the entire subtree.
+        """
+
+        try:
+            target_id = content.get("universal_id")
+
+            # is a response expected
+            confirm_response = bool(content.get("confirm_response", 0))
+            # this is the client rpc handler which handles the response
+            response_handler = content.get("return_handler")
+            token = content.get("token", 0)
+            session_id = content.get("session_id")
+
+
+            if not target_id:
+                self.log("[RESTART][ERROR] Missing universal_id.")
+                return
+
+            tp = self.get_agent_tree_master()
+            if not tp:
+                self.log("[RESTART][ERROR] Failed to load tree.")
+                return
+
+            parent_node = tp.get_node(target_id)
+            if parent_node and (parent_node.get("deleted") or parent_node.get("confirmed_deleted")):
+                self.log(f"[RESTART][BLOCKED] {target_id} is deleted. Cannot restart.")
+                return
+
+            # check flag - restart a single target or the whole branch
+            if content.get("restart_full_subtree", False):
+                ids = tp.get_subtree_nodes(target_id)  # full family
+                self.log(f"[RESTART] Restarting full subtree for {target_id}: {ids}")
+            else:
+                ids = [target_id]  # just the agent itself
+                self.log(f"[RESTART] Restarting single agent only: {target_id}")
+
+            # 🛠 Create reaper node with restart flags
+            reaper_node = make_reaper_node(
+                targets=ids,
+                tombstone_comm=False,
+                tombstone_pod=False,
+                delay=4,
+                cleanup_die=True,
+                is_mission=True,
+            )
+
+            # Death warrant (temporary agent self-destruct after mission)
+            death_id = secrets.token_hex(16)
+            death_confirmation = {
+                "universal_id": target_id,
+                "death_id": death_id,
+                "timestamp": time.time(),
+                "reason": "mission_complete",
+            }
+
+            if content.get("session_id", False):
+                return
+
+            if content.get("session_id", False):
+                death_confirmation['confirmation']['session_id'] = content["session_id"]
+
+            if content.get("return_handler"):
+                death_confirmation['confirmation']['return_handler'] = content["return_handler"]
+
+            signed_warrant = generate_signed_payload(death_confirmation, self.matrix_priv_obj)
+            reaper_node['config']['death_confirmation'] = signed_warrant
+
+            # Inject Reaper
+            reaper_packet = {
+                "target_universal_id": "matrix",
+                "subtree": reaper_node,
+                "ephemeral_agent": True,
+            }
+
+            self._cmd_inject_agents(reaper_packet, packet)
+            self.log(f"[RESTART] ✅ Reaper injected, restart initiated for {ids}")
+
+        except Exception as e:
+            self.log(error=e, block="main_try", level="ERROR")
+
 
     def cmd_shutdown_subtree(self, content, packet, identity:IdentityObject = None):
         """Initiates a graceful shutdown of an agent and its entire subtree.
@@ -1482,7 +1609,6 @@ class Agent(BootAgent):
             if not tp.has_node(universal_id):
                 self.log(f"Skipping node {universal_id} not found in agent_tree, probably phantom dir created in comm by other agent or process.)")
                 return
-
 
             subtree = tp.extract_subtree_by_id(universal_id)
             if not subtree:

@@ -1,20 +1,22 @@
-# Authored by Daniel F MacDonald and ChatGPT aka The Generals
-
+# Authored by Daniel F MacDonald and ChatGPT 5 aka The Generals
 import uuid, time, hashlib, json, datetime
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSizePolicy, QHeaderView, QTreeWidget, QTreeWidgetItem, QLabel
+from matrix_gui.core.dialog.restart_agent_dialog import RestartAgentDialog
+from matrix_gui.core.dialog.delete_agent_dialog import DeleteAgentDialog
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from PyQt5.QtCore import Qt, QTimer
-
+from PyQt5.QtWidgets import QMenu
 
 class PhoenixAgentTree(QWidget):
-    def __init__(self, session_id, vault_data=None, bus=None, parent=None):
+    def __init__(self, session_id, vault_data=None, bus=None, conn=None, deployment=None, parent=None):
         super().__init__(parent)
         try:
             self.vault_data = vault_data or {}
             self.bus = bus
-
-            self.bound_session_id = session_id
+            self.conn=conn
+            self.deployment=deployment
+            self.session_id = session_id
             self.parent = parent  # optional
             self.active_log_token = None  # can be used locally or emitted via signal
 
@@ -37,6 +39,11 @@ class PhoenixAgentTree(QWidget):
             self.tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)
             self.tree.setSelectionMode(QTreeWidget.SingleSelection)
             self.tree.itemClicked.connect(self._on_tree_item_clicked)
+
+            #context menu, right click, popup
+            self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.tree.customContextMenuRequested.connect(self._on_context_menu)
+
             layout.addWidget(self.tree)
 
             # === Agent detail panel
@@ -51,10 +58,10 @@ class PhoenixAgentTree(QWidget):
             # === Bind to session bus updates
             if self.bus:
                 self.bus.on(
-                    f"inbound.verified.agent_tree_master.update.{self.bound_session_id}",
+                    f"inbound.verified.agent_tree_master.update.{self.session_id}",
                     self._handle_tree_update
                 )
-                print(f"[AGENT_TREE] Subscribed to bus: inbound.verified.agent_tree_master.update.{self.bound_session_id}")
+                print(f"[AGENT_TREE] Subscribed to bus: inbound.verified.agent_tree_master.update.{self.session_id}")
 
         except Exception as e:
             emit_gui_exception_log("PhoenixAgentTree.__init__", e)
@@ -78,7 +85,7 @@ class PhoenixAgentTree(QWidget):
                     "service": "hive.log",
                     "payload": {
                         "target_agent": uid,
-                        "session_id": self.bound_session_id,
+                        "session_id": self.session_id,
                         "token": token,
                         "follow": True,
                         "return_handler": "agent_log_view.update"
@@ -86,9 +93,9 @@ class PhoenixAgentTree(QWidget):
                 }
             })
 
-            self.bus.emit("gui.agent.selected", session_id=self.bound_session_id, node=node)
-            self.bus.emit("gui.log.token.updated", session_id=self.bound_session_id, token=token, agent_title=node.get("name", uid))
-            self.bus.emit("outbound.message", session_id=self.bound_session_id, channel="outgoing.command", packet=pk)
+            self.bus.emit("gui.agent.selected", session_id=self.session_id, node=node)
+            self.bus.emit("gui.log.token.updated", session_id=self.session_id, token=token, agent_title=node.get("name", uid))
+            self.bus.emit("outbound.message", session_id=self.session_id, channel="outgoing.command", packet=pk)
 
             print(f"[AGENT_TREE] 🔍 Sent fetch_logs for agent {uid} with token={token}")
 
@@ -132,7 +139,7 @@ class PhoenixAgentTree(QWidget):
                     return
 
                 # Extract base name and children
-                base = str(node.get("name") or node.get("universal_id") or "Unnamed")
+                base = node.get("universal_id") or "Unnamed"
                 children = node.get("children", [])
                 child_count = len(children)
 
@@ -186,10 +193,10 @@ class PhoenixAgentTree(QWidget):
         try:
             if self.bus:
                 self.bus.off(
-                    f"inbound.verified.agent_tree_master.update.{self.bound_session_id}",
+                    f"inbound.verified.agent_tree_master.update.{self.session_id}",
                     self._handle_tree_update
                 )
-                print(f"[AGENT_TREE] Unsubscribed from agent_tree_master.update.{self.bound_session_id}")
+                print(f"[AGENT_TREE] Unsubscribed from agent_tree_master.update.{self.session_id}")
             super().closeEvent(event)
         except Exception as e:
             emit_gui_exception_log("PhoenixAgentTree.closeEvent", e)
@@ -226,3 +233,41 @@ class PhoenixAgentTree(QWidget):
         except Exception as e:
             emit_gui_exception_log("PhoenixAgentTree._compute_payload_hash", e)
             return None
+
+    def _on_context_menu(self, pos):
+        item = self.tree.itemAt(pos)
+        if not item or not hasattr(item, "node_data"):
+            return
+
+        node = item.node_data
+        uid = node.get("universal_id")
+        if not uid or uid == "matrix":  # don’t allow nuking Matrix itself
+            return
+
+        menu = QMenu(self)
+
+        #context menu, right click, to delete agent
+        act_delete = menu.addAction(f"☠ Delete {uid}")
+        act_delete.triggered.connect(lambda: self._launch_delete_dialog(uid))
+
+        # context menu, right click, to start agent
+        act_restart = menu.addAction(f"🔁 Restart {uid}")
+        act_restart.triggered.connect(lambda: self._launch_restart_dialog(uid))
+
+        menu.exec_(self.tree.viewport().mapToGlobal(pos))
+
+    def _launch_restart_dialog(self, uid):
+
+        dlg = RestartAgentDialog(session_id=self.session_id, bus=self.bus, conn=self.conn, deployment=self.deployment, parent=self)
+        dlg.prefill_uid(uid)
+        dlg.exec_()
+
+    def _launch_delete_dialog(self, uid):
+
+        dlg = DeleteAgentDialog(session_id=self.session_id,
+                                bus=self.bus,
+                                conn=self.conn,
+                                deployment = self.deployment,
+                                parent=self)
+        dlg.prefill_uid(uid)
+        dlg.exec_()

@@ -23,7 +23,7 @@ class Agent(BootAgent):
         """Initializes the AgentDoctor agent, setting its name and the maximum age for a beacon to be considered valid."""
         super().__init__()
         self.name = "AgentDoctor"
-        self.max_allowed_beacon_age = 8  # seconds
+        self.max_allowed_beacon_age = 10  # seconds
         self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
     def pre_boot(self):

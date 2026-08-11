@@ -26,9 +26,7 @@ class Agent(BootAgent):
         # Load targets, kill ID, and initialize paths
         config = self.tree_node.get("config", {})
         self.is_mission = bool(config.get("is_mission", False))
-        self.targets = self.command_line_args.get("targets") or config.get("kill_list", [])
-        self.universal_ids = self.command_line_args.get("universal_ids") or config.get("universal_ids", {})
-        self.kill_id = self.command_line_args.get("kill_id") or config.get("kill_id") or f"reap-{int(time.time())}"
+        self.targets = config.get("kill_list", [])
         self.strike_delay = config.get("delay", 0)
         self.tombstone_comm = config.get("tombstone_comm", True)
         self.tombstone_pod = config.get("tombstone_pod", True)
@@ -62,26 +60,23 @@ class Agent(BootAgent):
             self.log(f"[REAPER] ⏱ Waiting {self.strike_delay} seconds before executing strike...")
             time.sleep(self.strike_delay)
 
-        # Filter `self.targets` based on valid universal_ids
-        filtered_universal_ids = {universal_id: self.universal_ids[universal_id] for universal_id in self.targets if universal_id in self.universal_ids}
-
-        if not filtered_universal_ids:
-            self.log("[WARNING] No valid targets found in the provided target list.")
-            self.running = False  # Mark the agent as stopped
+        # Use self.targets directly
+        if not self.targets:
+            self.log("[WARNING] No valid targets in kill_list.")
+            self.running = False
             return
 
-        # Use central handler to process all valid targets at once
         try:
-
             self.universal_id_handler.process_all_universal_ids(
-                filtered_universal_ids,
+                self.targets,  # pass list of UIDs
                 tombstone_mode=True,
                 wait_seconds=20,
                 tombstone_comm=self.tombstone_comm,
                 tombstone_pod=self.tombstone_pod
             )
+
             if self.cleanup_die:
-                for uid in filtered_universal_ids:
+                for uid in self.targets:
                     try:
                         die_path = os.path.join(self.path_resolution["comm_path"], uid, "incoming", "die")
                         if os.path.exists(die_path):
@@ -95,7 +90,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"[ERROR] Failed to complete mission: {str(e)}")
 
-        self.running = False  # Mark the agent as stopped
+        self.running = False
         self.log("[INFO] Mission completed and the agent is now stopping.")
         self.leave_tombstone_and_die()
 
@@ -117,7 +112,7 @@ class Agent(BootAgent):
                 for agent_dir in comm_root.iterdir():
                     hello_path = agent_dir / "hello.moto"
                     cookie_path = hello_path / "hit.cookie"
-
+                    self._emit_beacon()
                     if not cookie_path.exists():
                         continue
 

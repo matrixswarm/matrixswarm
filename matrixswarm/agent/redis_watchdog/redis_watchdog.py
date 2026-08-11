@@ -14,18 +14,6 @@ from datetime import datetime
 
 from matrixswarm.core.mixin.agent_summary_mixin import AgentSummaryMixin
 
-
-# Agent Metadata
-__AGENT_META__ = {
-    "name": "redis_watchdog",
-    "universal_id": None,   # assigned by Matrix if missing
-    "roles": ["hive.alert", "hive.forensics.data_feed"],
-    "config_defaults": {
-        "check_interval_sec": 10,
-        "restart_limit": 3
-    }
-}
-
 class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
         super().__init__()

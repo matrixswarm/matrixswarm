@@ -118,19 +118,23 @@ class Agent(BootAgent):
                             continue
 
                         # Check if the target's heartbeat is stale
-                        statuses = check_heartbeats(self.path_resolution['comm_path'], universal_id)
-                        if statuses is None:
-                            # at least one thread failed, spawn
-                            self.log(f"[HEARTBEAT] {universal_id} failed heartbeat check")
+                        result = check_heartbeats(self.path_resolution['comm_path'], universal_id)
+                        meta = result["meta"]
+                        threads = result["threads"]
+                        if meta["error_success"]:
+                            self.log(f"[HEARTBEAT] {universal_id} failed: {meta['error']}")
                         else:
-                            # all threads are either alive or sleeping continue else respawn
-                            if all(s["status"] in ("alive", "sleeping") for s in statuses.values()):
-                                continue  # safe to skip further handling
+                            # log failed threads with deltas
+                            for t, s in threads.items():
+                                if s["status"] == "failed":
+                                    self.log(
+                                        f"[HEARTBEAT] {universal_id}:{t} failed delta={s['delta']}s (timeout={s['timeout']})")
+
+                            if all(s["status"] in ("alive", "sleeping") for s in threads.values()):
+                                continue
 
                         if self.clear_to_spawn(self.command_line_args.get("universe"),
-                                               keychain["security_box"]["spawner"],
-                                               node.get("universal_id"),
-                                               node.get("name")):
+                                               node.get("universal_id")):
 
                             # If heartbeat is stale, initiate respawn
                             try:

@@ -1,8 +1,10 @@
+#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Docstrings by Gemini
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
-#Authored by Daniel F MacDonald and ChatGPT aka The Generals
+
 import ssl
 import time
 import copy
@@ -24,10 +26,117 @@ from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from matrixswarm.core.utils import crypto_utils
 
 class Agent(BootAgent):
+    """
+    The Matrix WebSocket Agent, a specialized BootAgent for secure,
+    bi-directional communication with front-end applications.
+
+    This agent extends the core `BootAgent` functionality with a secure
+    WebSocket server. It's designed to provide a real-time, authenticated
+    data feed for human-in-the-loop interfaces, such as a GUI. It enforces
+    strict security checks, including mTLS and cryptographic signature
+    verification, to ensure only trusted clients can connect and exchange
+    messages. It also manages active client sessions and broadcasts messages
+    to connected clients.
+
+    Attributes:
+        AGENT_VERSION (str): The version of the agent.
+        allowlist_ips (list): A list of IP addresses permitted to connect.
+        port (int): The network port the WebSocket server listens on.
+        _websocket_clients (set): A set of active WebSocket connections.
+        _sessions (dict): A dictionary mapping session IDs to connection data.
+        loop (asyncio.AbstractEventLoop): The asyncio event loop running the server.
+        websocket_ready (bool): A flag indicating if the WebSocket server is bound.
+        interval (int): The sleep interval for the worker loop.
+        first_run (bool): A flag to indicate the first execution of the worker.
+        cert_pem (str): The agent's TLS certificate in PEM format.
+        key_pem (str): The agent's private key in PEM format.
+        ca_pem (str): The CA root certificate for client verification.
+        local_spki (str): The SHA-256 SPKI pin of the agent's server certificate.
+        peer_pub_key (Crypto.PublicKey.RSA): The public key used to verify
+            signatures on incoming messages.
+        ws_priv (Crypto.PublicKey.RSA): The private key used to sign outbound messages.
+        _stop_event (threading.Event): An event used to signal the WebSocket thread to stop.
+        _thread (threading.Thread): The thread running the WebSocket server.
+        _config (dict): A copy of the agent's most recent configuration.
+        _lock (threading.Lock): A lock to protect access to shared resources.
+        emit_process_beacon (function): A beacon to signal the process is alive.
+        emit_service_beacon (function): A beacon to signal the service is healthy.
+
+    Methods:
+        post_boot():
+            Logs a message confirming the agent is fully operational.
+
+        worker():
+            Manages the lifecycle of the WebSocket thread, starting it on
+            first run or restarting it if the configuration changes or the
+            thread has died.
+
+        start_socket_loop():
+            Initializes and runs the asyncio event loop for the WebSocket server,
+            setting up the SSL context and handling server startup.
+
+        cmd_health_report():
+            A command handler for processing health reports.
+
+        websocket_handler():
+            A wrapper for the main handler to catch top-level exceptions.
+
+        _websocket_handler_core():
+            The core handler for new WebSocket connections. It performs
+            multi-layered security checks, including IP allowlisting and
+            cryptographic signature verification on the initial handshake.
+            It also sets up a session and a keep-alive ping for the client.
+
+        update_broadcast_flag():
+            Creates or removes a file flag to signal other parts of the system
+            that a GUI is connected, which can be used to trigger alerts.
+
+        cmd_rpc_route():
+            Routes an RPC-style packet to a specific client session if a session
+            ID is provided. If not, it broadcasts the packet to all clients.
+
+        cmd_send_alert_msg():
+            A command handler that formats and dispatches an alert message to
+            all connected GUI clients.
+
+        _canon(obj):
+            A static helper method to create a canonical, sorted JSON string
+            for consistent signing.
+
+        _now():
+            A static helper method to get the current timestamp.
+
+        _sign_content(content):
+            Signs a dictionary using the agent's private key and returns a
+            base64-encoded signature.
+
+        cmd_alert_to_gui():
+            Dispatches a formatted alert to all connected GUI clients via
+            the WebSocket.
+
+        cmd_hive_log_delivery():
+            Handles requests to retrieve and format log files, then broadcasts
+            the content to a connected GUI client.
+
+        decrypt_log_line():
+            A placeholder for a method to decrypt a single line of an encrypted
+            log file.
+
+        cmd_broadcast():
+            Broadcasts a message to all currently connected WebSocket clients
+            using a thread-safe coroutine.
+        """
     def __init__(self):
+        """
+        Initializes the Matrix WebSocket agent.
+
+        It first calls the parent `BootAgent` constructor, then securely
+        loads TLS certificates and keys from the agent's directive. It
+        sets up state variables for managing WebSocket connections and
+        prepares the agent for network communication.
+        """
         super().__init__()
         self.AGENT_VERSION = "2.0.0"
-
 
         try:
 
@@ -94,11 +203,26 @@ class Agent(BootAgent):
         )
 
     def post_boot(self):
+        """
+        A one-time setup hook called after the main threads have started.
+
+        This method is overridden to log a confirmation that the agent is
+        fully operational and the perimeter guard is in place.
+        """
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – perimeter guard up.")
 
     def worker(self, config:dict = None, identity:IdentityObject = None):
         """
-        Starts or restarts the WebSocket thread if config changes or thread is dead.
+        The main operational loop for the agent, overridden from `BootAgent`.
+
+        This method is responsible for managing the lifecycle of the WebSocket
+        server thread. It ensures the server is started on the first run,
+        restarted if the configuration changes, or restarted if the thread
+        crashes unexpectedly. It also emits a process liveness beacon.
+
+        Args:
+            config (dict, optional): The latest configuration from a packet.
+            identity (IdentityObject, optional): The identity of the packet sender.
         """
         try:
 
@@ -134,6 +258,14 @@ class Agent(BootAgent):
 
 
     def start_socket_loop(self):
+        """
+        Initializes and runs the asyncio event loop for the WebSocket server.
+
+        This method is designed to run in a separate thread. It sets up the
+        SSL context with mTLS requirements, binds the server to a host and port,
+        and starts the event loop. It also schedules a service heartbeat beacon
+        and a broadcast flag updater to run concurrently.
+        """
         try:
             self.log("[WS] Booting WebSocket TLS thread...")
             time.sleep(1)
@@ -214,9 +346,22 @@ class Agent(BootAgent):
 
 
     def cmd_health_report(self, content, packet, identity:IdentityObject = None):
+        """
+        A command handler for processing a health report.
+
+        This method is a hook for the packet listener to process and
+        log health reports received from other agents.
+        """
         self.log(f"[RELAY] Received health report for {content.get('target_universal_id', '?')}")
 
     async def websocket_handler(self, websocket):
+        """
+        A wrapper for the main WebSocket handler.
+
+        This function wraps the core handler to provide a consistent top-level
+        exception catch, ensuring graceful closure even in case of unexpected
+        errors.
+        """
         try:
             await self._websocket_handler_core(websocket)
         except Exception as e:
@@ -227,6 +372,19 @@ class Agent(BootAgent):
                 pass
 
     async def _websocket_handler_core(self, websocket):
+        """
+        The core, low-level handler for a single WebSocket connection.
+
+        This coroutine manages the entire lifecycle of a client connection,
+        from the initial handshake to message reception and session cleanup.
+        It performs critical security checks, including IP allowlisting,
+        and verifies the handshake and subsequent messages with a
+        cryptographic signature check.
+
+        Args:
+            websocket (websockets.WebSocketServerProtocol): The active
+                WebSocket connection object.
+        """
         try:
 
             ip = getattr(websocket, "remote_address", None)
@@ -370,6 +528,14 @@ class Agent(BootAgent):
             self.log(f"[WS][CLEANUP] Client removed. Active={len(self._websocket_clients)}")
 
     def update_broadcast_flag(self, session_id=None, remove=False):
+        """
+        Creates or removes a local filesystem flag.
+
+        This method is used to signal other processes or agents within the
+        swarm that a GUI client is actively connected via WebSocket. The
+        flag's presence can be used to trigger certain behaviors, such as
+        sending real-time alerts.
+        """
         base = os.path.join(self.path_resolution["comm_path_resolved"], "broadcast")
         os.makedirs(base, exist_ok=True)
 
@@ -385,9 +551,13 @@ class Agent(BootAgent):
 
     def cmd_rpc_route(self, content, packet, identity:IdentityObject = None):
         """
-            Routes an RPC-style packet to a specific GUI session if session_id is provided.
-            Otherwise, falls back to broadcasting to all websocket clients.
-            """
+        Routes an RPC-style packet to a specific GUI session.
+
+        This command handler receives a packet, checks for a `session_id`, and
+        if found, attempts to send the packet's content directly to that
+        specific WebSocket client. If no `session_id` is specified or found,
+        it falls back to broadcasting the message to all connected clients.
+        """
         try:
 
             session_id = packet.get("session_id")
@@ -400,7 +570,7 @@ class Agent(BootAgent):
 
             if session_id and session_id in self._sessions:
                 websocket = self._sessions[session_id]["ws"]
-                if self.debug.is_enabled() or 1==1:
+                if self.debug.is_enabled():
                     self.log(f"[WS][ROUTER] Directing to session {session_id} : Sender: {sender}")
 
                 data = json.dumps(content, separators=(",", ":"), sort_keys=False)
@@ -418,6 +588,13 @@ class Agent(BootAgent):
 
 
     def cmd_send_alert_msg(self, content, packet, identity:IdentityObject = None):
+        """
+        Sends an alert message to the connected GUI clients.
+
+        This command handler formats an alert message from an incoming packet
+        into a standard GUI-compatible format and then uses the broadcast
+        method to send it to all active WebSocket clients.
+        """
         try:
             # Format the alert message
             msg = content.get("formatted_msg") or content.get("msg") or "[SWARM] Alert received."
@@ -446,15 +623,36 @@ class Agent(BootAgent):
     # --- Helper: stable canonical JSON (no whitespace, sorted keys)
     @staticmethod
     def _canon(obj: dict) -> bytes:
+        """
+        Converts a dictionary to a canonical JSON string.
+
+        This method produces a consistent, compact JSON representation by
+        removing whitespace and sorting keys. This is crucial for creating a
+        stable payload that can be cryptographically signed and verified.
+
+        Returns:
+            bytes: The canonical JSON string as a byte sequence.
+        """
         return json.dumps(obj or {}, separators=(",", ":"), sort_keys=True).encode()
 
     @staticmethod
     def _now() -> float:
+        """
+        Returns the current timestamp.
+        """
         return time.time()
 
     def _sign_content(self, content: dict) -> str:
         """
-        Returns base64 RS256 signature over canonicalized content.
+        Returns a base64-encoded RS256 signature over canonicalized content.
+
+        This private method signs a given dictionary by first converting it
+        into a canonical JSON string and then using the agent's private key
+        to create a digital signature.
+
+        Returns:
+            str: The base64-encoded signature, or an empty string if no
+                 private key is available.
         """
         if not self.ws_priv:
             return ""
@@ -464,10 +662,23 @@ class Agent(BootAgent):
 
 
     def cmd_alert_to_gui(self, content, packet, identity:IdentityObject = None):
+        """
+        Dispatches a formatted alert to a connected GUI client.
+
+        This is an internal command handler that acts as a bridge between
+        an incoming alert packet and the WebSocket broadcast mechanism.
+        """
         self.log(f"Dispatching alert to GUI: {content}")
         self.cmd_broadcast(content, packet)
 
     def cmd_hive_log_delivery(self, content, packet, identity=None):
+        """
+        Delivers formatted log content to the GUI.
+
+        This command handler retrieves a log file for a specified agent,
+        parses the JSON log entries, formats them with emojis and timestamps,
+        and then broadcasts the final, readable log to all connected GUI clients.
+        """
         uid = content.get("universal_id")
         num_lines = content.get("lines", 500)
         log_path = os.path.join(self.path_resolution["comm_path"], uid, "logs", "agent.log")
@@ -515,6 +726,12 @@ class Agent(BootAgent):
 
 
     def decrypt_log_line(line, key_bytes):
+        """
+        A placeholder for a method to decrypt a single line of an encrypted log.
+
+        This method is a stub and requires a full implementation to handle
+        decryption logic if the logs are encrypted.
+        """
         try:
             blob = base64.b64decode(line.strip())
             nonce, tag, ciphertext = blob[:12], blob[12:28], blob[28:]
@@ -524,7 +741,14 @@ class Agent(BootAgent):
             return f"[DECRYPT-FAIL] {str(e)}"
 
     def cmd_broadcast(self, content, packet, identity:IdentityObject = None):
+        """
+        Broadcasts a message to all active WebSocket clients.
 
+        This method is the primary mechanism for sending data from the agent
+        to connected GUI clients. It serializes the packet, iterates through
+        all active connections, and sends the message asynchronously. It also
+        handles the removal of any connections that have gone dead.
+        """
         try:
 
             if not hasattr(self, "loop") or self.loop is None:

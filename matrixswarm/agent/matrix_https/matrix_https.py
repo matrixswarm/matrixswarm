@@ -1,4 +1,5 @@
 #Authored by Daniel F MacDonald and ChatGPT aka The Generals
+# Docstrings by Gemini
 import sys
 import os
 sys.path.insert(0, os.getenv("SITE_ROOT"))
@@ -20,7 +21,26 @@ from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 from werkzeug.serving import make_server
 
 class CustomRequestHandler(WSGIRequestHandler):
+    """
+    A custom WSGI request handler that retrieves the client's TLS certificate.
+
+    This handler is used by the Flask server to access the binary form of the
+    peer's certificate. It overrides the standard `make_environ` method to
+    add the certificate data to the request's environment dictionary, making
+    it available to the application's routes for mutual TLS authentication.
+    """
     def make_environ(self):
+        """
+        Creates the WSGI environment dictionary for the request.
+
+        This method is a core part of the WSGI standard. It is overridden here
+        to attach the client's certificate as a binary object to the environment
+        under the key "peercert".
+
+        Returns:
+            dict: The standard WSGI environment dictionary, with the addition of
+                  the "peercert" key if a client certificate is present.
+        """
         environ = super().make_environ()
         try:
             client_cert = self.connection.getpeercert(binary_form=True)
@@ -30,8 +50,99 @@ class CustomRequestHandler(WSGIRequestHandler):
         return environ
 
 class Agent(BootAgent):
+    """
+    The Matrix HTTPS Agent, a specialized BootAgent for secure,
+    packet-based communication over HTTPS.
+
+    This agent extends the core functionality of a BootAgent with a Flask-based
+    HTTPS server. It is designed to act as a secure ingress point for
+    external commands, enforcing multiple layers of authentication, including
+    mutual TLS (mTLS) with SPKI pin verification and a cryptographic signature
+    check on the packet payload.
+
+    It also includes endpoints to trap and log unauthorized access attempts.
+
+    Attributes:
+        AGENT_VERSION (str): The version of the agent.
+        app (Flask.app): The Flask application instance that runs the HTTPS server.
+        port (int): The network port the server listens on.
+        allowlist_ips (list): A list of IP addresses permitted to access the server.
+        payload_dir (str): The filesystem path for storing incoming packet payloads.
+        cert_pem (str): The agent's TLS certificate in PEM format.
+        key_pem (str): The agent's private key in PEM format.
+        ca_pem (str): The PEM-encoded CA root certificate for client verification.
+        local_spki (str): The SHA-256 SPKI fingerprint of the agent's server cert.
+        expected_peer_spki (str): The expected SPKI pin of the connecting client.
+        peer_pub_key (Crypto.PublicKey.RSA): The public key used to verify
+            signatures on incoming packets.
+        run_server_retries (bool): A flag to control server restart attempts.
+        _emit_process_beacon (function): A beacon function to signal process liveness.
+        _emit_beacon (function): A beacon function to signal service liveness.
+
+    Methods:
+        pre_boot():
+            Initializes and starts the HTTPS server thread before the main
+            agent loops begin.
+
+        post_boot():
+            Logs a message indicating the agent is fully operational.
+
+        process_command(data):
+            A placeholder method for processing delegated commands.
+
+        worker_pre():
+            A hook that runs once before the main worker loop.
+
+        service_monitor():
+            Continuously pings the local server to verify the health of the
+            HTTPS stack, emitting a liveness beacon on success.
+
+        worker_post():
+            A hook that runs once after the main worker loop exits.
+
+        configure_routes():
+            Sets up all Flask routes for the server, including the main
+            `/matrix` endpoint, and various trap/denial endpoints.
+
+        receive_command():
+            The main POST handler for the `/matrix` endpoint. It performs
+            a multi-step security check on incoming requests:
+            1.  IP allowlist verification.
+            2.  Mutual TLS SPKI pin verification.
+            3.  JSON payload parsing and size guard.
+            4.  Timestamp-based replay attack prevention.
+            5.  Cryptographic signature verification on the payload.
+            If all checks pass, the packet is relayed to the core Matrix agent.
+
+        deny_unsupported_methods():
+            A handler that traps and logs requests using unsupported HTTP
+            methods on the `/matrix` endpoint.
+
+        trap_scan_targets():
+            A handler for decoy endpoints that logs and denies requests to
+            common attack targets like `/robots.txt` or `/wp-login.php`.
+
+        make_spoof_response():
+            Generates a deceptive HTML response to mislead automated scanners.
+
+        shutdown_cleanup():
+            Deletes temporary certificate files created during server startup.
+
+        run_server():
+            Initializes and runs the HTTPS server with mutual TLS, handling
+            potential startup failures with retries.
+
+        """
     def __init__(self):
         super().__init__()
+        """
+        Initializes the Matrix HTTPS agent.
+
+        It first calls the parent `BootAgent` constructor, then securely
+        loads TLS certificates and keys from the agent's directive. It
+        configures the Flask application and its routes, preparing the
+        HTTPS server for operation.
+        """
         self.AGENT_VERSION = "2.0.0"
         self.app = Flask(__name__)
         self.port = 65431
@@ -110,21 +221,51 @@ class Agent(BootAgent):
         self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
     def pre_boot(self):
+        """
+        A one-time setup hook called before the main threads start.
+
+        This method is overridden to start the HTTPS server in a background
+        thread, ensuring the network interface is up and running before the
+        rest of the agent's core loops begin.
+        """
         self.log("[PRE-BOOT] Matrix HTTPS Agent preparing routes and scanner.")
         threading.Thread(target=self.run_server, daemon=True).start()
 
     def post_boot(self):
+        """
+        A one-time setup hook called after the main threads have started.
+
+        This method is overridden to log a confirmation that the agent is
+        fully operational and the perimeter guard is in place.
+        """
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – perimeter guard up.")
 
-
     def process_command(self, data):
+        """
+        Processes a delegated command.
+
+        This is a placeholder method that would be implemented to handle
+        specific commands relayed from the `/matrix` endpoint.
+        """
         self.log(f"[CMD] Received delegated command: {data}")
 
     def worker_pre(self):
+        """
+        A hook that runs once before the main worker loop.
+
+        This method logs a message confirming that the boot process is
+        initialized and the HTTPS interface is online.
+        """
         self.log("[MATRIX_HTTPS] Boot initialized. Port online, certs verified.")
 
     def service_monitor(self):
-        """Continuously self-ping Flask /ping route to prove HTTPS stack health."""
+        """
+        Continuously self-pings the Flask `/ping` route to prove HTTPS stack health.
+
+        This method runs in a background thread and acts as a liveness check.
+        It uses a Flask test client to make a GET request to a local endpoint,
+        and if the response is successful, it emits a liveness beacon.
+        """
         while self.running:
             try:
                 with self.app.test_client() as client:
@@ -138,16 +279,42 @@ class Agent(BootAgent):
             interruptible_sleep(self, 30)
 
     def worker_post(self):
+        """
+        A hook that runs once after the main worker loop exits.
+
+        This method is called during agent shutdown and logs a message
+        indicating the HTTPS interface is going down.
+        """
         self.log("[MATRIX_HTTPS] HTTPS interface shutting down. The swarm will feel it.")
 
     def configure_routes(self):
+        """
+        Sets up and configures all Flask routes for the HTTPS server.
 
+        This method defines the various endpoints the server will respond to,
+        including the primary `/matrix` command handler, a `/ping` health check,
+        and various decoy endpoints to trap and log malicious scans.
+        """
         @self.app.route("/ping", methods=["GET"])
         def ping():
             return jsonify({"status": "ok"}), 200
 
         @self.app.route("/matrix", methods=["POST"])
         def receive_command():
+            """
+            Handles incoming POST requests to the `/matrix` endpoint.
+
+            This function performs a series of stringent security checks on the
+            request to ensure it is authentic and secure. It verifies the client's
+            IP, SPKI pin from the TLS certificate, the packet size, the timestamp
+            for freshness, and a cryptographic signature on the payload. If all
+            checks pass, it relays the command to the Matrix core agent via the
+            internal packet delivery system.
+
+            Returns:
+                Flask.Response: A JSON response indicating the status of the
+                                request (e.g., "ok", "denied", "error").
+            """
             try:
 
                 ip = request.remote_addr or "unknown"
@@ -219,7 +386,13 @@ class Agent(BootAgent):
 
         @self.app.route("/matrix", methods=["GET", "PUT", "DELETE", "OPTIONS", "HEAD"])
         def deny_unsupported_methods():
+            """
+            Catches and denies unsupported HTTP methods.
 
+            This handler logs and denies any request to the `/matrix` endpoint
+            that is not a POST request, returning a spoofed response to
+            harden the server against reconnaissance.
+            """
             ip = request.remote_addr or "unknown"
             if self.allowlist_ips:
                 if ip not in self.allowlist_ips:
@@ -239,6 +412,12 @@ class Agent(BootAgent):
         @self.app.route("/cgi-bin/", methods=["GET", "POST"])
 
         def trap_scan_targets():
+            """
+            A series of decoy endpoints designed to trap malicious scanning.
+
+            Requests to these common attack targets are logged and denied,
+            providing early warning of reconnaissance attempts.
+            """
             self.log(f"[MATRIX-HTTPS][SCAN-TRAP] Bait endpoint hit by {request.remote_addr}")
             return self.make_spoof_response()
 
@@ -271,7 +450,13 @@ class Agent(BootAgent):
 
 
     def shutdown_cleanup(self):
-        import os
+        """
+        Performs cleanup of temporary files during shutdown.
+
+        This method is called to safely delete any temporary certificate files
+        that were created in-memory for the HTTPS server, ensuring no sensitive
+        data is left on the filesystem.
+        """
         for f in [getattr(self, "_cert_file", None), getattr(self, "_key_file", None), getattr(self, "_ca_file", None)]:
             try:
                 if f and hasattr(f, "name") and os.path.exists(f.name):
@@ -281,6 +466,15 @@ class Agent(BootAgent):
                 self.log("[CLEANUP][ERROR] Failed to delete temp cert", error=e, block="shutdown")
 
     def run_server(self):
+        """
+        Initializes and starts the Flask HTTPS server.
+
+        This method sets up the SSL context for mutual TLS, loads the
+        certificates, and begins serving requests. It includes a retry
+        mechanism to handle transient startup failures. It also starts
+        watchdog threads to monitor the liveness of the process and
+        the service.
+        """
         retry_delay = 10
         max_retries = 5
         retries = 0

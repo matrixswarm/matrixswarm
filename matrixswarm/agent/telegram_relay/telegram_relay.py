@@ -10,27 +10,6 @@ from matrixswarm.core.boot_agent import BootAgent
 from matrixswarm.core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from matrixswarm.core.utils.swarm_sleep import interruptible_sleep
 
-# Agent Metadata
-# Do not add comments or tailing commas in the body
-__AGENT_META__ = {
-            "name": "telegram_relay",
-            "universal_id": None,
-            "tags": {
-                "connection": {
-                    "proto": "telegram"
-                },
-            },
-            "config": {
-                "service-manager": [{
-                    "role": [
-                       "hive.alert@cmd_send_alert_msg"
-                    ],
-                    "scope": ["parent", "any"]
-
-                }]
-            }
-        }
-
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()

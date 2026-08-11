@@ -2,76 +2,61 @@ import os
 from matrixswarm.core.swarm_session_root import SwarmSessionRoot
 
 class PathManager:
-    def __init__(self, root_path=None, use_session_root=False, agent_override=None, site_root_path=None):
+    def __init__(self, universe_id="default", reboot_uuid=None, python_exec="python3"):
+        # Boot a new swarm session
+        self.session = SwarmSessionRoot(universe_id=universe_id, reboot_uuid=reboot_uuid)
 
-        self.paths = {}
+        # Base roots
+        self.base_static = "/matrix/static"
+        self.base_universe = os.path.join("/matrix", universe_id, self.session.reboot_uuid)
 
-        if use_session_root:
-            session = SwarmSessionRoot()
-            self.set_from_session(session)
-            self.session = session
-            self.paths["session_path"] = session.base_path
-            self.paths["session_boot_payload"] = os.path.join(session.base_path, "boot_payload")
-        else:
-            self.root_path = root_path or os.path.abspath(os.path.join(os.path.dirname(__file__)))
-            self.paths["root"] = self.root_path
-            self.add_path("comm", "comm")
-            self.add_path("pod", "pod")
-
-            # Handle agent_override *before* anything else
-        if agent_override:
-            self.paths["agent"] = agent_override
-        elif site_root_path:
-            # Use agent path based on site_root_path if override not present
-            self.paths["agent"] = os.path.join(site_root_path, "agent")
-        else:
-            self.add_path("agent", "agent")
-
-        if site_root_path:
-            self.root_path = site_root_path
-            self.paths["root"] = site_root_path
-            self.paths["site_root_path"] = site_root_path
-
-
-    def set_from_session(self, session):
-        self.paths = {
-            "root": session.root_path,
-            "comm": session.comm_path,
-            "pod": session.pod_path,
-            "agent": session.agent_path
+        # Static dirs
+        self.static_paths = {
+            "agents": os.path.join(self.base_static, "agents"),
+            "universes": os.path.join(self.base_static, "universes"),
+            "comm": os.path.join(self.base_static, "comm", universe_id),
         }
-        self.root_path = session.root_path
 
-    def get_all_paths(self):
-        return self.paths
+        # Runtime dirs (from SessionRoot)
+        self.runtime_paths = {
+            "comm": self.session.comm_path,
+            "pod": self.session.pod_path,
+        }
 
-    def _ensure_root(self, path):
-        return path if os.path.isabs(path) else os.path.abspath(os.path.join(self.root_path, path))
+        # Ensure static dirs exist
+        for p in self.static_paths.values():
+            os.makedirs(p, exist_ok=True)
 
-    def add_path(self, key, path):
-        self.paths[key] = self._ensure_root(path)
+        self.python_exec = python_exec
 
-    def add_paths(self, paths):
-        if not isinstance(paths, dict):
-            raise ValueError("Expected a dictionary for paths.")
-        for key, path in paths.items():
-            if not isinstance(key, str) or not isinstance(path, str):
-                raise ValueError("Keys and values in the paths dictionary must be strings.")
-            self.add_path(key, path)
+    def build_resolution(self, universal_id, spawn_uuid):
+        return {
+            "root_path": self.session.root_path,
+            "pod_path": self.runtime_paths["pod"],
+            "comm_path": self.runtime_paths["comm"],
+            "agent_path": self.static_paths["agents"],
 
-    def get_path(self, key, trailing_slash=True):
-        path = self.paths.get(key)
-        if path and trailing_slash and not path.endswith(os.sep):
-            path += os.sep
-        return path
+            # Runtime comm (tmpfs)
+            "comm_runtime_path_resolved": os.path.join(self.runtime_paths["comm"], universal_id),
 
-    def construct_path(self, *segments, trailing_slash=True):
-        if not all(isinstance(segment, str) for segment in segments):
-            raise ValueError("All path segments must be strings.")
-        full_path = os.path.join(self.root_path, *segments)
-        if trailing_slash and not full_path.endswith(os.sep):
-            full_path += os.sep
-        return full_path
+            # Static comm (disk)
+            "comm_static_path_resolved": os.path.join(self.static_paths["comm"], universal_id),
 
-    def list_paths(self):
-        return self.paths
+            # Logs always → static
+            "log_path_resolved": os.path.join(self.static_paths["comm"], universal_id, "logs", "agent.log"),
+
+            # Pods
+            "pod_path_resolved": os.path.join(self.runtime_paths["pod"], spawn_uuid),
+
+            # Legacy for compatibility
+            "incoming_path_template": os.path.join(self.runtime_paths["comm"], "$universal_id", "incoming"),
+            "poke_worker_file": os.path.join(self.runtime_paths["comm"], universal_id, "hello.moto", "poke.worker"),
+
+            "site_root_path": self.base_static,
+            "install_path": self.base_static,
+            "python_site": self.base_static,
+            "python_exec": self.python_exec,
+            "universe_id": self.session.universe_id,
+            "reboot_uuid": self.session.reboot_uuid,
+        }
+

@@ -20,6 +20,8 @@ from matrix_gui.core.dispatcher.inbound_dispatcher import InboundDispatcher
 from matrix_gui.core.dispatcher.outbound_dispatcher import OutboundDispatcher
 from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.dialog.replace_agent_dialog import ReplaceAgentDialog
+from matrix_gui.core.dialog.restart_agent_dialog import RestartAgentDialog
+from matrix_gui.core.dialog.delete_agent_dialog import DeleteAgentDialog
 
 def run_session(session_id, conn):
 
@@ -54,7 +56,7 @@ def run_session(session_id, conn):
         # GUI
         app = QApplication(sys.argv)
         win = SessionWindow(session_id, deployment, conn, ctx.bus, inbound, outbound)
-        win.setWindowTitle("Matrix")
+
         win.show()
         app.exec_()
 
@@ -101,8 +103,11 @@ class SessionWindow(QMainWindow):
 
             self.log_view.line_count_changed.connect(self._on_log_count_changed)
 
-            # Events
+            #session window title
+            label = self.deployment.get("label", "unknown")
+            self.setWindowTitle(f"Matrix | deployment: {label} | session-id: {self.session_id}")
 
+            # Events
             self.bus.on("channel.status", self._handle_channel_status)
             self.bus.on(f"inbound.verified.agent_log_view.update.{self.session_id}", self._handle_log_update)
             self.bus.on("gui.log.token.updated", self._set_active_log_token)
@@ -136,7 +141,8 @@ class SessionWindow(QMainWindow):
             }
         """)
         layout = QVBoxLayout()
-        self.tree = PhoenixAgentTree(session_id=self.session_id, bus=self.bus, parent=self)
+        deployment = copy.deepcopy(self.deployment)
+        self.tree = PhoenixAgentTree(session_id=self.session_id, bus=self.bus, conn=self.conn, deployment=deployment, parent=self)
         layout.addWidget(self.tree)
         box.setLayout(layout)
         return box
@@ -194,19 +200,20 @@ class SessionWindow(QMainWindow):
         self.addToolBar(Qt.TopToolBarArea, bar)
 
         # Kill
-        kill_act = QAction("☠️ Kill", self)
-        kill_act.triggered.connect(lambda: self._send_cmd("kill"))
-        bar.addAction(kill_act)
+        delete_act = QAction("☠️ Delete Agent", self)
+        delete_act.triggered.connect(self._launch_delete_agent_modal)
+        bar.addAction(delete_act)
+
 
         # Replace Source
         replace_src_act = QAction("♻️ Replace Source", self)
-        replace_src_act.triggered.connect(self.launch_replace_agent_modal)
+        replace_src_act.triggered.connect(self._launch_replace_agent_source)
         bar.addAction(replace_src_act)
 
         # Restart Agent
         restart_act = QAction("🔁 Restart Agent", self)
         restart_act.setToolTip("Restart this agent after replacing its source.")
-        restart_act.triggered.connect(lambda: self._send_cmd("restart"))
+        restart_act.triggered.connect(self._launch_restart_agent)
         bar.addAction(restart_act)
 
         # Threads toggle
@@ -232,6 +239,11 @@ class SessionWindow(QMainWindow):
         self.pause_btn.triggered.connect(self._toggle_log_pause)
         bar.addAction(self.pause_btn)
 
+    # --- Delete Agent ---
+    def _launch_delete_agent_modal(self):
+        deployment=copy.deepcopy(self.deployment)
+        dlg = DeleteAgentDialog(session_id=self.session_id, bus=self.bus, conn=self.conn, deployment=deployment, parent=self)
+        dlg.exec_()
 
     # --- Log Update ---
     def _handle_log_update(self, session_id, channel, source, payload, **_):
@@ -253,8 +265,6 @@ class SessionWindow(QMainWindow):
 
         self._update_log_status_bar()
 
-    def _replace_agent_source(self):
-        pass
 
     def _on_log_count_changed(self, count: int):
         self._last_log_count = count
@@ -265,8 +275,15 @@ class SessionWindow(QMainWindow):
         self.log_paused = self.pause_btn.isChecked()
         self._update_log_status_bar()
 
-    def launch_replace_agent_modal(self):
-        dlg = ReplaceAgentDialog(session_id=self.session_id, bus=self.bus, parent=self)
+    def _launch_restart_agent(self):
+        deployment = copy.deepcopy(self.deployment)
+        dlg = RestartAgentDialog(session_id=self.session_id, bus=self.bus, conn=self.conn, deployment=deployment ,parent=self)
+        dlg.exec_()
+
+
+    def _launch_replace_agent_source(self):
+        deployment=copy.deepcopy(self.deployment)
+        dlg = ReplaceAgentDialog(session_id=self.session_id, bus=self.bus, conn=self.conn, deployment=deployment ,parent=self)
         dlg.exec_()
 
     def _update_log_status_bar(self):

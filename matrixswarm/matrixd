@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+import argparse, sys, json, os
+from pathlib import Path
+
+from matrixswarm.core.class_lib.file_system.path_core import PathManager
+from matrixswarm.core.core_spawner import CoreSpawner
+from matrixswarm.core.reaper import Reaper
+
+
+def boot_universe(base, universe_file, python_exec):
+    directive_path = Path(base) / "static" / "universes" / universe_file
+    if not directive_path.exists():
+        print(f"[ERROR] Universe not found: {directive_path}")
+        sys.exit(1)
+
+    with open(directive_path, "r") as f:
+        directive = json.load(f)
+
+    pm = PathManager(universe_id=directive["universal_id"],
+                     base=base,
+                     python_exec=python_exec)
+
+    cp = CoreSpawner(path_manager=pm,
+                     python_site=base,
+                     detected_python=python_exec,
+                     install_path=os.path.join(base, "static"))
+
+    cp.inject_universe(directive)
+    print(f"[BOOT] Universe {directive['universal_id']} started")
+
+
+def list_universes(base):
+    for universe_dir in Path(base).iterdir():
+        if not universe_dir.is_dir() or universe_dir.name == "static":
+            continue
+        print(f"🌌 {universe_dir.name}")
+        latest = universe_dir / "latest"
+        if latest.exists():
+            print(f" └── latest → {os.readlink(latest)}")
+        for epoch in sorted(universe_dir.iterdir()):
+            if epoch.is_dir() and epoch.name != "latest":
+                print(f" └── Boot {epoch.name}")
+
+
+def kill_universe(base, universe, cleanup=False):
+    runtime = Path(base) / universe
+    if not runtime.exists():
+        print(f"[WARN] No runtime for {universe}")
+        return
+    if cleanup:
+        os.system(f"rm -rf {runtime}")
+        print(f"[KILL] Universe {universe} wiped")
+    else:
+        # TODO: replace with Reaper call
+        print(f"[KILL] Universe {universe} terminated (runtime kept)")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="MatrixSwarm OS Daemon")
+    sub = parser.add_subparsers(dest="cmd")
+
+    boot = sub.add_parser("boot")
+    boot.add_argument("--universe", required=True)
+    boot.add_argument("--base", default="/matrix")
+    boot.add_argument("--python-exec", default=sys.executable)
+
+    lst = sub.add_parser("list")
+    lst.add_argument("--base", default="/matrix")
+
+    kill = sub.add_parser("kill")
+    kill.add_argument("--universe", required=True)
+    kill.add_argument("--base", default="/matrix")
+    kill.add_argument("--cleanup", action="store_true")
+
+    args = parser.parse_args()
+    if args.cmd == "boot":
+        boot_universe(args.base, args.universe, args.python_exec)
+    elif args.cmd == "list":
+        list_universes(args.base)
+    elif args.cmd == "kill":
+        kill_universe(args.base, args.universe, args.cleanup)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()

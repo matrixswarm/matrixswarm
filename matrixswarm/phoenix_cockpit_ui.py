@@ -1,7 +1,6 @@
 
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-import os
-import sys
+import os, sys, time
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import (
     QMainWindow, QVBoxLayout, QApplication,
@@ -173,6 +172,16 @@ class PhoenixCockpit(QMainWindow):
 
         if mtype == "ready":
             print(f"[MIRV] Session {sid} READY")
+
+        elif mtype == "swarm_feed":
+
+            event = msg.get("event")  # ← use the dict we already built in the dialog
+            if not event:
+                print("[MIRV][WARN] swarm_feed message missing event dict:", msg)
+                return
+
+            if self.static_panel:
+                self.static_panel.append_feed_event(event)
 
         elif mtype == "register_cmd":
             control = msg["control"]
