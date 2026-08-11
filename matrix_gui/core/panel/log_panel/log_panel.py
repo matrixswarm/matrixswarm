@@ -3,7 +3,6 @@ from PyQt6.QtGui import QFont, QTextCursor
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QTextCharFormat, QColor
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
-from matrix_gui.core.utils.threaded_timer import ThreadedTimer
 from collections import deque
 CHUNK_SIZE = 200
 
@@ -12,8 +11,6 @@ class LogPanel(QPlainTextEdit):
 
     def __init__(self, bus, parent=None):
         super().__init__(parent)
-        self.refresh_timer = ThreadedTimer(100)
-        self.refresh_timer.tick.connect(self._refresh_logs)
         try:
             self.bus = bus
             self.setReadOnly(True)
@@ -29,13 +26,6 @@ class LogPanel(QPlainTextEdit):
             self._flush_timer.start(50)  # 30ms is smooth for logs, but you can tune
         except Exception as e:
             emit_gui_exception_log("log_panel.__init__", e)
-
-    def _refresh_logs(self):
-        """Background tick: triggers GUI flush."""
-        try:
-            self._flush_lines()
-        except Exception as e:
-            emit_gui_exception_log("LogPanel._refresh_logs", e)
 
     def append_log_lines(self, lines):
         if not lines:
