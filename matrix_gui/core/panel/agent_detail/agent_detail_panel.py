@@ -88,7 +88,7 @@ class AgentDetailPanel(QWidget):
             self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.current_config = {}
 
-            self.bus.on(f"inbound.verified.agent_tree_master.update.{self.bound_session_id}", self._handle_tree_update)
+            self.bus.on("inbound.verified.agent_tree_master.update", self._handle_tree_update)
             self.bus.on("gui.agent.selected", self.set_agent_data)
 
             #no agent selected
