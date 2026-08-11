@@ -6,7 +6,6 @@ import json
 import base64
 import threading
 import hashlib
-from Crypto.PublicKey import RSA
 
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
@@ -15,7 +14,6 @@ from core.python_core.boot_agent import BootAgent
 from core.python_core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.python_core.class_lib.logging.logger import Logger
-from core.python_core.utils.crypto_utils import encrypt_with_ephemeral_aes,  sign_data, pem_fix
 
 class Agent(BootAgent):
     """
@@ -226,6 +224,7 @@ class Agent(BootAgent):
                         self.log(f"[LOG_STREAMER] 🚀 Broadcasting {len(rendered)} lines hash={h} sess={sess}")
 
                     self._broadcast_log_lines(token, target, sess, offset, rendered)
+
                     offset += len(new_lines)
 
                 if not follow:
@@ -257,6 +256,7 @@ class Agent(BootAgent):
         Uses BootAgent's unified callback for signing and dispatch.
         """
         try:
+
             if not lines:
                 return
 

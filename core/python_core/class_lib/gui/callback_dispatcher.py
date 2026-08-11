@@ -120,10 +120,11 @@ class PhoenixCallbackDispatcher:
             token = context.get_token()
 
             # === 2. Find endpoints ===
-            endpoints = self.agent.get_nodes_by_role(rpc_role, return_count=1)
+            endpoints = self.agent.get_nodes_by_role(rpc_role)
             if not endpoints:
                 self.agent.log(f"[CALLBACK] No endpoints found for rpc_role='{rpc_role}'.")
                 return
+            self.agent.log(f"[CALLBACK] Found {len(endpoints)} endpoints for rpc_role='{rpc_role}'")
 
             # === 3. Encrypt + Sign ===
             payload = {"handler": response_handler, "content": content}

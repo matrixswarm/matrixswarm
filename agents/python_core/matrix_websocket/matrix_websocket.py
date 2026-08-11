@@ -17,11 +17,12 @@ from Crypto.PublicKey import RSA
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.python_core.utils.swarm_trustkit import extract_spki_pin_from_cert
 from core.python_core.boot_agent import BootAgent
-from core.python_core.utils.crypto_utils import encrypt_with_ephemeral_aes,  sign_data, pem_fix
+from core.python_core.utils.crypto_utils import pem_fix
 from core.python_core.utils.cert_loader import load_cert_chain_from_memory
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.utils import crypto_utils
 from core.python_core.class_lib.packet_delivery.utility.security.packet_size import guard_packet_size
+from core.python_core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
 
 class Agent(BootAgent):
     """
@@ -593,16 +594,6 @@ class Agent(BootAgent):
                 "started": time.time()
             }
 
-            # Keepalive pinger
-            async def ping_keepalive(ws, sid):
-                while sid in self._sessions:
-                    try:
-                        await ws.ping()
-                    except Exception:
-                        break
-                    await asyncio.sleep(10)
-
-            self.loop.create_task(ping_keepalive(websocket, sid))
             self.update_broadcast_flag(session_id=sid)
 
             self.log(f"[WS][SESSION] Bound to session_id={sid}")
@@ -819,7 +810,7 @@ class Agent(BootAgent):
             }
 
             # Dispatch it via WebSocket
-            self._cmd_broadcast(broadcast_packet, identity=identity)
+            self._cmd_broadcast(broadcast_packet, identity=identity, encrypt_outgoing=True)
 
             self.log("Alert message sent to GUI feed.")
         except Exception as e:
@@ -874,16 +865,14 @@ class Agent(BootAgent):
     def _secure_payload(self, payload: dict):
         try:
 
-            sealed = encrypt_with_ephemeral_aes(payload,  self._peer_pub_key_pem)
-
-            packet = {
-                "serial": self._serial_num,
-                "content": sealed,
-                "timestamp": int(time.time()),
-            }
-            sig = sign_data(packet, self._signing_key_obj)
-            packet["sig"] = sig
-            self.log('Packet encrypted. Ready for transport')
+            packet=wrap_packet_securely(
+                payload,
+                peer_pub_key_pem=self._peer_pub_key_pem,
+                serial_num=self._serial_num,
+                signing_key_obj=self._signing_key_obj,
+                logger=self.log,
+            )
+            self.log('Hive alert packet encrypted. Ready for transport')
             return packet
 
         except Exception as e:

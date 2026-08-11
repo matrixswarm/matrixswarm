@@ -83,10 +83,6 @@ class Agent(BootAgent):
             for item in alerts:
                 alert_id = item.get("id")
                 props = item.get("properties", {})
-                event = props.get("event")
-                severity = props.get("severity")
-                area = props.get("areaDesc")
-                headline = props.get("headline")
                 issued = props.get("sent")
                 description = self.sanitize_alert_text(props.get("description", ""), 1500)
                 instruction = self.sanitize_alert_text(props.get("instruction", ""), 1000)

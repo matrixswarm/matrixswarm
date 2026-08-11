@@ -1,100 +1,119 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-import time, json
+import time
+
 from Crypto.PublicKey import RSA
-from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
-from matrix_gui.core.utils.crypto_utils import encrypt_with_ephemeral_aes, sign_data
-from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 
-def wrap_packet_securely(inner_data, deployment, sign=False, encrypt=False, target_uid="matrix"):
-    if not (sign or encrypt):
-        # fallback passthrough
-        pk = Packet()
-        pk.set_data(inner_data)
-        return pk
+from core.python_core.utils.crypto_utils import encrypt_with_ephemeral_aes, sign_data
 
-    # Get encryption and signing keys
-    remote_pubkey = _find_pubkey(deployment, target_uid)
-    signer_privkey = _find_privkey(deployment, target_uid)
 
-    # Build sealed (JSON string of inner payload)
-    sealed_data = json.dumps(inner_data, separators=(",", ":"))
+def _coerce_signing_key(signing_key_obj):
+    if signing_key_obj is None:
+        raise ValueError("signing_key_obj is required")
 
-    # Encrypt if needed
-    if encrypt:
-        if not remote_pubkey:
-            raise ValueError("Missing remote_pubkey for encryption")
-        sealed_data = encrypt_with_ephemeral_aes(json.loads(sealed_data), remote_pubkey)
+    if hasattr(signing_key_obj, "has_private"):
+        return signing_key_obj
 
-    # Now sign the outer shell
-    packet_content = {
-        "content": sealed_data,
-        "timestamp": int(time.time())
+    if isinstance(signing_key_obj, str):
+        return RSA.import_key(signing_key_obj.encode())
+
+    if isinstance(signing_key_obj, bytes):
+        return RSA.import_key(signing_key_obj)
+
+    raise TypeError("signing_key_obj must be an RSA key object or PEM")
+
+
+def secure_payload(
+    payload: dict,
+    peer_pub_key_pem,
+    serial_num,
+    signing_key_obj,
+    logger=None,
+    extra_fields=None,
+):
+    """
+    Encrypt and sign a payload for direct transport.
+
+    Returns the signed ciphertext wrapper only. This helper does not build a
+    Packet object and does not resolve keys from deployment metadata.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError("payload must be a dict")
+    if not peer_pub_key_pem:
+        raise ValueError("peer_pub_key_pem is required")
+    if not serial_num:
+        raise ValueError("serial_num is required")
+
+    signing_key_obj = _coerce_signing_key(signing_key_obj)
+    sealed = encrypt_with_ephemeral_aes(payload, peer_pub_key_pem)
+
+    packet = {
+        "serial": serial_num,
+        "content": sealed,
+        "timestamp": int(time.time()),
     }
 
-    if sign:
-        if not signer_privkey:
-            raise ValueError("Missing signing key for GUI")
-        signer_privkey_obj = RSA.import_key(signer_privkey.encode() if isinstance(signer_privkey, str) else signer_privkey)
-        sig = sign_data(packet_content, signer_privkey_obj)
-        packet_content["sig"] = sig
+    if extra_fields is not None:
+        if not isinstance(extra_fields, dict):
+            raise TypeError("extra_fields must be a dict")
+        blocked = {"content", "sig"}
+        overlap = blocked.intersection(extra_fields)
+        if overlap:
+            names = ", ".join(sorted(overlap))
+            raise ValueError(f"extra_fields cannot override signed packet field(s): {names}")
+        packet.update(extra_fields)
 
-    # Final wrapper packet
-    wrapper = Packet()
-    wrapper.set_data({
-        "timestamp": packet_content["timestamp"],
-        "content": packet_content
-    })
-    return wrapper
+    packet["sig"] = sign_data(packet, signing_key_obj)
+
+    if logger:
+        logger("Packet encrypted. Ready for transport")
+
+    return packet
 
 
-def _find_pubkey(deployment, uid):
+def wrap_packet_securely(
+    payload: dict,
+    peer_pub_key_pem=None,
+    serial_num=None,
+    signing_key_obj=None,
+    logger=None,
+    extra_fields=None,
+    **kwargs,
+):
     """
-    Returns the signing public key for the given agent UID from the vault_data.
-    Expects vault_data structured as:
-    {
-        "<deployment_id>": {
-            "label": "matrix",
-            "certs": {
-                "matrix": {
-                    "signing": {
-                        "pub": "..."
-                    }
-                }
-            }
-        }
-    }
+    Backward-named entry point for the new transport contract.
+
+    Explicit key material is now mandatory. Deployment lookup, Packet wrapping,
+    _find_pubkey, and _find_privkey were intentionally removed.
     """
-    try:
+    if "deployment" in kwargs:
+        raise TypeError(
+            "deployment lookup was removed; pass peer_pub_key_pem, serial_num, and signing_key_obj"
+        )
 
-        return deployment.get('certs',{}).get(uid,{}).get("signing", {}).get("pubkey")
-    except Exception as e:
-        emit_gui_exception_log("wrap_packet_securely._find_pubkey", e)
-    return None
+    peer_pub_key_pem = (
+        peer_pub_key_pem
+        or kwargs.pop("remote_pubkey", None)
+        or kwargs.pop("remote_pubkey_pem", None)
+        or kwargs.pop("peer_public_key", None)
+    )
+    serial_num = serial_num or kwargs.pop("serial", None) or kwargs.pop("serial_number", None)
+    signing_key_obj = (
+        signing_key_obj
+        or kwargs.pop("signing_key", None)
+        or kwargs.pop("signing_privkey_obj", None)
+        or kwargs.pop("signing_privkey_pem", None)
+    )
+    extra_fields = extra_fields or kwargs.pop("metadata", None) or kwargs.pop("signed_fields", None)
 
-def _find_privkey(deployment, uid):
-    """
-    Searches the vault_data for the private signing key of the given agent UID.
+    if kwargs:
+        unknown = ", ".join(sorted(kwargs))
+        raise TypeError(f"unsupported secure payload argument(s): {unknown}")
 
-    Expects vault_data structure like:
-    {
-        "<deployment_id>": {
-            "certs": {
-                "<uid>": {
-                    "signing": {
-                        "priv": "-----BEGIN PRIVATE KEY-----..."
-                    }
-                }
-            }
-        }
-    }
-
-    Returns:
-        str or None: the PEM string of the private key, or None if not found.
-    """
-    try:
-
-        return deployment.get('certs',{}).get(uid,{}).get("signing", {}).get("remote_privkey")
-    except Exception as e:
-        emit_gui_exception_log("wrap_packet_securely._find_privkey", e)
-    return None
-
+    return secure_payload(
+        payload=payload,
+        peer_pub_key_pem=peer_pub_key_pem,
+        serial_num=serial_num,
+        signing_key_obj=signing_key_obj,
+        logger=logger,
+        extra_fields=extra_fields,
+    )

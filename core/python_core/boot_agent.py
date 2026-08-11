@@ -1499,7 +1499,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             #len of keychain["security_box"] is checked because multiple iterations will cause it
             #to be overridden
             if bool(cfg.get("matrix_secure_verified",0)):
-
+                #self.log(f"{node}")
                 uid=node.get('universal_id')
                 self.log(f"[TRUST][{uid.upper()}] - matrix_secure_verified: TRUE → injecting real Matrix private key.")
                 keychain["security_box"]["encryption_enabled"] = int(self.encryption_enabled)

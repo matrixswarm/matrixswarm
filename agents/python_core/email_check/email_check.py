@@ -183,6 +183,7 @@ class Agent(BootAgent):
                                 self.accounts = {}
                                 self.log("[EMAIL_CHECK] ⚠️ No accounts in accounts.json.aes — halting polling.")
                         last_mtime = current_mtime
+                        self.accounts = accounts
                 interruptible_sleep(self, 5)
             except Exception as e:
                 self.log("[EMAIL_CHECK][WATCH-CONNECTIONS][ERROR]", error=e)
@@ -871,6 +872,8 @@ class Agent(BootAgent):
                 raise ValueError("Invalid data format — expected dict.")
             new_data = self._normalize_accounts(new_data)
             self._save_accounts_file({"accounts": new_data})
+            with self._accounts_lock:
+                self.accounts = new_data
             self.log(f"[EMAIL_CHECK] ✅ Updated accounts.json.aes from Phoenix with {len(new_data)} account(s).")
             return {"status": "ok", "updated": len(new_data)}
         except Exception as e:

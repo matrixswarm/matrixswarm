@@ -243,41 +243,23 @@ class Agent(BootAgent):
 
     def _broadcast_output(self, sess, token, output, handler):
         try:
-            endpoints = self.get_nodes_by_role(self.rpc_role, return_count=1)
-            if not endpoints:
-                self.log("[TERMINAL] ❌ No hive.rpc endpoints found")
-                return
 
-            remote_pub_pem = self._signing_keys.get("remote_pubkey")
             payload = {
-                "handler": handler,
-                "content": {
-                    "session_id": sess,
-                    "token": token,
-                    "output": output,
-                    "timestamp": int(time.time()),
-                }
-            }
-            sealed = encrypt_with_ephemeral_aes(payload, remote_pub_pem)
-            content = {
-                "serial": self._serial_num,
-                "content": sealed,
+                "session_id": sess,
+                "token": token,
+                "output": output,
                 "timestamp": int(time.time()),
             }
-            sig = sign_data(content, self._signing_key_obj)
-            content["sig"] = sig
 
-            pk = self.get_delivery_packet("standard.command.packet")
-            pk.set_data({
-                "handler": "dummy_handler",
-                "origin": self.command_line_args["universal_id"],
-                "session_id": sess,
-                "content": content,
-            })
+            # Send securely via BootAgent's crypto pipeline
+            self.crypto_reply(
+                response_handler=handler,
+                payload=payload,
+                session_id=sess,
+                token=token,
+                rpc_role=self.rpc_role
+            )
 
-            for ep in endpoints:
-                pk.set_payload_item("handler", ep.get_handler())
-                self.pass_packet(pk, ep.get_universal_id())
 
             self.log(f"[TERMINAL] Broadcasted output for sess={sess}")
         except Exception as e:

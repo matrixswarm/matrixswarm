@@ -85,9 +85,6 @@ def decrypt_directive(path: Path, swarm_key_b64: str) -> dict:
     decrypted = cipher.decrypt_and_verify(ciphertext, tag)
     return json.loads(decrypted.decode())
 
-
-
-
 def get_all_swarm_agent_info(universe=None, base="/matrix"):
     """
     Scan running swarm agents and extract:

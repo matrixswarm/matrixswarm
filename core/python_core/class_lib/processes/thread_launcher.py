@@ -3,7 +3,6 @@ import threading
 import time
 import uuid
 import traceback
-
 class ThreadLauncher:
     """
     ThreadLauncher — Swarm Thread Orchestrator
@@ -14,9 +13,8 @@ class ThreadLauncher:
     • Centralized logging via BootAgent.log
     """
 
-    def __init__(self, boot_agent):
-        self.agent = boot_agent
-        self.log = boot_agent.log
+    def __init__(self, emit_gui_exception_log):
+        self.log = self._resolve_logger(emit_gui_exception_log)
 
         self._threads = {}        # thread_id -> Thread
         self._registry = {}       # thread_id -> metadata
@@ -24,6 +22,21 @@ class ThreadLauncher:
         self._lock = threading.Lock()
 
         self.log("ThreadLauncher initialized")
+
+    @staticmethod
+    def _resolve_logger(logger):
+        if callable(logger):
+            return logger
+
+        agent_logger = getattr(logger, "log", None)
+        if callable(agent_logger):
+            return agent_logger
+
+        def fallback_log(*args, **kwargs):
+            message = args[0] if args else kwargs.get("error", "")
+            print(message)
+
+        return fallback_log
 
     # --------------------------------------------------
     def launch(
@@ -272,4 +285,3 @@ class ThreadLauncher:
                 level="ERROR",
             )
             return None
-

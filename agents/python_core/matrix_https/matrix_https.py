@@ -383,6 +383,7 @@ class Agent(BootAgent):
                 # 1) TLS client-cert SPKI pin (bind transport to expected peer)
                 cert_bin = request.environ.get("peercert", None)
                 if not cert_bin or not self._expected_peer_spki:
+                    self.log(f"[CERT_SPKI_CHECK][BLOCKED] missing peer cert or pin.")
                     return jsonify({"status": "denied", "message": "missing peer cert or pin"}), 403
 
                 actual_pin = extract_spki_pin_from_cert(cert_bin)
@@ -402,28 +403,33 @@ class Agent(BootAgent):
 
                 # 3) Size / structure guard on inner packet
                 if not guard_packet_size(matrix_packet, log=self.log):
+                    self.log(f"[HTTPS][PACKET_SIZE_GUARD] bad or oversized payload")
                     return jsonify({"status": "error", "message": "bad or oversized payload"}), 413
 
                 # 4) Replay window
                 try:
                     if not ts or abs(time.time() - float(ts)) > 120:
+                        self.log(f"[HTTPS][REPLAY_WINDOW_GUARD] packet is stale {abs(time.time() - float(ts))} > 120")
                         return jsonify({"status": "denied", "message": "stale"}), 403
-                except Exception:
+                except Exception as e:
+                    self.log(error=e, block="replay_check")
                     return jsonify({"status": "denied", "message": "bad timestamp"}), 403
 
                 # 5) Signature verification over inner dict
                 if not (self._peer_pub_key and sig_b64 and inner):
+                    self.log(f"[HTTPS][PACKET_SIGNATURE_VERIFICATION] missing signature or key")
                     return jsonify({"status": "denied", "message": "missing signature or key"}), 403
 
                 # 6) Verify Signature
                 try:
                     crypto_utils.verify_signed_payload(inner, sig_b64, self._peer_pub_key)
                 except Exception as e:
-                    self.log(f"[HTTPS][SIG DENY] {e}")
+                    self.log(f"[HTTPS][SIG DENY]", error=e, block="packet_signing_check")
                     return jsonify({"status": "denied", "message": "bad signature"}), 403
 
                 # 7) Packet Integrity
                 if not isinstance(matrix_packet, dict):
+                    self.log(f"[HTTPS][PACKET_INTEGRITY] bad packet format")
                     return jsonify({"status": "error", "message": "bad packet format"}), 400
 
                 if self.debug.is_enabled():

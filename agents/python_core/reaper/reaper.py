@@ -37,7 +37,7 @@ class Agent(BootAgent):
     # ---------------------------------------------------------
     # CORE ENTRY
     # ---------------------------------------------------------
-    def cmd_reap_agents(self, content, packet, identity=None):
+    def cmd_reap_agents(self, content, packet, identity:IdentityObject=None):
         """
         Matrix entry-point: execute a batch of Reaper targets.
 

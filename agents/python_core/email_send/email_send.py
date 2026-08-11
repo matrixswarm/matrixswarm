@@ -34,6 +34,8 @@ class Agent(BootAgent):
             to_address (str): The email address to send the alert to.
         """
         super().__init__()
+        self.thread_launcher = None
+        self.queue = None
 
         try:
             cfg = self.tree_node.get("config", {})
@@ -45,15 +47,24 @@ class Agent(BootAgent):
             self.password = smtp.get("smtp_password")
             self.to_address = smtp.get("smtp_to")  # default recipient
             self.encryption = (smtp.get("smtp_encryption") or "SSL").upper().strip()
-            self.thread_launcher = ThreadLauncher(self)
+            self.thread_launcher = ThreadLauncher(self.log)
             self.queue = EmailQueueManager(log=self.log, thread_launcher=self.thread_launcher)
 
         except Exception as e:
             self.log(error=e, level="ERROR")
 
+    def _email_queue_ready(self) -> bool:
+        if self.queue is not None:
+            return True
+        self.log("[EMAIL] ❌ Email queue is not initialized.", level="ERROR")
+        return False
+
     def cmd_send_email(self, content: dict, packet: dict, identity: IdentityObject = None):
         """Entry point when swarm sends a 'send email' command."""
         try:
+            if not self._email_queue_ready():
+                return
+
             smtp_server = content.get("smtp_server") or self.smtp_server
             raw_port = content.get("smtp_port") or self.smtp_port or 465
             try:
@@ -63,7 +74,7 @@ class Agent(BootAgent):
 
             from_addr = content.get("from") or self.from_address
             to_addr = content.get("to") or self.to_address
-            subject = content.get("subject").strip()
+            subject = (content.get("subject") or "MatrixSwarm Email").strip()
             password = content.get("password") or self.password
             encryption = (content.get("smtp_encryption") or self.encryption).upper().strip()
             body = content.get("body", "")
@@ -99,6 +110,9 @@ class Agent(BootAgent):
             packet (dict): The raw packet data.
             identity (IdentityObject): The verified identity of the command sender.
         """
+        if not self._email_queue_ready():
+            return
+
         if not all([self.smtp_server, self.smtp_port, self.from_address, self.password, self.to_address]):
             self.log("SMTP configuration is incomplete. Cannot send email.", level="ERROR")
             return

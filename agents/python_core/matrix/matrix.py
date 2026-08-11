@@ -2,7 +2,7 @@
 # Gemini, code enhancements and Docstrings
 import sys
 import os
-
+import copy
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
@@ -1386,7 +1386,10 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             if push_tree_home and alert_role:
                 remote_pub_pem = self._signing_keys.get("remote_pubkey")
 
-                # Ask each relay for its alive sessions
+                # Isolated outbound copy. Scrubbing cannot mutate the master.
+                outbound_tree = copy.deepcopy(self._agent_tree_master.root)
+                self._strip_sensitive_fields(outbound_tree)
+
                 for ep in self.get_nodes_by_role(alert_role):
                     relay_uid = ep.get_universal_id()
                     alive_sessions = self.has_fresh_broadcast_flag(relay_uid)
@@ -1395,24 +1398,24 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                         data = {
                             "handler": "agent_tree_master.update",
                             "session_id": sess,
-                            "content": self._agent_tree_master.root,
+                            "content": outbound_tree,
                         }
 
                         sealed = encrypt_with_ephemeral_aes(data, remote_pub_pem)
+
                         content = {
                             "serial": self._serial_num,
                             "content": sealed,
-                            "timestamp": int(time.time())
+                            "timestamp": int(time.time()),
                         }
-                        sig = sign_data(content, self._signing_key_obj)
-                        content["sig"] = sig
+                        content["sig"] = sign_data(content, self._signing_key_obj)
 
                         pk1 = self.get_delivery_packet("standard.command.packet")
                         pk1.set_data({
                             "handler": ep.get_handler(),
-                            "origin": self.command_line_args['universal_id'],
-                            "session_id": sess,  # outer too, for websocket routing
-                            "content": content
+                            "origin": self.command_line_args["universal_id"],
+                            "session_id": sess,
+                            "content": content,
                         })
                         self.pass_packet(pk1, relay_uid)
 
@@ -1421,6 +1424,31 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         except Exception as e:
             self.log("[TREE][ERROR] Failed to save agent_tree_master.", error=e)
             return False
+
+    def _strip_sensitive_fields(self, value):
+        """Remove locally declared sensitive siblings from an outbound copy."""
+        if isinstance(value, dict):
+            sensitive_fields = value.pop("sensitive_fields", None)
+
+            if isinstance(sensitive_fields, dict):
+                field_names = sensitive_fields.keys()
+            elif isinstance(sensitive_fields, (list, tuple, set)):
+                field_names = sensitive_fields
+            else:
+                field_names = ()
+
+            for field_name in field_names:
+                if isinstance(field_name, str):
+                    value.pop(field_name, None)
+
+            for child in value.values():
+                self._strip_sensitive_fields(child)
+
+        elif isinstance(value, list):
+            for child in value:
+                self._strip_sensitive_fields(child)
+
+        return value
 
     def _perform_agent_consciousness_scan(self, time_delta_timeout=0, flip_threshold=3, flip_window=60):
         """
@@ -1574,11 +1602,8 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             fpath = os.path.join(base, fname)
             age = now - os.path.getmtime(fpath)
             if age < threshold:
-                if fname == "connected.flag":
-                    alive_sessions.append("legacy")  # backward compat
-                else:
-                    sid = fname.replace("connected.flag.", "")
-                    alive_sessions.append(sid)
+                sid = fname.replace("connected.flag.", "")
+                alive_sessions.append(sid)
             else:
                 self.log(f"[BROADCAST] Flag stale: {fname} ({int(age)}s old)")
 

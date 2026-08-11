@@ -9,7 +9,7 @@ import json
 import time
 from core.python_core.boot_agent import BootAgent
 from core.python_core.utils.swarm_sleep import interruptible_sleep
-from core.python_core.utils.crypto_utils import encrypt_with_ephemeral_aes, sign_data, pem_fix
+from core.python_core.utils.crypto_utils import pem_fix
 from Crypto.PublicKey import RSA
 
 """
@@ -72,7 +72,7 @@ class Agent(BootAgent):
 
             self.enforce = bool(cfg.get("enforce", False))
             self.interval = int(cfg.get("interval", 30))
-            self.rpc_role = self.tree_node.get("rpc_router_role", "hive.rpc")
+            self.rpc_role = cfg.get("rpc_router_role", "hive.rpc")
             self.alert_role = cfg.get("alert_to_role", None)
             self.report_role = cfg.get("report_to_role", None)
             self.read_only = bool(cfg.get("read_only", False))
@@ -325,18 +325,40 @@ class Agent(BootAgent):
                         except Exception as be:
                             self.log(f"[PLUGIN-GUARD][BLOCK][ERROR] Failed to delete {folder}: {be}", level="ERROR")
 
+
                     elif self.enforce:
+
                         try:
+
                             self._quarantine(folder, fpath)
+
                             self.log(f"[PLUGIN-GUARD][ENFORCE] 🚨 Quarantined untracked plugin {folder}.", level="WARN")
+
+                            if not getattr(self, "_suppress_alerts", False) and self.should_alert(
+                                    f"{folder}:auto_quarantine"):
+                                alert_info = dict(info)
+
+                                alert_info["action"] = "auto_quarantine"
+
+                                alert_info["reason"] = "Untracked plugin quarantined under Enforcement mode."
+
+                                self.drop_alert(alert_info)
+
                             continue
+
+
                         except Exception as qe:
-                            self.log(f"[PLUGIN-GUARD][ENFORCE][ERROR] Failed to quarantine {folder}: {qe}",
-                                     level="ERROR")
+
+                            self.log(f"[PLUGIN-GUARD][ENFORCE][ERROR] Failed to quarantine {folder}: {qe}", level="ERROR")
+
+                            if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"{folder}:quarantine_failed"):
+                                alert_info = dict(info)
+                                alert_info["action"] = "quarantine_failed"
+                                alert_info["reason"] = f"Failed to quarantine untracked plugin: {qe}"
+                                self.drop_alert(alert_info)
 
                     else:
-                        self.log(f"[PLUGIN-GUARD][BLOCK] No enforcement active; leaving {folder} in place.",
-                                 level="INFO")
+                        self.log(f"[PLUGIN-GUARD][BLOCK] No enforcement active; leaving {folder} in place.", level="INFO")
 
                     if not getattr(self, "_suppress_alerts", False) and self.should_alert(folder):
                         self.drop_alert(info)
@@ -1017,44 +1039,22 @@ class Agent(BootAgent):
             token (str): A token for tracking the response.
         """
         try:
-            endpoints = self.get_nodes_by_role(self.rpc_role, return_count=1)
-            if not endpoints:
-                self.log("[PLUGIN-GUARD] ❌ No hive.rpc endpoints found")
-                return
-
-            remote_pub_pem = self.tree_node.get("config", {}).get("security", {}).get("signing", {}).get("remote_pubkey")
 
             payload = {
-                "handler": handler,
-                "content": {
                     "session_id": session_id,
                     "token": token,
                     **output,
                     "timestamp": int(time.time())
                 }
-            }
 
-            #self.log(f"[PLUGIN-GUARD][DEBUG] Outgoing payload: {json.dumps(payload, indent=2)}")
-            sealed = encrypt_with_ephemeral_aes(payload, remote_pub_pem)
-            content = {
-                "serial": self.tree_node.get("serial", {}),
-                "content": sealed,
-                "timestamp": int(time.time()),
-            }
-            sig = sign_data(content, self._signing_key_obj)
-            content["sig"] = sig
-
-            pk = self.get_delivery_packet("standard.command.packet")
-            pk.set_data({
-                "handler": "dummy_handler",
-                "origin": self.command_line_args["universal_id"],
-                "session_id": session_id,
-                "content": content,
-            })
-
-            for ep in endpoints:
-                pk.set_payload_item("handler", ep.get_handler())
-                self.pass_packet(pk, ep.get_universal_id())
+            # Send securely via BootAgent's crypto pipeline
+            self.crypto_reply(
+                response_handler=handler,
+                payload=payload,
+                session_id=session_id,
+                token=token,
+                rpc_role=self.rpc_role
+            )
 
             self.log("[PLUGIN-GUARD] Broadcasted panel output")
 

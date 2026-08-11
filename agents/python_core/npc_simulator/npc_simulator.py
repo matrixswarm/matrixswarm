@@ -236,39 +236,30 @@ class Agent(BootAgent):
             time.sleep(self.stream_interval)
 
     def _broadcast_frame(self, sess_id, token, handler):
+
         if not self._has_signing_keys:
             return
-        payload = {
-            "handler": handler,
-            "content": {
-                "universal_id": self.tree_node.get("universal_id"),
-                "session_id": sess_id,
-                "token": token,
-                "last_seen_player": self.last_seen_player,
-                "player_pos": self.player,
-                "npc_list": self.npcs,
-                "timestamp": int(time.time())
-            }
-        }
-        sealed = encrypt_with_ephemeral_aes(payload, self._signing_keys.get("remote_pubkey"))
-        content = {
-            "serial": self._serial_num,
-            "content": sealed,
-            "timestamp": int(time.time()),
-        }
-        content["sig"] = sign_data(content, self._signing_key_obj)
 
-        pk = self.get_delivery_packet("standard.command.packet")
-        pk.set_data({
-            "handler": "dummy_handler",
-            "origin": self.command_line_args.get("universal_id", "npc_simulator"),
+        payload = {
+            "universal_id": self.tree_node.get("universal_id"),
             "session_id": sess_id,
-            "content": content,
-        })
-        for ep in self.get_nodes_by_role(self.rpc_role, return_count=1):
-            pk.set_payload_item("handler", ep.get_handler())
-            self.pass_packet(pk, ep.get_universal_id())
-        self.log(f"[NPC][BROADCAST] Frame → sess={sess_id}")
+            "token": token,
+            "last_seen_player": self.last_seen_player,
+            "player_pos": self.player,
+            "npc_list": self.npcs,
+            "timestamp": int(time.time())
+        }
+
+        # Send securely via BootAgent's crypto pipeline
+        self.crypto_reply(
+            response_handler=handler,
+            payload=payload,
+            session_id=sess_id,
+            token=token,
+            rpc_role=self.rpc_role
+        )
+
+        self.log(f"[NPC][BROADCAST] Frame → session_id={sess_id}")
 
 if __name__ == "__main__":
     agent = Agent()

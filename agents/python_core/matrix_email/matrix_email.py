@@ -12,6 +12,7 @@ import json
 import imaplib
 import socket
 import base64
+import hashlib
 from email import policy
 from email.parser import BytesParser
 
@@ -42,7 +43,7 @@ class Agent(BootAgent):
             mail = config.get("imap", {}) or config.get("mail", {})
 
             # allow incoming packets (True=Deny, False=Allow)
-            self.lockdown_state = config.get('lockdown_state', False)  # whether the agent currently accepts external connections (False=accepting packets, True=not accepting packets)
+            self.lockdown_state = bool(config.get('lockdown_state', False))  # whether the agent currently accepts external connections (False=accepting packets, True=not accepting packets)
             self.lockdown_time = config.get('lockdown_time', 0)  # seconds to stay offline before auto-reopen (0 = none)
             self.lockdown_expires = 0  # epoch timestamp when lockdown ends
 
@@ -62,6 +63,9 @@ class Agent(BootAgent):
             self.remote_pubkey = signing.get("remote_pubkey")
             # Our private key for AES unwrap
             self.local_privkey = signing.get("privkey")
+            self._serial_num = self.tree_node.get("serial")
+            self.recipient_hash = self._recipient_hash(self._serial_num)
+            self.log(f"[MATRIX_EMAIL][INIT][RECIPIENT_HASH_IDENTIFIER][{self.recipient_hash.upper()}]")
 
             self._msg_retrieval_limit=int(config.get("msg_retrieval_limit", 10))
 
@@ -89,54 +93,99 @@ class Agent(BootAgent):
             self.log("[MATRIX_EMAIL][IMAP][ERROR] Failed IMAP connection", error=e)
             return None
 
-    def _get_unread_messages(self):
-        """
-        Retrieve the newest N unread messages and delete all others.
-        """
+    @staticmethod
+    def _recipient_hash(serial):
+        """Return the signed mailbox-routing tag for this MATRIX_EMAIL agent."""
+        if not isinstance(serial, str) or not serial.strip():
+            return None
+        return hashlib.sha256(
+            f"{serial.strip()}matrix-email-ingress".encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _extract_recipient_hash(outer_packet):
+        """Read the mailbox tag from the signed transport wrapper only."""
+        if not isinstance(outer_packet, dict):
+            return None
+        signed_wrapper = outer_packet.get("content")
+        if not isinstance(signed_wrapper, dict):
+            return None
+        value = signed_wrapper.get("hash")
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    @staticmethod
+    def _extract_rfc822_bytes(parts):
+        """Return the RFC822 byte payload without assuming a response shape."""
+        if not isinstance(parts, (list, tuple)):
+            return None
+        for part in parts:
+            if isinstance(part, tuple) and len(part) > 1 and isinstance(part[1], bytes):
+                return part[1]
+        return None
+
+    def _poll_unread_messages(self):
+        """Process only messages addressed to this serial and delete only on success."""
         M = self._connect_imap()
         if not M:
-            return []
+            return 0
 
-        msgs = []
+        if not self.recipient_hash:
+            self.log("[MATRIX_EMAIL][IMAP][DROP] Missing local serial recipient hash.")
+            try:
+                M.logout()
+            except Exception:
+                pass
+            return 0
+
+        processed = 0
         try:
             M.select(self.imap_folder)
             typ, data = M.search(None, "UNSEEN")
-            mail_ids = data[0].split()
+            mail_ids = data[0].split() if typ == "OK" and data else []
 
             if not mail_ids:
-                return []
+                return 0
 
             # Select the most recent N emails (sorted by arrival)
             newest = mail_ids[-self._msg_retrieval_limit:]
 
             for mid in newest:
-                typ, parts = M.fetch(mid, "(RFC822)")
+                typ, parts = M.fetch(mid, "(BODY.PEEK[])")
                 if typ != "OK":
                     continue
-                raw_msg = parts[0][1]
-                msgs.append(raw_msg)
+                raw_msg = self._extract_rfc822_bytes(parts)
+                if raw_msg is None:
+                    continue
 
-            # Nuke all messages regardless of success/failure
-            for mid in mail_ids:
-                M.store(mid, "+FLAGS", "\\Deleted")
+                outer_packet = self._extract_payload_from_email(raw_msg)
+                if not outer_packet:
+                    continue
 
-            # Check mailbox state and processing flag
-            if len(msgs) > 0:
-                self.log(f"[MATRIX_EMAIL] 📬 {len(msgs)} unread messages detected — beginning processing.")
-            else:
-                self.log("[MATRIX_EMAIL] 📭 No unread messages found.")
+                # A foreign, malformed, or unsigned tag is never marked seen
+                # or deleted.  Another matrix_email agent may own it.
+                if self._extract_recipient_hash(outer_packet) != self.recipient_hash:
+                    continue
+
+                # unwrap_secure_packet verifies the wrapper that contains the
+                # hash.  Delete only after authenticated forwarding succeeds.
+                if self._unwrap_and_forward(outer_packet, expected_hash=self.recipient_hash):
+                    M.store(mid, "+FLAGS.SILENT", r"(\Deleted)")
+                    processed += 1
+
+            if processed:
+                M.expunge()
+                self.log(f"[MATRIX_EMAIL] ✅ Relayed and deleted {processed} addressed message(s).")
 
         except Exception as e:
             self.log("[MATRIX_EMAIL][IMAP][FETCH][ERROR]", error=e)
 
         finally:
             try:
-                M.expunge()
                 M.logout()
-            except:
+            except Exception:
                 pass
 
-        return msgs
+        return processed
 
     # ------------------------------------------------------------
     # Parsing packets from email
@@ -187,7 +236,7 @@ class Agent(BootAgent):
     # ------------------------------------------------------------
     # Packet unwrap + forward to Matrix
     # ------------------------------------------------------------
-    def _unwrap_and_forward(self, outer_packet):
+    def _unwrap_and_forward(self, outer_packet, expected_hash=None):
         """
         Unwrap using the EXACT same unwrap_secure_packet() used by Matrix.
         Then forward the unwrapped dict directly to Matrix as a normal
@@ -199,6 +248,10 @@ class Agent(BootAgent):
 
             if not guard_packet_size(outer_packet, log=self.log):
                 self.log("bad or oversize payload")
+                return False
+
+            if expected_hash and self._extract_recipient_hash(outer_packet) != expected_hash:
+                self.log("[MATRIX_EMAIL][UNWRAP] ❌ Recipient hash mismatch.")
                 return False
 
             unwrapped = unwrap_secure_packet(
@@ -294,19 +347,24 @@ class Agent(BootAgent):
                 token=token,
                 rpc_role=self.tree_node.get("config", {}).get("rpc_router_role", "hive.rpc"),
             )
-
             self.log(f"[LOCKDOWN] Perimeter toggled → {payload}")
 
         except Exception as e:
             self.log(f"[LOCKDOWN][ERROR] cmd_toggle_perimeter failed: {e}")
 
     def toggle_perimeter(self, lockdown_state, lockdown_time):
-        self.lockdown_time = lockdown_time
-        if not lockdown_state:
+        self.lockdown_time = int(lockdown_time)
+        if not bool(lockdown_state):
             self.lockdown_state = False
         else:
             self.lockdown_state = True
             self.lockdown_expires = int(time.time()) + lockdown_time if lockdown_time > 0 else 0
+
+        expires = "Never" if self.lockdown_time > 0 else time.time() - self.lockdown_expires
+        if not self.lockdown_state:
+            self.log(f"[MATRIX-EMAIL] Packet Processing Turned On.")
+        else:
+            self.log(f"[MATRIX-EMAIL] Packet Processing Turned Off. Expires: {expires}.")
 
     # ------------------------------------------------------------
     # Worker loop
@@ -318,7 +376,7 @@ class Agent(BootAgent):
 
             # Detect config changes dynamically
             if isinstance(config, dict) and bool(config.get("push_live_config", 0)):
-                self.log(f"[ORACLE] 🔁 Live config update detected: {config}")
+                self.log(f"[LIVE_UPDATE] 🔁 Live config update detected: {config}")
                 self._apply_live_config(config)
 
             if self.lockdown_state and self.lockdown_time > 0:
@@ -329,19 +387,7 @@ class Agent(BootAgent):
 
             if not self.lockdown_state:
 
-                msgs = self._get_unread_messages()
-
-                if not msgs:
-                    return
-
-                for raw in msgs:
-                    outer = self._extract_payload_from_email(raw)
-                    if not outer:
-                        continue
-
-                    self._unwrap_and_forward(outer)
-            else:
-              self.log(f"[MATRIX-EMAIL][BLOCKED] Packet Processing is Off.")
+                self._poll_unread_messages()
 
         except Exception as e:
             self.log("[MATRIX_EMAIL][WORKER][ERROR]", error=e)
