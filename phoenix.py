@@ -281,19 +281,6 @@ class PhoenixCockpit(QMainWindow):
                 "tab": tab,  # store the widget itself
             })
 
-            layout.addWidget(container)
-
-            label = f"{deployment.get('label', 'session')} ▸ {session_id[:6]}"
-            idx = self.tab_stack.addTab(tab, label)
-            self.tab_stack.setCurrentIndex(idx)
-
-            # Track process and IPC for cleanup
-            self.session_processes.append({
-                "proc": p,
-                "conn": parent_conn,
-                "session_id": session_id,
-                "tab_index": idx
-            })
             self._active_sessions.add(session_id)
             self.status_sessions.setText(f"Sessions: {len(self._active_sessions)}")
 
@@ -553,8 +540,9 @@ class PhoenixCockpit(QMainWindow):
                         else:
                             print(f"[MIRV] Process {proc.pid} terminated")
                     # Remove UI tab if exists
-                    tab_index = sess.get("tab_index")
-                    if tab_index is not None and tab_index < self.tab_stack.count():
+                    tab = sess.get("tab")
+                    tab_index = self.tab_stack.indexOf(tab) if tab is not None else -1
+                    if tab_index >= 0:
                         self.tab_stack.removeTab(tab_index)
                         print(f"[MIRV] Closed tab for session {sid}")
                     # Drop from tracking structures
