@@ -9,10 +9,10 @@
 **Version:** 1.1 · **Status:** Pre-Release · **License:** MatrixSwarm Community License (Modified MIT)
 
 ---
-
+[![Phoenix Cockpit](https://img.shields.io/badge/Requires-Phoenix%20Cockpit%201.1+-orange.svg?style=flat-square)](https://github.com/matrixswarm/matrixswarm/tree/main/phoenix)
 [![Made with Python](https://img.shields.io/badge/Made%20with-Python%203.10+-blue.svg?style=flat-square)](https://www.python.org/)
 [![Security: Encrypted & Signed](https://img.shields.io/badge/Security-Encrypted%20%26%20Signed-green.svg?style=flat-square)](#)
-[![Phoenix Cockpit](https://img.shields.io/badge/Control-Phoenix%20Cockpit-orange.svg?style=flat-square)](https://github.com/matrixswarm/phoenix)
+[![Phoenix Cockpit](https://img.shields.io/badge/Control-Phoenix%20Cockpit-orange.svg?style=flat-square)](../phoenix)
 [![Discord Hive](https://img.shields.io/badge/Join-The%20Hive-7289da?style=flat-square&logo=discord)](https://discord.gg/CyngHqDmku)
 
 ---
@@ -26,7 +26,7 @@ Together they form *a self-orchestrating microservice civilization* called a **u
 - Fully encrypted directives and symmetric vaults.  
 - Resilient, decentralized, and resurrected on failure.  
 - Designed for real-world distributed AI and automation.  
-- Controlled securely through [**Phoenix Cockpit**](https://github.com/matrixswarm/phoenix).
+- Controlled securely through [**Phoenix Cockpit**](../phoenix).
 
 ---
 
@@ -44,7 +44,7 @@ Together they form *a self-orchestrating microservice civilization* called a **u
 MatrixOS is the **multi-language swarm runtime** of the MatrixSwarm ecosystem.  
 Agents run side-by-side — not under you — operating through file-based communication.
 #### Python ≥ 3.10 is required
-#### MatrixOS https://github.com/matrixswarm/phoenix required if connecting externally
+#### [Phoenix Cockpit ≥ 1.1](https://github.com/matrixswarm/matrixswarm/tree/main/phoenix) is required when connecting externally
 - Written in Python with Go and Rust agents in development.  
 - Encrypted, resurrected, and fully decentralized.  
 - Every agent is signed, sandboxed, and resurrected if killed.  
@@ -116,7 +116,7 @@ matrixd kill --universe phoenix --cleanup
 
 **The official GUI for remote control, deployment, and monitoring of MatrixSwarm universes.**
 
-If you want to operate MatrixSwarm securely over the Internet, you **must** use [Phoenix Cockpit](https://github.com/matrixswarm/phoenix).
+If you want to operate MatrixSwarm securely over the Internet, you **must** use [Phoenix Cockpit](../phoenix).
 
 - All remote commands, status, and logs are encrypted, signed, and relayed through the Phoenix cockpit using the `matrix_https` and `websocket-relay` agents.
 - No agent is exposed via open HTTP/S, and no API is available without a signed packet, trusted client certificate, and the Queen's signature.
@@ -128,7 +128,7 @@ pip install -e . # in your Phoenix repo
 phoenix # launches the secure GUI
 
 Get Phoenix Cockpit here:
-👉 See: [Phoenix Cockpit](https://github.com/matrixswarm/phoenix)
+👉 See: [Phoenix Cockpit](../phoenix)
 
 ### Why can’t you just open MatrixOS to the net?
 
@@ -342,20 +342,21 @@ Released under the MatrixSwarm Community License v1.1 (Modified MIT).
 Free for personal, research, and non-commercial use.
 For commercial use, contact: swarm@matrixswarm.com
 
+
 ### Authorship
-MatrixSwarm / Phoenix Cockpit © 2025 Daniel F. MacDonald & Contributors.
+
+MatrixSwarm © 2025–2026 Daniel F. MacDonald. Developed with assistance from ChatGPT.
+
 ### Resources
-GitHub: github.com/matrixswarm/matrixswarm
 
-Docs: matrixswarm.com
-
-Discord: Join the Hive
-
-Python: pip install matrixswarm
-
-Codex: /agents/gatekeeper
-
-Twitter/X: @matrixswarm
+- **GitHub:** [matrixswarm/matrixswarm](https://github.com/matrixswarm/matrixswarm)
+- **Phoenix Cockpit:** [phoenix/](https://github.com/matrixswarm/matrixswarm/tree/main/phoenix)
+- **MatrixOS:** [matrixos/](https://github.com/matrixswarm/matrixswarm/tree/main/matrixos)
+- **Documentation:** [matrixswarm.com](https://matrixswarm.com)
+- **Telegram:** [t.me/matrixswarm](https://t.me/matrixswarm)
+- **Discord:** [Join the Hive](https://discord.gg/CyngHqDmku)
+- **X/Twitter:** [@matrixswarm](https://x.com/matrixswarm)
+- **Gatekeeper agent:** [matrixos/agents/python_core/gatekeeper](https://github.com/matrixswarm/matrixswarm/tree/main/matrixos/agents/python_core/gatekeeper)
 
 ### Join the Hive
 Join the Swarm → https://discord.gg/CyngHqDmku
