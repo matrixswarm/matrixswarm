@@ -6,9 +6,9 @@
 ### *The Secure Control Plane for the MatrixSwarm Universe*
 **Version:** 1.1 · **Status:** Pre-Release · **License:** MatrixSwarm Community License (Modified MIT)
 ---
+[![Requires MatrixOS 1.1+](https://img.shields.io/badge/Requires-MatrixOS%201.1%2B-orange.svg?style=flat-square)](https://github.com/matrixswarm/matrixswarm/tree/main/matrixos)
 [![Built with PyQt6](https://img.shields.io/badge/Built%20with-PyQt6%206.6+-blue.svg?style=flat-square)](#)
 [![Security Verified](https://img.shields.io/badge/Security-Vault%20Locked%20%26%20SPKI%20Pinned-green.svg?style=flat-square)](#)
-[![MatrixOS Core](https://img.shields.io/badge/Requires-MatrixOS%203.10+-orange.svg?style=flat-square)](https://github.com/matrixswarm/matrixos)
 [![Discord Hive](https://img.shields.io/badge/Join-The%20Hive-7289da?style=flat-square&logo=discord)](https://discord.gg/CyngHqDmku)
 ---
 ### **Phoenix** is not a dashboard — it’s the *nervous system* of the swarm.  
@@ -50,10 +50,10 @@ funding open-source maintenance, documentation, and ecosystem growth.
 - Bitcoin — bc1qasqk5xn9j7cdddmeclxddzvym2sdv7d8g3xrtz
 
 ---
-
+#### [MatrixOS ≥ 1.1](https://github.com/matrixswarm/matrixswarm/tree/main/matrixos) is required
 #### Built with PyQt6 ≥ 6.6
 #### Python ≥ 3.10 is required
-#### MatrixOS https://github.com/matrixswarm/matrixos required
+
 * Enforces vault unlock → command flow (no unlocked vault, no ops).
 * Visualizes universes, deployments, agents, and their threads.
 * Streams logs, status, and service responses in real time.
@@ -484,7 +484,7 @@ Once this is in place, your cockpit, logs, and panels will reflect the active sw
 
 ### Architecture
 
-* Phoenix GUI (PyQt5)
+* Phoenix GUI (PyQt6)
 
   * Unlocks vault
   * Displays deployments + agent tree
@@ -515,25 +515,19 @@ For commercial use, contact: [swarm@matrixswarm.com](mailto:swarm@matrixswarm.co
 
 ### Authorship
 
-MatrixSwarm / Phoenix Cockpit © 2025 Daniel F. MacDonald & Contributors.
+MatrixSwarm © 2025–2026 Daniel F. MacDonald. Developed with assistance from ChatGPT.
 
 ### Resources
 
-GitHub: github.com/matrixswarm/matrixswarm
+- **GitHub:** [matrixswarm/matrixswarm](https://github.com/matrixswarm/matrixswarm)
+- **Phoenix Cockpit:** [phoenix/](https://github.com/matrixswarm/matrixswarm/tree/main/phoenix)
+- **MatrixOS:** [matrixos/](https://github.com/matrixswarm/matrixswarm/tree/main/matrixos)
+- **Documentation:** [matrixswarm.com](https://matrixswarm.com)
+- **Telegram:** [t.me/matrixswarm](https://t.me/matrixswarm)
+- **Discord:** [Join the Hive](https://discord.gg/CyngHqDmku)
+- **X/Twitter:** [@matrixswarm](https://x.com/matrixswarm)
+- **Gatekeeper agent:** [matrixos/agents/python_core/gatekeeper](https://github.com/matrixswarm/matrixswarm/tree/main/matrixos/agents/python_core/gatekeeper)
 
-GitHub: github.com/matrixswarm/matrixos
-
-Telegram: https://t.me/matrixswarm
-
-Docs: matrixswarm.com
-
-Discord: Join the Hive
-
-Python: pip install matrixswarm
-
-Codex: /agents/gatekeeper
-
-Twitter/X: @matrixswarm
 
 ### Join the Hive
 

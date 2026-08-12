@@ -18,17 +18,10 @@ class RailgunInstallDialog(QDialog):
         self.ssh_map = {}
         self.install_modes = [
             "Install from GitHub",
-            "Local Full Install"
+            "Local Full Install",
         ]
         self.tail_thread = None
-        self._build_ui()
-        self._extract_ssh_targets()
-        self.ssh_map = {}
-        self.install_modes = [
-            "Install from GitHub",
-            "Local Full Install"
-        ]
-        self.tail_thread = None
+        self._install_running = False
         self._build_ui()
         self._extract_ssh_targets()
 
@@ -139,13 +132,32 @@ class RailgunInstallDialog(QDialog):
         return self.ssh_map.get(sid)
 
     def run_installer(self):
+        if self._install_running:
+            self.output_box.append("[Railgun] Installation already in progress.")
+            return
+
+        self._install_running = True
+        self.btn_install.setEnabled(False)
+        client = None
         try:
-            self._extract_ssh_targets()  # always refresh SSH targets
+
+            selected_sid = self.ssh_selector.currentData()
+            if not selected_sid:
+                self.output_box.append("[Railgun] No SSH target selected.")
+                return
+
+            self._extract_ssh_targets()  # refresh while preserving operator selection
+
+            selected_index = self.ssh_selector.findData(selected_sid)
+            if selected_index < 0:
+                self.output_box.append(
+                    "[Railgun] Selected SSH target is no longer available."
+                )
+                return
+
+            self.ssh_selector.setCurrentIndex(selected_index)
             self.output_box.append("[Railgun] Starting installation…")
             ssh_cfg = self._get_selected_ssh()
-            if not ssh_cfg:
-                self.output_box.append("[Railgun] No valid SSH target.")
-                return
 
             host = ssh_cfg["host"]
             user = ssh_cfg["username"]
@@ -175,12 +187,10 @@ class RailgunInstallDialog(QDialog):
                 local_src = self.local_path.text().strip()
                 if not local_src:
                     self.output_box.append("[Railgun] No local source selected.")
-                    client.close()
                     return
 
                 if not os.path.isdir(local_src):
                     self.output_box.append(f"[Railgun] Local path is not a directory: {local_src}")
-                    client.close()
                     return
 
                 sftp = client.open_sftp()
@@ -224,10 +234,18 @@ class RailgunInstallDialog(QDialog):
 
             exit_code = channel.recv_exit_status()
             self.output_box.append(f"[Railgun] Installer exited (code={exit_code})")
-            client.close()
+
 
         except Exception as e:
             self.output_box.append(f"[Railgun ERROR] {e}")
+        finally:
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+            self._install_running = False
+            self.btn_install.setEnabled(True)
 
     def _connect_ssh(self, host, user, port, key_pem):
         try:
@@ -401,20 +419,37 @@ if ! command -v python3 >/dev/null 2>&1; then
     apt-get install -y python3 python3-venv python3-pip
 fi
 
-echo "[Installer] Cleaning old MatrixOS install…"
+if ! command -v flock >/dev/null 2>&1; then
+    echo "[Installer] Installing installation-lock support…"
+    apt-get update -y
+    apt-get install -y util-linux
+fi
 
-echo "[Installer] Cloning repository to /tmp/matrixos-github…"
-rm -rf /tmp/matrixos-github
-git clone https://github.com/matrixswarm/matrixos.git /tmp/matrixos-github
+LOCK_FILE="/tmp/matrixswarm-railgun-install.lock"
+exec 9>"$LOCK_FILE"
 
-if [ ! -d /tmp/matrixos-github ]; then
-    echo "[Installer][ERROR] Clone failed."
+if ! flock -n 9; then
+    echo "[Installer][ERROR] Another Railgun installation is already running."
+    exit 75
+fi
+
+CLONE_DIR="$(mktemp -d /tmp/matrixswarm-github.XXXXXX)"
+trap 'rm -rf "$CLONE_DIR"' EXIT
+
+echo "[Installer] Cloning MatrixSwarm monorepo…"
+git clone --depth 1 \
+    https://github.com/matrixswarm/matrixswarm.git \
+    "$CLONE_DIR"
+
+if [ ! -d "$CLONE_DIR/matrixos" ]; then
+    echo "[Installer][ERROR] MatrixOS directory not found after clone."
     exit 128
 fi
 
-# 4) Overwrite ALL MatrixOS runtime code safely
+mkdir -p /matrix
+
 echo "[Installer] Overwriting runtime directories (preserving universes)…"
-cp -r -f /tmp/matrixos-github/. /matrix
+cp -a "$CLONE_DIR/matrixos/." /matrix/
 
 cd /matrix
 
