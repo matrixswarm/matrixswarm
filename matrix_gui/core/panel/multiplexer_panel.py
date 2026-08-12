@@ -79,7 +79,7 @@ class MultiplexerPanel(QDialog):
             # Incoming Transport
             # ------------------------------
             incoming_group = QGroupBox("Incoming Transport (payload.reception)")
-            ig_layout = QVBoxLayout()
+            ig_layout = QHBoxLayout()
             incoming_group.setLayout(ig_layout)
 
             self.incoming_dropdown = QComboBox()
@@ -90,7 +90,7 @@ class MultiplexerPanel(QDialog):
                 self.incoming_dropdown.addItem(f"{name} ({uid})", uid)
 
             # Prefer explicitly flagged default_payload_reception
-            # Match deployment boot policy: first flagged default wins.
+            # rule: last flagged true wins
             preferred_incoming_index = 0
             found_default_payload = False
 
@@ -99,7 +99,6 @@ class MultiplexerPanel(QDialog):
                 if bool(conn.get("default_payload_reception", False)):
                     preferred_incoming_index = i
                     found_default_payload = True
-                    break
 
             # Fallback: prefer websocket if no explicit default set
             if not found_default_payload:
@@ -120,14 +119,21 @@ class MultiplexerPanel(QDialog):
                 "Applying will stop other ingress connectors and launch the selected one."
             )
 
-            ig_layout.addWidget(self.incoming_dropdown)
+            ig_layout.addWidget(self.incoming_dropdown, 1)
+
+            incoming_apply_btn = QPushButton("Apply")
+            incoming_apply_btn.setToolTip(
+                "Switch the active payload.reception transport."
+            )
+            incoming_apply_btn.clicked.connect(self._apply_incoming_route)
+            ig_layout.addWidget(incoming_apply_btn)
             layout.addWidget(incoming_group)
 
             # ------------------------------
             # Outgoing Transport
             # ------------------------------
             outgoing_group = QGroupBox("Outgoing Transport (outgoing.command)")
-            og_layout = QVBoxLayout()
+            og_layout = QHBoxLayout()
             outgoing_group.setLayout(og_layout)
 
             self.outgoing_dropdown = QComboBox()
@@ -136,33 +142,15 @@ class MultiplexerPanel(QDialog):
                 name = a.get("name", uid)
                 self.outgoing_dropdown.addItem(f"{name} ({uid})", uid)
 
-            og_layout.addWidget(self.outgoing_dropdown)
+            og_layout.addWidget(self.outgoing_dropdown, 1)
+
+            outgoing_apply_btn = QPushButton("Apply")
+            outgoing_apply_btn.setToolTip(
+                "Switch the active outgoing.command transport."
+            )
+            outgoing_apply_btn.clicked.connect(self._apply_outgoing_route)
+            og_layout.addWidget(outgoing_apply_btn)
             layout.addWidget(outgoing_group)
-
-            # ------------------------------
-            # Bottom Action Row
-            # ------------------------------
-            btn_row = QHBoxLayout()
-
-            apply_incoming_btn = QPushButton("Apply Incoming")
-            apply_incoming_btn.setToolTip(
-                "Switch only the payload.reception ingress connector."
-            )
-            apply_incoming_btn.clicked.connect(self._apply_incoming_route)
-            btn_row.addWidget(apply_incoming_btn)
-
-            apply_outgoing_btn = QPushButton("Apply Outgoing")
-            apply_outgoing_btn.setToolTip(
-                "Switch only the outgoing.command egress connector."
-            )
-            apply_outgoing_btn.clicked.connect(self._apply_outgoing_route)
-            btn_row.addWidget(apply_outgoing_btn)
-
-            close_btn = QPushButton("Close")
-            close_btn.clicked.connect(self.close)
-            btn_row.addWidget(close_btn)
-
-            layout.addLayout(btn_row)
 
         except Exception as e:
             emit_gui_exception_log("MultiplexerPanel.__init__", e)
@@ -171,49 +159,50 @@ class MultiplexerPanel(QDialog):
     # APPLY TRANSPORT SELECTIONS
     # ----------------------------------------------------------
     def _apply_outgoing_route(self):
-        """Switch only the selected outgoing.command connector."""
         try:
             selected_out_uid = self.outgoing_dropdown.currentData()
             if not selected_out_uid:
-                return
+                print("[MUX][OUTGOING] No outgoing transport selected.")
+                return False
 
             outbound = self.session_window.outbound_dispatcher
             for a in self.deployment.get("agents", []):
                 if a.get("universal_id") == selected_out_uid:
+                    outbound.preferred_channel = selected_out_uid
                     outbound.set_outbound_connector(a)
                     self.session_window.outgoing_badge.setText(f"Outgoing: {selected_out_uid}  ⚪")
+                    selected_label = self.outgoing_dropdown.currentText().strip()
                     self.session_window.status_label.setText(
-                        f"Status: Outgoing command route set to {self.outgoing_dropdown.currentText().strip()}"
+                        f"Status: Outgoing set to {selected_label}"
                     )
-                    print(f"[MUX][OUTGOING] Switched egress to: {selected_out_uid}")
-                    break
-            else:
-                print(f"[MUX][OUTGOING] Unknown outgoing connector: {selected_out_uid}")
+                    print(f"[MUX][SWITCH] Outgoing switched to: {selected_out_uid}")
+                    return True
+
+            print(f"[MUX][OUTGOING] No outgoing agent found for uid={selected_out_uid}")
+            return False
 
         except Exception as e:
             emit_gui_exception_log("MultiplexerPanel._apply_outgoing_route", e)
+            return False
 
     def _apply_incoming_route(self):
-        """Switch only the selected payload.reception connector."""
         try:
             selected_in_uid = self.incoming_dropdown.currentData()
             if not selected_in_uid:
-                return
+                print("[MUX][INCOMING] No incoming transport selected.")
+                return False
 
-            if selected_in_uid == getattr(self.session_window, "preferred_incoming_uid", None):
-                self.session_window.status_label.setText(
-                    f"Status: Incoming route already set to {self.incoming_dropdown.currentText().strip()}"
-                )
-                return
-
+            # SessionWindow is the sole owner of ingress policy, shutdown,
+            # launch, rollback, dispatcher binding, and status commit.
             if self.session_window.switch_inbound_connector(selected_in_uid):
-                self.session_window.status_label.setText(
-                    f"Status: Incoming payload route set to {self.incoming_dropdown.currentText().strip()}"
-                )
-                print(f"[MUX][INCOMING] Switched ingress to: {selected_in_uid}")
+                print(f"[MUX][SWITCH] Ingress switched to: {selected_in_uid}")
+                return True
 
+            print(f"[MUX][SWITCH][FAILED] Ingress remains unchanged: {selected_in_uid}")
+            return False
         except Exception as e:
             emit_gui_exception_log("MultiplexerPanel._apply_incoming_route", e)
+            return False
 
     def sync_with_current_connector(self):
         """

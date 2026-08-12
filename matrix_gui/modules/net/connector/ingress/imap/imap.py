@@ -93,6 +93,15 @@ class IMAPIngressConnector(BaseConnector):
     # ------------------------------------------------------------------
     # Main persistent loop
     # ------------------------------------------------------------------
+    def _wait_interruptibly(self, seconds):
+        deadline = time.monotonic() + max(0.0, float(seconds))
+        while not self.stopped():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return True
+            time.sleep(min(0.1, remaining))
+        return False
+
     def loop_tick(self):
         try:
             if not self._phoenix_session_id:
@@ -102,11 +111,13 @@ class IMAPIngressConnector(BaseConnector):
                 self._connect_imap()
                 if not self._imap:
                     self._emit_status("disconnected")
-                    time.sleep(5)
-                    return True
+                    self._wait_interruptibly(5)
+                    return not self.stopped()
 
             self._emit_status("connected")
             self._poll_mailbox()
+            if self.stopped():
+                return False
             self._maybe_send_heartbeat()
             return True
 
@@ -114,8 +125,8 @@ class IMAPIngressConnector(BaseConnector):
             emit_gui_exception_log("[IMAPIngressConnector.loop_tick]", e)
             self._close_imap()
             self._emit_status("disconnected")
-            time.sleep(5)
-            return True
+            self._wait_interruptibly(5)
+            return not self.stopped()
 
     # ------------------------------------------------------------------
     # Heartbeat: Phoenix -> swarm email egress watchdog
@@ -362,17 +373,26 @@ class IMAPIngressConnector(BaseConnector):
                     raw_msg = self._extract_rfc822_bytes(parts)
                     if raw_msg is None:
                         if self._fetch_response_has_flag(parts, "Seen"):
-                            print(f"[IMAP][FETCH][READ_NO_BODY][DELETE] uid={msg_id!r}")
+                            print(f"[IMAP][FETCH][READ_NO_BODY][LEAVE] uid={msg_id!r}")
                         else:
                             print(f"[IMAP][FETCH][SKIP] No message payload in UID fetch response for {msg_id!r}")
                         continue
 
                     msg = email.message_from_bytes(raw_msg)
+                    subj = str(msg.get("Subject", ""))
 
-                    if self.subject_prefix:
-                        subj = str(msg.get("Subject", ""))
-                        if self.subject_prefix not in subj:
-                            continue
+                    heartbeat_prefix = self.heartbeat_subject_prefix
+                    is_heartbeat_subject = bool(
+                        heartbeat_prefix and heartbeat_prefix in subj
+                    )
+
+                    # Apply the normal payload subject filter only to non-heartbeat mail.
+                    if (
+                            not is_heartbeat_subject
+                            and self.subject_prefix
+                            and self.subject_prefix not in subj
+                    ):
+                        continue
 
                     if self.from_filter:
                         sender = str(msg.get("From", ""))
@@ -383,48 +403,58 @@ class IMAPIngressConnector(BaseConnector):
                     if not body:
                         continue
 
-                    subj = str(msg.get("Subject", ""))
-
-                    heartbeat_prefix = (
-                        (self.agent.get("connection", {}) or {})
-                        .get("heartbeat_lane", {})
-                        .get("subject_prefix", "[MatrixSwarm-Heartbeat]")
-                    )
-
-                    if heartbeat_prefix and heartbeat_prefix in subj:
-                        print(f"[IMAP][SKIP] Heartbeat mail ignored: {subj}")
-                        action = "leave"
-                        continue
-
                     outer_packet = self._decode_outer_packet(body)
                     if not outer_packet:
                         continue
 
-                    # Authenticate all outer metadata first.
-                    if not self._verify_outer_signature_only(
-                            outer_packet,
-                            remote_pubkey,
-                    ):
-                        action = "leave"
-                        continue
-
-                    expected_cleanup_hash = hashlib.sha256(f"{self.serial}email-egress-message".encode("utf-8")).hexdigest()
-
+                    packet_hash = self._extract_message_hash(outer_packet)
                     packet_cleanup_hash = self._extract_cleanup_hash(outer_packet)
 
-                    # Delete stale mail only when it belongs to this Matrix node.
-                    if self._is_stale_outer_packet(outer_packet, now=now):
-                        if packet_cleanup_hash == expected_cleanup_hash:
-                            print(f"[IMAP][STALE][DELETE] uid={msg_id!r}")
+                    expected_cleanup_hash = hashlib.sha256(
+                        f"{self.serial}email-egress-message".encode("utf-8")
+                    ).hexdigest()
+
+                    heartbeat_hash = self._heartbeat_recipient_hash(self.serial)
+
+                    # Phoenix heartbeat: never verify it with the Swarm message key.
+                    # Leave fresh heartbeats for MatrixSwarm; remove abandoned ones.
+                    if packet_hash == heartbeat_hash:
+                        if self._is_stale_outer_packet(outer_packet, now):
+                            print(f"[IMAP][HEARTBEAT][STALE][DELETE] uid={msg_id!r}")
                             action = "delete"
                         else:
                             action = "leave"
                         continue
 
-                    # Live packets still require exact session ownership.
-                    packet_hash = self._extract_message_hash(outer_packet)
-                    if packet_hash != expected_hash:
+                    claims_current_session = packet_hash == expected_hash
+                    claims_this_node = packet_cleanup_hash == expected_cleanup_hash
+
+                    # Shared-inbox protection: never touch another node's packet.
+                    if not claims_current_session and not claims_this_node:
                         action = "leave"
+                        continue
+
+                    # Verify exactly once. A failure claiming this node/session is junk.
+                    if not self._verify_outer_signature_only(
+                            outer_packet,
+                            remote_pubkey,
+                    ):
+                        print(
+                            f"[IMAP][BAD_SIG][DELETE] uid={msg_id!r} "
+                            f"current_session={claims_current_session} "
+                            f"this_node={claims_this_node}"
+                        )
+                        action = "delete"
+                        continue
+
+                    # Authenticated packet for another session belonging to this node.
+                    # Preserve it while live; delete it after expiration.
+                    if not claims_current_session:
+                        if self._is_stale_outer_packet(outer_packet, now):
+                            print(f"[IMAP][STALE_SESSION][DELETE] uid={msg_id!r}")
+                            action = "delete"
+                        else:
+                            action = "leave"
                         continue
 
                     # Only delete Seen mail after signature and ownership checks.
@@ -489,7 +519,7 @@ class IMAPIngressConnector(BaseConnector):
             except Exception:
                 pass
 
-            time.sleep(self.poll_interval)
+            self._wait_interruptibly(self.poll_interval)
 
         except Exception as e:
             emit_gui_exception_log("[IMAPIngressConnector._poll_mailbox]", e)
@@ -817,9 +847,16 @@ class IMAPIngressConnector(BaseConnector):
         self._emit_status("disconnected")
 
     def _close_imap(self):
+        imap = self._imap
+        self._imap = None
         try:
-            if self._imap:
-                self._imap.logout()
+            if imap:
+                shutdown = getattr(imap, "shutdown", None)
+                if callable(shutdown):
+                    shutdown()
+                else:
+                    sock = getattr(imap, "sock", None)
+                    if sock:
+                        sock.close()
         except Exception:
             pass
-        self._imap = None

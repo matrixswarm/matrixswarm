@@ -24,7 +24,6 @@ from matrix_gui.modules.net.deployment_connector import _connect_single
 from matrix_gui.core.dispatcher.inbound_dispatcher import InboundDispatcher
 from matrix_gui.core.dispatcher.outbound_dispatcher import OutboundDispatcher
 from matrix_gui.config.boot.globals import get_sessions
-from matrix_gui.core.connector_bus import ConnectorBus
 from matrix_gui.core.panel.restart_agent_panel import RestartAgentPanel
 from matrix_gui.core.panel.replace_agent_panel import ReplaceAgentPanel
 from matrix_gui.core.panel.hotswap_agent_panel import HotswapAgentPanel
@@ -32,7 +31,6 @@ from matrix_gui.core.panel.inject_agent_panel import InjectAgentPanel
 from matrix_gui.core.panel.multiplexer_panel import MultiplexerPanel
 from matrix_gui.core.panel.control_bar import ControlBar
 from matrix_gui.modules.vault.services.vault_connection_singleton import VaultConnectionSingleton
-from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.modules.directive.deploy_dialog import DeployDialog
 
 def run_session(session_id, conn):
@@ -295,12 +293,11 @@ class SessionWindow(QMainWindow):
                     if ch == "payload.reception":
                         incoming_agents.append(a)
 
-                # Match deployment boot policy: first flagged default wins.
+                # rule: last one flagged true wins
                 for a in incoming_agents:
                     conn = a.get("connection", {}) or {}
                     if bool(conn.get("default_payload_reception", False)):
                         incoming_candidate = a
-                        break
 
                 # fallback: websocket if no explicit default set
                 if not incoming_candidate:
@@ -916,14 +913,11 @@ class SessionWindow(QMainWindow):
 
     def switch_inbound_connector(self, selected_uid: str):
         """
-        Make one payload.reception connector authoritative.
+        Atomically make one payload.reception connector authoritative.
 
-        Behavior:
-          1. Update preferred incoming UID
-          2. Update inbound dispatcher selector
-          3. Stop all other payload.reception connector threads
-          4. Launch the selected payload.reception connector
-          5. Update badge/status text
+        A replacement is never launched until every other managed ingress has
+        verifiably stopped. If launch or commit fails, the previous ingress is
+        restored when that can be done without creating a second receiver.
         """
         try:
             if not selected_uid:
@@ -950,42 +944,241 @@ class SessionWindow(QMainWindow):
                 print("[SESSION][INBOUND] No connection_launcher available.")
                 return False
 
-            # 2) Make only the selected ingress live/monitored, then launch it
-            try:
-                for a in incoming_agents:
-                    uid = a.get("universal_id")
-                    is_selected = (uid == selected_uid)
+            previous_uid = getattr(self, "preferred_incoming_uid", None)
+            previous_agent = next(
+                (
+                    a for a in incoming_agents
+                    if a.get("universal_id") == previous_uid
+                ),
+                None,
+            )
+            previous_disturbed = False
 
-                    launcher.update_policy(
-                        uid,
-                        auto_start=is_selected,
-                        monitor=is_selected,
-                        ready=True,
-                        reason="selected ingress" if is_selected else "dormant ingress",
+            def commit_route(uid, agent, action="set"):
+                self.preferred_incoming_uid = uid
+                self.inbound_dispatcher.set_inbound_connector(agent)
+                self.incoming_badge.setText(f"Incoming: {uid}  ⚪")
+                status_verb = {
+                    "set": "set to",
+                    "retained": "retained at",
+                    "restored": "restored to",
+                }.get(action, f"{action} to")
+                self.status_label.setText(
+                    f"Status: Incoming payload.reception {status_verb} {uid}"
+                )
+
+            def restore_previous(reason):
+                """Restore the last authoritative ingress without overlap."""
+                if not previous_uid or not previous_agent:
+                    print(
+                        f"[SESSION][INBOUND][ROLLBACK] No previous ingress "
+                        f"available after {reason}."
                     )
-
-                    if not is_selected:
-                        launcher.kill_thread(uid)
-
-                t = launcher.launch(selected_uid, fire_catapult=True)
-
-                if not t:
-                    print(f"[SESSION][INBOUND] Launch returned no thread for {selected_uid}")
                     return False
 
-                print(f"[SESSION][INBOUND] Launched ingress connector → {selected_uid}")
+                print(
+                    f"[SESSION][INBOUND][ROLLBACK] Restoring "
+                    f"{previous_uid} after {reason}."
+                )
 
+                # Disable every replacement candidate first so the monitor
+                # cannot resurrect one during rollback.
+                for agent in incoming_agents:
+                    uid = agent.get("universal_id")
+                    if uid == previous_uid:
+                        continue
+                    launcher.update_policy(
+                        uid,
+                        auto_start=False,
+                        monitor=False,
+                        ready=True,
+                        reason="rollback dormant ingress",
+                    )
+
+                # Nothing touched the previous worker yet. Keep it authoritative
+                # and avoid a needless stop/start cycle.
+                if not previous_disturbed:
+                    launcher.update_policy(
+                        previous_uid,
+                        auto_start=True,
+                        monitor=True,
+                        ready=True,
+                        reason="previous ingress retained",
+                    )
+                    commit_route(previous_uid, previous_agent, "retained")
+                    return True
+
+                # All other receivers must be down before restarting the old one.
+                for agent in incoming_agents:
+                    uid = agent.get("universal_id")
+                    if uid == previous_uid:
+                        continue
+                    if not launcher.kill_thread(uid):
+                        print(
+                            f"[SESSION][INBOUND][ROLLBACK][FAILED] Ingress "
+                            f"{uid} is still alive; refusing a second receiver."
+                        )
+                        return False
+
+                launcher.update_policy(
+                    previous_uid,
+                    auto_start=False,
+                    monitor=False,
+                    ready=True,
+                    reason="rollback restart pending",
+                )
+
+                # stop() latches the connector stop flag. Finish the old
+                # instance and create a fresh worker during rollback.
+                if not launcher.kill_thread(previous_uid):
+                    print(
+                        f"[SESSION][INBOUND][ROLLBACK][FAILED] "
+                        f"{previous_uid} is still alive."
+                    )
+                    return False
+
+                if not launcher.update_policy(
+                    previous_uid,
+                    auto_start=True,
+                    monitor=True,
+                    ready=True,
+                    reason="restored ingress",
+                ):
+                    return False
+
+                restored = launcher.launch(
+                    previous_uid,
+                    fire_catapult=True,
+                )
+                if not restored:
+                    print(
+                        f"[SESSION][INBOUND][ROLLBACK][FAILED] Could not "
+                        f"launch {previous_uid}."
+                    )
+                    return False
+
+                commit_route(previous_uid, previous_agent, "restored")
+                print(
+                    f"[SESSION][INBOUND][ROLLBACK] Restored ingress → "
+                    f"{previous_uid}"
+                )
+                return True
+
+            try:
+                # Reapplying the active route is a no-op for that worker, but
+                # it still purges any other stale ingress before returning.
+                same_route = selected_uid == previous_uid
+
+                if not launcher.update_policy(
+                    selected_uid,
+                    auto_start=same_route,
+                    monitor=same_route,
+                    ready=True,
+                    reason=(
+                        "selected ingress"
+                        if same_route else "pending ingress switch"
+                    ),
+                ):
+                    print(
+                        f"[SESSION][INBOUND] Selected connector is not "
+                        f"registered: {selected_uid}"
+                    )
+                    return False
+
+                # A different target may have stale ownership from an earlier
+                # attempt. Quiesce it while the current route remains intact.
+                if not same_route and not launcher.kill_thread(selected_uid):
+                    print(
+                        f"[SESSION][INBOUND] Switch aborted: target ingress "
+                        f"{selected_uid} is still alive."
+                    )
+                    return False
+
+                old_agents = [
+                    a for a in incoming_agents
+                    if a.get("universal_id") != selected_uid
+                ]
+
+                for agent in old_agents:
+                    launcher.update_policy(
+                        agent.get("universal_id"),
+                        auto_start=False,
+                        monitor=False,
+                        ready=True,
+                        reason="dormant ingress",
+                    )
+
+                # Stop the authoritative previous ingress last. If an unrelated
+                # stale worker refuses shutdown, the current route stays intact.
+                old_agents.sort(
+                    key=lambda a: a.get("universal_id") == previous_uid
+                )
+                for agent in old_agents:
+                    uid = agent.get("universal_id")
+                    if uid == previous_uid:
+                        previous_disturbed = True
+                    if not launcher.kill_thread(uid):
+                        print(
+                            f"[SESSION][INBOUND] Switch aborted: ingress "
+                            f"{uid} is still alive."
+                        )
+                        restore_previous(f"shutdown timeout for {uid}")
+                        return False
+
+                if not launcher.update_policy(
+                    selected_uid,
+                    auto_start=True,
+                    monitor=True,
+                    ready=True,
+                    reason="selected ingress",
+                ):
+                    restore_previous("target policy failure")
+                    return False
+
+                t = launcher.launch(selected_uid, fire_catapult=True)
+                if not t:
+                    print(
+                        f"[SESSION][INBOUND] Launch returned no thread for "
+                        f"{selected_uid}"
+                    )
+                    restore_previous("target launch failure")
+                    return False
+
+                print(
+                    f"[SESSION][INBOUND] Launched ingress connector → "
+                    f"{selected_uid}"
+                )
             except Exception as e:
-                emit_gui_exception_log(f"SessionWindow.switch_inbound_connector.launch:{selected_uid}", e)
+                emit_gui_exception_log(
+                    f"SessionWindow.switch_inbound_connector.launch:{selected_uid}",
+                    e,
+                )
+                restore_previous("switch exception")
                 return False
 
-            # 2) Update session preference + dispatcher binding
-            self.preferred_incoming_uid = selected_uid
-            self.inbound_dispatcher.set_inbound_connector(selected_agent)
-
-            # 3) Update UI
-            self.incoming_badge.setText(f"Incoming: {selected_uid}  ⚪")
-            self.status_label.setText(f"Status: Incoming payload.reception set to {selected_uid}")
+            # Commit dispatcher and UI state only after the replacement worker
+            # exists and every other ingress has verifiably stopped.
+            try:
+                commit_route(selected_uid, selected_agent)
+            except Exception as e:
+                emit_gui_exception_log(
+                    "SessionWindow.switch_inbound_connector.commit", e
+                )
+                launcher.update_policy(
+                    selected_uid,
+                    auto_start=False,
+                    monitor=False,
+                    ready=True,
+                    reason="failed ingress commit",
+                )
+                if not launcher.kill_thread(selected_uid):
+                    print(
+                        f"[SESSION][INBOUND][ROLLBACK][FAILED] Selected "
+                        f"ingress {selected_uid} is still alive."
+                    )
+                    return False
+                restore_previous("dispatcher/UI commit failure")
+                return False
 
             return True
 
@@ -1185,17 +1378,12 @@ class SessionWindow(QMainWindow):
         """
 
         try:
-            connector_bus = ConnectorBus.get(self.ctx.id)
 
-            try:
-                for event_name, handler in list(
-                    getattr(self.ctx, "_bus_refs", [])
-                ):
-                    connector_bus.off(event_name, handler)
+            if hasattr(self.ctx, "_bus_refs"):
+                for event_name, handler in self.ctx._bus_refs:
+                    self.bus.off(event_name, handler)
                     print(f"[BUS] 🔌 Unhooked {event_name} from {self.ctx.id}")
-            finally:
-                getattr(self.ctx, "_bus_refs", []).clear()
-                ConnectorBus.release(self.ctx.id)
+                self.ctx._bus_refs.clear()
 
             if hasattr(self.ctx, "bus"):
                 self.ctx.bus.clear()  # Clears SessionBus listeners
@@ -1231,14 +1419,19 @@ class SessionWindow(QMainWindow):
             try:
                 launcher = self.ctx.group.get("connection_launcher", None)
                 if launcher:
-                    launcher.destroy_all()
-                    print("[SESSION_WINDOW] ✅ All connections destroyed.")
+                    destroyed = launcher.destroy_all()
+                    self.unhook_bus_handlers()
+                    if destroyed:
+                        print("[SESSION_WINDOW] ✅ All connections destroyed.")
+                    else:
+                        print(
+                            "[SESSION_WINDOW][WARN] Shutdown incomplete; "
+                            "live launcher ownership was retained."
+                        )
                 else:
                     print("[SESSION_WINDOW] ⚠️ No launcher found in ctx.")
             except Exception as e:
                 print(f"[SESSION_WINDOW][ERROR] during shutdown: {e}")
-            finally:
-                self.unhook_bus_handlers()
 
             self._panel_cache.clear()
 
@@ -1256,4 +1449,3 @@ class SessionWindow(QMainWindow):
                     print("[SESSION][EXIT] Pipe already closed – skipping exit signal.")
 
             event.accept()
-
