@@ -1,0 +1,22 @@
+{
+    "name": "nginx_watchdog",
+    "universal_id": "nginx-sentinel",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83c\udf89"
+            }
+        },
+        "check_interval_sec": 10,
+        "always_alert": 1,
+        "restart_limit": 3,
+        "service_name": "nginx",
+        "ports": [
+            85
+        ],
+        "alert_cooldown": 300,
+        "alert_to_role": "hive.alert",
+        "report_to_role": "hive.forensics.data_feed"
+    }
+}

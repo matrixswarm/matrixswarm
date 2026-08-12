@@ -1,0 +1,10 @@
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#0078d7" stroke-width="2.3" xmlns="http://www.w3.org/2000/svg">
+  <!-- Plug body -->
+  <rect x="14" y="18" width="12" height="10" rx="3.5" fill="#eaf4ff" stroke="#0078d7"></rect>
+  <!-- Left prong -->
+  <rect x="16" y="10" width="2.3" height="9" rx="1.1" fill="#fff" stroke="#0078d7"></rect>
+  <!-- Right prong -->
+  <rect x="22" y="10" width="2.3" height="9" rx="1.1" fill="#fff" stroke="#0078d7"></rect>
+  <!-- Plug base curve -->
+  <ellipse cx="20" cy="28" rx="6" ry="2" fill="#eaf4ff" stroke="#0078d7"></ellipse>
+</svg>

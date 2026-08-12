@@ -1,0 +1,37 @@
+{
+    "name": "email_send",
+    "universal_id": "email-dagger",
+    "constraints": [
+        {
+            "smtp": {}
+        },
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udce7"
+            },
+            "panel": [
+                "email_send.email_send"
+            ]
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.alert@cmd_send_alert_msg",
+                    "send_email.send@cmd_send_email"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ]
+            }
+        ]
+    }
+}

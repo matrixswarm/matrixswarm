@@ -1,0 +1,59 @@
+{
+    "name": "trend_scout",
+    "universal_id": "gamer-in-nova-1",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        },
+        {
+            "symmetric_encryption": {
+                "type": "aes"
+            }
+        },
+        {
+            "mysql": {}
+        }
+    ],
+    "config": {
+
+        "ui": {
+            "agent_tree": {
+                "emoji": "📈"
+            },
+            "panel": [
+                "trend_scout.trend_scout"
+            ]
+        },
+      "oracle_role": "hive.oracle",
+      "gen_embeddings_role": "hive.oracle.gen_embeddings",
+      "cluster_labeler_role": "hive.oracle.cluster_labeler",
+      "sora_role": "hive.sora",
+
+      "video_object_type": 5050,
+
+      "embed_interval_sec": 21600,
+      "cluster_interval_sec": 3600,
+      "metrics_interval_sec": 3600,
+
+      "mode": "manual",
+      "idea_interval_sec": 86400,
+      "auto_idea_count": 10,
+      "idea_timer_enabled": false,
+
+      "enable_title_semantics": true,
+      "enable_tag_semantics": true,
+
+      "service-manager": [
+        {
+              "role": [
+                "trend_scout.topic_forge@cmd_topic_forge"
+              ],
+              "scope": ["parent", "any"]
+            }
+          ]
+
+        }
+}

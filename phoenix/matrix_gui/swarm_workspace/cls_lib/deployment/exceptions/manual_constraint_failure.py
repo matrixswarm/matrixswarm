@@ -1,0 +1,2 @@
+class ManualConstraintFailure(Exception):
+    pass

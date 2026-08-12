@@ -1,0 +1,35 @@
+{
+    "name": "log_streamer",
+    "universal_id": "log-streamer-1",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udc69\ud83c\udffb\u200d\ud83d\udcbb\ufe0f"
+            }
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.log_streamer@cmd_stream_log"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ],
+                "priority": {
+                    "hive.log.delivery": -1,
+                    "hive.proxy.route": 5,
+                    "default": 10
+                }
+            }
+        ]
+    }
+}

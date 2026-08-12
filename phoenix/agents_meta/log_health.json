@@ -1,0 +1,24 @@
+{
+    "name": "log_health",
+    "universal_id": "log-health",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83e\uddfe"
+            }
+        },
+        "log_path": "/var/log/httpd/error_log",
+        "service_name": "apache.error_log",
+        "severity_rules": {
+            "CRITICAL": [
+                "segfault"
+            ],
+            "WARNING": [
+                "error",
+                "client denied"
+            ]
+        },
+        "report_to_role": "hive.forensics.data_feed"
+    }
+}

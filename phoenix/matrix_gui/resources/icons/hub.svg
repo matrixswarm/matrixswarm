@@ -1,0 +1,13 @@
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#0078d7" stroke-width="2.1" xmlns="http://www.w3.org/2000/svg">
+  <!-- Central hub node -->
+  <circle cx="20" cy="20" r="5" fill="#eaf4ff" stroke="#0078d7"></circle>
+  <!-- Four surround nodes -->
+  <circle cx="20" cy="7" r="3" fill="#fff" stroke="#0078d7"></circle>
+  <circle cx="20" cy="33" r="3" fill="#fff" stroke="#0078d7"></circle>
+  <circle cx="7" cy="20" r="3" fill="#fff" stroke="#0078d7"></circle>
+  <circle cx="33" cy="20" r="3" fill="#fff" stroke="#0078d7"></circle>
+  <!-- Connecting lines -->
+  <line x1="20" y1="12" x2="20" y2="16" stroke="#0078d7"></line>
+  <line x1="20" y1="24" x2="20" y2="28" stroke="#0078d7"></line>
+  <line x1="12" y1="20" x2="16" y2="20" stroke="#0078d7"></line>
+  </svg>

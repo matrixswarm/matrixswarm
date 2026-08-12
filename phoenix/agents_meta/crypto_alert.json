@@ -1,0 +1,40 @@
+{
+    "name": "crypto_alert",
+    "universal_id": "crypto_bull",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        },
+        {
+            "symmetric_encryption": {
+                "type": "aes"
+            }
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\u20bf",
+                "icon": ":path_to_icon"
+            },
+            "panel": [
+                "crypto_alert.crypto_alert"
+            ]
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.crypto_alert.get_config@cmd_retrieve_config",
+                    "hive.crypto_alert.update_config@cmd_update_alerts",
+                    "hive.crypto_alert.stream_prices@cmd_stream_prices",
+                    "hive.crypto_alert.stop_stream@cmd_stop_stream_prices"
+                ]
+            }
+        ],
+        "poll_interval": 20,
+        "alert_role": "hive.swarm_feed.alert"
+    }
+}

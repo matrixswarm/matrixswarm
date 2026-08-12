@@ -1,0 +1,34 @@
+{
+    "name": "oracle",
+    "universal_id": "golden-child-4",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        },
+        {
+            "openai": null
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udd2e"
+            },
+            "panel": [
+                "oracle.oracle_config_panel"
+            ]
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.oracle@cmd_msg_prompt",
+                    "hive.oracle.gen_embeddings@cmd_generate_embeddings",
+                    "hive.oracle.cluster_labeler@cmd_label_clusters"
+                ]
+            }
+        ]
+    }
+}

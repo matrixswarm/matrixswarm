@@ -1,0 +1,16 @@
+{
+    "name": "sentinel",
+    "universal_id": "guardian-1",
+    "constraints": [],
+    "config": {
+        "matrix_secure_verified": 1,
+
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udee1\ufe0f"
+            }
+        },
+        "watching": "",
+        "universal_id_under_watch": ""
+    }
+}

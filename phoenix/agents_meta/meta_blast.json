@@ -1,0 +1,25 @@
+{
+  "universal_id": "meta_blast",
+  "name": "meta_blast",
+  "constraints": [
+    {
+      "mysql": {}
+    }
+  ],
+  "config": {
+    "ui": {
+      "agent_tree": {
+        "emoji": "🧠"
+      }
+    },
+    "poll_interval": 20,
+    "batch_limit": 3,
+    "owner_id": 3,
+    "object_type": 33333,
+    "oracle": {
+      "agent_name": "oracle",
+      "method": "metadata",
+      "timeout": 60
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+    "name": "network_health",
+    "universal_id": "network-health-1",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udcf6"
+            }
+        },
+        "check_interval_sec": 30,
+        "exclude_interfaces": [],
+        "tx_threshold_mbps": 100,
+        "rx_threshold_mbps": 100,
+        "conn_threshold": 1000,
+        "top_n_procs": 5,
+        "report_to_role": "hive.forensics.data_feed"
+    }
+}

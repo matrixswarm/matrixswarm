@@ -1,0 +1,49 @@
+{
+    "name": "npc_simulator",
+    "universal_id": "npc-simulator-1",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        }
+    ],
+    "config": {
+        "grid_size": 20,
+        "npc_count": 100,
+        "tick_interval_sec": 1,
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83c\udfae",
+                "icon": ":path_to_icon"
+            },
+            "panel": [
+                "npc_simulator.gameboard",
+                "npc_simulator.config"
+            ]
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "npc.swarm.control@cmd_control_npcs",
+                    "npc.swarm.status@cmd_report_status",
+                    "npc.swarm.stream.start@cmd_start_npc_stream",
+                    "npc.swarm.stream.stop@cmd_stop_npc_stream"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ],
+                "priority": {
+                    "npc.swarm.control": 1,
+                    "npc.swarm.status": 1,
+                    "npc.swarm.stream.start": 1,
+                    "npc.swarm.stream.stop": 1,
+                    "default": 10
+                },
+                "exclusive": false
+            }
+        ]
+    }
+}
