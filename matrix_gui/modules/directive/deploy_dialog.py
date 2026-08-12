@@ -147,7 +147,8 @@ class DeployDialog(QtWidgets.QDialog):
         try:
 
             if directive_name:
-                directive_remote = f"/matrix/boot_directives/{directive_name.split('boot_directives')[-1].replace('\\\\', '/').split('/')[-1]}"
+                directive_leaf = str(directive_name).replace("\\", "/").rsplit("/", 1)[-1]
+                directive_remote = f"/matrix/boot_directives/{directive_leaf}"
             else:
                 directive_remote = f"/matrix/boot_directives/{universe}.enc.json"
 
@@ -183,7 +184,8 @@ class DeployDialog(QtWidgets.QDialog):
                     f"matrixd kill --universe {universe}"
                 )
 
-            self.output.append(f"[CMD] {cmd}\n")
+            display_cmd = cmd.replace(str(swarm_key), "[REDACTED]")
+            self.output.append(f"[CMD] {display_cmd}\n")
 
             try:
                 client = paramiko.SSHClient()
