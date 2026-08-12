@@ -25,8 +25,8 @@ def _coerce_signing_key(signing_key_obj):
 def secure_payload(
     payload: dict,
     peer_pub_key_pem,
-    serial_num,
-    signing_key_obj,
+    serial_num=None,
+    signing_key_obj=None,
     logger=None,
     extra_fields=None,
 ):
@@ -40,22 +40,26 @@ def secure_payload(
         raise TypeError("payload must be a dict")
     if not peer_pub_key_pem:
         raise ValueError("peer_pub_key_pem is required")
-    if not serial_num:
-        raise ValueError("serial_num is required")
 
     signing_key_obj = _coerce_signing_key(signing_key_obj)
     sealed = encrypt_with_ephemeral_aes(payload, peer_pub_key_pem)
 
     packet = {
-        "serial": serial_num,
         "content": sealed,
         "timestamp": int(time.time()),
     }
 
+    # Only dispatcher/bootstrap packets publish a serial.
+    if serial_num is not None:
+        if not isinstance(serial_num, str) or not serial_num.strip():
+            raise ValueError("serial_num must be a non-empty string when supplied")
+        packet["serial"] = serial_num.strip()
+
+
     if extra_fields is not None:
         if not isinstance(extra_fields, dict):
             raise TypeError("extra_fields must be a dict")
-        blocked = {"content", "sig"}
+        blocked = {"content", "sig", "serial"}
         overlap = blocked.intersection(extra_fields)
         if overlap:
             names = ", ".join(sorted(overlap))

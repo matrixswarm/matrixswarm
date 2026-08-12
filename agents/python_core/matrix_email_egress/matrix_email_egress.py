@@ -266,7 +266,6 @@ class Agent(BootAgent):
         signed_block = wrap_packet_securely(
             payload,
             peer_pub_key_pem=self._peer_pub_key_pem,
-            serial_num=self._serial_num,
             signing_key_obj=self._signing_key_obj,
             extra_fields={
                 "timestamp": now,
@@ -1052,7 +1051,7 @@ class Agent(BootAgent):
             msg = self._build_email(payload, session_id)
             self._smtp_send_message(msg)
 
-            self.log(f"[EMAIL][SEND] → {session_id} | {payload.get('handler')}")
+            self.log(f"[EMAIL][SEND] → {session_id}")
             return True
 
         except Exception as e:
@@ -1160,29 +1159,36 @@ class Agent(BootAgent):
         except Exception as e:
             self.log("[EMAIL][RPC][ERROR]", error=e)
 
-    def _secure_payload(self, payload: dict):
+    def _secure_payload(self, payload: dict) -> dict:
         """
-        Encrypt and sign payload dictionary using agent transport cryptographic keys.
+        Create the inner packet consumed by Phoenix inbound_dispatcher.
 
-        Args:
-            payload (dict): Raw dictionary to secure.
-
-        Returns:
-            dict: Secure wrapped packet structure.
+        The serial is required here because inbound_dispatcher uses it to locate
+        the sender's verification/decryption credentials in the vault.
         """
+        if not isinstance(payload, dict):
+            raise TypeError("payload must be a dict")
+
+        serial = self._serial_num
+        if not isinstance(serial, str) or not serial.strip():
+            raise RuntimeError("dispatcher packet serial is not configured")
+
         try:
-            packet = wrap_packet_securely(
+            return wrap_packet_securely(
                 payload,
                 peer_pub_key_pem=self._peer_pub_key_pem,
-                serial_num=self._serial_num,
+                serial_num=serial.strip(),  # Required on INNER packet
                 signing_key_obj=self._signing_key_obj,
                 logger=self.log,
             )
-            self.log('Hive alert packet encrypted. Ready for transport')
-            return packet
 
         except Exception as e:
-            self.log("[WS][SEND][ERROR] Failed to send secure packet", error=e)
+            self.log(
+                "[EMAIL][SECURE_PAYLOAD][ERROR] "
+                "Failed to build dispatcher packet",
+                error=e,
+            )
+            raise
 
     def post_boot(self):
         """
