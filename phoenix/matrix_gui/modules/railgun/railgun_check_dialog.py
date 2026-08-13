@@ -1,13 +1,14 @@
 # Authored by Daniel F MacDonald and ChatGPT-5.1 aka The Generals
 # Commander Edition — Railgun Remote Host Recon
-import io
-import paramiko
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QTextEdit, QMessageBox
 )
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
-from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
+from matrix_gui.modules.railgun.ssh_support import (
+    connect_ssh_profile,
+    load_registry_ssh_profiles,
+)
 
 class RailgunCheckDialog(QDialog):
     """
@@ -38,13 +39,7 @@ class RailgunCheckDialog(QDialog):
         ssh_box.addWidget(QLabel("<b>SSH Target:</b>"))
 
         self.ssh_selector = QComboBox()
-        vault = self._vault()
-
-        ssh_map = vault.get("connection_manager", {}).get("ssh", {})
-
-        for sid, meta in ssh_map.items():
-            label = meta.get("label", sid)
-            self.ssh_selector.addItem(f"{label} ({meta.get('host')})", meta)
+        self.refresh_targets()
 
         ssh_box.addWidget(self.ssh_selector)
         layout.addLayout(ssh_box)
@@ -104,42 +99,66 @@ class RailgunCheckDialog(QDialog):
     # -----------------------------------------------------
     # SSH INIT
     # -----------------------------------------------------
-    def _vault(self):
-        """Always fetch the live vault snapshot."""
-        return VaultCoreSingleton.get().read()
-
     def refresh_targets(self):
+        selected_serial = self.ssh_selector.currentData()
         self.ssh_selector.clear()
-        vault = self._vault()
-        ssh_map = vault.get("connection_manager", {}).get("ssh", {})
 
-        for sid, meta in ssh_map.items():
-            label = meta.get("label", sid)
-            self.ssh_selector.addItem(f"{label} ({meta.get('host')})", meta)
+        try:
+            ssh_map = load_registry_ssh_profiles()
+        except Exception:
+            self.ssh_selector.addItem(
+                "Unable to load SSH Registry",
+                None,
+            )
+            return
+
+        if not ssh_map:
+            self.ssh_selector.addItem(
+                "No SSH profiles in Registry",
+                None,
+            )
+            return
+
+        for serial, meta in ssh_map.items():
+            label = meta.get("label", serial)
+            self.ssh_selector.addItem(
+                f"{label} ({meta.get('host')})",
+                meta,
+            )
+            if serial == selected_serial:
+                self.ssh_selector.setCurrentIndex(
+                    self.ssh_selector.count() - 1
+                )
 
     def _connect(self):
         ssh_cfg = self.ssh_selector.currentData()
         if not ssh_cfg:
-            QMessageBox.critical(self, "No SSH Target", "No SSH target found in vault.")
+            QMessageBox.critical(
+                self,
+                "No SSH Target",
+                "No SSH target found in the SSH Registry.",
+            )
             return None
 
         try:
-            host = ssh_cfg.get("host")
-            user = ssh_cfg.get("username")
-            port = int(ssh_cfg.get("port", 22))
-            privkey_pem = ssh_cfg.get("private_key")
+            if self.client is not None:
+                self.client.close()
+                self.client = None
 
-            key = paramiko.RSAKey.from_private_key(io.StringIO(privkey_pem))
-
-            self.client = paramiko.SSHClient()
-            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            self.client.connect(host, port=port, username=user, pkey=key)
-
+            self.client, actual_fingerprint = connect_ssh_profile(
+                ssh_cfg
+            )
+            self.output_box.append(
+                f"[SSH] Verified host fingerprint: "
+                f"{actual_fingerprint}"
+            )
             return self.client
 
-        except Exception as e:
-            emit_gui_exception_log("RailgunCheck.connect", e)
-            self.output_box.append(f"<span style='color:red'>[SSH ERROR] {e}</span>")
+        except Exception as exc:
+            emit_gui_exception_log("RailgunCheck.connect", exc)
+            self.output_box.append(
+                f"<span style='color:red'>[SSH ERROR] {exc}</span>"
+            )
             return None
 
     def _run(self, cmd):
