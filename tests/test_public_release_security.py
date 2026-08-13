@@ -100,6 +100,42 @@ class PublicReleaseSecurityTests(unittest.TestCase):
             launcher_source,
         )
 
+    def test_phoenix_tls_temp_private_keys_are_contained(self):
+        loader_source = source(
+            "phoenix/matrix_gui/core/utils/cert_loader.py"
+        )
+        self.assertIn("tempfile.NamedTemporaryFile(", loader_source)
+        self.assertGreaterEqual(loader_source.count("0o600"), 2)
+        self.assertIn("os.unlink(path)", loader_source)
+        self.assertIn(
+            "Failed to remove temporary TLS credential material",
+            loader_source,
+        )
+        self.assertNotIn("tempfile.gettempdir()", loader_source)
+        self.assertNotIn("Temp files retained", loader_source)
+
+    def test_smtp_credentials_require_encrypted_transport(self):
+        smtp_paths = (
+            "matrixos/agents/python_core/email_send/factory/email_sender_thread.py",
+            "matrixos/agents/python_core/matrix_email_egress/matrix_email_egress.py",
+            "phoenix/matrix_gui/modules/net/connector/ingress/imap/imap.py",
+        )
+        for path in smtp_paths:
+            with self.subTest(path=path):
+                text = source(path)
+                self.assertIn(
+                    'mode not in ("SSL", "TLS", "STARTTLS")',
+                    text,
+                )
+                self.assertIn(
+                    "SMTP encryption must be SSL, TLS, or STARTTLS",
+                    text,
+                )
+                self.assertNotIn(
+                    'if mode in ("TLS", "STARTTLS")',
+                    text,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

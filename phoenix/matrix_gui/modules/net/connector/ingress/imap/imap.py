@@ -250,15 +250,19 @@ class IMAPIngressConnector(BaseConnector):
             msg.set_content(payload_b64)
 
             context = ssl.create_default_context()
+            mode = self._smtp_encryption
+            if mode not in ("SSL", "TLS", "STARTTLS"):
+                raise ValueError(
+                    "SMTP encryption must be SSL, TLS, or STARTTLS"
+                )
 
-            if self._smtp_encryption == "SSL":
+            if mode == "SSL":
                 with smtplib.SMTP_SSL(self._smtp_server, self._smtp_port, timeout=15, context=context) as smtp:
                     self._smtp_login_if_needed(smtp)
                     smtp.send_message(msg)
             else:
                 with smtplib.SMTP(self._smtp_server, self._smtp_port, timeout=15) as smtp:
-                    if self._smtp_encryption in ("TLS", "STARTTLS"):
-                        smtp.starttls(context=context)
+                    smtp.starttls(context=context)
                     self._smtp_login_if_needed(smtp)
                     smtp.send_message(msg)
 

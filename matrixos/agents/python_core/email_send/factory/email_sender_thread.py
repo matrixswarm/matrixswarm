@@ -491,14 +491,18 @@ class Agent(BootAgent):
         context = ssl.create_default_context()
 
         mode = self.encryption.upper().strip()
+        if mode not in ("SSL", "TLS", "STARTTLS"):
+            raise ValueError(
+                "SMTP encryption must be SSL, TLS, or STARTTLS"
+            )
+
         if mode == "SSL":
             with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, timeout=timeout, context=context) as server:
                 server.login(self.from_address, self.password)
                 server.send_message(msg)
         else:
             with smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=timeout) as server:
-                if mode in ("TLS", "STARTTLS"):
-                    server.starttls(context=context)
+                server.starttls(context=context)
                 if self.from_address and self.password:
                     server.login(self.from_address, self.password)
                 server.send_message(msg)
