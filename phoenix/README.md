@@ -70,11 +70,32 @@ note: this is the old cockpit design
 ---
 ## ⚡ Quick Start
 
-### Install
+### Install and launch from source
+
+From the monorepo root:
+
+#### Windows — Git Bash
 
 ```bash
-  pip install -e .
+cd phoenix
+py -3.10 -m venv .venv
+source .venv/Scripts/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python phoenix.py
 ```
+
+#### Linux/macOS
+
+```bash
+cd phoenix
+python3.10 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python phoenix.py
+```
+
 ### Unlock Vault
 
 When Phoenix starts, you’ll see only the 🔐 UNLOCK button.
@@ -500,11 +521,12 @@ Once this is in place, your cockpit, logs, and panels will reflect the active sw
 
   * Broadcasts responses to Phoenix
 
-### Install Phoenix as a Desktop App
+### Launch Phoenix Cockpit
+
+From the `phoenix/` directory with its virtual environment activated:
 
 ```bash
-  pip install -e .
-  phoenix
+python phoenix.py
 ```
 
 ### License

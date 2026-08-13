@@ -122,10 +122,13 @@ If you want to operate MatrixSwarm securely over the Internet, you **must** use 
 - No agent is exposed via open HTTP/S, and no API is available without a signed packet, trusted client certificate, and the Queen's signature.
 - **Without Phoenix, the Matrix Queen does not listen!**
 
-To connect and control a MatrixSwarm universe from anywhere, always run the cockpit:
+To connect and control a MatrixSwarm universe from anywhere, launch Phoenix Cockpit from the monorepo source:
 
-pip install -e . # in your Phoenix repo
-phoenix # launches the secure GUI
+```bash
+cd phoenix
+python -m pip install -r requirements.txt
+python phoenix.py
+```
 
 Get Phoenix Cockpit here:
 👉 See: [Phoenix Cockpit](../phoenix)

@@ -15,3 +15,8 @@ matrixos/LICENSE text eol=lf
 matrixos/AUTHORS.md text eol=lf
 matrixos/LICENSING.md text eol=lf
 matrixos/OPERATIONAL-SAFETY.md text eol=lf
+
+.gitattributes text eol=lf
+.gitignore text eol=lf
+phoenix/requirements.txt text eol=lf
+matrixos/requirements.txt text eol=lf
