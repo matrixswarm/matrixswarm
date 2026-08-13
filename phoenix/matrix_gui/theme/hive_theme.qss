@@ -1,0 +1,351 @@
+/*  ===  PHOENIX : KICKASS CONTROL THEME  ===  */
+/* Reset inherited widget styling */
+* {
+    background: none;
+    border: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+}
+/* === Global === */
+QWidget {
+    background-color: #0d0d0f;
+    color: #d0d0d0;
+    font-family: "Consolas", "Roboto Mono", monospace;
+    font-size: 11pt;
+}
+
+/* subtle 1-px chrome for panels */
+QFrame, QGroupBox {
+    border: 1px solid #1e1e20;
+    border-radius: 6px;
+    background-color: #111113;
+    margin-top: 4px;
+    padding: 6px;
+}
+
+/* === Buttons === */
+QPushButton {
+    background-color: #1b1b1d;
+    border: 1px solid #2d2d30;
+    border-radius: 6px;
+    padding: 6px 14px;
+    color: #e0e0e0;
+    font-weight: 500;
+}
+QPushButton:hover {
+    background-color: #232327;
+    border-color: #0ae8b5;        /* teal accent */
+}
+QPushButton:pressed {
+    background-color: #0e0e10;
+    border-color: #08856c;
+    color: #b0b0b0;
+}
+QPushButton:disabled {
+    background-color: #161616;
+    color: #555;
+    border-color: #222;
+}
+
+/* Unlock button hero style */
+#UnlockButton {
+    background-color: #0ae8b5;
+    color: #0b0b0b;
+    font-size: 18px;
+    font-weight: 700;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 24px;
+}
+#UnlockButton:hover {
+    background-color: #13f2bf;
+}
+#UnlockButton:pressed {
+    background-color: #09b48c;
+    color: #fff;
+}
+
+/* === ComboBoxes === */
+QComboBox {
+    background-color: #151517;
+    border: 1px solid #2d2d30;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+QComboBox:hover {
+    border-color: #0ae8b5;
+}
+
+/* === Tabs === */
+QTabWidget::pane {
+    border: none;
+    background: #0f0f11;
+}
+QTabBar::tab {
+    background-color: #1e1e1e;
+    color: #f0f0f0;
+    padding: 4px 12px;
+    border: 1px solid #333;
+    border-radius: 6px;  /* ← tighter, like your dashboard button */
+    margin: 2px;
+    font-weight: bold;
+    min-height: 24px;
+}
+
+QTabBar::tab:selected {
+    background-color: #00d4aa;
+    color: black;
+    border-radius: 8px;
+    padding: 5px 14px;
+}
+
+QTabBar::tab:hover {
+    background-color: #2c2c2c;
+    color: #fff;
+    border: 1px solid #555;
+}
+
+/* === Scrollbars === */
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: #141414;
+    border: none;
+    border-radius: 4px;
+    width: 12px;
+}
+QScrollBar::handle {
+    background: #2a2a2a;
+    border-radius: 4px;
+}
+QScrollBar::handle:hover {
+    background: #0ae8b5;
+}
+
+/* === Status Bar === */
+QStatusBar {
+    background-color: #0b0b0c;
+    color: #0ae8b5;
+    font-family: "Consolas";
+    border-top: 1px solid #1e1e1e;
+}
+
+/* === Tree / List === */
+QTreeWidget, QListWidget {
+    background-color: #111113;
+    alternate-background-color: #101012;
+    border: 1px solid #1e1e20;
+}
+QTreeView::item:selected, QListView::item:selected {
+    background: #0ae8b5;
+    color: #0b0b0b;
+}
+/* Top control bar accent line */
+#PhoenixControlPanel {
+    border-bottom: 1px solid #0ae8b5;
+}
+
+/* Swarm feed header text */
+QGroupBox::title {
+    color: #0ae8b5;
+    font-weight: bold;
+}
+
+.Alert {
+    background-color: #330000;
+    border: 1px solid #ff4444;
+    color: #ff8888;
+}
+/* === Line Edits / Password fields === */
+QLineEdit {
+    background-color: #0f0f10;
+    border: 1px solid #2a2a2d;
+    border-radius: 4px;
+    padding: 6px 8px;
+    color: #e0e0e0;
+    font-family: "Consolas", "Roboto Mono", monospace;
+    font-size: 11pt;
+    selection-background-color: #0ae8b5;
+    selection-color: #0b0b0b;
+}
+
+QLineEdit:hover {
+    border-color: #3a3a3d;
+}
+
+QLineEdit:focus {
+    border: 1px solid #0ae8b5;
+    background-color: #131314;
+    color: #ffffff;
+}
+#HomeTab {
+    background-color: #0d0d0f;
+    border: none;
+    padding: 6px;
+}
+#HomeTab QGroupBox::title {
+    color: #0ae8b5;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+QTabBar::tab:selected {
+    background-color: #0ae8b5;
+    color: #0b0b0b;
+    font-weight: 600;
+    border-bottom: 2px solid #0ae8b5;
+}
+QTabBar::tab:first {
+    background-color: #101012;
+    border: 1px solid #1a1a1d;
+    color: #0ae8b5;
+    font-weight: bold;
+}
+#PhoenixControlPanel {
+    border-bottom: 1px solid #0ae8b5;
+    box-shadow: 0 2px 4px #00000040;
+}
+
+QTextEdit, QPlainTextEdit {
+    background-color: #0b0b0c;
+    border: 1px solid #1a1a1d;
+    border-radius: 6px;
+    padding: 8px;
+    color: #d0d0d0;
+    font-family: "Consolas", monospace;
+}
+QTextEdit:focus, QPlainTextEdit:focus {
+    border-color: #0ae8b5;
+    background-color: #111113;
+}
+/* === Core panels (Agent Tree, Logs, etc.) === */
+QGroupBox {
+    background-color: #0d0d0f;
+    border: 1px solid #1a1a1d;
+    border-radius: 6px;
+    margin-top: 4px;
+    padding-top: 10px;
+    font-weight: bold;
+    color: #0ae8b5;    /* titles in teal */
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+    color: #0ae8b5;
+}
+
+/* === STATUS BAR CLEANUP === */
+QStatusBar {
+    background-color: #0d0d0d;
+    color: #d0d0d0;
+    border: none;
+}
+
+QStatusBar::item {
+    border: none;          /* removes the white divider */
+    background: transparent;
+    padding: 2px 8px;      /* optional – makes labels breathe */
+}
+
+/* The inner text/log areas */
+QTextEdit, QPlainTextEdit, QListView, QTreeView {
+    background-color: #0b0b0c;
+    border: 1px solid #1a1a1d;
+    border-radius: 4px;
+    color: #d0d0d0;
+    font-family: "Consolas", monospace;
+    font-size: 10pt;
+    selection-background-color: #0ae8b5;
+    selection-color: #0b0b0b;
+}
+QScrollArea {
+    background-color: #0d0d0f;
+    border: none;
+}
+QSplitter::handle {
+    background-color: #1a1a1d;
+}
+QSplitter::handle:hover {
+    background-color: #0ae8b5;
+}
+QTextEdit, QPlainTextEdit {
+    background-color: #101012;
+}
+QGroupBox {
+    box-shadow: inset 0 0 8px #0ae8b510;
+}
+#OutputBox {
+    font-family: "Consolas", monospace;
+    background-color: #0b0b0c;
+}
+/* === Control bar combo === */
+QComboBox {
+    background-color: #1b1b1d;
+    border: 1px solid #2d2d30;
+    border-radius: 6px;
+    color: #eee;
+    padding: 6px 12px;
+    min-width: 110px;
+    font-weight: 500;
+}
+
+QComboBox:hover {
+    border-color: #0ae8b5;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+QComboBox::down-arrow {
+    image: url(matrix_gui/resources/icons/drop_down.svg);
+    width: 12px;
+    height: 12px;
+}
+QStatusBar QFrame, QStatusBar QGroupBox {
+    border: none;
+
+}
+/* === EmailSend === */
+QGroupBox {
+    border: 1px solid #333;
+    border-radius: 6px;
+    margin-top: 12px;
+    padding: 8px;
+    background-color: #141414;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    color: #bbb;
+    font-weight: bold;
+}
+
+QLabel {
+    color: #ccc;
+}
+QPushButton {
+    border: 1px solid #333;
+    border-radius: 4px;
+    background-color: #1a1a1a;
+}
+QPushButton:hover {
+    background-color: #242424;
+    border: 1px solid #555;
+}
+/* Commander fix: remove outer container borders */
+#CockpitWrapper QFrame,
+#CockpitWrapper QGroupBox {
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+}
+/* cockpit spacing */
+QGroupBox {
+    margin: 8px 8px 12px 8px;   /* L, T, R, B */
+    padding: 8px;
+}

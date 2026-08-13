@@ -1,0 +1,48 @@
+{
+    "name": "terminal_streamer",
+    "universal_id": "terminal-1",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udda5\ufe0f"
+            },
+            "panel": [
+                "terminal_streamer.stream_viewer"
+            ]
+        },
+        "safe_shell_mode": true,
+        "whitelist": [
+            "uptime",
+            "df -h",
+            "free -m",
+            "whoami",
+            "top -b -n 1 -c",
+            "ps -eo pid,user,%cpu,%mem,etime,cmd --sort=-%cpu"
+        ],
+        "service-manager": [
+            {
+                "role": [
+                    "terminal.stream.start@cmd_start_stream_terminal",
+                    "terminal.stream.stop@cmd_stop_stream_terminal",
+                    "terminal.allowed.list@cmd_get_allowed_commands"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ],
+                "priority": {
+                    "hive.proxy.route": 5,
+                    "default": 10
+                }
+            }
+        ]
+    }
+}

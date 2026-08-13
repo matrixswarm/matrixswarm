@@ -1,0 +1,27 @@
+{
+    "name": "slack_relay",
+    "universal_id": "slack-it-out-1",
+    "constraints": [
+        {
+            "slack": null
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udcac"
+            }
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.alert@cmd_send_alert_msg"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ]
+            }
+        ]
+    }
+}

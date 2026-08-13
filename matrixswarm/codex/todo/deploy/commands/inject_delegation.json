@@ -1,4 +1,0 @@
-{
-  "universal_id": "worker-alpha",
-  "delegated": ["logger-beta", "mailman-scout"]
-}

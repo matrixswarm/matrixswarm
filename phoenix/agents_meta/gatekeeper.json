@@ -1,0 +1,18 @@
+{
+    "name": "gatekeeper",
+    "universal_id": "gatekeeper",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udeaa"
+            }
+        },
+        "ignore_ips": [],
+        "log_path": "/var/log/auth.log",
+        "maxmind_db": "GeoLite2-City.mmdb",
+        "geoip_enabled": 1,
+        "always_alert": 1,
+        "alert_to_role": "hive.alert"
+    }
+}

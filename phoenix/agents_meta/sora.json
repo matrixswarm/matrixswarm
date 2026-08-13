@@ -1,0 +1,40 @@
+{
+    "name": "sora",
+    "universal_id": "sora-agent-1",
+    "constraints": [
+        {
+            "openai": null
+        },
+        {
+            "mysql": {}
+        },
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83c\udf9e\ufe0f"
+            },
+            "panel": [
+                "sora.sora_config_panel"
+            ]
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.sora@cmd_sora_prompt",
+                    "external.gateway.config@cmd_external_gateway_config"
+                ]
+            }
+        ],
+        "model": "gpt-sora-1",
+        "resolution": "1920x1080",
+        "poll_interval": 60,
+        "water_mark_text": ""
+    }
+}

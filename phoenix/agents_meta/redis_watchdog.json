@@ -1,0 +1,20 @@
+{
+    "name": "redis_watchdog",
+    "universal_id": "redis-hammer",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83c\udfad"
+            }
+        },
+        "check_interval_sec": 10,
+        "restart_limit": 3,
+        "redis_port": 6379,
+        "always_alert": 1,
+        "socket_path": "/var/run/redis/redis-server.sock",
+        "alert_to_role": "hive.alert",
+        "report_to_role": "hive.forensics.data_feed",
+        "service_name": "redis"
+    }
+}

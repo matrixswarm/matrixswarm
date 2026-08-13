@@ -1,0 +1,19 @@
+{
+    "name": "matrix",
+    "universal_id": "matrix",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "👑"
+            }
+        },
+    }
+}

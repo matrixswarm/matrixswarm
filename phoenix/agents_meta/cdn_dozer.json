@@ -1,0 +1,32 @@
+{
+    "universal_id": "cdn_dozer",
+    "name": "cdn_dozer",
+    "constraints": [
+        {
+            "cdn": {}
+        },
+        {
+            "mysql": {}
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {"emoji": "🚀"},
+            "panel": [
+                "cdn_dozer.cdn_dozer"
+            ]
+        },
+        "cdn": {
+            "poll_interval": 60
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.cdn_dozer.push_file@cmd_push_file",
+                    "hive.cdn_dozer.verify_upload@cmd_verify_upload"
+                ],
+                "scope": ["parent", "any"]
+            }
+        ]
+    }
+}

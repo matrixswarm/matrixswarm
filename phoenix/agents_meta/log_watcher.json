@@ -1,0 +1,87 @@
+{
+    "name": "log_watcher",
+    "universal_id": "triclops-1",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udc41\ufe0f\ud83d\udc41\ufe0f\ud83d\udc41\ufe0f"
+            },
+            "panel": [
+                "log_watcher.log_watcher"
+            ]
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "logwatch.generate.digest@cmd_generate_system_log_digest"
+                ]
+            }
+        ],
+        "collectors": {
+            "httpd": {
+                "paths": [
+                    "/var/log/httpd/error_log",
+                    "/var/log/httpd/dragoart_error.log",
+                    "/var/log/httpd/matrixswarm_error.log"
+                ],
+                "rotate_depth": 1,
+                "max_lines": 50
+            },
+            "mod_secure": {
+                "paths": [
+                    "/var/log/httpd"
+                ],
+                "rotate_depth": 1,
+                "max_lines": 50
+            },
+            "sshd": {
+                "paths": [
+                    "/var/log/secure"
+                ],
+                "rotate_depth": 1,
+                "max_lines": 50
+            },
+            "fail2ban": {
+                "paths": [
+                    "/var/log/fail2ban.log"
+                ],
+                "rotate_depth": 1,
+                "max_lines": 50
+            },
+            "systemd": {
+                "paths": [
+                    "/var/log/messages"
+                ],
+                "rotate_depth": 1,
+                "max_lines": 50
+            },
+            "postfix": {
+                "paths": [
+                    "/var/log/maillog"
+                ],
+                "rotate_depth": 1,
+                "max_lines": 50
+            },
+            "dovecot": {
+                "paths": [
+                    "/var/log/dovecot.log"
+                ],
+                "rotate_depth": 1,
+                "max_lines": 50
+            }
+        },
+        "enable_oracle": 0,
+        "oracle_role": "hive.oracle",
+        "oracle_timeout": 600,
+        "patrol_interval_hours": 6,
+        "alert_role": "hive.alert"
+    }
+}

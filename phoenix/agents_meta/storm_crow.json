@@ -1,0 +1,21 @@
+{
+    "name": "storm_crow",
+    "universal_id": "storm-crow-1",
+    "description": "Watches for server weather alerts for your area.",
+    "constraints": [
+
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\uD83E\uDD21"
+            }
+        },
+        "alert_to_role": "hive.alert",
+        "zip_code": "20007",
+        "weather_latitude": "38.9152945",
+        "weather_longitude": "-77.0827632",
+        "alert_endpoint": "https://api.weather.gov/alerts/active?point"
+
+    }
+}

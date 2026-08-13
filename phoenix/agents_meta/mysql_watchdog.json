@@ -1,0 +1,23 @@
+{
+    "name": "mysql_watchdog",
+    "universal_id": "mysql-red-phone",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udee2\ufe0f"
+            }
+        },
+        "mysql_port": 3306,
+        "socket_path": "/var/run/mysqld/mysqld.sock",
+        "service_name": "mariadb",
+        "check_interval_sec": 20,
+        "restart_limit": 3,
+        "alert_thresholds": {
+            "uptime_pct_min": 90,
+            "slow_restart_sec": 10
+        },
+        "alert_to_role": "hive.alert",
+        "report_to_role": "hive.forensics.data_feed"
+    }
+}

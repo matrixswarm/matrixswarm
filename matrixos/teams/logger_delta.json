@@ -1,0 +1,35 @@
+{
+  "name": "sentinel",
+  "universal_id": "support_team_001",
+  "filesystem": {},
+  "config": {
+          "ui": {
+              "agent_tree": {"emoji": "\uD83E\uDDD1\u200D\uD83E\uDD1D\u200D\uD83E\uDDD1"}
+          }
+  },
+  "children": [
+
+    {
+      "name": "filewatch",
+      "universal_id": "filewatch_001",
+      "filesystem": {},
+      "config": {
+          "ui": {
+              "agent_tree": {"emoji": "\uD83D\uDCC2"}
+          }
+  },
+      "children": [
+    {
+      "name": "uptime_pinger",
+      "universal_id": "uptime_pinger_001",
+      "filesystem": {},
+      "config": {
+          "ui": {
+              "agent_tree": {"emoji": "\uD83D\uDCF6"}
+          }
+      },
+      "children": []
+    }]
+    }
+  ]
+}

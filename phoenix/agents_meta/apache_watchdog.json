@@ -1,0 +1,23 @@
+{
+    "name": "apache_watchdog",
+    "universal_id": "apache_watchdog-1",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83e\udded\ufe0f"
+            }
+        },
+        "check_interval_sec": 10,
+        "service_name": "httpd",
+        "ports": [
+            80,
+            443
+        ],
+        "restart_limit": 3,
+        "always_alert": 1,
+        "alert_cooldown": 300,
+        "alert_to_role": "hive.alert",
+        "report_to_role": "hive.forensics.data_feed"
+    }
+}

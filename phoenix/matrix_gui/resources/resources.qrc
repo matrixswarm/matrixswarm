@@ -1,0 +1,14 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file>icons/connect.svg</file>
+    <file>icons/network.svg</file>
+    <file>icons/document.svg</file>
+    <file>icons/key.svg</file>
+    <file>icons/plug.svg</file>
+    <file>icons/hub.svg</file>
+    <file>icons/deployment.svg</file>
+    <file>icons/unlock.svg</file>
+    <file>icons/lock.svg</file>
+    <file>icons/cowbell.svg</file>
+  </qresource>
+</RCC>

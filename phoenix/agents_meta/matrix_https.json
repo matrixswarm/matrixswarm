@@ -1,0 +1,41 @@
+{
+    "name": "matrix_https",
+    "universal_id": "matrix-https",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        },
+        {
+            "connection_cert": {}
+        },
+        {
+            "https": {}
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83c\udf10"
+            },
+            "panel": [
+                "matrix_https.matrix_https"
+            ]
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "matrix_https.toggle_perimeter@cmd_toggle_perimeter",
+                    "hive.toggle_perimeter@cmd_toggle_perimeter",
+                    "matrix_https.status@cmd_status"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ]
+            }
+        ]
+    }
+}

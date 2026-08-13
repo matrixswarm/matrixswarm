@@ -1,0 +1,35 @@
+{
+    "name": "telegram_relay",
+    "universal_id": "telegram-bot-father-2",
+    "constraints": [
+        {
+            "telegram": null
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udce1"
+            }
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "comm",
+                    "comm.security",
+                    "comm.*",
+                    "hive.alert@cmd_send_alert_msg"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ],
+                "auth": {
+                    "sig": true
+                },
+                "priority": 10,
+                "exclusive": false
+            }
+        ]
+    }
+}

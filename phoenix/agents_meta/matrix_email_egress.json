@@ -1,0 +1,47 @@
+{
+    "name": "matrix_email_egress",
+    "universal_id": "matrix-email-egress",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        },
+        {
+            "email_egress": {"inject_in_connection": 1}
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udef0\ufe0f"
+            },
+            "panel": [
+                "matrix_email_egress.matrix_email_egress"
+            ]
+
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.alert@cmd_send_alert_msg",
+                    "hive.swarm_feed.alert@cmd_send_alert_msg",
+                    "hive.rpc@cmd_rpc_route",
+                    "matrix_email_egress.toggle_perimeter@cmd_toggle_perimeter",
+                    "hive.toggle_perimeter@cmd_toggle_perimeter",
+                    "matrix_email_egress.status@cmd_status"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ],
+                "priority": {
+                    "hive.log.delivery": -1,
+                    "hive.proxy.route": 5,
+                    "default": 10
+                }
+            }
+        ]
+    }
+}

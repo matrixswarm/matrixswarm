@@ -1,0 +1,117 @@
+{
+    "name": "tripwire_lite",
+    "universal_id": "tripwire-guard-1",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        },
+        {
+            "symmetric_encryption": {
+                "type": "aes"
+            }
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udee1\ufe0f"
+            },
+            "panel": [
+                "tripwire_lite.tripwire_lite"
+            ]
+        },
+        "watch_paths": [
+            {
+                "path": "/var/www",
+                "recursive": true,
+                "watch_dirs": true,
+                "watch_files": true
+            },
+            {
+                "path": "/matrix/agents",
+                "recursive": true,
+                "watch_dirs": true,
+                "watch_files": true
+            },
+            {
+                "path": "/matrix/core",
+                "recursive": true,
+                "watch_dirs": true,
+                "watch_files": true
+            },
+            {
+                "path": "/matrix/boot_directives",
+                "recursive": true,
+                "watch_dirs": true,
+                "watch_files": true
+            },
+            {
+                "path": "/your/webserver/or/whatever/youwant",
+                "recursive": false,
+                "watch_dirs": true,
+                "watch_files": true
+            }
+        ],
+        "ignore_paths": [
+            "/matrix/universes"
+        ],
+        "quarantine_root": "/matrix/quarantine",
+        "dry_run": true,
+        "enforce": false,
+        "interval": 5,
+        "allowed_extensions": [
+            ".html",
+            ".htm",
+            ".css",
+            ".js",
+            ".json",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".svg",
+            ".webp",
+            ".woff",
+            ".woff2"
+        ],
+        "suspicious_extensions": [
+            ".php",
+            ".phtml",
+            ".phps",
+            ".sh",
+            ".py",
+            ".pl",
+            ".cgi",
+            ".exe",
+            ".bin",
+            ".so"
+        ],
+        "alert_to_role": "hive.alert",
+        "rpc_router_role": "hive.rpc",
+        "cooldown": 900,
+        "service-manager": [
+            {
+                "role": [
+                    "tripwire.guard.status@cmd_list_status",
+                    "tripwire.guard.toggle_enforce@cmd_toggle_enforce",
+                    "tripwire.guard.toggle_dry_run@cmd_toggle_dry_run",
+                    "tripwire.guard.list_alerts@cmd_list_alerts",
+                    "tripwire.guard.restore_item@cmd_restore_item",
+                    "tripwire.guard.restore_all@cmd_restore_all",
+                    "tripwire.guard.delete_alert@cmd_delete_alert",
+                    "tripwire.guard.reset@cmd_tripwire_reset"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ],
+                "priority": {
+                    "default": 10
+                }
+            }
+        ]
+    }
+}

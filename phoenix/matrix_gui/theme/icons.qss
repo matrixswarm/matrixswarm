@@ -1,0 +1,34 @@
+/* Phoenix Control Panel Icon Map */
+
+QPushButton#connect {
+    qproperty-icon: url(":/icons/connect.svg");
+    qproperty-iconSize: 20px 20px;
+}
+QPushButton#connMgr {
+    qproperty-icon: url(":/icons/connections.svg");
+    qproperty-iconSize: 20px 20px;
+}
+QPushButton#directives {
+    qproperty-icon: url(":/icons/document.svg");
+    qproperty-iconSize: 20px 20px;
+}
+QPushButton#changeVault {
+    qproperty-icon: url(":/icons/key.svg");
+    qproperty-iconSize: 20px 20px;
+}
+
+/* Optional Vault lock/unlock toggle */
+QLabel[vault_status="unlocked"] {
+    qproperty-pixmap: url(":/icons/unlock.svg");
+}
+
+QLabel[vault_status="locked"] {
+    qproperty-pixmap: url(":/icons/lock.svg");
+}
+QLabel#vaultStatus[vault_status="locked"] {
+    qproperty-pixmap: url(":/icons/lock.svg");
+}
+
+QLabel#vaultStatus[vault_status="unlocked"] {
+    qproperty-pixmap: url(":/icons/unlock.svg");
+}

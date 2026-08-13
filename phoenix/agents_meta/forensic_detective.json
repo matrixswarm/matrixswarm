@@ -1,0 +1,23 @@
+{
+    "name": "forensic_detective",
+    "universal_id": "forensic-detective-1",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udd75\ufe0f"
+            }
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.forensics.data_feed@cmd_ingest_status_report"
+                ]
+            }
+        ],
+        "oracle_analysis": {
+            "enable_oracle": 1,
+            "role": "hive.oracle"
+        }
+    }
+}

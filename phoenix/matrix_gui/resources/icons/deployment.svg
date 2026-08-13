@@ -1,0 +1,9 @@
+<svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke-width="2" stroke="#0078d7" xmlns="http://www.w3.org/2000/svg">
+  <!-- Tray/platform -->
+  <rect x="8" y="28" width="24" height="6" rx="2.5" fill="#eaf4ff" stroke="#0078d7"></rect>
+  <!-- Upward arrow (deploy action) -->
+  <line x1="20" y1="26" x2="20" y2="12" stroke="#0078d7" stroke-width="2.7" stroke-linecap="round"></line>
+  <polygon points="16,16 20,8 24,16" fill="#0078d7"></polygon>
+  <!-- Server box (deployment target) -->
+  <rect x="14" y="16" width="12" height="8" rx="2.5" fill="#fff" stroke="#0078d7"></rect>
+</svg>

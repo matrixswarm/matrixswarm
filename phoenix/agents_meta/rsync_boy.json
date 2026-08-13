@@ -1,0 +1,40 @@
+{
+    "name": "rsync_boy",
+    "universal_id": "rsync-boy-1",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        },
+        {
+            "ssh": null
+        },
+        {
+            "mysql": null
+        }
+    ],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\ud83d\udcbe"
+            },
+            "panel": [
+                "rsync_boy.rsync_boy"
+            ]
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "hive.rsync_boy.push_local@cmd_push_local",
+                    "hive.rsync_boy.push_remote@cmd_push_remote"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ]
+            }
+        ]
+    }
+}

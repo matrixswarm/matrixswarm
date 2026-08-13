@@ -1,0 +1,17 @@
+{
+    "name": "system_health",
+    "universal_id": "system-health-1",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "\u2695\ufe0f"
+            }
+        },
+        "check_interval_sec": 60,
+        "mem_threshold_percent": 90.0,
+        "cpu_threshold_percent": 85.0,
+        "disk_threshold_percent": 95.0,
+        "report_to_role": "hive.forensics.data_feed"
+    }
+}

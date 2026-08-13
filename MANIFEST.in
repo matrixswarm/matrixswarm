@@ -1,4 +1,0 @@
-recursive-include matrixswarm/agent *
-recursive-include matrixswarm/boot_directives *
-recursive-include matrixswarm/tools *.sh
-include matrixswarm/SAMPLE.env

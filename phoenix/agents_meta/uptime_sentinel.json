@@ -1,0 +1,31 @@
+{
+    "name": "uptime_sentinel",
+    "universal_id": "uptime-pinger-1",
+
+    "constraints": [
+        {
+            "packet_signing": { "in": true, "out": true }
+        },
+        {
+            "symmetric_encryption": { "type": "aes" }
+        }
+    ],
+
+    "config": {
+        "ui": {
+            "agent_tree": { "emoji": "🛡️" },
+            "panel": [
+                "uptime_sentinel.uptime_sentinel"
+            ]
+        },
+
+        "interval_sec": 30,
+        "cooldown": 120,
+        "alert_enabled": true,
+        "alert_to_role": "hive.alert",
+
+        "_comment_targets_example": "{ 'url': 'https://example.com', 'note': 'Main Site', 'expect': 'some random text expected to be on the page' }",
+
+        "targets": []
+    }
+}
