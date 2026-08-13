@@ -489,8 +489,6 @@ class Agent(BootAgent):
 
     def _smtp_send_message(self, msg: EmailMessage, timeout=20):
         context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
 
         mode = self.encryption.upper().strip()
         if mode == "SSL":

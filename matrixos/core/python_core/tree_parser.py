@@ -210,6 +210,11 @@ class TreeParser(LogMixin):
             self._rejected_nodes.append(new_universal_id)
             return []
 
+        if matrix_priv_obj is None:
+            raise PermissionError(
+                "Matrix signing capability is required to insert a live node."
+            )
+
         self._validate_and_store_node(new_node)
 
         # Find the parent and append the new node to its children list.
@@ -219,11 +224,15 @@ class TreeParser(LogMixin):
 
         parent_node.setdefault(self.CHILDREN_KEY, []).append(new_node)
 
-        if matrix_priv_obj:
-            for node in self.walk_tree(new_node):
-                uid = node.get(self.UNIVERSAL_ID_KEY)
-                if uid:
-                    self.assign_identity_token_to_node(uid, matrix_priv_obj, encryption_enabled=True, force=True)
+        for node in self.walk_tree(new_node):
+            uid = node.get(self.UNIVERSAL_ID_KEY)
+            if uid:
+                self.assign_identity_token_to_node(
+                    uid,
+                    matrix_priv_obj,
+                    encryption_enabled=True,
+                    force=True,
+                )
 
         return list(self._added_nodes)
 
@@ -714,6 +723,11 @@ class TreeParser(LogMixin):
             matrix_priv: PEM-encoded Matrix private key string.
             matrix_key_b64: Base64-encoded AES key string.
         """
+        if matrix_priv_obj is None:
+            raise PermissionError(
+                "Matrix signing capability is required for identity assignment."
+            )
+
         for node in self.walk_tree(self.root):
             uid = node.get("universal_id")
             if not uid:

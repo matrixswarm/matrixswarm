@@ -154,11 +154,16 @@ def decrypt_vault(log=None):
 
         matrix_priv = payload_dict.get("matrix_priv")
 
-        payload_dict["matrix_priv"]=matrix_priv
+        payload_dict["matrix_priv"] = matrix_priv
 
         payload_dict["matrix_pub_obj"] = serialization.load_pem_public_key(matrix_pub.encode())
 
-        payload_dict["matrix_priv_obj"] = serialization.load_pem_private_key(matrix_priv.encode(), password=None)
+        payload_dict["matrix_priv_obj"] = None
+        if matrix_priv:
+            payload_dict["matrix_priv_obj"] = serialization.load_pem_private_key(
+                matrix_priv.encode(),
+                password=None,
+            )
 
         os.remove(vault_path)
 

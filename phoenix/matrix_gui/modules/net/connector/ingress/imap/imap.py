@@ -250,8 +250,6 @@ class IMAPIngressConnector(BaseConnector):
             msg.set_content(payload_b64)
 
             context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
 
             if self._smtp_encryption == "SSL":
                 with smtplib.SMTP_SSL(self._smtp_server, self._smtp_port, timeout=15, context=context) as smtp:

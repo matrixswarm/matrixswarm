@@ -144,9 +144,9 @@ class SMTPConnector(BaseConnector):
             msg.set_content(payload_b64)
 
             # Secure connection
+            # Use the operating-system trust store and require hostname and
+            # certificate-chain validation before sending SMTP credentials.
             context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
 
             with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=timeout) as server:
                 server.starttls(context=context)

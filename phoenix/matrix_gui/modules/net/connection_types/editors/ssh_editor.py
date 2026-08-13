@@ -1,14 +1,15 @@
-import paramiko
-import base64
-import io
 from PyQt6.QtWidgets import QMessageBox
-from hashlib import sha256
 from PyQt6.QtWidgets import (
     QFormLayout, QLineEdit, QComboBox,
     QTextEdit, QPushButton
 )
 from .base_editor import ConnectionEditorInterface
-from matrix_gui.core.class_lib.validation.network.private_key_utils import KeyValidator
+from matrix_gui.modules.railgun.ssh_support import (
+    connect_ssh_profile,
+    load_private_key,
+    normalize_fingerprint,
+    probe_ssh_host_fingerprint,
+)
 
 
 class SSHConnectionEditor(ConnectionEditorInterface):
@@ -153,13 +154,38 @@ class SSHConnectionEditor(ConnectionEditorInterface):
         if method == "private_key" and not self.private_key.toPlainText().strip():
             return False, "Private key required."
 
-        ssh_editor = SSHConnectionEditor()
-        ssh_editor.auth_type = 'private_key'
-        ssh_editor.private_key = self.private_key.toPlainText().strip()
-        if not ssh_editor.validate():
-            return "Private key validation failed!"
+        if method == "private_key":
+            try:
+                load_private_key(
+                    self.private_key.toPlainText(),
+                    self.passphrase.text(),
+                )
+            except ValueError as exc:
+                return False, str(exc)
+
+        if not self.fingerprint.text().strip():
+            return False, "Trusted SHA256 host fingerprint is required."
 
         return True, ""
+
+    def _connection_snapshot(self, fingerprint):
+        auth = self.auth_type.currentText()
+        return {
+            "host": self.host.text().strip(),
+            "port": int(self.port.text() or 22),
+            "username": self.username.text().strip(),
+            "auth_type": auth,
+            "password": self.password.text().strip() if auth == "password" else None,
+            "private_key": (
+                self.private_key.toPlainText().strip()
+                if auth == "private_key" else None
+            ),
+            "private_key_passphrase": (
+                self.passphrase.text().strip() or None
+                if auth == "private_key" else None
+            ),
+            "trusted_host_fingerprint": fingerprint,
+        }
 
     def _test_connection(self):
         host = self.host.text().strip()
@@ -172,45 +198,10 @@ class SSHConnectionEditor(ConnectionEditorInterface):
             QMessageBox.warning(self, "Missing Fields", "Host and Username are required.")
             return
 
-        # --- Paramiko client ---
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.WarningPolicy())
-
-        # --- Load identity ---
-        pkey = None
-        if auth == "private_key":
-            key_text = self.private_key.toPlainText().strip()
-            passphrase = self.passphrase.text().strip() or None
-            try:
-                pkey = paramiko.RSAKey.from_private_key(
-                    io.StringIO(key_text),
-                    password=passphrase
-                )
-            except Exception as e:
-                QMessageBox.critical(self, "Invalid Key", f"Private key error:\n{e}")
-                return
-
+        client = None
         try:
-            client.connect(
-                hostname=host,
-                port=port,
-                username=username,
-                password=self.password.text().strip() if auth == "password" else None,
-                pkey=pkey,
-                allow_agent=(auth == "agent"),
-                look_for_keys=False,
-                timeout=8
-            )
-
-            # SUCCESSFUL AUTH
-            server_key = client.get_transport().get_remote_server_key()
-            raw_fp = sha256(server_key.asbytes()).digest()
-            fp_b64 = base64.b64encode(raw_fp).decode()
-            fp_str = f"SHA256:{fp_b64}"
-
-            # Fingerprint check
+            fp_str = probe_ssh_host_fingerprint(host, port, timeout=8)
             if not stored_fp:
-                # ask user to trust
                 resp = QMessageBox.question(
                     self,
                     "Unknown Host",
@@ -218,10 +209,11 @@ class SSHConnectionEditor(ConnectionEditorInterface):
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No
                 )
-                if resp == QMessageBox.StandardButton.Yes:
-                    self.fingerprint.setText(fp_str)
+                if resp != QMessageBox.StandardButton.Yes:
+                    return
+                self.fingerprint.setText(fp_str)
             else:
-                if stored_fp != fp_str:
+                if normalize_fingerprint(stored_fp) != normalize_fingerprint(fp_str):
                     QMessageBox.warning(
                         self,
                         "Fingerprint Mismatch",
@@ -231,15 +223,21 @@ class SSHConnectionEditor(ConnectionEditorInterface):
                     )
                     return
 
+            client, verified_fp = connect_ssh_profile(
+                self._connection_snapshot(fp_str),
+                timeout=8,
+            )
+
             QMessageBox.information(
                 self, "Connection OK",
-                f"Connection successful.\n\nFingerprint:\n{fp_str}"
+                f"Connection successful.\n\nFingerprint:\n{verified_fp}"
             )
 
         except Exception as e:
             QMessageBox.critical(self, "Connection Failed", f"{e}")
         finally:
             try:
-                client.close()
-            except:
+                if client:
+                    client.close()
+            except Exception:
                 pass

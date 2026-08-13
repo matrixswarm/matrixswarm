@@ -26,10 +26,24 @@ def establish_ws_connection(host, port, agent, deployment, session_id, timeout=5
     cert_adapter = AgentCertWrapper(agent, deployment)
 
     # Write cert + key to temp files (Windows safe)
-    cert_path = key_path = None
+    cert_path = key_path = ca_path = None
     try:
+        required_tls = {
+            "CA root": cert_adapter.ca_root_cert,
+            "client certificate": cert_adapter.cert,
+            "client key": cert_adapter.key,
+            "server SPKI pin": cert_adapter.server_spki_pin,
+        }
+        missing_tls = [name for name, value in required_tls.items() if not value]
+        if missing_tls:
+            raise ValueError(
+                "Missing required WSS trust material: "
+                + ", ".join(missing_tls)
+            )
+
         cert_path = write_temp_pem(cert_adapter.cert)
         key_path = write_temp_pem(cert_adapter.key)
+        ca_path = write_temp_pem(cert_adapter.ca_root_cert)
     except Exception as e:
         print(f"[WSSConnector] ❌ Failed to write temp PEMs: {e}")
         return None
@@ -42,8 +56,9 @@ def establish_ws_connection(host, port, agent, deployment, session_id, timeout=5
             sslopt={
                 "certfile": cert_path,
                 "keyfile": key_path,
-                "cert_reqs": ssl.CERT_NONE,   # critical: disable CA chain checks
-                "check_hostname": False,      # skip hostname match
+                "ca_certs": ca_path,
+                "cert_reqs": ssl.CERT_REQUIRED,
+                "check_hostname": True,
             }
         )
 
@@ -80,10 +95,13 @@ def establish_ws_connection(host, port, agent, deployment, session_id, timeout=5
 
 
     finally:
-        for p in [cert_path, key_path]:
+        for p in [cert_path, key_path, ca_path]:
             if p and os.path.exists(p):
                 os.remove(p)
-        print(f"[CERT_LOADER][WSS] 🧹 Cleaned up {cert_path}, {key_path}")
+        print(
+            f"[CERT_LOADER][WSS] 🧹 Cleaned up "
+            f"{cert_path}, {key_path}, {ca_path}"
+        )
 
 class WSSConnector(BaseConnector):
     def __init__(self, running=True):

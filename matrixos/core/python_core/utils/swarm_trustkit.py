@@ -6,7 +6,7 @@ from Crypto.PublicKey import RSA
 from Crypto.Hash import SHA256
 from Crypto.Signature import pkcs1_15
 from cryptography.hazmat.backends import default_backend
-import base64, hashlib, json, os, time, threading, ssl, socket, requests
+import base64, hashlib, json, os, time, threading, ssl, socket
 from typing import Optional, Tuple
 
 # === SPKI (cert pinning) ===
@@ -88,25 +88,14 @@ def decrypt_payload(packet: dict, recipient_priv_pem: str) -> dict:
     raw = gcm.decrypt_and_verify(b("ciphertext"), b("tag"))
     return json.loads(raw.decode())
 
-# === HTTPS helpers (client) with SPKI pin ===
-def secure_https_request(host: str, port: int, path: str, method="POST", json_payload=None, expected_spki_pin: str=None, timeout=5.0):
-    url = f"https://{host}:{port}{path}"
-    ctx = ssl._create_unverified_context()
-    s = ctx.wrap_socket(socket.create_connection((host, port), timeout=timeout), server_hostname=host)
-    cert_bin = s.getpeercert(binary_form=True); s.close()
-    pin = extract_spki_pin_from_cert(cert_bin)
-    if pin != expected_spki_pin:
-        raise RuntimeError(f"SPKI mismatch: expected {expected_spki_pin}, got {pin}")
-    fn = requests.post if method.upper() == "POST" else requests.get
-    r = fn(url, json=json_payload, verify=False, timeout=timeout)
-    r.raise_for_status()
-    return r
-
 # === WSS helper (client) pre-dial pin check ===
-def precheck_spki(host: str, port: int, expected_spki_pin: str, timeout=5.0):
-    ctx = ssl._create_unverified_context()
-    s = ctx.wrap_socket(socket.create_connection((host, port), timeout=timeout), server_hostname=host)
-    cert_bin = s.getpeercert(binary_form=True); s.close()
+def precheck_spki(host: str, port: int, expected_spki_pin: str, ca_cert: str, timeout=5.0):
+    if not expected_spki_pin or not ca_cert:
+        raise ValueError("SPKI pin and CA certificate are required")
+    ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=ca_cert)
+    with socket.create_connection((host, port), timeout=timeout) as raw:
+        with ctx.wrap_socket(raw, server_hostname=host) as tls_socket:
+            cert_bin = tls_socket.getpeercert(binary_form=True)
     pin = extract_spki_pin_from_cert(cert_bin)
     if pin != expected_spki_pin:
         raise RuntimeError(f"SPKI mismatch: expected {expected_spki_pin}, got {pin}")

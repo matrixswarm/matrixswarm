@@ -1,6 +1,7 @@
 # Authored by Daniel F MacDonald & ChatGPT-5 aka The Generals
-import io, os, paramiko
+import os
 from PyQt6 import QtWidgets, QtCore
+from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 QtCore.QCoreApplication.processEvents()
 class DeployDialog(QtWidgets.QDialog):
     """Railgun-style MatrixD controller over SSH, with SSH selector."""
@@ -119,7 +120,6 @@ class DeployDialog(QtWidgets.QDialog):
         user = ssh_cfg["username"]
         port = int(ssh_cfg.get("port", 22))
         auth_type = ssh_cfg.get("auth_type", "private_key")
-        password = ssh_cfg.get("password")
         privkey_pem = ssh_cfg.get("private_key")
 
         if auth_type == "private_key" and not privkey_pem:
@@ -188,37 +188,11 @@ class DeployDialog(QtWidgets.QDialog):
             self.output.append(f"[CMD] {display_cmd}\n")
 
             try:
-                client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-                if auth_type == "password":
-                    client.connect(
-                        host,
-                        port=port,
-                        username=user,
-                        password=password,
-                        look_for_keys=False,
-                        allow_agent=False
-                    )
-
-                elif auth_type == "private_key":
-                    key = paramiko.RSAKey.from_private_key(io.StringIO(privkey_pem))
-                    client.connect(
-                        host,
-                        port=port,
-                        username=user,
-                        pkey=key,
-                        look_for_keys=False,
-                        allow_agent=False
-                    )
-
-                elif auth_type == "agent":
-                    client.connect(
-                        host,
-                        port=port,
-                        username=user,
-                        allow_agent=True
-                    )
+                client, actual_fingerprint = connect_ssh_profile(ssh_cfg)
+                self.output.append(
+                    f"[SSH] Host fingerprint verified: "
+                    f"{actual_fingerprint}\n"
+                )
 
                 transport = client.get_transport()
                 chan = transport.open_session()

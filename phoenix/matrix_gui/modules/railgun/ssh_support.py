@@ -3,6 +3,7 @@
 import base64
 import hmac
 import io
+import socket
 from hashlib import sha256
 
 import paramiko
@@ -24,6 +25,35 @@ def clean_secret(value):
 def sha256_fingerprint(key):
     digest = sha256(key.asbytes()).digest()
     return "SHA256:" + base64.b64encode(digest).decode("ascii")
+
+
+def probe_ssh_host_fingerprint(host, port=22, timeout=8):
+    """Read the SSH host key before authentication or credential exchange."""
+    clean_host = clean_secret(host)
+    if not clean_host:
+        raise ValueError("SSH host is required")
+    try:
+        clean_port = int(port)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("SSH port is invalid") from exc
+
+    sock = transport = None
+    try:
+        sock = socket.create_connection(
+            (clean_host, clean_port),
+            timeout=timeout,
+        )
+        transport = paramiko.Transport(sock)
+        transport.start_client(timeout=timeout)
+        key = transport.get_remote_server_key()
+        if key is None:
+            raise paramiko.SSHException("SSH server did not present a host key")
+        return sha256_fingerprint(key)
+    finally:
+        if transport is not None:
+            transport.close()
+        elif sock is not None:
+            sock.close()
 
 
 def normalize_fingerprint(value):

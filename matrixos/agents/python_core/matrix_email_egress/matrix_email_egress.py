@@ -320,8 +320,6 @@ class Agent(BootAgent):
             raise RuntimeError("SMTP lane is not configured")
 
         context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
 
         mode = (self.encryption or "STARTTLS").upper().strip()
         envelope_from = self.from_address

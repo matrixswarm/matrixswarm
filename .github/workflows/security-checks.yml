@@ -1,0 +1,29 @@
+name: Security checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "fix/public-release-security-*"
+
+permissions:
+  contents: read
+
+jobs:
+  static-security:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile Python sources
+        run: python -m compileall -q matrixos phoenix
+
+      - name: Run public-release security invariants
+        run: python -m unittest discover -s tests -p "test_*.py" -v

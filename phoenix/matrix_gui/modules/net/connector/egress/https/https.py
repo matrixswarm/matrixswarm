@@ -111,6 +111,8 @@ class HTTPSConnector(BaseConnector):
             ctx.bus.emit("channel.packet.sent", start_end=1)
 
         uid = self.agent.get("universal_id")
+        https_conn = tls_sock = raw_sock = None
+        cert_path = key_path = None
         try:
             inner = {
                 "matrix_packet": packet.get_packet(),
@@ -129,12 +131,26 @@ class HTTPSConnector(BaseConnector):
 
             # ---- Setup TLS context ----
             cert_adapter = AgentCertWrapper(self.agent, self.deployment)
-            ctx_ssl = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            required_tls = {
+                "CA root": cert_adapter.ca_root_cert,
+                "client certificate": cert_adapter.cert,
+                "client key": cert_adapter.key,
+                "server SPKI pin": cert_adapter.server_spki_pin,
+            }
+            missing_tls = [name for name, value in required_tls.items() if not value]
+            if missing_tls:
+                raise ValueError(
+                    "Missing required HTTPS trust material: "
+                    + ", ".join(missing_tls)
+                )
 
-            ctx_ssl.check_hostname = False
-            ctx_ssl.verify_mode = ssl.CERT_NONE
-            ctx_ssl.load_verify_locations(cadata=cert_adapter.ca_root_cert)
-            pin, cert_path, key_path = load_cert_chain_from_memory(
+            ctx_ssl = ssl.create_default_context(
+                ssl.Purpose.SERVER_AUTH,
+                cadata=cert_adapter.ca_root_cert,
+            )
+            ctx_ssl.check_hostname = True
+            ctx_ssl.verify_mode = ssl.CERT_REQUIRED
+            _, cert_path, key_path = load_cert_chain_from_memory(
                 ctx_ssl, cert_adapter.cert, cert_adapter.key
             )
 
@@ -156,17 +172,22 @@ class HTTPSConnector(BaseConnector):
             resp = https_conn.getresponse()
             print(f"[HTTPSConnector] 🌐 Sent → HTTPS {resp.status}")
 
-            # ---- Cleanup ----
-            https_conn.close()
-            tls_sock.close()
-            raw_sock.close()
-            os.remove(cert_path)
-            os.remove(key_path)
-
         except Exception as e:
             print(f"[HTTPSConnector] ❌ Send error: {e}")
 
         finally:
+            for resource in (https_conn, tls_sock, raw_sock):
+                if resource:
+                    try:
+                        resource.close()
+                    except Exception:
+                        pass
+            for path in (cert_path, key_path):
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
             if hasattr(ctx, "bus"):
                 ctx.bus.emit("channel.packet.sent", start_end=0)
 
@@ -189,6 +210,5 @@ class HTTPSConnector(BaseConnector):
             #print(f"[DEBUG][{self.__class__.__name__}] duplicate close() suppressed")
             return
         self._closed = True
-
 
 

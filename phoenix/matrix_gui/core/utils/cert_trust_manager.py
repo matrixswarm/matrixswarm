@@ -1,6 +1,5 @@
 # cert_trust_manager.py — Tactical handler for Python TLS trust enforcement
 import ssl
-import tempfile
 from matrix_gui.core.utils.cert_loader import load_cert_chain_from_memory
 
 class CertTrustManager:
@@ -10,18 +9,17 @@ class CertTrustManager:
         self.key_pem = key_pem
 
     def hardened_ssl_context(self) -> ssl.SSLContext:
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
+        if not self.ca_pem:
+            raise ValueError("A CA root is required for TLS server verification")
+
+        ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        ctx.check_hostname = True
         ctx.verify_mode = ssl.CERT_REQUIRED
 
         try:
-            # Write CA cert to a temporary file — more reliable than cadata
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pem") as f:
-                f.write(self.ca_pem.encode())
-                f.flush()
-                ctx.load_verify_locations(cafile=f.name)
+            ctx.load_verify_locations(cadata=self.ca_pem)
         except Exception as e:
-            raise RuntimeError(f"[TLS] Failed to load CA cert via cafile: {e}")
+            raise RuntimeError(f"[TLS] Failed to load CA cert: {e}")
 
         if self.cert_pem and self.key_pem:
             try:

@@ -29,17 +29,29 @@ class WebSocketClient:
 
     def connect_for_session(self, host, port):
         print(f"[DEBUG] Connecting to wss://{host}:{port}/ws")
+        raw_sock = None
+        tls_sock = None
         try:
 
-            raw_sock = socket.create_connection((host, port))
-            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            if not all((self.tls_cert, self.tls_key, self.expected_pin, self.ca_cert)):
+                raise ValueError(
+                    "WSS requires a CA root, client certificate, client key, "
+                    "and expected server SPKI pin"
+                )
+
+            ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+            load_ca_into_context(ctx, self.ca_cert)
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
 
             # Load client identity
-            load_cert_chain_from_memory(ctx, self.tls_cert, self.tls_key)
+            _, self._cert_path, self._key_path = load_cert_chain_from_memory(
+                ctx, self.tls_cert, self.tls_key
+            )
 
+            raw_sock = socket.create_connection((host, port), timeout=10)
             tls_sock = ctx.wrap_socket(raw_sock, server_hostname=host)
+            raw_sock = None
 
             # === SPKI pin verification
             peer_cert = tls_sock.getpeercert(binary_form=True)
@@ -74,9 +86,14 @@ class WebSocketClient:
             ws.sock = tls_sock
             ws.connected = True
             self.ws = ws
-
+            tls_sock = None
 
         except Exception as e:
+            if tls_sock is not None:
+                tls_sock.close()
+            elif raw_sock is not None:
+                raw_sock.close()
+            self._cleanup_tempfiles()
             print("❌ [SSL DEBUG] Connection failed:", e)
             print(traceback.format_exc())
             raise
@@ -99,13 +116,17 @@ class WebSocketClient:
         if self.ws:
             self.ws.close()
             self.ws = None
-        # Cleanup tempfiles
+        self._cleanup_tempfiles()
+
+    def _cleanup_tempfiles(self):
         for path in (self._cert_path, self._key_path):
             if path and os.path.exists(path):
                 try:
                     os.unlink(path)
                 except Exception:
                     pass
+        self._cert_path = None
+        self._key_path = None
 
 
 

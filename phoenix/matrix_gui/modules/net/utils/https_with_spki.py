@@ -8,20 +8,16 @@ def https_with_spki(host, port, expected_pin, cert_file=None, key_file=None, ca_
     if not expected_pin:
         raise ValueError("SPKI pin required")
 
+    if not ca_cert:
+        raise ValueError("CA certificate required")
     if not cert_file or not key_file:
-        log.warning(f"[HTTPS] Missing client cert or key for mTLS to {host}:{port}")
+        raise ValueError("Client certificate and key required")
 
     # Create context
-    if ca_cert:
-        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-        context.load_verify_locations(ca_cert)
-        log.info(f"[HTTPS] Using CA verification with {ca_cert}")
-    else:
-        context = ssl._create_unverified_context()  # disables CA/hostname check
-        log.warning("[HTTPS] No CA cert provided. Hostname and CA checks are disabled.")
-
-    if cert_file and key_file:
-        context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    context.load_verify_locations(ca_cert)
+    context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+    log.info(f"[HTTPS] Using CA verification with {ca_cert}")
 
     # Create and wrap socket
     conn = socket.create_connection((host, port))

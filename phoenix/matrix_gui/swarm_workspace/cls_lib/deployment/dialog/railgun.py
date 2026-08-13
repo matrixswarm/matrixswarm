@@ -3,10 +3,9 @@
 Commander Edition — Standalone Railgun Module
 Non-blocking SSH deploy with full live output streaming.
 """
-import io
 import ntpath
 import posixpath
-import paramiko
+from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 
 from PyQt6.QtCore import QThread, pyqtSignal, QSize
 from PyQt6.QtWidgets import (
@@ -38,42 +37,12 @@ class RailgunWorker(QThread):
             user = self.ssh_meta["username"]
             port = int(self.ssh_meta.get("port", 22))
 
-            # 1. SSH Connect
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-            auth_type = self.ssh_meta.get("auth_type", "private_key")
-
-            if auth_type == "password":
-                client.connect(
-                    host,
-                    port=port,
-                    username=user,
-                    password=self.ssh_meta.get("password"),
-                    look_for_keys=False,
-                    allow_agent=False
-                )
-
-            elif auth_type == "private_key":
-                key_text = self.ssh_meta.get("private_key")
-                privkey = paramiko.RSAKey.from_private_key(io.StringIO(key_text))
-
-                client.connect(
-                    host,
-                    port=port,
-                    username=user,
-                    pkey=privkey,
-                    look_for_keys=False,
-                    allow_agent=False
-                )
-
-            elif auth_type == "agent":
-                client.connect(
-                    host,
-                    port=port,
-                    username=user,
-                    allow_agent=True
-                )
+            # 1. SSH Connect with the Registry's pinned host identity.
+            client, actual_fingerprint = connect_ssh_profile(self.ssh_meta)
+            self.sig_stdout.emit(
+                f"[RAILGUN] Host fingerprint verified: "
+                f"{actual_fingerprint}\n"
+            )
 
             # 2. Upload directive
             sftp = client.open_sftp()
