@@ -78,7 +78,8 @@ From the monorepo root:
 
 ```bash
 cd phoenix
-py -3.10 -m venv .venv
+py -3 -c "import sys; assert sys.version_info >= (3, 10), 'Python 3.10+ required'"
+py -3 -m venv .venv
 source .venv/Scripts/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
@@ -89,7 +90,8 @@ python phoenix.py
 
 ```bash
 cd phoenix
-python3.10 -m venv .venv
+python3 -c "import sys; assert sys.version_info >= (3, 10), 'Python 3.10+ required'"
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
