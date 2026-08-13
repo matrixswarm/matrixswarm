@@ -499,80 +499,118 @@ class RailgunInstallDialog(QDialog):
 
     def _generate_installer(self, remote_staging, mode, pyflag):
         return f"""#!/bin/bash
-    set -e
+set -euo pipefail
 
-    echo "[Installer] Local Full Install: syncing MatrixOS from staging…"
+echo "[Installer] Local Full Install: syncing MatrixOS from staging..."
 
-    TARGET="/matrix"
-    SRC_DIR="{remote_staging}"
-
-    
-    # 2) Ensure /matrix exists
-    mkdir -p "$TARGET"
-
-    # 3) Use rsync MIRROR MODE to overwrite runtime code
-    echo "[Installer] Running rsync mirror…"
-
-    rsync -a --delete \
-        "$SRC_DIR"/ "$TARGET"/
-
-    echo "[Installer] rsync complete."
-
-    # 4) Python environment
-    if [ "$PYTHON_MODE" = "create" ]; then
-    echo "[Installer] Creating fresh venv…"
-    rm -rf "$TARGET/venv"
-    python3 -m venv "$TARGET/venv"
-    source "$TARGET/venv/bin/activate"
-    pip install --upgrade pip wheel
-    [ -f "$TARGET/requirements.txt" ] && pip install -r "$TARGET/requirements.txt"
-    elif [ "$PYTHON_MODE" = "activate" ]; then
-    echo "[Installer] Activating existing venv…"
-    source "$TARGET/venv/bin/activate" || echo "[WARN] Could not activate venv"
-    pip install --upgrade pip wheel || true
-    [ -f "$TARGET/requirements.txt" ] && pip install -r "$TARGET/requirements.txt"
-    else
-    echo "[Installer] Skipping Python setup."
-    fi
-
-    # 5) matrixd link
-    if [ ! -f "$TARGET/scripts/matrixd" ]; then
-    echo "[Installer][ERROR] matrixd script missing under $TARGET/scripts"
-    exit 127
-    fi
-
-    echo "[Installer] Linking matrixd…"
-    rm -f /usr/local/bin/matrixd
-    ln -sf "$TARGET/scripts/matrixd" /usr/local/bin/matrixd
-    chmod +x "$TARGET/scripts/matrixd"
-
-    echo "[Installer] Local MatrixOS install complete."
-    exit 0
-    """
-
-    def _generate_github_installer(self, pyflag):
-        return f"""#!/bin/bash
-set -e
-
-echo "[Installer] GitHub mode: cloning MatrixOS…"
-
-# Ensure required tools
-if ! command -v git >/dev/null 2>&1; then
-    echo "[Installer] Installing git…"
-    apt-get update -y
-    apt-get install -y git
+if [ "$(id -u)" -ne 0 ]; then
+    echo "[Installer][ERROR] MatrixOS installation requires root."
+    exit 77
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
-    echo "[Installer] Installing python3…"
     apt-get update -y
     apt-get install -y python3 python3-venv python3-pip
 fi
 
-if ! command -v flock >/dev/null 2>&1; then
-    echo "[Installer] Installing installation-lock support…"
+if ! command -v rsync >/dev/null 2>&1; then
     apt-get update -y
-    apt-get install -y util-linux
+    apt-get install -y rsync
+fi
+
+TARGET="/matrix"
+SRC_DIR="{remote_staging}"
+VENV_DIR="$TARGET/.venv"
+
+mkdir -p "$TARGET"
+
+echo "[Installer] Replacing runtime code while preserving operator data..."
+for runtime_dir in agents core scripts; do
+    if [ -d "$SRC_DIR/$runtime_dir" ]; then
+        mkdir -p "$TARGET/$runtime_dir"
+        rsync -a --delete \
+            "$SRC_DIR/$runtime_dir/" "$TARGET/$runtime_dir/"
+    fi
+done
+
+for preserved_dir in boot_directives maxmind; do
+    if [ -d "$SRC_DIR/$preserved_dir" ]; then
+        mkdir -p "$TARGET/$preserved_dir"
+        rsync -a \
+            "$SRC_DIR/$preserved_dir/" "$TARGET/$preserved_dir/"
+    fi
+done
+
+find "$SRC_DIR" -maxdepth 1 -type f \
+    ! -name "install_matrixos.sh" \
+    -exec cp -a {{}} "$TARGET/" \;
+
+if [ "$PYTHON_MODE" = "create" ]; then
+    echo "[Installer] Creating isolated MatrixOS environment..."
+    rm -rf "$VENV_DIR"
+    if ! python3 -m venv "$VENV_DIR"; then
+        rm -rf "$VENV_DIR"
+        apt-get update -y
+        apt-get install -y python3-venv python3-pip
+        python3 -m venv "$VENV_DIR"
+    fi
+elif [ "$PYTHON_MODE" = "skip" ]; then
+    echo "[Installer] Reusing existing MatrixOS environment..."
+    if [ ! -x "$VENV_DIR/bin/python3" ]; then
+        echo "[Installer][ERROR] Existing environment not found: $VENV_DIR"
+        exit 126
+    fi
+else
+    echo "[Installer][ERROR] Unsupported Python mode: $PYTHON_MODE"
+    exit 64
+fi
+
+"$VENV_DIR/bin/python3" -m pip install --upgrade pip wheel
+if [ -f "$TARGET/requirements.txt" ]; then
+    "$VENV_DIR/bin/python3" -m pip install -r "$TARGET/requirements.txt"
+fi
+"$VENV_DIR/bin/python3" -m pip check
+
+if [ ! -f "$TARGET/scripts/matrixd" ]; then
+    echo "[Installer][ERROR] matrixd script missing under $TARGET/scripts"
+    exit 127
+fi
+
+chmod +x "$TARGET/scripts/matrixd"
+"$VENV_DIR/bin/python3" "$TARGET/scripts/matrixd" --help >/dev/null
+
+echo "[Installer] Installing virtual-environment matrixd wrapper..."
+printf '%s\n' \
+    '#!/bin/sh' \
+    'exec /matrix/.venv/bin/python3 /matrix/scripts/matrixd "$@"' \
+    > /usr/local/bin/matrixd
+chmod 0755 /usr/local/bin/matrixd
+
+echo "[Installer] Local MatrixOS installation complete."
+exit 0
+"""
+
+    def _generate_github_installer(self, pyflag):
+        return f"""#!/bin/bash
+set -euo pipefail
+
+echo "[Installer] GitHub mode: cloning MatrixOS..."
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "[Installer][ERROR] MatrixOS installation requires root."
+    exit 77
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+    apt-get update -y
+    apt-get install -y python3 python3-venv python3-pip
+fi
+
+if ! command -v git >/dev/null 2>&1 || \
+   ! command -v rsync >/dev/null 2>&1 || \
+   ! command -v flock >/dev/null 2>&1; then
+    apt-get update -y
+    apt-get install -y git rsync util-linux
 fi
 
 LOCK_FILE="/tmp/matrixswarm-railgun-install.lock"
@@ -586,7 +624,7 @@ fi
 CLONE_DIR="$(mktemp -d /tmp/matrixswarm-github.XXXXXX)"
 trap 'rm -rf "$CLONE_DIR"' EXIT
 
-echo "[Installer] Cloning MatrixSwarm monorepo…"
+echo "[Installer] Cloning MatrixSwarm monorepo..."
 git clone --depth 1 \
     https://github.com/matrixswarm/matrixswarm.git \
     "$CLONE_DIR"
@@ -596,36 +634,72 @@ if [ ! -d "$CLONE_DIR/matrixos" ]; then
     exit 128
 fi
 
-mkdir -p /matrix
+TARGET="/matrix"
+SRC_DIR="$CLONE_DIR/matrixos"
+VENV_DIR="$TARGET/.venv"
 
-echo "[Installer] Overwriting runtime directories (preserving universes)…"
-cp -a "$CLONE_DIR/matrixos/." /matrix/
+mkdir -p "$TARGET"
 
-cd /matrix
+echo "[Installer] Replacing runtime code while preserving operator data..."
+for runtime_dir in agents ai core docs scripts sounds teams; do
+    if [ -d "$SRC_DIR/$runtime_dir" ]; then
+        mkdir -p "$TARGET/$runtime_dir"
+        rsync -a --delete \
+            "$SRC_DIR/$runtime_dir/" "$TARGET/$runtime_dir/"
+    fi
+done
 
-# Python Environment
+for preserved_dir in boot_directives maxmind; do
+    if [ -d "$SRC_DIR/$preserved_dir" ]; then
+        mkdir -p "$TARGET/$preserved_dir"
+        rsync -a \
+            "$SRC_DIR/$preserved_dir/" "$TARGET/$preserved_dir/"
+    fi
+done
+
+find "$SRC_DIR" -maxdepth 1 -type f \
+    -exec cp -a {{}} "$TARGET/" \;
+
 if [ "{pyflag}" = "create" ]; then
-    echo "[Installer] Creating venv…"
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install --upgrade pip wheel
-    if [ -f "requirements.txt" ]; then
-        pip install -r requirements.txt
+    echo "[Installer] Creating isolated MatrixOS environment..."
+    rm -rf "$VENV_DIR"
+    if ! python3 -m venv "$VENV_DIR"; then
+        rm -rf "$VENV_DIR"
+        apt-get update -y
+        apt-get install -y python3-venv python3-pip
+        python3 -m venv "$VENV_DIR"
+    fi
+elif [ "{pyflag}" = "skip" ]; then
+    echo "[Installer] Reusing existing MatrixOS environment..."
+    if [ ! -x "$VENV_DIR/bin/python3" ]; then
+        echo "[Installer][ERROR] Existing environment not found: $VENV_DIR"
+        exit 126
     fi
 else
-    echo "[Installer] Skipping venv creation."
+    echo "[Installer][ERROR] Unsupported Python mode: {pyflag}"
+    exit 64
 fi
 
-# matrixd executable
-if [ ! -f /matrix/scripts/matrixd ]; then
-    echo "[Installer][ERROR] matrixd not found in /matrix/scripts"
+"$VENV_DIR/bin/python3" -m pip install --upgrade pip wheel
+if [ -f "$TARGET/requirements.txt" ]; then
+    "$VENV_DIR/bin/python3" -m pip install -r "$TARGET/requirements.txt"
+fi
+"$VENV_DIR/bin/python3" -m pip check
+
+if [ ! -f "$TARGET/scripts/matrixd" ]; then
+    echo "[Installer][ERROR] matrixd not found in $TARGET/scripts"
     exit 127
 fi
 
-echo "[Installer] Linking matrixd globally…"
-rm -f /usr/local/bin/matrixd
-ln -sf /matrix/scripts/matrixd /usr/local/bin/matrixd
-chmod +x /matrix/scripts/matrixd
+chmod +x "$TARGET/scripts/matrixd"
+"$VENV_DIR/bin/python3" "$TARGET/scripts/matrixd" --help >/dev/null
+
+echo "[Installer] Installing virtual-environment matrixd wrapper..."
+printf '%s\n' \
+    '#!/bin/sh' \
+    'exec /matrix/.venv/bin/python3 /matrix/scripts/matrixd "$@"' \
+    > /usr/local/bin/matrixd
+chmod 0755 /usr/local/bin/matrixd
 
 echo "[Installer] MatrixOS GitHub installation complete."
 exit 0

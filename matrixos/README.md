@@ -304,41 +304,39 @@ Pod sandboxes: /matrix/universes/<uid>/pod/<uuid>.
 
 Agents self-heal and hot-reload (die token removal).
 
-🛠 Install matrixd as a System Daemon
-Install the executable:
+## Install and run MatrixOS
 
-````bash
-  sudo cp scripts/matrixd /usr/local/bin/matrixd
-sudo chmod +x /usr/local/bin/matrixd
+The supported deployment path is **Phoenix Cockpit → Railgun**. Railgun installs MatrixOS under
+\`/matrix\`, creates an isolated Python environment at \`/matrix/.venv\`, and installs a
+\`/usr/local/bin/matrixd\` wrapper that always uses that environment.
+
+Railgun requires a root SSH profile because installation writes to \`/matrix\` and
+\`/usr/local/bin\`. It preserves operational universes, encrypted directives, MaxMind data,
+quarantine contents, and the existing virtual environment when the operator selects reuse.
+
+Verify an installation:
+
+\`\`\`bash
 matrixd --help
-Install the service:
-
-sudo cp scripts/matrixd.service /etc/systemd/system/matrixd.service
-Enable & start:
-
-sudo systemctl daemon-reexec
-sudo systemctl daemon-reload
-sudo systemctl enable matrixd
-sudo systemctl start matrixd
-systemctl status matrixd
-Test service:
 matrixd list
-````
-Expected: running agents list or [LIST] No active swarm agents found.
+\`\`\`
 
+Expected when no universe is running:
 
-### Auto-boot a universe:
-  Edit /etc/systemd/system/matrixd.service:
+\`\`\`text
+[LIST] No active swarm agents found
+\`\`\`
 
-````ini
-ExecStart=/usr/local/bin/matrixd boot --universe phoenix
-Reload + restart:
-````
+Start and stop universes explicitly:
 
-```` bash
-  sudo systemctl daemon-reload
-sudo systemctl restart matrixd
-````
+\`\`\`bash
+matrixd boot --universe phoenix
+matrixd kill --universe phoenix --cleanup
+\`\`\`
+
+MatrixSwarm does **not** ship, install, enable, or recommend a systemd service for
+\`matrixd\`. Run universes deliberately through Phoenix or the command line so failures do
+not create an uncontrolled restart loop.
 
 ### License
 MatrixSwarm is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE).
