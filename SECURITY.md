@@ -3,7 +3,7 @@
 ## Supported version
 
 MatrixSwarm 1.1 is pre-release software. Security fixes are applied to the current
-\`main\` branch. Older snapshots, branches, and the historical standalone PyPI package
+`main` branch. Older snapshots, branches, and the historical standalone PyPI package
 may not receive security updates.
 
 ## Reporting a vulnerability

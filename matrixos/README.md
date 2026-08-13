@@ -307,35 +307,35 @@ Agents self-heal and hot-reload (die token removal).
 ## Install and run MatrixOS
 
 The supported deployment path is **Phoenix Cockpit → Railgun**. Railgun installs MatrixOS under
-\`/matrix\`, creates an isolated Python environment at \`/matrix/.venv\`, and installs a
-\`/usr/local/bin/matrixd\` wrapper that always uses that environment.
+`/matrix`, creates an isolated Python environment at `/matrix/.venv`, and installs a
+`/usr/local/bin/matrixd` wrapper that always uses that environment.
 
-Railgun requires a root SSH profile because installation writes to \`/matrix\` and
-\`/usr/local/bin\`. It preserves operational universes, encrypted directives, MaxMind data,
+Railgun requires a root SSH profile because installation writes to `/matrix` and
+`/usr/local/bin`. It preserves operational universes, encrypted directives, MaxMind data,
 quarantine contents, and the existing virtual environment when the operator selects reuse.
 
 Verify an installation:
 
-\`\`\`bash
+```bash
 matrixd --help
 matrixd list
-\`\`\`
+```
 
 Expected when no universe is running:
 
-\`\`\`text
+```text
 [LIST] No active swarm agents found
-\`\`\`
+```
 
 Start and stop universes explicitly:
 
-\`\`\`bash
+```bash
 matrixd boot --universe phoenix
 matrixd kill --universe phoenix --cleanup
-\`\`\`
+```
 
 MatrixSwarm does **not** ship, install, enable, or recommend a systemd service for
-\`matrixd\`. Run universes deliberately through Phoenix or the command line so failures do
+`matrixd`. Run universes deliberately through Phoenix or the command line so failures do
 not create an uncontrolled restart loop.
 
 ### License

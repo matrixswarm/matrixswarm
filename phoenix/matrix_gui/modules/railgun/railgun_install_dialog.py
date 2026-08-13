@@ -543,7 +543,7 @@ done
 
 find "$SRC_DIR" -maxdepth 1 -type f \
     ! -name "install_matrixos.sh" \
-    -exec cp -a {{}} "$TARGET/" \;
+    -exec cp -a {{}} "$TARGET/" \\;
 
 if [ "$PYTHON_MODE" = "create" ]; then
     echo "[Installer] Creating isolated MatrixOS environment..."
@@ -658,7 +658,7 @@ for preserved_dir in boot_directives maxmind; do
 done
 
 find "$SRC_DIR" -maxdepth 1 -type f \
-    -exec cp -a {{}} "$TARGET/" \;
+    -exec cp -a {{}} "$TARGET/" \\;
 
 if [ "{pyflag}" = "create" ]; then
     echo "[Installer] Creating isolated MatrixOS environment..."
