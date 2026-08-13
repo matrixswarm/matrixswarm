@@ -11,7 +11,7 @@ class PacketEmitter(PacketFactoryMixin):
 
 
         state = ChannelState.dump()
-        if not state["host"] or not state["cert"] or not state["key"]:
+        if not state["host"] or not state["cert"] or not state["key"] or not state.get("ca"):
             print("[EMITTER] Incomplete channel config. Aborting.")
             return
 
@@ -37,7 +37,7 @@ class PacketEmitter(PacketFactoryMixin):
                 url=url,
                 json=pk1.get_packet(),
                 cert=(state["cert"], state["key"]),
-                verify=False,
+                verify=state["ca"],
                 timeout=5
             )
             print(f"[EMITTER] HTTP {response.status_code}: {response.text[:64]}...")

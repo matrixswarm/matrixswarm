@@ -320,10 +320,13 @@ class Agent(BootAgent):
             raise RuntimeError("SMTP lane is not configured")
 
         context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
 
         mode = (self.encryption or "STARTTLS").upper().strip()
+        if mode not in ("SSL", "TLS", "STARTTLS"):
+            raise ValueError(
+                "SMTP encryption must be SSL, TLS, or STARTTLS"
+            )
+
         envelope_from = self.from_address
         envelope_to = [self.to_address]
 
@@ -377,12 +380,11 @@ class Agent(BootAgent):
                 ) as server:
                     self.log("[EMAIL][SMTP][CONNECT] SMTP established")
 
-                    if mode in ("TLS", "STARTTLS"):
-                        stage = "starttls"
-                        tls_code, _ = server.starttls(context=context)
-                        self.log(
-                            f"[EMAIL][SMTP][TLS] established code={tls_code!r}"
-                        )
+                    stage = "starttls"
+                    tls_code, _ = server.starttls(context=context)
+                    self.log(
+                        f"[EMAIL][SMTP][TLS] established code={tls_code!r}"
+                    )
 
                     if self.from_address and self.password:
                         stage = "login"

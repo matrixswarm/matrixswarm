@@ -200,10 +200,17 @@ class WsTransport(Transport):
 
 # --- SPKI helpers ------------------------------------------------------------
 
-def _server_der_cert(host: str, port: int, timeout: float = 5.0) -> bytes:
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+def _server_der_cert(
+    host: str,
+    port: int,
+    ca_pem: str,
+    timeout: float = 5.0,
+) -> bytes:
+    if not ca_pem:
+        raise RuntimeError("A CA certificate is required for TLS probing")
+    ctx = ssl.create_default_context(cadata=ca_pem)
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
     with socket.create_connection((host, port), timeout=timeout) as sock:
         with ctx.wrap_socket(sock, server_hostname=host) as ssock:
             return ssock.getpeercert(binary_form=True)
@@ -303,25 +310,39 @@ class ConnectionGroup:
                 target_url = override_url or f"{proto}://{host}:{port}"
                 self.emit("ops.feed", f"[{self.name}] connecting to {target_url}")
 
-                # 2) Probe server certificate
-                server_cn, server_fp = _probe_server_identity(host, port)
-                self.emit("ops.feed", f"[{self.name}] CN → {server_cn}, fingerprint → {server_fp[:12]}…")
-
-                # 3) Resolve cert profile via tag_registry
+                # 2) Resolve the trusted certificate profile before probing.
                 cert_profile = tag_registry_lookup("security", "perimeter_https", "v1")
                 if not cert_profile:
                     raise RuntimeError("No cert profile found for perimeter_https")
 
-                # 4) Check SPKI pin match
+                ca_pem = cert_profile.get("https_ca")
                 expected_pin = cert_profile.get("spki_pin")
-                if expected_pin:
-                    der = _server_der_cert(host, port, timeout=5.0)
-                    actual_pin = _spki_pin_from_der(der)
-                    if actual_pin != expected_pin:
-                        raise RuntimeError(f"SPKI mismatch: expected {expected_pin}, got {actual_pin}")
-                    self.emit("ops.feed", f"[{self.name}] SPKI match OK: {actual_pin[:12]}…")
-                else:
-                    self.emit("ops.feed", f"[{self.name}] SPKI pin not found in profile; skipping pin check")
+                if not ca_pem or not expected_pin:
+                    raise RuntimeError(
+                        "Certificate profile must include https_ca and spki_pin"
+                    )
+
+                # 3) Probe through verified TLS, then enforce the independent
+                # SPKI identity pin.
+                server_cn, server_fp, der = _probe_server_identity(
+                    host,
+                    port,
+                    ca_pem,
+                )
+                self.emit(
+                    "ops.feed",
+                    f"[{self.name}] CN → {server_cn}, "
+                    f"fingerprint → {server_fp[:12]}…",
+                )
+                actual_pin = _spki_pin_from_der(der)
+                if actual_pin != expected_pin:
+                    raise RuntimeError(
+                        f"SPKI mismatch: expected {expected_pin}, got {actual_pin}"
+                    )
+                self.emit(
+                    "ops.feed",
+                    f"[{self.name}] SPKI match OK: {actual_pin[:12]}…",
+                )
 
                 # 5) Bind HTTPS
                 self.cert_profile = cert_profile
@@ -630,25 +651,25 @@ def build_ws_ssl_context(cert_profile: dict, server_hostname: str) -> ssl.SSLCon
     ctx._server_hostname = server_hostname  # type: ignore[attr-defined]
     return ctx
 
-def _probe_server_identity(host: str, port: int) -> Tuple[str, str]:
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with socket.create_connection((host, port), timeout=5) as sock:
-        with ctx.wrap_socket(sock, server_hostname=host) as ssock:
-            der = ssock.getpeercert(binary_form=True)
-            info = ssock.getpeercert()
+def _probe_server_identity(
+    host: str,
+    port: int,
+    ca_pem: str,
+) -> Tuple[str, str, bytes]:
+    der = _server_der_cert(host, port, ca_pem, timeout=5.0)
     fp = hashlib.sha256(der).hexdigest()
     cn = ""
     try:
-        for tup in info.get("subject", []):
-            for k, v in tup:
-                if k == "commonName":
-                    cn = v
-                    break
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+
+        cert = x509.load_der_x509_certificate(der)
+        attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        if attrs:
+            cn = attrs[0].value
     except Exception:
         pass
-    return cn, fp
+    return cn, fp, der
 
 def send_ws(self, text: str) -> None:
     if not (self.wss and self.wss.is_up()):

@@ -34,7 +34,6 @@ from cryptography.hazmat.primitives import serialization
 from core.python_core.mixin.ghost_vault import decrypt_vault
 from core.python_core.utils.trust_log import log_trust_banner
 from core.python_core.boot_agent_thread_config import get_default_thread_registry
-from core.python_core.trust_templates.matrix_dummy_priv import DUMMY_MATRIX_PRIV
 from core.python_core.tree_parser import TreeParser
 from core.python_core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
@@ -71,7 +70,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             swarm_key (str): The global AES key used for general packet encryption.
             private_key (str): The agent's personal AES key.
             matrix_pub (str): The PEM-encoded public key of the root Matrix agent.
-            matrix_priv (str): The private key of the Matrix agent (often a dummy key).
+            matrix_priv (str | None): Matrix signing key, provisioned only to
+                Matrix and explicitly verified recovery sentinels.
             public_key_obj: The agent's own public key as a cryptography object.
             private_key_obj: The agent's own private key as a cryptography object.
             logger (Logger): An encrypted logger instance for this agent.
@@ -99,7 +99,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         #these 2 guys are aux and are created by the parent
         self.matrix_pub = payload.get("matrix_pub")
-        self.matrix_priv = payload.get("matrix_priv")  # Fallback already handled by decrypt_vault()
+        self.matrix_priv = payload.get("matrix_priv")
 
         #these are the same 2 guys that have been converted in the vault
         self.public_key_obj = payload["public_key_obj"]
@@ -146,13 +146,22 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.log(f"[BOOT] matrix_pub is missing. Trust cannot be verified.", error=e, block="serialize_public_key")
             exit()
 
-        try:
-            self.matrix_priv_obj = PyCryptoRSA.import_key(self.matrix_priv)
-            self.log("[BOOT] 🔐 Matrix private key imported via PyCryptodome for signature operations.")
-        except Exception as e:
-            self.matrix_priv_obj = None
-            self.log("[BOOT] ❌ Failed to convert Matrix private key to PyCrypto-compatible object", error=e)
-            exit()
+        self.matrix_priv_obj = None
+        if self.matrix_priv:
+            try:
+                self.matrix_priv_obj = PyCryptoRSA.import_key(self.matrix_priv)
+                self.log("[BOOT] 🔐 Matrix signing capability imported.")
+            except Exception as e:
+                self.log(
+                    "[BOOT] ❌ Invalid provisioned Matrix signing capability",
+                    error=e,
+                )
+                exit()
+        else:
+            self.log(
+                "[BOOT] Matrix signing capability not provisioned; "
+                "running as an ordinary agent."
+            )
 
         # 🧬 Chain-of-trust determination
         uid = self.command_line_args.get("universal_id", "")
@@ -1485,7 +1494,9 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             keychain["swarm_key"] = self.swarm_key
             keychain['private_key'] = node.get("vault",{}).get("private_key")
             keychain["matrix_pub"] = self.matrix_pub
-            keychain["matrix_priv"]=DUMMY_MATRIX_PRIV
+            # Ordinary agents verify Matrix with the public key but must not
+            # receive any Matrix signing capability.
+            keychain["matrix_priv"] = None
             keychain["encryption_enabled"]=int(self.encryption_enabled)
             keychain["security_box"] = self.security_box.copy()
             #Matrix is running, and currently spawning

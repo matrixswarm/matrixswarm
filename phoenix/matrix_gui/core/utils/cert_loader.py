@@ -1,7 +1,6 @@
 import os
 import ssl
 import tempfile
-import uuid
 import hashlib
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
@@ -12,18 +11,30 @@ def load_cert_chain_from_memory(ctx: ssl.SSLContext, cert_pem: str, key_pem: str
     Load cert and key from memory into SSLContext securely.
     Returns: pin (SHA256 of SPKI)
     """
-    unique_id = uuid.uuid4().hex[:6]
-
-    temp_dir = tempfile.gettempdir()
-    cert_path = os.path.join(temp_dir, f"cert_{unique_id}.pem")
-    key_path  = os.path.join(temp_dir, f"key_{unique_id}.pem")
+    cert_path = None
+    key_path = None
 
     try:
-        with open(cert_path, "w") as cert_file:
+        with tempfile.NamedTemporaryFile(
+                mode="w",
+                delete=False,
+                suffix=".pem",
+                encoding="utf-8",
+        ) as cert_file:
+            cert_path = cert_file.name
             cert_file.write(cert_pem)
-        with open(key_path, "w") as key_file:
+
+        with tempfile.NamedTemporaryFile(
+                mode="w",
+                delete=False,
+                suffix=".pem",
+                encoding="utf-8",
+        ) as key_file:
+            key_path = key_file.name
             key_file.write(key_pem)
 
+        os.chmod(cert_path, 0o600)
+        os.chmod(key_path, 0o600)
         ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
 
         fingerprint = hashlib.sha256(cert_pem.encode()).hexdigest()[:16]
@@ -36,9 +47,21 @@ def load_cert_chain_from_memory(ctx: ssl.SSLContext, cert_pem: str, key_pem: str
         return pin, cert_path, key_path
 
     finally:
-        # DO NOT delete immediately; let TLS handshake fully complete
-        print(f"[CERT_LOADER] 🔐 Temp files retained for TLS use: "
-              f"{os.path.normpath(cert_path)}, {os.path.normpath(key_path)}")
+        cleanup_error = None
+        for path in (cert_path, key_path):
+            if not path:
+                continue
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                cleanup_error = cleanup_error or exc
+
+        if cleanup_error is not None:
+            raise RuntimeError(
+                "Failed to remove temporary TLS credential material"
+            ) from cleanup_error
 
 
 

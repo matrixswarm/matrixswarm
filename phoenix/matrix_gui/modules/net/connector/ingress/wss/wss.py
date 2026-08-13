@@ -33,8 +33,8 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
     Create and authenticate a secure WebSocket connection.
 
     1. Writes client cert/key to temp PEM files.
-    2. Opens WSS socket with disabled hostname/CERT checks.
-    3. Verifies server SPKI pin.
+    2. Opens WSS with CA-chain and hostname verification.
+    3. Independently verifies the server SPKI pin.
     4. Sends a signed 'hello' handshake message.
     5. Cleans up temp PEM files.
 
@@ -50,10 +50,24 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
         websocket.WebSocket | None: Active WebSocket on success, else None.
     """
     cert_adapter = AgentCertWrapper(agent, deployment)
-    cert_path = key_path = None
+    cert_path = key_path = ca_path = None
     try:
+        required_tls = {
+            "CA root": cert_adapter.ca_root_cert,
+            "client certificate": cert_adapter.cert,
+            "client key": cert_adapter.key,
+            "server SPKI pin": cert_adapter.server_spki_pin,
+        }
+        missing_tls = [name for name, value in required_tls.items() if not value]
+        if missing_tls:
+            raise ValueError(
+                "Missing required WSS trust material: "
+                + ", ".join(missing_tls)
+            )
+
         cert_path = _write_temp_pem(cert_adapter.cert)
         key_path = _write_temp_pem(cert_adapter.key)
+        ca_path = _write_temp_pem(cert_adapter.ca_root_cert)
         url = f"wss://{host}:{port}/ws"
 
         ws = create_connection(
@@ -62,8 +76,9 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
             sslopt={
                 "certfile": cert_path,
                 "keyfile": key_path,
-                "cert_reqs": ssl.CERT_NONE,
-                "check_hostname": False,
+                "ca_certs": ca_path,
+                "cert_reqs": ssl.CERT_REQUIRED,
+                "check_hostname": True,
             },
         )
 
@@ -92,10 +107,13 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
         emit_gui_exception_log(f"[wss._establish_connection][{agent.get('universal_id')}] connect error", e)
         return None
     finally:
-        for p in (cert_path, key_path):
+        for p in (cert_path, key_path, ca_path):
             if p and os.path.exists(p):
                 os.remove(p)
-        print(f"[CERT_LOADER][WSS] 🧹 Cleaned up {cert_path}, {key_path}")
+        print(
+            f"[CERT_LOADER][WSS] 🧹 Cleaned up "
+            f"{cert_path}, {key_path}, {ca_path}"
+        )
 # ----------------------------------------------------------------------
 class WSSConnector(BaseConnector):
     """

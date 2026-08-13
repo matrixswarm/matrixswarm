@@ -134,6 +134,12 @@ class ReapStatusHandlerMixin:
             .get("reaper")
         )
         if not reaper_id:
+            if self.matrix_priv_obj is None:
+                self.log(
+                    "[ASSASSIN] Reaper creation denied: Matrix signing "
+                    "capability is not provisioned."
+                )
+                return
             reaper_id = f"reaper_{secrets.token_hex(6)}"
             self.meta["swarm_state"]["reserved_agent_ids"]["reaper"] = reaper_id
 
@@ -494,4 +500,3 @@ class ReapStatusHandlerMixin:
             if parent_id:
                 self.delegate_tree_to_agent(parent_id, self.tree_path_dict)
                 self.log(f"[REAPER] 🔁 Delegated parent {parent_id} (root of txn {trans_id})")
-
