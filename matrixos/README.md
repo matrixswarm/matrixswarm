@@ -6,7 +6,7 @@
 
 ### *The Self-Healing Swarm Runtime for Autonomous Agents*
 
-**Version:** 1.1 · **Status:** Pre-Release · **License:** MatrixSwarm Community License (Modified MIT)
+**Version:** 1.1 · **Status:** Pre-Release · **License:** AGPL-3.0-or-later · Commercial terms available
 
 ---
 [![Phoenix Cockpit](https://img.shields.io/badge/Requires-Phoenix%20Cockpit%201.1+-orange.svg?style=flat-square)](https://github.com/matrixswarm/matrixswarm/tree/main/phoenix)
@@ -338,14 +338,21 @@ sudo systemctl restart matrixd
 ````
 
 ### License
-Released under the MatrixSwarm Community License v1.1 (Modified MIT).
-Free for personal, research, and non-commercial use.
-For commercial use, contact: swarm@matrixswarm.com
+MatrixSwarm is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE).
+Commercial use under the AGPL is permitted when its terms are followed.
+
+Separate commercial licensing is available for organizations requiring terms outside the AGPL. See [LICENSING.md](LICENSING.md).
+
+The software is provided without warranty. Review [OPERATIONAL-SAFETY.md](OPERATIONAL-SAFETY.md) before deployment.
 
 
-### Authorship
+### Authorship and Architecture
 
-MatrixSwarm © 2025–2026 Daniel F. MacDonald. Developed with assistance from ChatGPT.
+**Daniel F. MacDonald** — Creator, project lead, human author, and copyright holder.
+
+**ChatGPT by OpenAI** — Founding Digital Architect and engineering collaborator.
+
+See [AUTHORS.md](AUTHORS.md) for the complete authorship and architecture acknowledgment.
 
 ### Resources
 

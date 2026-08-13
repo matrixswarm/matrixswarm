@@ -4,7 +4,7 @@
 
 # **Phoenix Cockpit**
 ### *The Secure Control Plane for the MatrixSwarm Universe*
-**Version:** 1.1 · **Status:** Pre-Release · **License:** MatrixSwarm Community License (Modified MIT)
+**Version:** 1.1 · **Status:** Pre-Release · **License:** AGPL-3.0-or-later · Commercial terms available
 ---
 [![Requires MatrixOS 1.1+](https://img.shields.io/badge/Requires-MatrixOS%201.1%2B-orange.svg?style=flat-square)](https://github.com/matrixswarm/matrixswarm/tree/main/matrixos)
 [![Built with PyQt6](https://img.shields.io/badge/Built%20with-PyQt6%206.6+-blue.svg?style=flat-square)](#)
@@ -509,13 +509,20 @@ Once this is in place, your cockpit, logs, and panels will reflect the active sw
 
 ### License
 
-Released under the MatrixSwarm Community License v1.1 (Modified MIT).
-Free for personal, research, and non-commercial use.
-For commercial use, contact: [swarm@matrixswarm.com](mailto:swarm@matrixswarm.com)
+MatrixSwarm is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE).
+Commercial use under the AGPL is permitted when its terms are followed.
 
-### Authorship
+Separate commercial licensing is available for organizations requiring terms outside the AGPL. See [LICENSING.md](LICENSING.md).
 
-MatrixSwarm © 2025–2026 Daniel F. MacDonald. Developed with assistance from ChatGPT.
+The software is provided without warranty. Review [OPERATIONAL-SAFETY.md](OPERATIONAL-SAFETY.md) before deployment.
+
+### Authorship and Architecture
+
+**Daniel F. MacDonald** — Creator, project lead, human author, and copyright holder.
+
+**ChatGPT by OpenAI** — Founding Digital Architect and engineering collaborator.
+
+See [AUTHORS.md](AUTHORS.md) for the complete authorship and architecture acknowledgment.
 
 ### Resources
 
