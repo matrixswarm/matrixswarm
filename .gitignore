@@ -1,0 +1,136 @@
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+env/
+ENV/
+
+# Python packaging and builds
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local environment configuration
+.env
+.env.*
+!**/.env.example
+!**/.env.sample
+!**/SAMPLE.env
+
+# Local deployment and host configuration
+*.local.json
+*.dev.json
+**/matrix_host.*
+**/previous_hosts.*
+
+# Private keys, certificates, and encrypted artifacts
+*.key
+*.pem
+*.crt
+*.csr
+*.p12
+*.pfx
+*.jks
+*.srl
+*.vault
+*.enc
+*.enc.json
+*.json.enc
+**/socket_certs/
+**/https_certs/
+
+# MatrixSwarm runtime state
+**/comm/
+**/pod/
+**/universes/runtime/
+*.spawn
+*.msg
+*.poke
+*.flag
+*.pid
+*.sock
+*.state
+
+# Logs, temporary files, and backups
+**/logs/
+*.log
+*.tmp
+*.bak
+
+# Non-distributable/local databases
+**/maxmind/
+*.mmdb
+*.sqlite
+*.sqlite3
+
+# MatrixSwarm private or local-only modules
+/matrixos/agents/python_core/sora/
+/matrixos/agents/python_core/cdn_dozer/
+/matrixos/agents/python_core/meta_blast/
+/matrixos/agents/python_core/trend_scout/
+/matrixos/agents/python_core/firewalld_sentinel/
+/matrixos/core/python_core/class_lib/data_science/
+/phoenix/matrix_gui/crypto_alert_panel.py
+/phoenix/phoenix_cockpit_ui.py
+
+# Deployment keys and unsealed directives
+**/boot_directives/keys/
+**/boot_directives_priv/
+**/boot_directives/*.json
+!**/boot_directives/SAMPLE*.json
+!**/boot_directives/*.example.json
+
+# Runtime configuration containing credentials or infrastructure details
+**/settings.json
+**/alerts.json
+**/config/*.json
+**/config/*.enc
+**/config/*.key
+**/config/*.pem
+**/config/*.crt
+!**/config/SAMPLE*.json
+!**/config/*.example.json
+
+# Operational vault contents
+/phoenix/matrix_gui/vaults/*
+!/phoenix/matrix_gui/vaults/.gitkeep
+!/phoenix/matrix_gui/vaults/README.md
+/phoenix/vaults/*
+!/phoenix/vaults/.gitkeep
+!/phoenix/vaults/README.md
+
+# Browser sessions and authentication state
+**/scraper_cookies.json
+/phoenix/matrix_gui/**/cookies/
+/phoenix/matrix_gui/**/tokens/
+/phoenix/matrix_gui/**/auth/
+/phoenix/matrix_gui/**/login_flows/
+/phoenix/matrix_gui/**/state.json
+**/.ms-playwright/
+
+# Local operator scratch files
+To OpenAI.txt
