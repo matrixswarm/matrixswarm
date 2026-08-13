@@ -3,6 +3,9 @@
 import os
 import io
 import time
+import base64
+import hmac
+from hashlib import sha256
 import paramiko
 from PyQt6 import QtWidgets
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -11,6 +14,74 @@ from PyQt6.QtWidgets import (
     QComboBox, QFileDialog, QTextEdit, QLineEdit, QGroupBox
 )
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
+
+
+def _clean_secret(value):
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned or cleaned.lower() == "none":
+        return None
+    return cleaned
+
+
+def _sha256_fingerprint(key):
+    digest = sha256(key.asbytes()).digest()
+    return "SHA256:" + base64.b64encode(digest).decode("ascii")
+
+
+def _normalize_fingerprint(value):
+    cleaned = _clean_secret(value)
+    if not cleaned or not cleaned.startswith("SHA256:"):
+        raise ValueError("A trusted SHA256 host-key fingerprint is required")
+    return cleaned.rstrip("=")
+
+
+class _PinnedHostKeyPolicy(paramiko.MissingHostKeyPolicy):
+    def __init__(self, expected_fingerprint):
+        self.expected = _normalize_fingerprint(expected_fingerprint)
+
+    def missing_host_key(self, client, hostname, key):
+        actual = _sha256_fingerprint(key)
+        if not hmac.compare_digest(
+            self.expected,
+            _normalize_fingerprint(actual),
+        ):
+            raise paramiko.SSHException(
+                "SSH host-key fingerprint mismatch for "
+                f"{hostname}: expected {self.expected}, "
+                f"received {_normalize_fingerprint(actual)}"
+            )
+
+
+def _load_private_key(key_pem, passphrase=None):
+    key_text = _clean_secret(key_pem)
+    if not key_text:
+        raise ValueError("Private key is required for private-key auth")
+
+    password = _clean_secret(passphrase)
+    errors = []
+
+    for key_type in (
+        paramiko.RSAKey,
+        paramiko.Ed25519Key,
+        paramiko.ECDSAKey,
+    ):
+        try:
+            return key_type.from_private_key(
+                io.StringIO(key_text),
+                password=password,
+            )
+        except (
+            paramiko.SSHException,
+            ValueError,
+        ) as exc:
+            errors.append(f"{key_type.__name__}: {exc}")
+
+    raise ValueError(
+        "Unsupported or invalid private key (RSA, Ed25519, and ECDSA "
+        "are supported): " + "; ".join(errors)
+    )
 
 class RailgunInstallDialog(QDialog):
     def __init__(self, parent=None):
@@ -113,14 +184,24 @@ class RailgunInstallDialog(QDialog):
             host = meta.get("host")
             user = meta.get("username", "root")
             port = int(meta.get("port", 22))
-            key = meta.get("private_key", "")
+            auth_type = str(
+                meta.get("auth_type", "private_key")
+            ).strip().lower()
 
             self.ssh_selector.addItem(f"{label} ({host})", sid)
             self.ssh_map[sid] = {
                 "host": host,
                 "username": user,
                 "port": port,
-                "private_key": key,
+                "auth_type": auth_type,
+                "password": _clean_secret(meta.get("password")),
+                "private_key": _clean_secret(meta.get("private_key")),
+                "private_key_passphrase": _clean_secret(
+                    meta.get("private_key_passphrase")
+                ),
+                "trusted_host_fingerprint": _clean_secret(
+                    meta.get("trusted_host_fingerprint")
+                ),
             }
 
         self.output_box.append(f"[Railgun] Loaded {len(self.ssh_map)} SSH profiles.")
@@ -158,20 +239,19 @@ class RailgunInstallDialog(QDialog):
             self.ssh_selector.setCurrentIndex(selected_index)
             self.output_box.append("[Railgun] Starting installation…")
             ssh_cfg = self._get_selected_ssh()
+            if not ssh_cfg:
+                raise RuntimeError("Selected SSH profile could not be loaded")
 
-            host = ssh_cfg["host"]
-            user = ssh_cfg["username"]
-            port = ssh_cfg["port"]
-            key_pem = ssh_cfg["private_key"]
+            host = ssh_cfg.get("host")
+            user = ssh_cfg.get("username")
+            if not host or not user:
+                raise RuntimeError(
+                    "SSH profile is missing host or username"
+                )
 
-            if not host or not key_pem:
-                self.output_box.append("[Railgun] SSH profile missing host or private key.")
-                return
-
-            client = self._connect_ssh(host, user, port, key_pem)
+            client = self._connect_ssh(ssh_cfg)
             if not client:
-                self.output_box.append("[Railgun] SSH connection failed.")
-                return
+                raise RuntimeError("SSH connection failed")
 
             remote_staging = self._create_remote_staging(client)
 
@@ -233,7 +313,13 @@ class RailgunInstallDialog(QDialog):
                     break
 
             exit_code = channel.recv_exit_status()
-            self.output_box.append(f"[Railgun] Installer exited (code={exit_code})")
+            self.output_box.append(
+                f"[Railgun] Installer exited (code={exit_code})"
+            )
+            if exit_code != 0:
+                raise RuntimeError(
+                    f"Remote installer failed with exit code {exit_code}"
+                )
 
 
         except Exception as e:
@@ -247,32 +333,96 @@ class RailgunInstallDialog(QDialog):
             self._install_running = False
             self.btn_install.setEnabled(True)
 
-    def _connect_ssh(self, host, user, port, key_pem):
+    def _connect_ssh(self, ssh_cfg):
+        client = None
         try:
-            key = paramiko.RSAKey.from_private_key(io.StringIO(key_pem))
+            host = ssh_cfg["host"]
+            user = ssh_cfg["username"]
+            port = int(ssh_cfg.get("port", 22))
+            auth_type = str(
+                ssh_cfg.get("auth_type", "private_key")
+            ).strip().lower()
+            expected_fingerprint = ssh_cfg.get(
+                "trusted_host_fingerprint"
+            )
+
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(host, port=port, username=user, pkey=key)
-            self.output_box.append(f"[SSH] Connected to {host}")
+            client.set_missing_host_key_policy(
+                _PinnedHostKeyPolicy(expected_fingerprint)
+            )
+
+            connect_args = {
+                "hostname": host,
+                "port": port,
+                "username": user,
+                "look_for_keys": False,
+                "allow_agent": False,
+                "timeout": 15,
+                "auth_timeout": 15,
+                "banner_timeout": 15,
+            }
+
+            if auth_type == "password":
+                password = _clean_secret(ssh_cfg.get("password"))
+                if not password:
+                    raise ValueError(
+                        "Password is required for password auth"
+                    )
+                connect_args["password"] = password
+            elif auth_type == "private_key":
+                connect_args["pkey"] = _load_private_key(
+                    ssh_cfg.get("private_key"),
+                    ssh_cfg.get("private_key_passphrase"),
+                )
+            elif auth_type == "agent":
+                connect_args["allow_agent"] = True
+            else:
+                raise ValueError(
+                    f"Unsupported SSH auth type: {auth_type}"
+                )
+
+            client.connect(**connect_args)
+
+            server_key = client.get_transport().get_remote_server_key()
+            actual_fingerprint = _sha256_fingerprint(server_key)
+            if not hmac.compare_digest(
+                _normalize_fingerprint(expected_fingerprint),
+                _normalize_fingerprint(actual_fingerprint),
+            ):
+                raise paramiko.SSHException(
+                    "SSH host-key fingerprint changed during connection"
+                )
+
+            self.output_box.append(
+                f"[SSH] Connected to {host} "
+                f"({actual_fingerprint})"
+            )
             return client
         except Exception as e:
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
             self.output_box.append(f"[SSH ERROR] {e}")
             return None
 
     def _create_remote_staging(self, client):
         ts = time.strftime("%Y%m%d_%H%M%S")
         remote = f"/tmp/matrix_staging_{ts}"
-        client.exec_command(f"mkdir -p {remote}")
-        time.sleep(0.2)  # give remote FS time to settle
+        command = f"mkdir -p {remote} && test -d {remote}"
+        stdin, stdout, stderr = client.exec_command(command)
+        error = stderr.read().decode(errors="replace").strip()
+        exit_code = stdout.channel.recv_exit_status()
 
-        stdin, stdout, stderr = client.exec_command(f"test -d {remote} && echo OK || echo FAIL")
-        result = stdout.read().decode().strip()
+        if exit_code != 0:
+            raise RuntimeError(
+                f"Failed to create remote staging at {remote}: {error}"
+            )
 
-        if result != "OK":
-            self.output_box.append(f"[Railgun ERROR] Failed to create remote staging at {remote}")
-        else:
-            self.output_box.append(f"[Railgun] Remote staging created: {remote}")
-
+        self.output_box.append(
+            f"[Railgun] Remote staging created: {remote}"
+        )
         return remote
 
     def _upload_directory(self, sftp, local_dir, remote_dir):
