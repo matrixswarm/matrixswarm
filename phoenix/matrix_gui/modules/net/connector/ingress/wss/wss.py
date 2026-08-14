@@ -33,8 +33,8 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
     Create and authenticate a secure WebSocket connection.
 
     1. Writes client cert/key to temp PEM files.
-    2. Opens WSS with CA-chain and hostname verification.
-    3. Independently verifies the server SPKI pin.
+    2. Opens WSS without CA/hostname identity checks.
+    3. Authenticates the server using the deployment SPKI pin.
     4. Sends a signed 'hello' handshake message.
     5. Cleans up temp PEM files.
 
@@ -49,11 +49,12 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
     Returns:
         websocket.WebSocket | None: Active WebSocket on success, else None.
     """
-    cert_adapter = AgentCertWrapper(agent, deployment)
-    cert_path = key_path = ca_path = None
+    cert_adapter = None
+    ws = None
+    cert_path = key_path = None
     try:
+        cert_adapter = AgentCertWrapper(agent, deployment)
         required_tls = {
-            "CA root": cert_adapter.ca_root_cert,
             "client certificate": cert_adapter.cert,
             "client key": cert_adapter.key,
             "server SPKI pin": cert_adapter.server_spki_pin,
@@ -67,7 +68,6 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
 
         cert_path = _write_temp_pem(cert_adapter.cert)
         key_path = _write_temp_pem(cert_adapter.key)
-        ca_path = _write_temp_pem(cert_adapter.ca_root_cert)
         url = f"wss://{host}:{port}/ws"
 
         ws = create_connection(
@@ -76,18 +76,29 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
             sslopt={
                 "certfile": cert_path,
                 "keyfile": key_path,
-                "ca_certs": ca_path,
-                "cert_reqs": ssl.CERT_REQUIRED,
-                "check_hostname": True,
+                # The exact deployment SPKI pin is the server identity trust
+                # anchor. CA/hostname checks would reject IP targets before
+                # that pin can be evaluated.
+                "cert_reqs": ssl.CERT_NONE,
+                "check_hostname": False,
             },
         )
 
-        # SPKI verify
+        # Authenticate the peer before sending the signed hello.
         peer_cert = ws.sock.getpeercert(binary_form=True)
-        ok, actual_pin = verify_spki_pin(peer_cert, cert_adapter.server_spki_pin)
+        if not peer_cert:
+            raise ConnectionError("WSS peer did not present a certificate")
+        ok, actual_pin = verify_spki_pin(
+            peer_cert,
+            cert_adapter.server_spki_pin,
+        )
         if not ok:
-            ws.close()
-            raise ConnectionError(f"SPKI mismatch: expected {cert_adapter.server_spki_pin}, got {actual_pin}")
+            raise ConnectionError(
+                "WSS SPKI mismatch: "
+                f"expected {cert_adapter.server_spki_pin}, got {actual_pin}"
+            )
+
+        print("[WSSConnector] ✅ Server SPKI pin verified")
 
         # signed hello
         hello = {
@@ -104,16 +115,27 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
         return ws
 
     except Exception as e:
-        emit_gui_exception_log(f"[wss._establish_connection][{agent.get('universal_id')}] connect error", e)
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        emit_gui_exception_log(
+            f"[wss._establish_connection][{agent.get('universal_id')}] connect error",
+            e,
+        )
         return None
     finally:
-        for p in (cert_path, key_path, ca_path):
-            if p and os.path.exists(p):
-                os.remove(p)
-        print(
-            f"[CERT_LOADER][WSS] 🧹 Cleaned up "
-            f"{cert_path}, {key_path}, {ca_path}"
-        )
+        for path in (cert_path, key_path):
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError as cleanup_error:
+                    emit_gui_exception_log(
+                        "[wss._establish_connection] temporary PEM cleanup failed",
+                        cleanup_error,
+                    )
+        print("[CERT_LOADER][WSS] 🧹 Temporary client certificate files cleaned")
 # ----------------------------------------------------------------------
 class WSSConnector(BaseConnector):
     """

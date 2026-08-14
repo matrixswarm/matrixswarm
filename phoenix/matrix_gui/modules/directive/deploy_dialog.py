@@ -2,6 +2,10 @@
 import os
 from PyQt6 import QtWidgets, QtCore
 from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
+from matrix_gui.modules.railgun.remote_shell import (
+    quote_remote_argument,
+    validate_remote_token,
+)
 QtCore.QCoreApplication.processEvents()
 class DeployDialog(QtWidgets.QDialog):
     """Railgun-style MatrixD controller over SSH, with SSH selector."""
@@ -14,6 +18,9 @@ class DeployDialog(QtWidgets.QDialog):
 
         self.ssh_map = ssh_map
         self.deployment = deployment or {}
+        self._ssh_client = None
+        self._active_channel = None
+        self._poll_timer = None
         self.layout = QtWidgets.QVBoxLayout(self)
 
         # -------------------------------
@@ -63,6 +70,11 @@ class DeployDialog(QtWidgets.QDialog):
 
         # Flags
         self.flag_verbose = QtWidgets.QCheckBox("--verbose")
+        self.flag_verbose.setEnabled(False)
+        self.flag_verbose.setToolTip(
+            "Disabled for SSH boots: detached agents must not inherit the SSH output channel. "
+            "Use the cockpit agent logs for live output."
+        )
         self.flag_debug = QtWidgets.QCheckBox("--debug")
         self.flag_clean = QtWidgets.QCheckBox("--clean")
         self.flag_rugpull = QtWidgets.QCheckBox("--rug-pull")
@@ -130,12 +142,23 @@ class DeployDialog(QtWidgets.QDialog):
         swarm_key = self.deployment["swarm_key"]
         directive_name = self.deployment["encrypted_path"]
         # Collect options
-        universe = self.universe_edit.text().strip() or self.deployment["label"]
         directive_path = self.directive_dropdown.currentData()
-        directive_file = os.path.basename(directive_path)
+        try:
+            universe = validate_remote_token(
+                self.universe_edit.text().strip() or self.deployment["label"],
+                "Universe name",
+            )
+            if not directive_path:
+                raise ValueError("Directive path is required")
+            directive_file = validate_remote_token(
+                os.path.basename(str(directive_path)),
+                "Directive filename",
+            )
+        except ValueError as error:
+            self.output.append(f"[ERROR] {error}\n")
+            return
 
         flags = []
-        if self.flag_verbose.isChecked(): flags.append("--verbose")
         if self.flag_debug.isChecked(): flags.append("--debug")
         if self.flag_clean.isChecked(): flags.append("--clean")
         if self.flag_rugpull.isChecked(): flags.append("--rug-pull")
@@ -147,7 +170,10 @@ class DeployDialog(QtWidgets.QDialog):
         try:
 
             if directive_name:
-                directive_leaf = str(directive_name).replace("\\", "/").rsplit("/", 1)[-1]
+                directive_leaf = validate_remote_token(
+                    str(directive_name).replace("\\", "/").rsplit("/", 1)[-1],
+                    "Directive filename",
+                )
                 directive_remote = f"/matrix/boot_directives/{directive_leaf}"
             else:
                 directive_remote = f"/matrix/boot_directives/{universe}.enc.json"
@@ -156,35 +182,52 @@ class DeployDialog(QtWidgets.QDialog):
                 self.output.append("[ERROR] No SWARM_KEY available for this deployment.\n")
                 return
 
+            universe = validate_remote_token(universe, "Universe name")
+            quoted_universe = quote_remote_argument(universe, "Universe name")
+            quoted_swarm_key = quote_remote_argument(swarm_key, "SWARM_KEY")
+
             if action == "start":
                 directive_remote = f"/matrix/boot_directives/{directive_file}"
+                quoted_directive = quote_remote_argument(
+                    directive_remote,
+                    "Directive path",
+                )
 
                 cmd = (
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
-                    f"export SWARM_KEY='{swarm_key}' && "
-                    f"[ -d venv ] && source venv/bin/activate || true && "
-                    f"matrixd boot --universe {universe} --directive {directive_remote} {flag_str}"
+                    f"export SWARM_KEY={quoted_swarm_key} && "
+                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
+                    f"matrixd boot --universe {quoted_universe} "
+                    f"--directive {quoted_directive} {flag_str}"
                 )
 
             elif action == "restart":
+                quoted_directive = quote_remote_argument(
+                    directive_remote,
+                    "Directive path",
+                )
                 cmd = (
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
-                    f"export SWARM_KEY='{swarm_key}' && "
-                    f"[ -d venv ] && source venv/bin/activate || true && "
-                    f"matrixd kill --universe {universe} && "
-                    f"matrixd boot --universe {universe} --directive {directive_remote} {flag_str}"
+                    f"export SWARM_KEY={quoted_swarm_key} && "
+                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
+                    f"matrixd kill --universe {quoted_universe} && "
+                    f"matrixd boot --universe {quoted_universe} "
+                    f"--directive {quoted_directive} {flag_str}"
                 )
             elif action == "stop":
                 cmd = (
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
-                    f"[ -d venv ] && source venv/bin/activate || true && "
-                    f"matrixd kill --universe {universe}"
+                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
+                    f"matrixd kill --universe {quoted_universe}"
                 )
 
-            display_cmd = cmd.replace(str(swarm_key), "[REDACTED]")
+            display_cmd = cmd.replace(
+                f"export SWARM_KEY={quoted_swarm_key}",
+                "export SWARM_KEY='[REDACTED]'",
+            )
             self.output.append(f"[CMD] {display_cmd}\n")
 
             try:
@@ -196,7 +239,6 @@ class DeployDialog(QtWidgets.QDialog):
 
                 transport = client.get_transport()
                 chan = transport.open_session()
-                chan.get_pty()
                 chan.exec_command(cmd)
 
                 # store references so poller can read them
@@ -217,17 +259,18 @@ class DeployDialog(QtWidgets.QDialog):
     def _poll_ssh_channel(self):
         chan = getattr(self, "_active_channel", None)
         if chan is None:
-            self._poll_timer.stop()
+            if self._poll_timer is not None:
+                self._poll_timer.stop()
             return
 
         try:
-            # STDOUT
-            if chan.recv_ready():
+            # Drain the SSH window fully so boot output cannot back-pressure
+            # the remote matrixd process.
+            while chan.recv_ready():
                 data = chan.recv(4096).decode(errors="ignore")
                 self.output.append(data)
 
-            # STDERR
-            if chan.recv_stderr_ready():
+            while chan.recv_stderr_ready():
                 data = chan.recv_stderr(4096).decode(errors="ignore")
                 self.output.append(f"<span style='color:red'>{data}</span>")
 
@@ -235,12 +278,32 @@ class DeployDialog(QtWidgets.QDialog):
             if chan.exit_status_ready():
                 code = chan.recv_exit_status()
                 self.output.append(f"\n[Exit {code}] remote action complete.\n")
-
-                self._poll_timer.stop()
-                self._active_channel = None
-                chan.close()
+                self._close_ssh_session()
 
         except Exception as e:
             self.output.append(f"[ERROR] SSH stream: {e}")
+            self._close_ssh_session()
+
+    def _close_ssh_session(self):
+        if self._poll_timer is not None:
             self._poll_timer.stop()
-            self._active_channel = None
+
+        chan = self._active_channel
+        self._active_channel = None
+        if chan is not None:
+            try:
+                chan.close()
+            except Exception:
+                pass
+
+        client = self._ssh_client
+        self._ssh_client = None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def closeEvent(self, event):
+        self._close_ssh_session()
+        super().closeEvent(event)

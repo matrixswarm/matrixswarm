@@ -12,6 +12,7 @@ from core.python_core.class_lib.crypto.symmetric_encryption.aes.aes import AESHa
 from core.python_core.class_lib.email.email_parser import EmailParser
 
 from core.python_core.boot_agent import BootAgent
+from core.python_core.utils.mail_tls import create_mail_tls_context
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
@@ -52,7 +53,7 @@ class Agent(BootAgent):
 
         try:
             self.AGENT_VERSION = "2.0.0"
-            
+
             cfg = self.tree_node.get("config", {}) or {}
 
             # --- Extract incoming email config directly from deployment ---
@@ -299,18 +300,25 @@ class Agent(BootAgent):
     def _imap_connect(self, cfg: Dict[str, Any]) -> imaplib.IMAP4:
         host = cfg.get("incoming_server")
         port = int(cfg.get("incoming_port") or 143)
-        enc = (cfg.get("incoming_encryption") or "").upper()
+        enc = (cfg.get("incoming_encryption") or "").strip().upper()
         user = cfg.get("incoming_username")
         pwd = cfg.get("incoming_password")
 
         try:
+            context = create_mail_tls_context()
 
             if enc in ("SSL", "TLS", "IMAPS", "SSL/TLS"):
-                client = imaplib.IMAP4_SSL(host, port, )
-            else:
+                client = imaplib.IMAP4_SSL(host, port, ssl_context=context)
+            elif enc == "STARTTLS":
                 client = imaplib.IMAP4(host, port)
-            if enc == "STARTTLS":
-                client.starttls()
+                client.starttls(ssl_context=context)
+            elif enc == "NONE":
+                client = imaplib.IMAP4(host, port)
+            else:
+                raise ValueError(
+                    "IMAP encryption must be SSL, TLS, IMAPS, SSL/TLS, "
+                    "STARTTLS, or explicit NONE"
+                )
             client.login(user, pwd)
             return client
 
@@ -909,7 +917,7 @@ class Agent(BootAgent):
     def _safe_poll_all_accounts_once(self):
         with self._accounts_lock:
             self._poll_all_accounts_once()
-            
+
     def worker(self, config=None, identity=None):
         """
         Main polling loop.

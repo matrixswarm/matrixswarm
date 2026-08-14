@@ -21,10 +21,10 @@ Attributes:
 """
 import sys, time, builtins, inspect, json, pprint
 
-from matrix_gui.core.utils.linux_gui_preflight import require_linux_egl
+from matrix_gui.core.utils.linux_gui_preflight import require_linux_gui_runtime
 
 
-require_linux_egl()
+require_linux_gui_runtime()
 
 print("Python:", sys.version)
 try:

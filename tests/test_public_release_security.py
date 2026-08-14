@@ -38,11 +38,9 @@ class PublicReleaseSecurityTests(unittest.TestCase):
             tree_source,
         )
 
-    def test_active_transport_paths_do_not_disable_tls_verification(self):
+    def test_ca_verified_transport_paths_do_not_disable_tls_verification(self):
         transport_paths = (
-            "phoenix/matrix_gui/modules/net/connector/egress/https/https.py",
             "phoenix/matrix_gui/modules/net/connector/egress/smtp/smtp.py",
-            "phoenix/matrix_gui/modules/net/connector/ingress/wss/wss.py",
             "phoenix/matrix_gui/modules/net/connector/ingress/wss/establish_tls_socket.py",
             "phoenix/matrix_gui/modules/net/connector/wss/wss.py",
             "phoenix/matrix_gui/modules/net/connector/wss/establish_tls_socket.py",
@@ -62,6 +60,45 @@ class PublicReleaseSecurityTests(unittest.TestCase):
                 self.assertNotIn("check_hostname = False", text)
                 self.assertNotIn("verify=False", text)
                 self.assertNotIn("_create_unverified_context", text)
+
+    def test_pin_authoritative_phoenix_transports_verify_before_payload(self):
+        https_source = source(
+            "phoenix/matrix_gui/modules/net/connector/egress/https/https.py"
+        )
+        self.assertEqual(1, https_source.count("ssl.CERT_NONE"))
+        self.assertIn("ctx_ssl.check_hostname = False", https_source)
+        self.assertNotIn("load_verify_locations", https_source)
+        self.assertNotIn('"CA root": cert_adapter.ca_root_cert', https_source)
+        self.assertIn(
+            'raise ConnectionError("HTTPS peer did not present a certificate")',
+            https_source,
+        )
+        self.assertLess(
+            https_source.index("ok, actual_pin = verify_spki_pin("),
+            https_source.index("https_conn.request("),
+        )
+
+        wss_source = source(
+            "phoenix/matrix_gui/modules/net/connector/ingress/wss/wss.py"
+        )
+        self.assertEqual(1, wss_source.count("ssl.CERT_NONE"))
+        self.assertIn('"check_hostname": False', wss_source)
+        self.assertNotIn('"ca_certs":', wss_source)
+        self.assertNotIn('"CA root": cert_adapter.ca_root_cert', wss_source)
+        self.assertIn(
+            'raise ConnectionError("WSS peer did not present a certificate")',
+            wss_source,
+        )
+        self.assertLess(
+            wss_source.index("ok, actual_pin = verify_spki_pin("),
+            wss_source.index("ws.send(json.dumps(hello))"),
+        )
+        self.assertIn("if ws is not None:", wss_source)
+        self.assertIn("ws.close()", wss_source)
+
+        spki_source = source("phoenix/matrix_gui/core/utils/spki_utils.py")
+        self.assertIn("hmac.compare_digest", spki_source)
+        self.assertIn("A non-empty expected SPKI pin is required", spki_source)
 
     def test_trust_helpers_do_not_offer_unverified_request_paths(self):
         trust_helpers = (
@@ -120,13 +157,15 @@ class PublicReleaseSecurityTests(unittest.TestCase):
             "matrixos/agents/python_core/matrix_email_egress/matrix_email_egress.py",
             "phoenix/matrix_gui/modules/net/connector/ingress/imap/imap.py",
         )
+        guard_markers = {
+            smtp_paths[0]: "mode not in self._TLS_MODES",
+            smtp_paths[1]: 'mode not in ("SSL", "TLS", "STARTTLS")',
+            smtp_paths[2]: 'mode not in ("SSL", "TLS", "STARTTLS")',
+        }
         for path in smtp_paths:
             with self.subTest(path=path):
                 text = source(path)
-                self.assertIn(
-                    'mode not in ("SSL", "TLS", "STARTTLS")',
-                    text,
-                )
+                self.assertIn(guard_markers[path], text)
                 self.assertIn(
                     "SMTP encryption must be SSL, TLS, or STARTTLS",
                     text,

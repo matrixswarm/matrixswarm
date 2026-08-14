@@ -88,19 +88,20 @@ python phoenix.py
 
 #### Linux
 
-Phoenix uses Qt's EGL runtime. Install the system package that provides
-`libEGL.so.1` before creating the Python environment:
+Phoenix uses Qt's EGL and XCB cursor runtimes. Install the system packages that
+provide `libEGL.so.1` and `libxcb-cursor.so.0` before creating the Python
+environment:
 
 Ubuntu/Debian:
 
 ```bash
-sudo apt update && sudo apt install -y libegl1
+sudo apt update && sudo apt install -y libegl1 libxcb-cursor0
 ```
 
 Fedora/RHEL/Rocky/Alma:
 
 ```bash
-sudo dnf install -y libglvnd-egl
+sudo dnf install -y libglvnd-egl xcb-util-cursor
 ```
 
 Then install and launch Phoenix:
@@ -115,8 +116,8 @@ python -m pip install -r requirements.txt
 python phoenix.py
 ```
 
-If `libEGL.so.1` is missing, Phoenix exits before importing PyQt6 and prints
-the appropriate package-install commands.
+If either native GUI library is missing, Phoenix exits before importing PyQt6
+and prints the appropriate package-install commands.
 
 #### macOS
 
@@ -620,4 +621,3 @@ GUI live
 Vault integrated
 
 Recruiting contributors who think in systems.
-

@@ -17,6 +17,7 @@ from email import policy
 from email.parser import BytesParser
 
 from core.python_core.boot_agent import BootAgent
+from core.python_core.utils.mail_tls import create_mail_tls_context
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.class_lib.packet_delivery.utility.security.unwrap_secure_packet import unwrap_secure_packet
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
@@ -86,7 +87,11 @@ class Agent(BootAgent):
         """Connect to IMAP server using SSL."""
         try:
             socket.setdefaulttimeout(20)
-            M = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+            M = imaplib.IMAP4_SSL(
+                self.imap_host,
+                self.imap_port,
+                ssl_context=create_mail_tls_context(),
+            )
             M.login(self.imap_user, self.imap_pass)
             return M
         except Exception as e:
