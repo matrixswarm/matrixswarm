@@ -1,5 +1,5 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-import json, time, hashlib, platform, winsound, subprocess, threading, os
+import json, time, hashlib, platform, subprocess, threading, os
 from pathlib import Path
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QGroupBox, QComboBox, QCheckBox, QHBoxLayout
 from matrix_gui.core.class_lib.feed.feed_formatter import FeedFormatter
@@ -228,6 +228,8 @@ class PhoenixStaticPanel(QWidget):
                 sound_name = self.sound_dropdown.currentText()
                 sound_path = os.path.abspath(f"matrix_gui/resources/sounds/{sound_name}")
                 if platform.system() == "Windows":
+                    import winsound
+
                     winsound.PlaySound(sound_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
                 elif platform.system() == "Darwin":
                     subprocess.Popen(["afplay", sound_path])
