@@ -86,7 +86,39 @@ python -m pip install -r requirements.txt
 python phoenix.py
 ```
 
-#### Linux/macOS
+#### Linux
+
+Phoenix uses Qt's EGL runtime. Install the system package that provides
+`libEGL.so.1` before creating the Python environment:
+
+Ubuntu/Debian:
+
+```bash
+sudo apt update && sudo apt install -y libegl1
+```
+
+Fedora/RHEL/Rocky/Alma:
+
+```bash
+sudo dnf install -y libglvnd-egl
+```
+
+Then install and launch Phoenix:
+
+```bash
+cd phoenix
+python3 -c "import sys; assert sys.version_info >= (3, 10), 'Python 3.10+ required'"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python phoenix.py
+```
+
+If `libEGL.so.1` is missing, Phoenix exits before importing PyQt6 and prints
+the appropriate package-install commands.
+
+#### macOS
 
 ```bash
 cd phoenix
@@ -588,3 +620,4 @@ GUI live
 Vault integrated
 
 Recruiting contributors who think in systems.
+
