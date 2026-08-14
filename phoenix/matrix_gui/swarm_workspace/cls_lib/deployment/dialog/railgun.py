@@ -5,6 +5,10 @@ Non-blocking SSH deploy with full live output streaming.
 """
 import ntpath
 import posixpath
+from matrix_gui.modules.railgun.remote_shell import (
+    quote_remote_argument,
+    validate_remote_token,
+)
 from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 
 from PyQt6.QtCore import QThread, pyqtSignal, QSize
@@ -35,6 +39,22 @@ class RailgunWorker(QThread):
         client = None
         chan = None
         try:
+            # Reject malformed command data before opening SSH or uploading.
+            universe = validate_remote_token(
+                self.opts["universe"],
+                "Universe name",
+            )
+            bundle_name = validate_remote_token(
+                ntpath.basename(self.local_bundle),
+                "Directive filename",
+            )
+            reboot_id = None
+            if self.opts.get("reboot_id"):
+                reboot_id = validate_remote_token(
+                    self.opts["reboot_id"],
+                    "Reboot ID",
+                )
+
             # 1. SSH Connect with the Registry's pinned host identity.
             client, actual_fingerprint = connect_ssh_profile(self.ssh_meta)
             self.sig_stdout.emit(
@@ -51,14 +71,12 @@ class RailgunWorker(QThread):
             except FileNotFoundError:
                 sftp.mkdir(remote_root)
 
-            remote_bundle = posixpath.join(remote_root, ntpath.basename(self.local_bundle))
+            remote_bundle = posixpath.join(remote_root, bundle_name)
             sftp.put(self.local_bundle, remote_bundle)
             sftp.close()
 
             # 3. Build boot command. Detached agents must never inherit this
             # SSH channel, so --verbose is deliberately suppressed here.
-            universe = self.opts["universe"]
-
             flags = []
             for flag in ["debug", "clean", "reboot", "rug_pull", "reboot_new"]:
                 if self.opts.get(flag):
@@ -70,17 +88,23 @@ class RailgunWorker(QThread):
                     "use cockpit agent logs for live output.\n"
                 )
 
-            if self.opts.get("reboot_id"):
-                flags.append(f"--reboot-id {self.opts['reboot_id']}")
+            if reboot_id:
+                flags.extend(
+                    ["--reboot-id", quote_remote_argument(reboot_id, "Reboot ID")]
+                )
 
             boot_flags = " ".join(flags)
+            quoted_universe = quote_remote_argument(universe, "Universe name")
+            quoted_bundle = quote_remote_argument(remote_bundle, "Directive path")
+            quoted_swarm_key = quote_remote_argument(self.swarm_key, "SWARM_KEY")
 
             cmd = (
                 f"cd /matrix && "
                 f"export SITE_ROOT=/matrix && "
-                f"export SWARM_KEY='{self.swarm_key}' && "
+                f"export SWARM_KEY={quoted_swarm_key} && "
                 f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
-                f"(matrixd boot --universe {universe} --directive {remote_bundle} {boot_flags}) "
+                f"(matrixd boot --universe {quoted_universe} "
+                f"--directive {quoted_bundle} {boot_flags}) "
                 f"2>&1"
             )
 

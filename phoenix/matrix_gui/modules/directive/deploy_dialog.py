@@ -2,6 +2,10 @@
 import os
 from PyQt6 import QtWidgets, QtCore
 from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
+from matrix_gui.modules.railgun.remote_shell import (
+    quote_remote_argument,
+    validate_remote_token,
+)
 QtCore.QCoreApplication.processEvents()
 class DeployDialog(QtWidgets.QDialog):
     """Railgun-style MatrixD controller over SSH, with SSH selector."""
@@ -138,9 +142,21 @@ class DeployDialog(QtWidgets.QDialog):
         swarm_key = self.deployment["swarm_key"]
         directive_name = self.deployment["encrypted_path"]
         # Collect options
-        universe = self.universe_edit.text().strip() or self.deployment["label"]
         directive_path = self.directive_dropdown.currentData()
-        directive_file = os.path.basename(directive_path)
+        try:
+            universe = validate_remote_token(
+                self.universe_edit.text().strip() or self.deployment["label"],
+                "Universe name",
+            )
+            if not directive_path:
+                raise ValueError("Directive path is required")
+            directive_file = validate_remote_token(
+                os.path.basename(str(directive_path)),
+                "Directive filename",
+            )
+        except ValueError as error:
+            self.output.append(f"[ERROR] {error}\n")
+            return
 
         flags = []
         if self.flag_debug.isChecked(): flags.append("--debug")
@@ -154,7 +170,10 @@ class DeployDialog(QtWidgets.QDialog):
         try:
 
             if directive_name:
-                directive_leaf = str(directive_name).replace("\\", "/").rsplit("/", 1)[-1]
+                directive_leaf = validate_remote_token(
+                    str(directive_name).replace("\\", "/").rsplit("/", 1)[-1],
+                    "Directive filename",
+                )
                 directive_remote = f"/matrix/boot_directives/{directive_leaf}"
             else:
                 directive_remote = f"/matrix/boot_directives/{universe}.enc.json"
@@ -163,35 +182,52 @@ class DeployDialog(QtWidgets.QDialog):
                 self.output.append("[ERROR] No SWARM_KEY available for this deployment.\n")
                 return
 
+            universe = validate_remote_token(universe, "Universe name")
+            quoted_universe = quote_remote_argument(universe, "Universe name")
+            quoted_swarm_key = quote_remote_argument(swarm_key, "SWARM_KEY")
+
             if action == "start":
                 directive_remote = f"/matrix/boot_directives/{directive_file}"
+                quoted_directive = quote_remote_argument(
+                    directive_remote,
+                    "Directive path",
+                )
 
                 cmd = (
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
-                    f"export SWARM_KEY='{swarm_key}' && "
+                    f"export SWARM_KEY={quoted_swarm_key} && "
                     f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
-                    f"matrixd boot --universe {universe} --directive {directive_remote} {flag_str}"
+                    f"matrixd boot --universe {quoted_universe} "
+                    f"--directive {quoted_directive} {flag_str}"
                 )
 
             elif action == "restart":
+                quoted_directive = quote_remote_argument(
+                    directive_remote,
+                    "Directive path",
+                )
                 cmd = (
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
-                    f"export SWARM_KEY='{swarm_key}' && "
+                    f"export SWARM_KEY={quoted_swarm_key} && "
                     f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
-                    f"matrixd kill --universe {universe} && "
-                    f"matrixd boot --universe {universe} --directive {directive_remote} {flag_str}"
+                    f"matrixd kill --universe {quoted_universe} && "
+                    f"matrixd boot --universe {quoted_universe} "
+                    f"--directive {quoted_directive} {flag_str}"
                 )
             elif action == "stop":
                 cmd = (
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
                     f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
-                    f"matrixd kill --universe {universe}"
+                    f"matrixd kill --universe {quoted_universe}"
                 )
 
-            display_cmd = cmd.replace(str(swarm_key), "[REDACTED]")
+            display_cmd = cmd.replace(
+                f"export SWARM_KEY={quoted_swarm_key}",
+                "export SWARM_KEY='[REDACTED]'",
+            )
             self.output.append(f"[CMD] {display_cmd}\n")
 
             try:

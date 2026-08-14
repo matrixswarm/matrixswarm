@@ -157,13 +157,15 @@ class PublicReleaseSecurityTests(unittest.TestCase):
             "matrixos/agents/python_core/matrix_email_egress/matrix_email_egress.py",
             "phoenix/matrix_gui/modules/net/connector/ingress/imap/imap.py",
         )
+        guard_markers = {
+            smtp_paths[0]: "mode not in self._TLS_MODES",
+            smtp_paths[1]: 'mode not in ("SSL", "TLS", "STARTTLS")',
+            smtp_paths[2]: 'mode not in ("SSL", "TLS", "STARTTLS")',
+        }
         for path in smtp_paths:
             with self.subTest(path=path):
                 text = source(path)
-                self.assertIn(
-                    'mode not in ("SSL", "TLS", "STARTTLS")',
-                    text,
-                )
+                self.assertIn(guard_markers[path], text)
                 self.assertIn(
                     "SMTP encryption must be SSL, TLS, or STARTTLS",
                     text,

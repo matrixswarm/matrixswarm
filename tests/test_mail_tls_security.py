@@ -80,6 +80,18 @@ class MailTLSSecurityTests(unittest.TestCase):
                             f"TLS context missing at {path}:{node.lineno}",
                         )
 
+    def test_email_check_plaintext_requires_explicit_none_mode(self):
+        text = source(
+            "matrixos/agents/python_core/email_check/email_check.py"
+        )
+        self.assertIn('elif enc == "NONE":', text)
+        self.assertIn('.strip().upper()', text)
+        self.assertIn("IMAP encryption must be", text)
+        self.assertNotIn(
+            'else:\n                client = imaplib.IMAP4(host, port)',
+            text,
+        )
+
     def _load_email_sender_worker(self):
         matrixos_root = str(ROOT / "matrixos")
         sys.path.insert(0, matrixos_root)
