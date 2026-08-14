@@ -95,7 +95,7 @@ class HTTPSConnector(BaseConnector):
           1. Emit start event on ConnectorBus.
           2. Wrap the packet with timestamp and session metadata.
           3. Sign payload with RSA private key from deployment certs.
-          4. Establish a TLS socket with custom CA and client cert.
+          4. Establish a TLS socket with the deployment client certificate.
           5. Verify server SPKI pin.
           6. POST JSON payload to '/matrix' endpoint.
           7. Clean up sockets and temporary cert files.
@@ -132,7 +132,6 @@ class HTTPSConnector(BaseConnector):
             # ---- Setup TLS context ----
             cert_adapter = AgentCertWrapper(self.agent, self.deployment)
             required_tls = {
-                "CA root": cert_adapter.ca_root_cert,
                 "client certificate": cert_adapter.cert,
                 "client key": cert_adapter.key,
                 "server SPKI pin": cert_adapter.server_spki_pin,
@@ -144,12 +143,13 @@ class HTTPSConnector(BaseConnector):
                     + ", ".join(missing_tls)
                 )
 
-            ctx_ssl = ssl.create_default_context(
-                ssl.Purpose.SERVER_AUTH,
-                cadata=cert_adapter.ca_root_cert,
-            )
-            ctx_ssl.check_hostname = True
-            ctx_ssl.verify_mode = ssl.CERT_REQUIRED
+            # Deployment certificates are ephemeral and may be addressed by
+            # an IP absent from the certificate SAN. The exact deployment SPKI
+            # pin is therefore the server identity trust anchor. No request is
+            # sent until the peer certificate matches that pin.
+            ctx_ssl = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx_ssl.check_hostname = False
+            ctx_ssl.verify_mode = ssl.CERT_NONE
             _, cert_path, key_path = load_cert_chain_from_memory(
                 ctx_ssl, cert_adapter.cert, cert_adapter.key
             )
@@ -158,12 +158,21 @@ class HTTPSConnector(BaseConnector):
             raw_sock = socket.create_connection((self.host, self.port), timeout=timeout)
             tls_sock = ctx_ssl.wrap_socket(raw_sock, server_hostname=self.host)
 
-            # Verify SPKI
+            # Verify the peer before transmitting any application data.
             peer_cert = tls_sock.getpeercert(binary_form=True)
-            ok, actual_pin = verify_spki_pin(peer_cert, cert_adapter.server_spki_pin)
+            if not peer_cert:
+                raise ConnectionError("HTTPS peer did not present a certificate")
+            ok, actual_pin = verify_spki_pin(
+                peer_cert,
+                cert_adapter.server_spki_pin,
+            )
             if not ok:
-                raise ConnectionError(f"SPKI mismatch: {actual_pin}")
+                raise ConnectionError(
+                    "HTTPS SPKI mismatch: "
+                    f"expected {cert_adapter.server_spki_pin}, got {actual_pin}"
+                )
 
+            print("[HTTPSConnector] ✅ Server SPKI pin verified")
             https_conn = http.client.HTTPSConnection(self.host, self.port, context=ctx_ssl)
             https_conn.sock = tls_sock
             https_conn.request(
