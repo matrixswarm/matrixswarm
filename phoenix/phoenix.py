@@ -20,6 +20,12 @@ Attributes:
 
 """
 import sys, time, builtins, inspect, json, pprint
+
+from matrix_gui.core.utils.linux_gui_preflight import require_linux_egl
+
+
+require_linux_egl()
+
 print("Python:", sys.version)
 try:
     from PyQt6.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
