@@ -14,6 +14,9 @@ class DeployDialog(QtWidgets.QDialog):
 
         self.ssh_map = ssh_map
         self.deployment = deployment or {}
+        self._ssh_client = None
+        self._active_channel = None
+        self._poll_timer = None
         self.layout = QtWidgets.QVBoxLayout(self)
 
         # -------------------------------
@@ -63,6 +66,11 @@ class DeployDialog(QtWidgets.QDialog):
 
         # Flags
         self.flag_verbose = QtWidgets.QCheckBox("--verbose")
+        self.flag_verbose.setEnabled(False)
+        self.flag_verbose.setToolTip(
+            "Disabled for SSH boots: detached agents must not inherit the SSH output channel. "
+            "Use the cockpit agent logs for live output."
+        )
         self.flag_debug = QtWidgets.QCheckBox("--debug")
         self.flag_clean = QtWidgets.QCheckBox("--clean")
         self.flag_rugpull = QtWidgets.QCheckBox("--rug-pull")
@@ -135,7 +143,6 @@ class DeployDialog(QtWidgets.QDialog):
         directive_file = os.path.basename(directive_path)
 
         flags = []
-        if self.flag_verbose.isChecked(): flags.append("--verbose")
         if self.flag_debug.isChecked(): flags.append("--debug")
         if self.flag_clean.isChecked(): flags.append("--clean")
         if self.flag_rugpull.isChecked(): flags.append("--rug-pull")
@@ -163,7 +170,7 @@ class DeployDialog(QtWidgets.QDialog):
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
                     f"export SWARM_KEY='{swarm_key}' && "
-                    f"[ -d venv ] && source venv/bin/activate || true && "
+                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
                     f"matrixd boot --universe {universe} --directive {directive_remote} {flag_str}"
                 )
 
@@ -172,7 +179,7 @@ class DeployDialog(QtWidgets.QDialog):
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
                     f"export SWARM_KEY='{swarm_key}' && "
-                    f"[ -d venv ] && source venv/bin/activate || true && "
+                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
                     f"matrixd kill --universe {universe} && "
                     f"matrixd boot --universe {universe} --directive {directive_remote} {flag_str}"
                 )
@@ -180,7 +187,7 @@ class DeployDialog(QtWidgets.QDialog):
                 cmd = (
                     f"cd /matrix && "
                     f"export SITE_ROOT=/matrix && "
-                    f"[ -d venv ] && source venv/bin/activate || true && "
+                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
                     f"matrixd kill --universe {universe}"
                 )
 
@@ -196,7 +203,6 @@ class DeployDialog(QtWidgets.QDialog):
 
                 transport = client.get_transport()
                 chan = transport.open_session()
-                chan.get_pty()
                 chan.exec_command(cmd)
 
                 # store references so poller can read them
@@ -217,17 +223,18 @@ class DeployDialog(QtWidgets.QDialog):
     def _poll_ssh_channel(self):
         chan = getattr(self, "_active_channel", None)
         if chan is None:
-            self._poll_timer.stop()
+            if self._poll_timer is not None:
+                self._poll_timer.stop()
             return
 
         try:
-            # STDOUT
-            if chan.recv_ready():
+            # Drain the SSH window fully so boot output cannot back-pressure
+            # the remote matrixd process.
+            while chan.recv_ready():
                 data = chan.recv(4096).decode(errors="ignore")
                 self.output.append(data)
 
-            # STDERR
-            if chan.recv_stderr_ready():
+            while chan.recv_stderr_ready():
                 data = chan.recv_stderr(4096).decode(errors="ignore")
                 self.output.append(f"<span style='color:red'>{data}</span>")
 
@@ -235,12 +242,32 @@ class DeployDialog(QtWidgets.QDialog):
             if chan.exit_status_ready():
                 code = chan.recv_exit_status()
                 self.output.append(f"\n[Exit {code}] remote action complete.\n")
-
-                self._poll_timer.stop()
-                self._active_channel = None
-                chan.close()
+                self._close_ssh_session()
 
         except Exception as e:
             self.output.append(f"[ERROR] SSH stream: {e}")
+            self._close_ssh_session()
+
+    def _close_ssh_session(self):
+        if self._poll_timer is not None:
             self._poll_timer.stop()
-            self._active_channel = None
+
+        chan = self._active_channel
+        self._active_channel = None
+        if chan is not None:
+            try:
+                chan.close()
+            except Exception:
+                pass
+
+        client = self._ssh_client
+        self._ssh_client = None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def closeEvent(self, event):
+        self._close_ssh_session()
+        super().closeEvent(event)
