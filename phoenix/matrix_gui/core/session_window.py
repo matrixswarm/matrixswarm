@@ -655,10 +655,13 @@ class SessionWindow(QMainWindow):
         try:
             if self.stacked.currentWidget() == panel:
                 print("[DEBUG] Panel already active, skipping reset")
+                self._schedule_specialty_panel_activation(panel)
                 return
             if self.stacked.indexOf(panel) == -1:
                 self.stacked.addWidget(panel)
             self.stacked.setCurrentWidget(panel)
+
+            self._schedule_specialty_panel_activation(panel)
 
             self.control_bar.clear_secondary_buttons()
 
@@ -677,6 +680,35 @@ class SessionWindow(QMainWindow):
             print("[DEBUG] Added Home button")
         except Exception as e:
             emit_gui_exception_log("session_window.show_specialty_panel", e)
+
+    def _schedule_specialty_panel_activation(self, panel: QWidget):
+        """Activate embedded specialty-panel editors after the stack switch paints."""
+        QTimer.singleShot(
+            0,
+            lambda panel=panel: self._activate_specialty_panel(panel),
+        )
+
+    def _activate_specialty_panel(self, panel: QWidget):
+        """Restore focus and repaint hooks for cached panels in the native subwindow."""
+        try:
+            if self.stacked.currentWidget() is not panel:
+                return
+
+            self.activateWindow()
+            panel.ensurePolished()
+
+            activation_hook = getattr(panel, "on_panel_activated", None)
+            if callable(activation_hook):
+                activation_hook()
+            else:
+                panel.setFocus(Qt.FocusReason.OtherFocusReason)
+
+            panel.update()
+        except Exception as e:
+            emit_gui_exception_log(
+                "session_window._activate_specialty_panel",
+                e,
+            )
 
 
     def _build_log_panel(self):

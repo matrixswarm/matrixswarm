@@ -1,7 +1,8 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
 import time
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit, QMessageBox, QComboBox, QGroupBox
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QTextEdit,
+    QMessageBox, QComboBox, QGroupBox, QCompleter
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QStyle
@@ -160,6 +161,14 @@ class EmailSend(PhoenixPanelInterface):
         )
         self.view_pass_btn.setText("🙈 Hide" if checked else "👁 View")
 
+    def on_panel_activated(self):
+        """Wake the editors after this cached panel enters the native stack."""
+        self.subject.ensurePolished()
+        self.body.ensurePolished()
+        self.subject.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.subject.update()
+        self.body.viewport().update()
+
 
     def _temp_load_email_connections(self):
         """
@@ -224,11 +233,17 @@ class EmailSend(PhoenixPanelInterface):
                 vault_data = vault.fetch_fresh(target="email_recipients") or {}
                 recipients = vault_data.get("recipients", [])
 
-            # Populate dropdown
-            self.to_address.clear()
-            for addr in recipients:
-                if addr:
-                    self.to_address.addItem(addr)
+            # QLineEdit has no addItem API. Preserve free-form entry and offer
+            # vault recipients through a case-insensitive completion popup.
+            recipients = [str(addr).strip() for addr in recipients if str(addr).strip()]
+            self._recipient_completer = QCompleter(recipients, self.to_address)
+            self._recipient_completer.setCaseSensitivity(
+                Qt.CaseSensitivity.CaseInsensitive
+            )
+            self._recipient_completer.setCompletionMode(
+                QCompleter.CompletionMode.PopupCompletion
+            )
+            self.to_address.setCompleter(self._recipient_completer)
 
             print(f"[EMAIL PANEL] Loaded {len(recipients)} saved recipients from deployment/vault.")
 
@@ -237,7 +252,7 @@ class EmailSend(PhoenixPanelInterface):
 
     def _save_current_recipient(self):
         """Save the current 'To' address into vault list."""
-        email = self.to_address.currentText().strip()
+        email = self.to_address.text().strip()
         if not email:
             return
         try:
@@ -253,7 +268,7 @@ class EmailSend(PhoenixPanelInterface):
 
     def _delete_current_recipient(self):
         """Delete selected 'To' address from vault list."""
-        email = self.to_address.currentText().strip()
+        email = self.to_address.text().strip()
         if not email:
             return
         try:
