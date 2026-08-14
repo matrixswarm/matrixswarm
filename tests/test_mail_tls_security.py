@@ -2,7 +2,9 @@ import ast
 import importlib.util
 from pathlib import Path
 import ssl
+import sys
 import unittest
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +79,143 @@ class MailTLSSecurityTests(unittest.TestCase):
                             {"context", "ssl_context"} & keywords,
                             f"TLS context missing at {path}:{node.lineno}",
                         )
+
+    def _load_email_sender_worker(self):
+        matrixos_root = str(ROOT / "matrixos")
+        sys.path.insert(0, matrixos_root)
+        try:
+            return load_module(
+                "matrixos/agents/python_core/email_send/factory/"
+                "email_sender_thread.py",
+                "email_sender_thread_under_test",
+            )
+        finally:
+            sys.path.remove(matrixos_root)
+
+    @staticmethod
+    def _worker_payload(encryption):
+        return {
+            "smtp_server": "smtp.example.test",
+            "smtp_port": 465 if encryption == "SSL" else 587,
+            "encryption": encryption,
+            "from_addr": "sender@example.test",
+            "to_addr": "recipient@example.test",
+            "password": "test-only-password",
+            "subject": "TLS test",
+            "body": "test body",
+        }
+
+    def test_email_send_factory_exports_managed_worker_contract(self):
+        path = (
+            "matrixos/agents/python_core/email_send/factory/"
+            "email_sender_thread.py"
+        )
+        tree = ast.parse(source(path), filename=path)
+        classes = {
+            node.name: node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef)
+        }
+
+        self.assertIn("EmailSenderThread", classes)
+        self.assertNotIn("Agent", classes)
+
+        methods = {
+            node.name
+            for node in classes["EmailSenderThread"].body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        self.assertTrue({"__init__", "run"} <= methods)
+
+    def test_email_sender_worker_passes_verified_context_to_ssl(self):
+        module = self._load_email_sender_worker()
+        tls_context = object()
+        smtp = Mock()
+        smtp.__enter__ = Mock(return_value=smtp)
+        smtp.__exit__ = Mock(return_value=False)
+        shared = {
+            "thread_id": "worker-1",
+            "context": {
+                "payload": self._worker_payload("SSL"),
+                "queue_manager": Mock(),
+            },
+        }
+
+        with (
+            patch.object(
+                module,
+                "create_mail_tls_context",
+                return_value=tls_context,
+            ),
+            patch.object(module.smtplib, "SMTP_SSL", return_value=smtp)
+            as smtp_ssl,
+        ):
+            module.EmailSenderThread(Mock(), shared).run()
+
+        smtp_ssl.assert_called_once_with(
+            "smtp.example.test",
+            465,
+            context=tls_context,
+            timeout=10,
+        )
+        smtp.login.assert_called_once_with(
+            "sender@example.test",
+            "test-only-password",
+        )
+        smtp.send_message.assert_called_once()
+        shared["context"]["queue_manager"].thread_finished.assert_called_once_with(
+            "worker-1"
+        )
+
+    def test_email_sender_worker_passes_verified_context_to_starttls(self):
+        module = self._load_email_sender_worker()
+        tls_context = object()
+        smtp = Mock()
+        smtp.__enter__ = Mock(return_value=smtp)
+        smtp.__exit__ = Mock(return_value=False)
+        shared = {
+            "thread_id": "worker-2",
+            "context": {
+                "payload": self._worker_payload("STARTTLS"),
+                "queue_manager": Mock(),
+            },
+        }
+
+        with (
+            patch.object(
+                module,
+                "create_mail_tls_context",
+                return_value=tls_context,
+            ),
+            patch.object(module.smtplib, "SMTP", return_value=smtp)
+            as smtp_client,
+        ):
+            module.EmailSenderThread(Mock(), shared).run()
+
+        smtp_client.assert_called_once_with(
+            "smtp.example.test",
+            587,
+            timeout=10,
+        )
+        smtp.starttls.assert_called_once_with(context=tls_context)
+        smtp.send_message.assert_called_once()
+
+    def test_email_sender_worker_rejects_plaintext_modes(self):
+        module = self._load_email_sender_worker()
+        shared = {
+            "thread_id": "worker-3",
+            "context": {
+                "payload": self._worker_payload("NONE"),
+                "queue_manager": Mock(),
+            },
+        }
+        worker = module.EmailSenderThread(Mock(), shared)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "SMTP encryption must be SSL, TLS, or STARTTLS",
+        ):
+            worker._send(Mock())
 
 
 if __name__ == "__main__":
