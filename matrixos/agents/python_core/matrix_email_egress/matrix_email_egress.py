@@ -23,7 +23,6 @@ import json
 import smtplib
 import imaplib
 import email
-import ssl
 import time
 import threading
 from email.message import EmailMessage
@@ -36,6 +35,7 @@ from core.python_core.class_lib.packet_delivery.utility.security.unwrap_secure_p
 from core.python_core.utils.crypto_utils import pem_fix
 from core.python_core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
 from core.python_core.utils.swarm_sleep import interruptible_sleep
+from core.python_core.utils.mail_tls import create_mail_tls_context
 
 class Agent(BootAgent):
     """
@@ -319,7 +319,7 @@ class Agent(BootAgent):
         if not self.smtp_server or not self.from_address or not self.to_address:
             raise RuntimeError("SMTP lane is not configured")
 
-        context = ssl.create_default_context()
+        context = create_mail_tls_context()
 
         mode = (self.encryption or "STARTTLS").upper().strip()
         if mode not in ("SSL", "TLS", "STARTTLS"):
@@ -434,6 +434,7 @@ class Agent(BootAgent):
             imap = imaplib.IMAP4_SSL(
                 self.hb_imap_server,
                 self.hb_imap_port,
+                ssl_context=create_mail_tls_context(),
                 timeout=self.heartbeat_poll_timeout,
             )
             imap.login(self.hb_imap_user, self.hb_imap_pass)

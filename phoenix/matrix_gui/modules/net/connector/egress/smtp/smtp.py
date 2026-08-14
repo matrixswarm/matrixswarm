@@ -1,11 +1,12 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-import smtplib, ssl, json, base64, time, hashlib
+import smtplib, json, base64, time, hashlib
 from email.message import EmailMessage
 from matrix_gui.core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.modules.net.connector.interfaces.base_connector import BaseConnector
 from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.connector_bus import ConnectorBus
+from matrix_gui.core.utils.mail_tls import create_mail_tls_context
 
 class SMTPConnector(BaseConnector):
     """
@@ -146,7 +147,7 @@ class SMTPConnector(BaseConnector):
             # Secure connection
             # Use the operating-system trust store and require hostname and
             # certificate-chain validation before sending SMTP credentials.
-            context = ssl.create_default_context()
+            context = create_mail_tls_context()
 
             with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=timeout) as server:
                 server.starttls(context=context)

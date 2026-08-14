@@ -6,7 +6,6 @@ import imaplib
 import json
 import re
 import smtplib
-import ssl
 import time
 from email.message import EmailMessage
 from typing import Any, Optional
@@ -17,6 +16,7 @@ from matrix_gui.core.class_lib.packet_delivery.utility.encryption.utility.unwrap
 from matrix_gui.core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
 from matrix_gui.modules.net.connector.interfaces.base_connector import BaseConnector
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
+from matrix_gui.core.utils.mail_tls import create_mail_tls_context
 
 
 class IMAPIngressConnector(BaseConnector):
@@ -249,7 +249,7 @@ class IMAPIngressConnector(BaseConnector):
             msg["Subject"] = f"{self.heartbeat_subject_prefix}"
             msg.set_content(payload_b64)
 
-            context = ssl.create_default_context()
+            context = create_mail_tls_context()
             mode = self._smtp_encryption
             if mode not in ("SSL", "TLS", "STARTTLS"):
                 raise ValueError(
@@ -297,7 +297,11 @@ class IMAPIngressConnector(BaseConnector):
             return
 
         try:
-            self._imap = imaplib.IMAP4_SSL(creds["host"], creds["port"])
+            self._imap = imaplib.IMAP4_SSL(
+                creds["host"],
+                creds["port"],
+                ssl_context=create_mail_tls_context(),
+            )
             self._imap.login(creds["username"], creds["password"])
             self._imap.select(creds.get("folder", self.folder or "INBOX"))
             self._emit_status("connected", creds["host"], creds["port"])

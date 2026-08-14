@@ -12,7 +12,6 @@ import json
 import base64
 import imaplib
 import socket
-import ssl
 import smtplib
 import email
 
@@ -22,6 +21,7 @@ from core.python_core.boot_agent import BootAgent
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.python_core.utils.crypto_utils import encrypt_with_ephemeral_aes, sign_data, pem_fix
+from core.python_core.utils.mail_tls import create_mail_tls_context
 
 
 class Agent(BootAgent):
@@ -241,7 +241,11 @@ class Agent(BootAgent):
             return None
         try:
             socket.setdefaulttimeout(20)
-            M = imaplib.IMAP4_SSL(self.hb_imap_host, self.hb_imap_port)
+            M = imaplib.IMAP4_SSL(
+                self.hb_imap_host,
+                self.hb_imap_port,
+                ssl_context=create_mail_tls_context(),
+            )
             M.login(self.hb_imap_user, self.hb_imap_pass)
             return M
         except Exception as e:
@@ -429,7 +433,11 @@ class Agent(BootAgent):
             return None
         try:
             socket.setdefaulttimeout(20)
-            M = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+            M = imaplib.IMAP4_SSL(
+                self.imap_host,
+                self.imap_port,
+                ssl_context=create_mail_tls_context(),
+            )
             M.login(self.imap_user, self.imap_pass)
             return M
         except Exception as e:
@@ -488,7 +496,7 @@ class Agent(BootAgent):
                 pass
 
     def _smtp_send_message(self, msg: EmailMessage, timeout=20):
-        context = ssl.create_default_context()
+        context = create_mail_tls_context()
 
         mode = self.encryption.upper().strip()
         if mode not in ("SSL", "TLS", "STARTTLS"):

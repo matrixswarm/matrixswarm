@@ -12,6 +12,7 @@ from core.python_core.class_lib.crypto.symmetric_encryption.aes.aes import AESHa
 from core.python_core.class_lib.email.email_parser import EmailParser
 
 from core.python_core.boot_agent import BootAgent
+from core.python_core.utils.mail_tls import create_mail_tls_context
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 
 class Agent(BootAgent):
@@ -304,13 +305,14 @@ class Agent(BootAgent):
         pwd = cfg.get("incoming_password")
 
         try:
+            context = create_mail_tls_context()
 
             if enc in ("SSL", "TLS", "IMAPS", "SSL/TLS"):
-                client = imaplib.IMAP4_SSL(host, port, )
+                client = imaplib.IMAP4_SSL(host, port, ssl_context=context)
             else:
                 client = imaplib.IMAP4(host, port)
             if enc == "STARTTLS":
-                client.starttls()
+                client.starttls(ssl_context=context)
             client.login(user, pwd)
             return client
 
