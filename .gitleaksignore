@@ -1,0 +1,9 @@
+bfcd49543147d36823e03786be67f704687afb91:core/python_core/trust_templates/matrix_dummy_priv.py:private-key:1
+f8dbf40be3262be53aa4af96ed0f3dd39add463d:core/trust_templates/matrix_dummy_priv.py:private-key:1
+689d2137b4ab51fe81c1371a69891cf455c4da4d:Lib/site-packages/nacl/pwhash/__init__.py:generic-api-key:27
+689d2137b4ab51fe81c1371a69891cf455c4da4d:Lib/site-packages/nacl/pwhash/__init__.py:generic-api-key:28
+689d2137b4ab51fe81c1371a69891cf455c4da4d:Lib/site-packages/nacl/pwhash/argon2id.py:generic-api-key:25
+689d2137b4ab51fe81c1371a69891cf455c4da4d:Lib/site-packages/nacl/pwhash/argon2id.py:generic-api-key:26
+689d2137b4ab51fe81c1371a69891cf455c4da4d:Lib/site-packages/nacl/pwhash/argon2i.py:generic-api-key:25
+689d2137b4ab51fe81c1371a69891cf455c4da4d:Lib/site-packages/nacl/pwhash/argon2i.py:generic-api-key:26
+689d2137b4ab51fe81c1371a69891cf455c4da4d:Lib/site-packages/nacl/bindings/crypto_sign.py:generic-api-key:150
