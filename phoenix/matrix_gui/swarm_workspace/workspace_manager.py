@@ -15,8 +15,10 @@ from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSing
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from .cls_lib.agent.agent_node import AgentNode
 
+
 class WorkspaceManagerDialog(QDialog):
     workspace_selected = pyqtSignal(str)
+
     def __init__(self):
 
         super().__init__()
@@ -63,11 +65,16 @@ class WorkspaceManagerDialog(QDialog):
         self.selected_uuid = None
 
     # ------------------------------------------------------------------
-    def _persist(self):
+    def _persist(self, workspaces=None):
         """Persist workspace list to vault through VaultCore."""
         vcs = VaultCoreSingleton.get()  # live vault authority
-        vcs.data["workspaces"] = self.workspaces  # write into live dict
-        vcs.patch("workspaces", self.workspaces)  # validate + commit
+        updated_workspaces = self.workspaces if workspaces is None else workspaces
+        committed = vcs.patch("workspaces", updated_workspaces)
+        self.vault_data = vcs.data
+        self.workspaces = vcs.data["workspaces"]
+        if not committed:
+            raise RuntimeError("Vault rejected the workspace update.")
+        return True
 
     # ------------------------------------------------------------------
     def _populate(self):
@@ -79,6 +86,16 @@ class WorkspaceManagerDialog(QDialog):
             self.ws_list.addItem(item)
 
     # ------------------------------------------------------------------
+    def _select_workspace(self, workspace_uuid):
+        """Select a workspace in the live list after it has been rebuilt."""
+        for row in range(self.ws_list.count()):
+            item = self.ws_list.item(row)
+            if item.data(Qt.ItemDataRole.UserRole) == workspace_uuid:
+                self.ws_list.setCurrentRow(row)
+                return True
+        return False
+
+    # ------------------------------------------------------------------
     def _new_workspace(self):
 
         try:
@@ -87,15 +104,6 @@ class WorkspaceManagerDialog(QDialog):
             # Commander fix — ensure section exists in vault
             vcs.data.setdefault("workspaces", {})
             self.workspaces = vcs.data["workspaces"]
-
-            # Now safe to create the workspace
-            ws_uuid = uuid.uuid4().hex
-
-            self.workspaces[ws_uuid] = {
-                "uuid": ws_uuid,
-                "label": "Untitled Workspace",
-                "data": []
-            }
 
             # Load Matrix meta.json
             base_dir = Path(__file__).resolve().parents[2]  # matrix_gui/swarm_workspace
@@ -112,16 +120,26 @@ class WorkspaceManagerDialog(QDialog):
             matrix_node = AgentNode(matrix_meta).get_node()
             matrix_node["parent"] = None
 
-            # Inject into workspace
-            self.workspaces[ws_uuid]["data"].append(matrix_node)
+            # Build the complete workspace off-vault. Nothing is committed
+            # until its required Matrix metadata has loaded successfully.
+            ws_uuid = uuid.uuid4().hex
+            new_workspace = {
+                "uuid": ws_uuid,
+                "label": "Untitled Workspace",
+                "data": [matrix_node],
+            }
+            updated_workspaces = copy.deepcopy(self.workspaces)
+            updated_workspaces[ws_uuid] = new_workspace
 
-            # Persist
-            self._persist()
+            # Persist, refresh, and select before opening the modal editor.
+            # Qt signals are synchronous, so emitting first can leave the
+            # manager visually stale until the editor returns.
+            self._persist(updated_workspaces)
+            self._populate()
+            self._select_workspace(ws_uuid)
 
-            # return UUID to caller
             self.selected_uuid = ws_uuid
             self.workspace_selected.emit(ws_uuid)
-            self._populate()
 
         except Exception as e:
             emit_gui_exception_log("WorkspaceManagerDialog._new_workspace", e)
@@ -156,10 +174,7 @@ class WorkspaceManagerDialog(QDialog):
             self._populate()
 
             # Select the new clone in the list
-            for i in range(self.ws_list.count()):
-                if self.ws_list.item(i).data(Qt.ItemDataRole.UserRole) == new_uuid:
-                    self.ws_list.setCurrentRow(i)
-                    break
+            self._select_workspace(new_uuid)
 
         except Exception as e:
             emit_gui_exception_log("WorkspaceManagerDialog._clone_workspace", e)
@@ -228,4 +243,3 @@ class WorkspaceManagerDialog(QDialog):
             self.workspaces[uuid_]["label"] = new_name.strip()
             self._persist()
             self._populate()
-
