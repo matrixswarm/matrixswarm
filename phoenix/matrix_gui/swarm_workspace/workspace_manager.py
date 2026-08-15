@@ -69,9 +69,12 @@ class WorkspaceManagerDialog(QDialog):
         """Persist workspace list to vault through VaultCore."""
         vcs = VaultCoreSingleton.get()  # live vault authority
         updated_workspaces = self.workspaces if workspaces is None else workspaces
-        vcs.patch("workspaces", updated_workspaces)  # validate + commit
+        committed = vcs.patch("workspaces", updated_workspaces)
         self.vault_data = vcs.data
         self.workspaces = vcs.data["workspaces"]
+        if not committed:
+            raise RuntimeError("Vault rejected the workspace update.")
+        return True
 
     # ------------------------------------------------------------------
     def _populate(self):

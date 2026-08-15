@@ -147,6 +147,64 @@ class WorkspaceManagerRefreshTests(unittest.TestCase):
         self.assertEqual(list_widget.current_row, 1)
         self.assertFalse(select_workspace(dialog, "charlie"))
 
+    def test_persist_resynchronizes_and_raises_when_vault_rejects(self):
+        rollback_workspaces = {"existing": {"uuid": "existing"}}
+
+        class Vault:
+            def __init__(self):
+                self.data = {"workspaces": rollback_workspaces}
+
+            def patch(self, key, value):
+                self.data["workspaces"] = rollback_workspaces
+                return False
+
+        vault = Vault()
+        singleton = SimpleNamespace(get=lambda: vault)
+        persist = load_method(
+            WORKSPACE_MANAGER,
+            "WorkspaceManagerDialog",
+            "_persist",
+            {"VaultCoreSingleton": singleton},
+        )
+        dialog = SimpleNamespace(
+            vault_data={"workspaces": {}},
+            workspaces={"candidate": {"uuid": "candidate"}},
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Vault rejected the workspace update",
+        ):
+            persist(dialog, dialog.workspaces)
+
+        self.assertIs(dialog.vault_data, vault.data)
+        self.assertIs(dialog.workspaces, rollback_workspaces)
+
+    def test_persist_returns_success_and_tracks_committed_vault_state(self):
+        class Vault:
+            def __init__(self):
+                self.data = {"workspaces": {}}
+
+            def patch(self, key, value):
+                self.data["workspaces"] = dict(value)
+                return True
+
+        vault = Vault()
+        singleton = SimpleNamespace(get=lambda: vault)
+        persist = load_method(
+            WORKSPACE_MANAGER,
+            "WorkspaceManagerDialog",
+            "_persist",
+            {"VaultCoreSingleton": singleton},
+        )
+        candidate = {"candidate": {"uuid": "candidate"}}
+        dialog = SimpleNamespace(vault_data={}, workspaces={})
+
+        self.assertTrue(persist(dialog, candidate))
+        self.assertIs(dialog.vault_data, vault.data)
+        self.assertIs(dialog.workspaces, vault.data["workspaces"])
+        self.assertEqual(dialog.workspaces, candidate)
+
 
 if __name__ == "__main__":
     unittest.main()
