@@ -17,6 +17,7 @@ import hashlib
 import argparse
 import psutil
 import re
+import shutil
 
 from pathlib import Path
 from Crypto.Cipher import AES
@@ -96,8 +97,13 @@ def get_all_swarm_agent_info(universe=None, base="/matrix"):
 
     Optional: pass a universe name to filter only that swarm.
     """
+    base_root = str(Path(base)).rstrip("/") or "/"
     pattern = re.compile(
-        r"/matrix/universes/runtime/(?P<universe>[a-zA-Z0-9_\-]+)/(?P<reboot>[0-9_]+)/pod/(?P<uuid>[a-f0-9\-]+)/run\s+--job\s+(?P<job_universe>[a-zA-Z0-9_\-]+):(?P<universal_id>[a-zA-Z0-9_\-]+)"
+        rf"{re.escape(base_root)}/universes/runtime/"
+        r"(?P<universe>[a-zA-Z0-9_\-]+)/"
+        r"(?P<reboot>[0-9_]+)/pod/(?P<uuid>[a-f0-9\-]+)/run\s+"
+        r"--job\s+(?P<job_universe>[a-zA-Z0-9_\-]+):"
+        r"(?P<universal_id>[a-zA-Z0-9_\-]+)"
     )
 
     results = []
@@ -125,6 +131,7 @@ def get_all_swarm_agent_info(universe=None, base="/matrix"):
                     "universal_id": gd["universal_id"],
                     "pod_path": str(runtime_root / "pod"),
                     "comm_path": str(runtime_root / "comm"),
+                    "details": {"cmd": cmdline},
                 })
         except Exception:
             continue
@@ -296,9 +303,34 @@ def main():
     # subcommands
     sub.add_parser("list").add_argument("--base", default="/matrix", help="List existing universes under the given base path.")
     kill = sub.add_parser("kill")
-    kill.add_argument("--universe", required=True, help="Universe to terminate.")
+    kill.add_argument(
+        "--universe",
+        help=(
+            "Universe to terminate. When --delete-directive-with-key is set "
+            "and this option is omitted, target every discovered universe."
+        ),
+    )
     kill.add_argument("--base", default="/matrix", help="Base path for MatrixSwarm universes.")
-    kill.add_argument("--cleanup", action="store_true", help="After kill, remove old runtime directories for that universe.")
+    kill.add_argument(
+        "--cleanup", "--clean-up",
+        dest="cleanup",
+        action="store_true",
+        help=(
+            "After kill, remove old boot directories. With "
+            "--delete-directive-with-key, remove the targeted universe's "
+            "complete runtime and static trees."
+        ),
+    )
+    kill.add_argument(
+        "--delete-directive-with-key",
+        action="store_true",
+        help=(
+            "After verified shutdown, remove the target's encrypted boot "
+            "directive and matching swarm-key file. Omit --universe to "
+            "operate on every discovered universe (interactive confirmation "
+            "required). Vault deployments are never removed."
+        ),
+    )
 
     args = parser.parse_args()
     if args.cmd == "boot":
@@ -318,7 +350,54 @@ def main():
     elif args.cmd == "list":
         list_universes(args.base)
     elif args.cmd == "kill":
-        kill_universe(args.base, args.universe, args.cleanup)
+        if not args.universe and not args.delete_directive_with_key:
+            kill.error(
+                "--universe is required unless "
+                "--delete-directive-with-key is specified"
+            )
+
+        universes = (
+            [args.universe]
+            if args.universe
+            else discover_universes(args.base)
+        )
+        if not universes:
+            print("[KILL] No universes discovered.")
+            return
+
+        if not args.universe:
+            print("[KILL][DELETE-ALL] Target universes:")
+            for universe in universes:
+                print(f"  - {universe}")
+            if not sys.stdin.isatty():
+                print(
+                    "[KILL][ABORT] Refusing all-universe deletion without "
+                    "an interactive terminal."
+                )
+                raise SystemExit(1)
+            confirmation = input(
+                "Type DELETE ALL to level every listed universe and remove "
+                "its directive/key: "
+            )
+            if confirmation != "DELETE ALL":
+                print("[KILL][ABORT] Confirmation did not match.")
+                raise SystemExit(1)
+
+        failures = []
+        for universe in universes:
+            if not kill_universe(
+                args.base,
+                universe,
+                cleanup=args.cleanup,
+                delete_directive_with_key=args.delete_directive_with_key,
+            ):
+                failures.append(universe)
+
+        if failures:
+            raise RuntimeError(
+                "[KILL][FATAL] One or more universes were not fully "
+                f"processed: {', '.join(failures)}"
+            )
     else:
         parser.print_help()
 
@@ -352,39 +431,175 @@ def list_universes(base="/matrix"):
             print(f" └── PID {agent['pid']} :: {agent['universal_id']}")
 
 
-def kill_universe(base, universe, cleanup=False):
+def discover_universes(base="/matrix"):
+    """Return validated universe IDs known by config, storage, or processes."""
+    base_path = Path(base)
+    directives_dir = base_path / "boot_directives"
+    keys_dir = directives_dir / "keys"
+    runtime_root = base_path / "universes" / "runtime"
+    static_root = base_path / "universes" / "static"
+    candidates = set()
+
+    if directives_dir.is_dir():
+        for directive in directives_dir.glob("*.enc.json"):
+            candidates.add(directive.name[:-len(".enc.json")])
+
+    if keys_dir.is_dir():
+        for key_file in keys_dir.glob("*.key"):
+            candidates.add(key_file.stem)
+
+    for root in (runtime_root, static_root):
+        if not root.is_dir():
+            continue
+        for child in root.iterdir():
+            if child.name != "latest" and (child.is_dir() or child.is_symlink()):
+                candidates.add(child.name)
+
+    for info in get_all_swarm_agent_info(universe=None, base=base):
+        universe = info.get("universe")
+        if universe:
+            candidates.add(universe)
+
+    universes = []
+    for universe in sorted(candidates):
+        try:
+            validate_universe_id(universe)
+            universes.append(universe)
+        except Exception as exc:
+            print(
+                f"[KILL][DISCOVERY][SKIP] Invalid universe ID "
+                f"{universe!r}: {exc}"
+            )
+    return universes
+
+
+def _remove_exact_file(path, label):
+    """Unlink one exact file or symlink; never recurse or expand a pattern."""
+    if not path.exists() and not path.is_symlink():
+        print(f"[DELETE] No {label} present: {path}")
+        return True
+    if path.is_dir() and not path.is_symlink():
+        print(f"[DELETE][ERROR] Refusing directory where {label} was expected: {path}")
+        return False
+    try:
+        path.unlink()
+        print(f"[DELETE] Removed {label}: {path}")
+        return True
+    except OSError as exc:
+        print(f"[DELETE][ERROR] Could not remove {label} {path}: {exc}")
+        return False
+
+
+def _remove_universe_tree(root, universe, label):
+    """Remove one validated universe tree without following a root symlink."""
+    target = root / universe
+    if target.parent.absolute() != root.absolute():
+        print(f"[CLEANUP][ERROR] Refusing path outside {root}: {target}")
+        return False
+    if not target.exists() and not target.is_symlink():
+        print(f"[CLEANUP] No {label} tree present: {target}")
+        return True
+    try:
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        else:
+            shutil.rmtree(target)
+        print(f"[CLEANUP] Removed {label} tree: {target}")
+        return True
+    except OSError as exc:
+        print(f"[CLEANUP][ERROR] Could not remove {label} tree {target}: {exc}")
+        return False
+
+
+def _prune_old_boots(root):
+    """Preserve the newest boot while removing older boot directories."""
+    if not root.is_dir():
+        print(f"[CLEANUP] No boot tree present: {root}")
+        return True
+
+    boots = sorted(
+        (
+            child for child in root.iterdir()
+            if child.name != "latest" and child.is_dir() and not child.is_symlink()
+        ),
+        key=lambda path: path.name,
+    )
+    ok = True
+    for old in boots[:-1]:
+        try:
+            shutil.rmtree(old)
+            print(f"[CLEANUP] Removed old boot: {old}")
+        except OSError as exc:
+            print(f"[CLEANUP][ERROR] Could not remove old boot {old}: {exc}")
+            ok = False
+    return ok
+
+
+def kill_universe(base, universe, cleanup=False,
+                  delete_directive_with_key=False):
+    validate_universe_id(universe)
+    base_path = Path(base)
     runtime_base = Path(base) / "universes" / "runtime" / universe
     static_base = Path(base) / "universes" / "static" / universe
 
-    # Always resolve latest symlink
-    latest = runtime_base / "latest"
-    if not latest.is_symlink():
-        print(f"[KILL][ERROR] No latest symlink found for {universe}")
-        return
-
-    target_boot = runtime_base / latest.readlink()
-    pod_path = target_boot / "pod"
-    comm_path = target_boot / "comm"
-
     print(f"[KILL] Target Universe: {universe}")
-    print(f"[KILL] Runtime Path: {target_boot}")
-    print(f"[KILL] Pod Path: {pod_path}")
-    print(f"[KILL] Comm Path: {comm_path}")
+
+    # Resolve latest only for operator visibility. A missing link means the
+    # universe is already inactive; directive/key deletion may still proceed.
+    latest = runtime_base / "latest"
+    if latest.is_symlink():
+        target_boot = runtime_base / latest.readlink()
+        print(f"[KILL] Runtime Path: {target_boot}")
+        print(f"[KILL] Pod Path: {target_boot / 'pod'}")
+        print(f"[KILL] Comm Path: {target_boot / 'comm'}")
+    else:
+        print(f"[KILL] No latest symlink found for {universe}; treating it as inactive.")
 
     print(f"[REBOOT] 💣 Full MIRV deployment initiated: {universe}")
     target_paths = get_all_swarm_agent_info(universe=universe, base=base)
 
-    B2Bomber().level_it(target_paths)
+    if not B2Bomber().level_it(target_paths):
+        print(
+            f"[KILL][ABORT] {universe} still has live agents; preserving "
+            "directive, key, runtime, and static data."
+        )
+        return False
+
+    ok = True
+
+    if delete_directive_with_key:
+        directives_dir = base_path / "boot_directives"
+        directive_path = directives_dir / f"{universe}.enc.json"
+        key_path = directives_dir / "keys" / f"{universe}.key"
+        ok = _remove_exact_file(directive_path, "encrypted directive") and ok
+        ok = _remove_exact_file(key_path, "matching swarm key") and ok
+        if not ok:
+            print(
+                f"[KILL][ABORT] Directive/key removal for {universe} was "
+                "incomplete; preserving runtime and static data."
+            )
+            return False
 
     if cleanup:
         print(f"[SWARM-CLEANER] Running cleanup for universe '{universe}'...")
-        # Clean all but latest in runtime/static
-        for subdir in [runtime_base, static_base]:
-            boots = [d for d in subdir.iterdir() if d.is_dir() and d.name != "latest"]
-            boots_sorted = sorted(boots, key=lambda p: p.name)
-            for old in boots_sorted[:-1]:
-                print(f"[CLEANUP] Removing old boot: {old}")
-                os.system(f"rm -rf '{old}'")
+        if delete_directive_with_key:
+            runtime_root = base_path / "universes" / "runtime"
+            static_root = base_path / "universes" / "static"
+            ok = _remove_universe_tree(
+                runtime_root, universe, "runtime"
+            ) and ok
+            ok = _remove_universe_tree(
+                static_root, universe, "static"
+            ) and ok
+        else:
+            ok = _prune_old_boots(runtime_base) and ok
+            ok = _prune_old_boots(static_base) and ok
+
+    if ok:
+        print(f"[KILL] Universe '{universe}' operation complete.")
+    else:
+        print(f"[KILL][ERROR] Universe '{universe}' operation incomplete.")
+    return ok
 
 if __name__ == "__main__":
     main()

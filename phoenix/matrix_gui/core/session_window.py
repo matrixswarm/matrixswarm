@@ -29,6 +29,7 @@ from matrix_gui.core.panel.replace_agent_panel import ReplaceAgentPanel
 from matrix_gui.core.panel.hotswap_agent_panel import HotswapAgentPanel
 from matrix_gui.core.panel.inject_agent_panel import InjectAgentPanel
 from matrix_gui.core.panel.multiplexer_panel import MultiplexerPanel
+from matrix_gui.core.panel.universe_teardown_dialog import UniverseTeardownDialog
 from matrix_gui.core.panel.control_bar import ControlBar
 from matrix_gui.modules.vault.services.vault_connection_singleton import VaultConnectionSingleton
 from matrix_gui.modules.directive.deploy_dialog import DeployDialog
@@ -1324,6 +1325,22 @@ class SessionWindow(QMainWindow):
 
         except Exception as e:
             print(f"[CONTROL][ERROR] {e}")
+
+    def _launch_universe_teardown(self):
+        """Open the session-transport remote-universe teardown dialog."""
+        try:
+            dialog = UniverseTeardownDialog(
+                session_id=self.session_id,
+                bus=self.bus,
+                deployment=self.deployment,
+                parent=self,
+            )
+            dialog.exec()
+        except Exception as e:
+            emit_gui_exception_log(
+                "SessionWindow._launch_universe_teardown",
+                e,
+            )
 
     def show_crypto_alert_panel(self):
         """

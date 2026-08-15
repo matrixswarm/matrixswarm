@@ -32,6 +32,8 @@ import hashlib
 import json
 import base64
 import secrets
+import shlex
+import shutil
 from Crypto.PublicKey import RSA
 import subprocess
 
@@ -1661,28 +1663,151 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
     def _cmd_matrix_reloaded(self, content, packet, identity=None):
         """
-        Relaunches the entire swarm (Matrix and children) using the preserved command line
-        from security_box, but guarantees that --swarm_key is passed in case the key file
-        was nuked (for example, after a Railgun reload). Matrix always carries her swarm_key
-        in memory, so we re-inject it.
+        Legacy handler repurposed as a verified destructive teardown.
+
+        Matrix launches ``matrixd kill`` for her own universe. Matrixd levels
+        every running agent before removing the encrypted directive, matching
+        swarm-key file (when present), and the universe's runtime/static trees.
+        The Phoenix vault deployment is intentionally outside this operation.
         """
         try:
-            cmd = self.security_box.get("reboot", "")
-            if not cmd:
-                self.log("[REBOOT][ERROR] No preserved launch command found.")
+            if not isinstance(content, dict) or content.get("confirm_response") != 1:
+                self.log(
+                    "[MATRIX-DELETE][ERROR] Explicit teardown confirmation "
+                    "was not supplied."
+                )
                 return
 
-            # ensure the --swarm_key flag is present and injected
-            if "--swarm_key" not in cmd:
-                # safely quote the swarm key so spaces or symbols are preserved
-                cmd += f" --swarm_key='{self.swarm_key}'"
+            delete_directive_with_key = (
+                content.get("delete_directive_with_key") is True
+            )
+            clean_up = content.get("clean_up") is True
+            if clean_up and not delete_directive_with_key:
+                self.log(
+                    "[MATRIX-DELETE][ERROR] Full runtime/static cleanup "
+                    "requires directive/key deletion."
+                )
+                return
 
-            self.log(f"[REBOOT] Relaunching universe with: {cmd}")
-            subprocess.Popen(cmd, shell=True)
+            universe_value = self.command_line_args.get("universe")
+            if not isinstance(universe_value, str):
+                self.log("[MATRIX-DELETE][ERROR] Current universe is unavailable.")
+                return
+
+            universe = universe_value.strip()
+            if not universe or not all(
+                char.isalnum() or char in "_-" for char in universe
+            ):
+                self.log(
+                    f"[MATRIX-DELETE][ERROR] Invalid current universe: "
+                    f"{universe_value!r}"
+                )
+                return
+
+            # Keep launcher resolution inside this handler. Matrix agents are
+            # materialized as generated ``run`` files, so the handler must not
+            # depend on a newly added sibling helper being copied with it.
+            # Prefer the installed Python entry point under Matrix's current
+            # interpreter. This bypasses stale venv/PATH console shims while
+            # preserving the exact environment that is already running Matrix.
+            launcher = []
+            canonical_matrixd = Path("/matrix/scripts/matrixd")
+            if canonical_matrixd.is_file():
+                launcher = [sys.executable, str(canonical_matrixd)]
+
+            candidates = ["/usr/local/bin/matrixd"]
+            reboot_command = self.security_box.get("reboot", "")
+            if isinstance(reboot_command, str) and reboot_command.strip():
+                try:
+                    preserved_argv = shlex.split(reboot_command)
+                    boot_index = preserved_argv.index("boot")
+                    launcher_prefix = preserved_argv[:boot_index]
+                    if (
+                        launcher_prefix
+                        and Path(launcher_prefix[-1]).name == "matrixd"
+                    ):
+                        candidates.append(launcher_prefix[-1])
+                except (ValueError, TypeError):
+                    pass
+
+            installed = shutil.which("matrixd")
+            if installed:
+                candidates.append(installed)
+
+            seen = set()
+            for candidate in candidates if not launcher else ():
+                candidate = os.path.expanduser(str(candidate))
+                if not os.path.isabs(candidate):
+                    candidate = shutil.which(candidate)
+                    if not candidate:
+                        continue
+                candidate = os.path.abspath(candidate)
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+
+                path = Path(candidate)
+                if not path.is_file():
+                    continue
+                launcher = (
+                    [candidate]
+                    if os.access(candidate, os.X_OK)
+                    else [sys.executable, candidate]
+                )
+                break
+
+            if not launcher:
+                self.log("[MATRIX-DELETE][ERROR] Could not resolve matrixd.")
+                return
+
+            self.log(
+                "[MATRIX-DELETE] Using launcher: "
+                + " ".join(shlex.quote(part) for part in launcher)
+            )
+
+            cmd = launcher + ["kill", "--universe", universe]
+            if delete_directive_with_key:
+                cmd.append("--delete-directive-with-key")
+            if clean_up:
+                cmd.append("--clean-up")
+
+            selected_cleanup = (
+                "directive/key and runtime/static trees"
+                if clean_up
+                else "directive/key"
+                if delete_directive_with_key
+                else "no remote files"
+            )
+            self.log(
+                f"[MATRIX-DELETE] Leveling universe '{universe}'; selected "
+                f"file cleanup: {selected_cleanup}. Vault deployment will "
+                "be retained."
+            )
+            process = subprocess.Popen(
+                cmd,
+                shell=False,
+                start_new_session=True,
+                close_fds=True,
+            )
+
+            # Catch immediate launch/argument failures before Matrix exits.
+            time.sleep(0.25)
+            exit_code = process.poll()
+            if exit_code not in (None, 0):
+                self.log(
+                    f"[MATRIX-DELETE][ERROR] matrixd exited immediately "
+                    f"with status {exit_code}."
+                )
+                return
+
+            self.log(
+                f"[MATRIX-DELETE] Teardown launched as PID {process.pid}; "
+                "Matrix standing down."
+            )
             os._exit(0)
 
         except Exception as e:
-            self.log("[REBOOT][ERROR] Failed to relaunch Matrix.", error=e)
+            self.log("[MATRIX-DELETE][ERROR] Failed to launch teardown.", error=e)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,17 @@ class B2Bomber:
                 comm_root = agent.get("comm_path")
                 uid = agent.get("universal_id")
                 pod_path = agent.get("pod_path")
+                pid = agent.get("pid")
+
+                # Track the process before filesystem work. A missing comm
+                # path or failed cookie write must never make a live PID
+                # invisible to shutdown verification.
+                tracker_id = f"{uid or 'unknown'}:{pid or 'no-pid'}"
+                self.agents[tracker_id] = {
+                    "pid": pid,
+                    "universal_id": uid or tracker_id,
+                    "details": {"cmd": (agent.get("details") or {}).get("cmd")}
+                }
 
                 if not comm_root or not uid:
                     self.log_info(f"[B2-BOMBER][SKIP] Missing comm_path/universal_id for agent: {agent}")
@@ -53,14 +64,6 @@ class B2Bomber:
                 else:
                     JsonSafeWrite.safe_write(die_path, "terminate")
                     self.log_info(f"B2-BOMBER][DROPPING-DIE-COOKIE] `die` cookie written for {uid} at {die_path}")
-
-
-                # Track agent info for later escalation
-                self.agents[uid] = {
-                    "pid": agent.get("pid"),
-                    "details": {"cmd": agent.get("details", {}).get("cmd")}
-                }
-
             except Exception as e:
                 self.log_info(f"[B2-BOMBER][DROPPING-DIE-COOKIE][ERROR] Failed to distribute die cookie for {agent}: {e}")
 
@@ -95,8 +98,9 @@ class B2Bomber:
         run=1
         while time.time() <= deadline:
             survivors.clear()
-            for uid, info in list(self.agents.items()):
+            for tracker_id, info in list(self.agents.items()):
                 pid = info.get("pid")
+                uid = info.get("universal_id", tracker_id)
                 if pid and self.is_pid_alive(pid):
                     survivors.append({"universal_id": uid, "pid": pid})
                     self.log_info(f"[B2-BOMBER] 💣 Bombing Run {run} Agent {uid} (PID {pid}) still breathing...")
@@ -109,14 +113,15 @@ class B2Bomber:
         self.log_info(f"[B2-BOMBER] Timeout reached. Survivors: {[s['universal_id'] for s in survivors]}")
         return survivors
 
-    def escalate_shutdown(self, survivors, grace_after_term=1, dry_run=False):
+    def escalate_shutdown(self, survivors, grace_after_term=1,
+                          grace_after_kill=2, dry_run=False):
         """
         Immediately attempt polite termination (SIGTERM / proc.terminate), wait `grace_after_term`,
         then SIGKILL any remaining PIDs. No batching — level it.
         """
         if not survivors:
             self.log_info("[B2-BOMBER] No survivors to escalate.")
-            return
+            return []
 
         # First pass: SIGTERM (prefer process group on POSIX)
         active = {}
@@ -151,7 +156,7 @@ class B2Bomber:
                             self.log_info(f"[B2-BOMBER] terminate() → {uid} (PID {pid})")
                 except Exception as e:
                     self.log_info(f"[B2-BOMBER][WARN] SIGTERM fallback for {uid}: {e}")
-                active[uid] = pid
+                active[pid] = uid
             except psutil.NoSuchProcess:
                 self.log_info(f"[B2-BOMBER] Already dead: {uid}")
             except Exception as e:
@@ -161,7 +166,7 @@ class B2Bomber:
         time.sleep(grace_after_term)
 
         # Second pass: SIGKILL any remaining
-        for uid, pid in list(active.items()):
+        for pid, uid in list(active.items()):
             if self.is_pid_alive(pid):
                 try:
                     if dry_run:
@@ -182,15 +187,33 @@ class B2Bomber:
                 except Exception as e:
                     self.log_info(f"[B2-BOMBER][ERROR] Failed to SIGKILL {uid} (PID {pid}): {e}")
 
+        # Do not report success until every tracked PID is actually gone. The
+        # caller may be about to remove boot material, so AccessDenied and
+        # slow process teardown must fail closed.
+        deadline = time.time() + max(float(grace_after_kill), 0)
+        remaining = []
+        while True:
+            remaining = [
+                {"universal_id": uid, "pid": pid}
+                for pid, uid in active.items()
+                if self.is_pid_alive(pid)
+            ]
+            if not remaining or time.time() >= deadline:
+                break
+            time.sleep(0.1)
+
+        return remaining
+
     def level_it(self, target_list, check_interval=2, timeout=30, dry_run=False):
         """
         Simplified: write die for every target, wait, then level survivors.
         target_list: list of dicts with keys 'universal_id','comm_path','pod_path','pid', 'details'
         """
         self.log_info("[B2-BOMBER] Initiating 'level it' sequence.")
+        self.agents = {}
         if not target_list:
             self.log_info("[B2-BOMBER][WARN] No targets provided.")
-            return
+            return True
 
         # 1) Drop die cookies for each target
         self.pass_out_die_cookies(target_list, dry_run=dry_run)
@@ -201,8 +224,19 @@ class B2Bomber:
         # 3) If anybody survived, escalate immediately (no batches)
         if survivors:
             self.log_info("[B2-BOMBER][WARNING] Survivors detected — leveling now.")
-            self.escalate_shutdown(survivors, grace_after_term=1, dry_run=dry_run)
+            survivors = self.escalate_shutdown(
+                survivors,
+                grace_after_term=1,
+                dry_run=dry_run,
+            )
+            if survivors:
+                self.log_info(
+                    "[B2-BOMBER][FATAL] Unable to stop: "
+                    f"{[s['universal_id'] for s in survivors]}"
+                )
+                return False
         else:
             self.log_info("[B2-BOMBER] All targets exited cleanly.")
 
         self.log_info("[B2-BOMBER] Universe-wide carpet-bombing operation complete.")
+        return True
