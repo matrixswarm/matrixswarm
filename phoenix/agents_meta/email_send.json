@@ -13,9 +13,10 @@
         }
     ],
     "config": {
+        "encrypt_alerts": false,
         "ui": {
             "agent_tree": {
-                "emoji": "\ud83d\udce7"
+                "emoji": "📧"
             },
             "panel": [
                 "email_send.email_send"
