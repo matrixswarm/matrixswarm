@@ -6,6 +6,7 @@ import json
 import base64
 import threading
 import hashlib
+import re
 
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
@@ -21,10 +22,41 @@ class Agent(BootAgent):
     ephemeral rpc_handler, supports start_line offsets, and handles rotation.
     """
 
+    # Redaction is deliberately performed here, at the swarm egress boundary.
+    # Phoenix must never receive a clear-text secret just because an agent
+    # logged a request payload or configuration object.
+    _PEM_BEGIN_RE = re.compile(
+        r"(?i)-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----"
+    )
+    _PEM_END_RE = re.compile(r"(?i)-----END (?:[A-Z0-9 ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----")
+
+    @classmethod
+    def _redact_text(cls, value, stream=None) -> str:
+        """Defend against secrets embedded in free-form or malformed logs."""
+        text = str(value)
+
+        # PEM blocks can span many log lines, so remember state per stream.
+        pem_active = bool(stream and stream.get("redacting_pem", False))
+        if pem_active:
+            if cls._PEM_END_RE.search(text):
+                stream["redacting_pem"] = False
+                return "[REDACTED PEM PRIVATE KEY]"
+            return "[REDACTED PEM PRIVATE KEY DATA]"
+
+        if cls._PEM_BEGIN_RE.search(text):
+            if stream is not None and not cls._PEM_END_RE.search(text):
+                stream["redacting_pem"] = True
+            return "[REDACTED PEM PRIVATE KEY]"
+
+        return Logger.redact_text(text)
+
+    def _redact_log_lines(self, lines, stream):
+        return [self._redact_text(line, stream) for line in lines]
+
     def __init__(self):
         super().__init__()
         try:
-            self.AGENT_VERSION = "1.1.0"
+            self.AGENT_VERSION = "1.2.0"
             cfg = self.tree_node.get("config", {})
 
             self.interval = int(cfg.get("interval", 2))     # seconds between polls
@@ -116,6 +148,7 @@ class Agent(BootAgent):
             "token": token,
             "return_handler": return_handler,
             "can_broadcast": False,
+            "redacting_pem": False,
             "log_path": log_path,
             "created": time.time()
         }
@@ -215,9 +248,16 @@ class Agent(BootAgent):
                             if self.key_bytes:
                                 line = Logger.decrypt_log_line(line, self.key_bytes)
                             entry = json.loads(line)
-                            rendered.append(Logger.render_log_line(entry))
+                            safe_entry = Logger.redact_structure(entry)
+                            rendered.append(Logger.render_log_line(safe_entry))
                         except Exception:
                             rendered.append(f"[MALFORMED] {line.strip()}")
+
+                    # Structured redaction above protects normal Logger
+                    # entries. This second pass covers renderer output and
+                    # malformed/free-form lines without touching agent logs on
+                    # disk.
+                    rendered = self._redact_log_lines(rendered, stream)
 
                     if self.debug.is_enabled():
                         h = self._hash_lines(rendered)
