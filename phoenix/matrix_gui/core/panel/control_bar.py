@@ -387,6 +387,15 @@ class ControlBar(QWidget):
             delete_action.triggered.connect(
                 lambda _checked=False: self._run_for_selected_agent(self.session_window._launch_delete_agent)
             )
+            menu.addSeparator()
+            teardown_action = menu.addAction("Destroy remote universe…")
+            teardown_action.setToolTip(
+                "Stop the active remote universe and optionally remove its "
+                "directive, key, runtime, and static data."
+            )
+            teardown_action.triggered.connect(
+                lambda _checked=False: self.session_window._launch_universe_teardown()
+            )
             self.more_btn.setMenu(menu)
             self.more_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             self.top_row.addWidget(self.more_btn)
