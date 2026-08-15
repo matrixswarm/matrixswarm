@@ -2,6 +2,7 @@ import time
 import os
 import json
 import base64
+import re
 from datetime import datetime
 from pathlib import Path
 from Crypto.Cipher import AES
@@ -9,6 +10,85 @@ from Crypto.Random import get_random_bytes
 from core.python_core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
 
 class Logger:
+    """Structured agent logger with fail-closed secret redaction."""
+
+    REDACTED = "[REDACTED]"
+    _SENSITIVE_VALUE_RE = re.compile(
+        r"""(?ix)
+        (?P<prefix>
+            [\"']?
+            (?:
+                password|passphrase|pwd|secret|token|authorization|cookie|
+                api[_ -]?key|access[_ -]?key|private[_ -]?key|
+                swarm[_ -]?key|aes[_ -]?key|client[_ -]?secret|credential(?:s)?
+            )
+            [\"']?\s*[:=]\s*
+        )
+        (?P<value>
+            \[REDACTED\](?:\]+)?|
+            \"(?:\\.|[^\"])*\"|
+            '(?:\\.|[^'])*'|
+            [^\s,}\]\)]+
+        )
+        """
+    )
+    _AUTH_HEADER_RE = re.compile(
+        r"(?i)(?P<prefix>\bauthorization\s*[:=]\s*)"
+        r"(?:bearer|basic|token)\s+[^\s,}\]]+"
+    )
+    _URL_CREDENTIAL_RE = re.compile(
+        r"(?i)(?P<prefix>\b[a-z][a-z0-9+.-]*://[^/\s:@]+:)[^@\s/]+(?=@)"
+    )
+
+    @classmethod
+    def is_sensitive_key(cls, key) -> bool:
+        """Recognize credential-bearing keys across snake/camel/kebab case."""
+        normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", str(key)).casefold()
+        compact = re.sub(r"[^a-z0-9]", "", normalized)
+        return any(
+            marker in compact
+            for marker in (
+                "password", "passphrase", "pwd", "secret", "token",
+                "authorization", "apikey", "accesskey", "privatekey",
+                "swarmkey", "aeskey", "credential", "cookie",
+                "clientsecret",
+            )
+        )
+
+    @classmethod
+    def redact_structure(cls, value):
+        """Return a redacted copy without mutating the caller's payload."""
+        if isinstance(value, dict):
+            return {
+                key: cls.REDACTED if cls.is_sensitive_key(key)
+                else cls.redact_structure(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [cls.redact_structure(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(cls.redact_structure(item) for item in value)
+        if isinstance(value, str):
+            return cls.redact_text(value)
+        return value
+
+    @classmethod
+    def redact_text(cls, value) -> str:
+        """Redact credentials embedded in free-form text and malformed JSON."""
+        text = str(value)
+        text = cls._URL_CREDENTIAL_RE.sub(
+            lambda match: f"{match.group('prefix')}{cls.REDACTED}",
+            text,
+        )
+        text = cls._AUTH_HEADER_RE.sub(
+            lambda match: f"{match.group('prefix')}{cls.REDACTED}",
+            text,
+        )
+        return cls._SENSITIVE_VALUE_RE.sub(
+            lambda match: f"{match.group('prefix')}{cls.REDACTED}",
+            text,
+        )
+
     def __init__(self, log_path, logs="logs", file_name="agent.log", max_bytes=5_000_000, backup_count=5):
         if ENCRYPTION_CONFIG.is_enabled():
             swarm_key = ENCRYPTION_CONFIG.get_swarm_key()
@@ -34,9 +114,14 @@ class Logger:
 
         try:
 
+            # Use a clean copy for every destination: delegated logger,
+            # console, signed entry, and disk. The original message object is
+            # left untouched for the calling agent.
+            safe_message = self.redact_structure(message)
+
             if hasattr(self, "logger"):
                 self.logger.log(
-                    message=message,
+                    message=safe_message,
                     level=level,
                     print_to_console=print_to_console,
                     include_timestamp=include_timestamp,
@@ -50,13 +135,13 @@ class Logger:
 
                 # fallback print if logger is missing
                 ts = time.strftime("%Y-%m-%d %H:%M:%S")
-                print(f"[{ts}] [{level}] {message}")
+                print(f"[{ts}] [{level}] {safe_message}")
 
 
             # 🔧 Build log entry
             log_entry = {
                 "level": level,
-                "message": message
+                "message": safe_message
             }
 
             if include_timestamp:
@@ -157,7 +242,8 @@ class Logger:
         """
         Convert a JSON log entry into a flat CLI-style string.
         """
-        ts = entry.get("timestamp", "")
-        level = entry.get("level", "INFO")
-        msg = entry.get("message", "")
-        return f"[{ts}] [{level}] {msg}"
+        safe_entry = Logger.redact_structure(entry)
+        ts = safe_entry.get("timestamp", "")
+        level = safe_entry.get("level", "INFO")
+        msg = safe_entry.get("message", "")
+        return Logger.redact_text(f"[{ts}] [{level}] {msg}")

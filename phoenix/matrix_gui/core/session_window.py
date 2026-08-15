@@ -536,11 +536,27 @@ class SessionWindow(QMainWindow):
         @private
         """
 
-        if not panels:
-            # No specialty panels -> stay where you are
-            return
-
         try:
+            node = node or {}
+            # The command deck owns presentation only; the tree remains the
+            # authoritative source of the selected agent.
+            self.control_bar.set_selected_agent(node)
+
+            if not panels:
+                # A plain tree selection must not leave an older plugin's
+                # contextual controls visible under the session command deck.
+                self.control_bar.remove_prefix_button()
+                self.control_bar.clear_secondary_buttons()
+                self.control_bar.set_context("Cockpit")
+                self.control_bar.hide_secondary_row()
+                return
+
+            selected_name = (
+                node.get("name")
+                or node.get("agent_name")
+                or node.get("universal_id")
+                or "Selected agent"
+            )
 
             all_buttons = []
 
@@ -567,11 +583,14 @@ class SessionWindow(QMainWindow):
                     print(f"[DEBUG] {panel_name} has no usable buttons, ignoring")
 
             # Only update toolbar if we actually collected something
+            self.control_bar.remove_prefix_button()
+            self.control_bar.set_context(f"Agent / {selected_name}")
             if all_buttons:
                 self.control_bar.clear_secondary_buttons()
                 self.control_bar.add_secondary_buttons(all_buttons)
             else:
                 self.control_bar.clear_secondary_buttons()
+                self.control_bar.hide_secondary_row()
 
         except Exception as e:
             emit_gui_exception_log("SessionWindow._handle_agent_selected", e)
@@ -639,9 +658,14 @@ class SessionWindow(QMainWindow):
         """
         try:
             self.stacked.setCurrentWidget(self.default_panel)
-            # Only clear the secondary rack — keep the default top row
-            #if hasattr(self, "control_bar"):
-                #self.control_bar.clear_secondary_buttons()
+            # Returning home must clear specialty-panel affordances. Leaving
+            # them visible was the source of the old toolbar continuity leak.
+            if hasattr(self, "control_bar"):
+                self.control_bar.remove_prefix_button()
+                self.control_bar.clear_secondary_buttons()
+                self.control_bar.set_context("Cockpit")
+                self.control_bar.hide_secondary_row()
+                self.control_bar.refresh_toggle_states()
         except Exception as e:
             emit_gui_exception_log("SessionWindow.show_default_panel", e)
 
@@ -663,7 +687,13 @@ class SessionWindow(QMainWindow):
 
             self._schedule_specialty_panel_activation(panel)
 
+            panel_name = panel.windowTitle().strip() if panel.windowTitle() else ""
+            if not panel_name:
+                panel_name = panel.__class__.__name__.replace("Panel", "")
+
+            self.control_bar.remove_prefix_button()
             self.control_bar.clear_secondary_buttons()
+            self.control_bar.set_context(f"Panel / {panel_name}")
 
             if hasattr(panel, "get_panel_buttons"):
                 buttons = panel.get_panel_buttons()
@@ -672,12 +702,11 @@ class SessionWindow(QMainWindow):
             else:
                 self.control_bar.hide_secondary_row()
 
-            # Always keep the main rack visible
+            # Context rail always starts with an explicit route back to the
+            # cockpit, followed by the specialty panel's own actions.
+            self.control_bar.add_prefix_button("‹", "Cockpit", self.show_default_panel)
             self.control_bar.show_secondary_row()
-
-            # Always add Home
-            self.control_bar.add_prefix_button("🔙", "Main", self.show_default_panel)
-            print("[DEBUG] Added Home button")
+            print("[DEBUG] Added cockpit context prefix")
         except Exception as e:
             emit_gui_exception_log("session_window.show_specialty_panel", e)
 
@@ -817,7 +846,7 @@ class SessionWindow(QMainWindow):
             group = self.detail_panel.config_group
             visible = not group.isVisible()
             group.setVisible(visible)
-            # Optionally: self.control_bar.config_btn.setChecked(visible)
+            self.control_bar.refresh_toggle_states()
         except Exception as e:
             emit_gui_exception_log("session_window.toggle_config_panel", e)
 
@@ -829,7 +858,7 @@ class SessionWindow(QMainWindow):
             group = self.detail_panel.inspector_group
             visible = not group.isVisible()
             group.setVisible(visible)
-            # Optionally: self.control_bar.threads_btn.setChecked(visible)
+            self.control_bar.refresh_toggle_states()
         except Exception as e:
             emit_gui_exception_log("session_window.toggle_threads_panel", e)
 
@@ -841,8 +870,8 @@ class SessionWindow(QMainWindow):
 
         try:
             self.log_paused = not self.log_paused
-            # Optionally: self.control_bar.pause_btn.setChecked(self.log_paused)
             self._update_log_status_bar()
+            self.control_bar.refresh_toggle_states()
         except Exception as e:
             emit_gui_exception_log("session_window._toggle_log_pause", e)
 
