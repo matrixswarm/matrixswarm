@@ -349,3 +349,12 @@ QGroupBox {
     margin: 8px 8px 12px 8px;   /* L, T, R, B */
     padding: 8px;
 }
+
+/* The panel switcher is structural; child panels provide the visible chrome. */
+QStackedWidget#SessionPanelStack {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+}
