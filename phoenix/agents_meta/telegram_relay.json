@@ -4,13 +4,25 @@
     "constraints": [
         {
             "telegram": null
+        },
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
         }
     ],
     "config": {
+        "alerts_enabled": true,
+        "encrypt_alerts": false,
+        "packet_ttl": 3600,
         "ui": {
             "agent_tree": {
                 "emoji": "\ud83d\udce1"
-            }
+            },
+            "panel": [
+                "telegram_relay.telegram_relay"
+            ]
         },
         "service-manager": [
             {

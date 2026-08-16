@@ -1,13 +1,13 @@
 # Commander & ChatGPT – Victory Always Edition
-# EMAIL SEND Config Editor
+# TELEGRAM RELAY Config Editor
 from PyQt6.QtWidgets import QCheckBox, QFormLayout, QLabel, QWidget
 
 from .base_editor import BaseEditor
 from .mixin.service_roles_mixin import ServiceRolesMixin
 
 
-class EmailSend(BaseEditor, ServiceRolesMixin):
-    """Edit alert-payload protection without exposing assigned key material."""
+class TelegramRelay(BaseEditor, ServiceRolesMixin):
+    """Edit Telegram alert delivery and alert-payload protection."""
 
     def _build_form(self):
         cfg = self.config
@@ -17,11 +17,11 @@ class EmailSend(BaseEditor, ServiceRolesMixin):
         form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(4)
 
-        self.alerts_enabled = QCheckBox("Enable email alert delivery")
+        self.alerts_enabled = QCheckBox("Enable Telegram alert delivery")
         self.alerts_enabled.setChecked(bool(cfg.get("alerts_enabled", True)))
         form.addRow(self.alerts_enabled)
 
-        self.encrypt_alerts = QCheckBox("Encrypt alert email subject and body")
+        self.encrypt_alerts = QCheckBox("Encrypt Telegram alert message")
         self.encrypt_alerts.setChecked(bool(cfg.get("encrypt_alerts", False)))
         form.addRow(self.encrypt_alerts)
 
@@ -32,7 +32,7 @@ class EmailSend(BaseEditor, ServiceRolesMixin):
         explanation.setWordWrap(True)
         form.addRow(explanation)
 
-        self.layout.addRow(QLabel("🔐 Email Alert Security"))
+        self.layout.addRow(QLabel("🔐 Telegram Alert Security"))
         self.layout.addRow(security_box)
 
         self.layout.addRow(QLabel("🔗 Service Manager Roles"))
