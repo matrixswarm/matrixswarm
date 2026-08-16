@@ -148,7 +148,7 @@ class Agent(BootAgent):
         self.log("[TELEGRAM] Relay shutting down. No more echoes for now.")
 
     def cmd_send_alert_msg(self, content, packet, identity:IdentityObject = None):
-        if not self.alerts_enabled:
+        if not getattr(self, "alerts_enabled", True):
             self.log("[TELEGRAM] Alert delivery is disabled.", level="INFO")
             return
 

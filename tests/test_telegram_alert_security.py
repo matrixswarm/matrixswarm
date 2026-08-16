@@ -141,6 +141,12 @@ class TelegramAlertSecurityTests(unittest.TestCase):
         agent.cmd_send_alert_msg({"msg": "must not send"}, {"origin": "watcher"})
         self.assertEqual([], agent.sent)
 
+    def test_legacy_instance_without_alert_flag_defaults_to_enabled(self):
+        agent = self._agent(encrypted=False)
+        del agent.alerts_enabled
+        agent.cmd_send_alert_msg({"formatted_msg": "legacy alert"}, {})
+        self.assertEqual(["legacy alert"], agent.sent)
+
     def test_plaintext_mode_is_preserved_when_encryption_is_off(self):
         agent = self._agent(encrypted=False)
         agent.cmd_send_alert_msg({"formatted_msg": "ordinary alert"}, {})

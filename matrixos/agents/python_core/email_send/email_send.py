@@ -199,7 +199,7 @@ class Agent(BootAgent):
 
     def cmd_send_alert_msg(self, content: dict, packet, identity: IdentityObject = None):
         """Format a swarm alert and enqueue plaintext or a secure envelope."""
-        if not self.alerts_enabled:
+        if not getattr(self, "alerts_enabled", True):
             self.log("[EMAIL] Alert delivery is disabled.", level="INFO")
             return
 
