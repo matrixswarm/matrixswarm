@@ -136,7 +136,7 @@ class MatrixWebsocket(PhoenixPanelInterface):
                 "handler": "cmd_service_request",
                 "ts": time.time(),
                 "content": {
-                    "service": "matrix_https.status",
+                    "service": "matrix_websocket.status",
                     "payload": {
                         "session_id": self.session_id,
                         "return_handler": "matrix_websocket_panel.status_ack",

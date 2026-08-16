@@ -100,6 +100,10 @@ class RailgunWorker(QThread):
 
             cmd = (
                 f"cd /matrix && "
+                # Keep the remote Python launcher line-buffered so Railgun
+                # receives boot progress continuously over the non-PTY channel.
+                f"export PYTHONUNBUFFERED=1 && "
+                f"export PYTHONIOENCODING=utf-8 && "
                 f"export SITE_ROOT=/matrix && "
                 f"export SWARM_KEY={quoted_swarm_key} && "
                 f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
