@@ -50,9 +50,12 @@ class Agent(BootAgent):
             # This switch protects the message inside the already encrypted SMTP
             # connection. It intentionally applies only to swarm alerts; the
             # explicit send_email service keeps its caller-supplied message.
+            self.alerts_enabled = bool(cfg.get("alerts_enabled", True))
             self.encrypt_alerts = bool(cfg.get("encrypt_alerts", False))
             self._configure_alert_security(cfg)
 
+            alert_state = "on" if self.alerts_enabled else "off"
+            self.log(f"Alert delivery: {alert_state}", level="INFO")
             state = "on" if self.encrypt_alerts else "off"
             self.log(f"Alert message encryption: {state}", level="INFO")
             self.email_message_send_packet_identifier = hashlib.sha256(
@@ -196,6 +199,10 @@ class Agent(BootAgent):
 
     def cmd_send_alert_msg(self, content: dict, packet, identity: IdentityObject = None):
         """Format a swarm alert and enqueue plaintext or a secure envelope."""
+        if not self.alerts_enabled:
+            self.log("[EMAIL] Alert delivery is disabled.", level="INFO")
+            return
+
         if not self._email_queue_ready():
             return
 

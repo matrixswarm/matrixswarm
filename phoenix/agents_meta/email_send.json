@@ -13,6 +13,7 @@
         }
     ],
     "config": {
+        "alerts_enabled": true,
         "encrypt_alerts": false,
         "ui": {
             "agent_tree": {
