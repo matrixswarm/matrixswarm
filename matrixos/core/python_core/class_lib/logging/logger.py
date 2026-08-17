@@ -119,25 +119,6 @@ class Logger:
             # left untouched for the calling agent.
             safe_message = self.redact_structure(message)
 
-            if hasattr(self, "logger"):
-                self.logger.log(
-                    message=safe_message,
-                    level=level,
-                    print_to_console=print_to_console,
-                    include_timestamp=include_timestamp,
-                    override_path=override_path,
-                    override_filename=override_filename,
-                    signer=signer,
-                    console_mode=console_mode
-                )
-            else:
-
-
-                # fallback print if logger is missing
-                ts = time.strftime("%Y-%m-%d %H:%M:%S")
-                print(f"[{ts}] [{level}] {safe_message}")
-
-
             # 🔧 Build log entry
             log_entry = {
                 "level": level,
@@ -152,7 +133,7 @@ class Logger:
                     payload = json.dumps(log_entry, sort_keys=True).encode()
                     log_entry["sig"] = base64.b64encode(signer(payload)).decode()
                 except Exception as e:
-                    print(f"[LOGGER][WARN] Signature failed: {e}")
+                    print(f"[LOGGER][WARN] Signature failed: {e}", flush=True)
 
             # 📄 Prepare output for disk (JSON always)
             output = json.dumps(log_entry, ensure_ascii=False)
@@ -164,7 +145,7 @@ class Logger:
             # 🖨 Console Output
             if print_to_console:
                 if console_mode == "json" or hasattr(self, "_decoded_swarm_key"):
-                    print(output)
+                    print(output, flush=True)
                 else:
                     ts = log_entry.get("timestamp", "")
                     lvl = log_entry.get("level", "INFO")
@@ -175,7 +156,7 @@ class Logger:
                         "WARNING": "⚠️",
                         "DEBUG": "🐞"
                     }.get(lvl.upper(), "🔸")
-                    print(f"{emoji} [{ts}] [{lvl}] {msg}")
+                    print(f"{emoji} [{ts}] [{lvl}] {msg}", flush=True)
 
             # 📝 Write to log file (structured)
             path = (
@@ -194,7 +175,7 @@ class Logger:
                 with open(path, "a", encoding="utf-8") as f:
                     f.write(output.rstrip() + "\n")  # force newline, strip extras
             except Exception as e:
-                print(f"[LOGGER][ERROR] Failed to write to {path}: {e}")
+                print(f"[LOGGER][ERROR] Failed to write to {path}: {e}", flush=True)
 
         except Exception as final_fail:
             # Emergency fallback
@@ -205,8 +186,10 @@ class Logger:
             except:
                 pass  # If even /tmp fails, let it burn silently
 
-            print(f"🛑 [LOGGER][CRITICAL FAIL] Could not write to main log. Error dumped to: {fallback_path}")
-
+            print(
+                f"🛑 [LOGGER][CRITICAL FAIL] Could not write to main log. Error dumped to: {fallback_path}",
+                flush=True
+            )
 
     def _rotate_logs(self, path):
         base = Path(path)
