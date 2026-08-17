@@ -1,8 +1,11 @@
 # Authored by Daniel F MacDonald and ChatGPT aka The Generals
-import sys
-import os
-import time
+import base64
+import hashlib
+import io
 import json
+import os
+import sys
+import time
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 # ╔══════════════════════════════════════════════════════════╗
@@ -15,11 +18,19 @@ import discord as discord_real
 from discord.ext import commands
 import asyncio
 
+from Crypto.PublicKey import RSA
+
 from core.python_core.boot_agent import BootAgent
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from core.python_core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
+from core.python_core.utils.crypto_utils import pem_fix
 
 class Agent(BootAgent):
+    """Relay swarm alerts to Discord with optional signed payload encryption."""
+
+    ENCRYPTED_ALERT_MARKER = "MATRIXSWARM-ENCRYPTED-ALERT-V1"
+
     def __init__(self):
         super().__init__()
 
@@ -43,8 +54,107 @@ class Agent(BootAgent):
             self.channel_id = int(channel_id)
         else:
             self.channel_id = 0
+
+        self.alerts_enabled = bool(config.get("alerts_enabled", True))
+        self.encrypt_alerts = bool(config.get("encrypt_alerts", False))
+        self.packet_ttl = int(config.get("packet_ttl") or 3600)
+        self._serial_num = self.tree_node.get("serial")
+        self._peer_pub_key_pem = None
+        self._signing_key_obj = None
+        self._configure_alert_security(config)
+
+        self.discord_message_send_packet_identifier = hashlib.sha256(
+            f"{self._serial_num}discord-relay-message".encode("utf-8")
+        ).hexdigest()
+
         self.name = "DiscordAgentV3e"
         self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
+
+        alert_state = "on" if self.alerts_enabled else "off"
+        encryption_state = "on" if self.encrypt_alerts else "off"
+        self.log(f"Alert delivery: {alert_state}", level="INFO")
+        self.log(f"Alert message encryption: {encryption_state}", level="INFO")
+
+    def _configure_alert_security(self, config: dict) -> None:
+        """Load assigned signing/encryption material without weakening boot."""
+        if not self.encrypt_alerts:
+            return
+
+        signing_cfg = config.get("security", {}).get("signing", {}) or {}
+        remote_pubkey = signing_cfg.get("remote_pubkey")
+        local_privkey = signing_cfg.get("privkey")
+
+        try:
+            self._peer_pub_key_pem = pem_fix(remote_pubkey) if remote_pubkey else None
+            self._signing_key_obj = (
+                RSA.import_key(pem_fix(local_privkey).encode("utf-8"))
+                if local_privkey
+                else None
+            )
+        except Exception as e:
+            self._peer_pub_key_pem = None
+            self._signing_key_obj = None
+            self.log(
+                "[DISCORD][ALERT_ENCRYPTION][KEY_ERROR] Assigned keys could not be loaded.",
+                error=e,
+                level="ERROR",
+            )
+
+    def _secure_payload(self, payload: dict) -> dict:
+        """Sign and encrypt one alert payload using the assigned packet keys."""
+        if not isinstance(payload, dict):
+            raise TypeError("payload must be a dict")
+        if not self._peer_pub_key_pem or not self._signing_key_obj:
+            raise RuntimeError("alert signing/encryption keys are not configured")
+
+        serial = self._serial_num
+        if not isinstance(serial, str) or not serial.strip():
+            raise RuntimeError("alert packet serial is not configured")
+
+        now = int(time.time())
+        return wrap_packet_securely(
+            payload,
+            peer_pub_key_pem=self._peer_pub_key_pem,
+            serial_num=serial.strip(),
+            signing_key_obj=self._signing_key_obj,
+            logger=self.log,
+            extra_fields={
+                "expires": now + self.packet_ttl,
+                "hash": self.discord_message_send_packet_identifier,
+            },
+        )
+
+    @staticmethod
+    def _alert_sender(packet, identity: IdentityObject = None) -> str:
+        if identity and identity.has_verified_identity():
+            return str(identity.get_sender_uid())
+        if isinstance(packet, dict):
+            return str(packet.get("origin", "not specified"))
+        return "not specified"
+
+    def _encrypt_alert_message(
+        self,
+        *,
+        message: str,
+        content: dict,
+        packet,
+        identity: IdentityObject = None,
+    ) -> str:
+        """Return a versioned base64 secure envelope with no alert plaintext."""
+        payload = {
+            "handler": "discord_relay.alert",
+            "content": {
+                "message": str(message),
+                "origin": self._alert_sender(packet, identity),
+                "level": str(content.get("level", "info")),
+                "timestamp": time.time(),
+            },
+        }
+        envelope = {"content": self._secure_payload(payload)}
+        encoded = base64.b64encode(
+            json.dumps(envelope, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        ).decode("ascii")
+        return f"{self.ENCRYPTED_ALERT_MARKER}\n{encoded}"
 
     def post_boot(self):
         self.log("[DISCORD] Starting client runner thread...")
@@ -118,34 +228,89 @@ class Agent(BootAgent):
         """
         Receives a unified alert packet and renders the best format available.
         """
-        # Check if rich embed data exists
-        if content.get("embed_data"):
-            # Use the new logic to send a rich embed
-            self.send_embed_from_data(content["embed_data"])
-        else:
-            # Fall back to sending plain text for older/simpler alerts
-            message_to_send = content.get("formatted_msg") or content.get("msg") or "[SWARM] No content."
-            self.send_text_message(message_to_send)
+        if not getattr(self, "alerts_enabled", True):
+            self.log("[DISCORD] Alert delivery is disabled.", level="INFO")
+            return
+
+        try:
+            if self.encrypt_alerts:
+                message = self._encrypt_alert_message(
+                    message=self.format_message(content),
+                    content=content,
+                    packet=packet,
+                    identity=identity,
+                )
+                if self.send_encrypted_alert_to_discord(message):
+                    self.log("[DISCORD] Encrypted message relayed successfully.")
+                return
+
+            # Preserve native rich embeds in explicit plaintext mode.
+            if content.get("embed_data"):
+                self.send_embed_from_data(content["embed_data"])
+            else:
+                message = content.get("formatted_msg") or content.get("msg") or "[SWARM] No content."
+                self.send_text_message(message)
+        except Exception as e:
+            self.log(
+                "[DISCORD][ALERT_ENCRYPTION][SEND_BLOCKED] Alert was not sent.",
+                error=e,
+                level="ERROR",
+            )
 
     def send_text_message(self, message: str):
         try:
-            self.send_to_discord(message)
-            self.log("[DISCORD] Message relayed successfully.")
+            if self.send_to_discord(message):
+                self.log("[DISCORD] Message relayed successfully.")
+                return True
         except Exception as e:
             self.log(f"[DISCORD][ERROR] Failed to relay message: {e}")
+        return False
 
     def send_to_discord(self, message):
         if not self.bot or not self.channel_id:
             self.log("[DISCORD][ERROR] Bot not ready or channel ID missing.")
-            return
+            return False
         try:
             channel = self.bot.get_channel(self.channel_id)
             if channel:
                 asyncio.run_coroutine_threadsafe(channel.send(message), self.bot.loop)
+                return True
             else:
                 self.log("[DISCORD][ERROR] Channel not found.")
         except Exception as e:
             self.log(f"[DISCORD][ERROR] Discord delivery failed: {e}")
+        return False
+
+    def send_encrypted_alert_to_discord(self, message: str) -> bool:
+        """Send a secure envelope without exceeding Discord's text limit."""
+        if len(message) <= 1900:
+            return self.send_to_discord(message)
+
+        if not self.bot or not self.channel_id:
+            self.log("[DISCORD][ERROR] Bot not ready or channel ID missing.")
+            return False
+
+        try:
+            channel = self.bot.get_channel(self.channel_id)
+            if not channel:
+                self.log("[DISCORD][ERROR] Channel not found.")
+                return False
+
+            attachment = discord_real.File(
+                io.BytesIO(message.encode("utf-8")),
+                filename=f"matrixswarm-encrypted-alert-{int(time.time())}.txt",
+            )
+            asyncio.run_coroutine_threadsafe(
+                channel.send(
+                    "MATRIXSWARM-ENCRYPTED-ALERT-V1\nEncrypted alert attached.",
+                    file=attachment,
+                ),
+                self.bot.loop,
+            )
+            return True
+        except Exception as e:
+            self.log(f"[DISCORD][ERROR] Encrypted attachment delivery failed: {e}")
+            return False
 
     def send_embed_from_data(self, content: dict):
         """
@@ -183,6 +348,12 @@ class Agent(BootAgent):
 
     def format_message(self, data: dict):
         """Builds a detailed message from embed_data if present."""
+        embed = data.get("embed_data")
+        if embed:
+            title = embed.get("title", "Swarm Alert")
+            description = embed.get("description", "No details provided.")
+            footer = embed.get("footer", "")
+            return f"{title}\n\n{description}\n\n{footer}".strip()
         return data.get("formatted_msg") or data.get("msg") or "[SWARM] No content."
 
     #SEND A NON SPAMMING MESSAGE TO DISCORD TO BE RETRIEVED AT THE CONVENIENCE OF PHOENIX

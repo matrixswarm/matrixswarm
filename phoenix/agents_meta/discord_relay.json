@@ -4,15 +4,24 @@
     "constraints": [
         {
             "discord": null
+        },
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
         }
     ],
     "config": {
+        "alerts_enabled": true,
+        "encrypt_alerts": false,
+        "packet_ttl": 3600,
         "ui": {
             "agent_tree": {
                 "emoji": "\ud83d\udcac"
             },
             "panel": [
-                "discord_relay.security_2fa"
+                "discord_relay.discord_relay"
             ]
         },
         "service-manager": [
@@ -24,7 +33,12 @@
                 "scope": [
                     "parent",
                     "any"
-                ]
+                ],
+                "auth": {
+                    "sig": true
+                },
+                "priority": 10,
+                "exclusive": false
             }
         ]
     }
