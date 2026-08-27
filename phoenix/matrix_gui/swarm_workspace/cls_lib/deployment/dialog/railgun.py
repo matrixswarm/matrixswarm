@@ -6,7 +6,9 @@ Non-blocking SSH deploy with full live output streaming.
 import ntpath
 import posixpath
 from matrix_gui.modules.railgun.remote_shell import (
-    quote_remote_argument,
+    build_remote_matrixd_command,
+    mcp_worker_linux_user,
+    validate_linux_user,
     validate_remote_token,
 )
 from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
@@ -43,6 +45,9 @@ class RailgunWorker(QThread):
             universe = validate_remote_token(
                 self.opts["universe"],
                 "Universe name",
+            )
+            linux_user = validate_linux_user(
+                self.opts["linux_user"], "Swarm Linux user"
             )
             bundle_name = validate_remote_token(
                 ntpath.basename(self.local_bundle),
@@ -88,28 +93,29 @@ class RailgunWorker(QThread):
                     "use cockpit agent logs for live output.\n"
                 )
 
-            if reboot_id:
-                flags.extend(
-                    ["--reboot-id", quote_remote_argument(reboot_id, "Reboot ID")]
+            provision_mcp_worker = bool(
+                self.opts.get("mcp_worker_enabled", False)
+            )
+            cmd = build_remote_matrixd_command(
+                action="start",
+                universe=universe,
+                linux_user=linux_user,
+                directive_path=remote_bundle,
+                swarm_key=self.swarm_key,
+                boot_flags=flags,
+                reboot_id=reboot_id,
+                provision_mcp_worker=provision_mcp_worker,
+            )
+            self.sig_stdout.emit(
+                f"[RAILGUN] Universe account: {linux_user}\n"
+            )
+            if provision_mcp_worker:
+                self.sig_stdout.emit(
+                    "[RAILGUN] MCP worker account: "
+                    f"{mcp_worker_linux_user(linux_user)} (isolated)\n"
                 )
-
-            boot_flags = " ".join(flags)
-            quoted_universe = quote_remote_argument(universe, "Universe name")
-            quoted_bundle = quote_remote_argument(remote_bundle, "Directive path")
-            quoted_swarm_key = quote_remote_argument(self.swarm_key, "SWARM_KEY")
-
-            cmd = (
-                f"cd /matrix && "
-                # Keep the remote Python launcher line-buffered so Railgun
-                # receives boot progress continuously over the non-PTY channel.
-                f"export PYTHONUNBUFFERED=1 && "
-                f"export PYTHONIOENCODING=utf-8 && "
-                f"export SITE_ROOT=/matrix && "
-                f"export SWARM_KEY={quoted_swarm_key} && "
-                f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
-                f"(matrixd boot --universe {quoted_universe} "
-                f"--directive {quoted_bundle} {boot_flags}) "
-                f"2>&1"
+            self.sig_stdout.emit(
+                "[RAILGUN] Root provisioning prepared; SWARM_KEY remains redacted.\n"
             )
 
             # 4. This is a non-interactive background deployment. Do not

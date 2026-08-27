@@ -19,6 +19,17 @@ from .dialog.railgun import RailgunDialog
 from matrix_gui.modules.vault.crypto.deploy_tools import write_encrypted_bundle_to_file
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
 
+
+def _contains_agent(node, agent_name):
+    """Return whether a compiled/staged directive contains an agent name."""
+    if isinstance(node, dict):
+        if node.get("name") == agent_name:
+            return True
+        return any(_contains_agent(value, agent_name) for value in node.values())
+    if isinstance(node, list):
+        return any(_contains_agent(value, agent_name) for value in node)
+    return False
+
 class Deploy():
 
     def deploy_directive(self, parent_dialog, directive_staging, deployment_staging, workspace_id):
@@ -49,6 +60,9 @@ class Deploy():
                 QMessageBox.information(None, "Cancelled", "Deployment process cancelled by operator.")
                 return
             opts = opts_dialog.get_options()
+            opts["mcp_worker_enabled"] = _contains_agent(
+                directive_staging.get("agents", {}), "mcp_reflex"
+            )
 
             # --- Agent source embedding (Clown Car) ---
             """
@@ -175,6 +189,8 @@ class Deploy():
                 "swarm_key": swarm_key_mem,
                 "encrypted_path": str(out_path),
                 "encrypted_hash": encrypted_hash,
+                "linux_user": opts["linux_user"],
+                "mcp_worker_enabled": opts["mcp_worker_enabled"],
                 "agents": deployment_staging.deployment["agents"],
                 "certs": deployment_staging.deployment["certs"],
             }
@@ -220,4 +236,3 @@ class Deploy():
         except Exception as e:
             print(f"Failed directive creation: {e}")
             QMessageBox.critical(None, "Error", f"Deployment error alert:\n{e}")
-

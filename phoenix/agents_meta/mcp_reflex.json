@@ -1,0 +1,28 @@
+{
+  "name": "mcp_reflex",
+  "universal_id": "mcp-reflex-1",
+  "constraints": [
+    {"packet_signing": {"in": true, "out": true}},
+    {"symmetric_encryption": {"type": "aes"}}
+  ],
+  "config": {
+    "ui": {"agent_tree": {"emoji": "🔌"}},
+    "service-manager": [{"role": [
+      "hive.mcp.tools@cmd_mcp_list_tools",
+      "hive.mcp.call_tool@cmd_mcp_call_tool"
+    ]}],
+    "require_verified_identity": true,
+    "max_workers": 2,
+    "max_pending": 8,
+    "worker_timeout_sec": 45,
+    "max_result_bytes": 262144,
+    "sandbox": {
+      "enabled": true,
+      "scope": "universe",
+      "launcher": "/usr/local/libexec/matrix-mcp-launch",
+      "worker_account": "railgun-managed"
+    },
+    "servers": {},
+    "access_control": {"default": "deny", "callers": {}}
+  }
+}

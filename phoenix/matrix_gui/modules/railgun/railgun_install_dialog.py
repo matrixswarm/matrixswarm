@@ -464,6 +464,31 @@ if [ -f "$TARGET/requirements.txt" ]; then
 fi
 "$VENV_DIR/bin/python3" -m pip check
 
+MCP_REQUIREMENTS="$TARGET/agents/python_core/mcp_reflex/worker/requirements.txt"
+MCP_LAUNCHER="$TARGET/scripts/matrix-mcp-launch"
+if [ -f "$MCP_REQUIREMENTS" ]; then
+    echo "[Installer] Creating isolated MCP worker environment..."
+    if ! command -v sudo >/dev/null 2>&1; then
+        apt-get update -y
+        apt-get install -y sudo
+    fi
+    MCP_VENV="$TARGET/mcp/.venv"
+    mkdir -p "$TARGET/mcp/workers"
+    rm -rf "$MCP_VENV"
+    python3 -m venv "$MCP_VENV"
+    "$MCP_VENV/bin/python3" -m pip install --upgrade pip wheel
+    "$MCP_VENV/bin/python3" -m pip install -r "$MCP_REQUIREMENTS"
+    "$MCP_VENV/bin/python3" -m pip check
+
+    if [ ! -f "$MCP_LAUNCHER" ]; then
+        echo "[Installer][ERROR] MCP privilege-drop launcher is missing."
+        exit 127
+    fi
+    install -d -o root -g root -m 0755 /usr/local/libexec
+    install -o root -g root -m 0755 \
+        "$MCP_LAUNCHER" /usr/local/libexec/matrix-mcp-launch
+fi
+
 if [ ! -f "$TARGET/scripts/matrixd" ]; then
     echo "[Installer][ERROR] matrixd script missing under $TARGET/scripts"
     exit 127
@@ -578,6 +603,31 @@ if [ -f "$TARGET/requirements.txt" ]; then
     "$VENV_DIR/bin/python3" -m pip install -r "$TARGET/requirements.txt"
 fi
 "$VENV_DIR/bin/python3" -m pip check
+
+MCP_REQUIREMENTS="$TARGET/agents/python_core/mcp_reflex/worker/requirements.txt"
+MCP_LAUNCHER="$TARGET/scripts/matrix-mcp-launch"
+if [ -f "$MCP_REQUIREMENTS" ]; then
+    echo "[Installer] Creating isolated MCP worker environment..."
+    if ! command -v sudo >/dev/null 2>&1; then
+        apt-get update -y
+        apt-get install -y sudo
+    fi
+    MCP_VENV="$TARGET/mcp/.venv"
+    mkdir -p "$TARGET/mcp/workers"
+    rm -rf "$MCP_VENV"
+    python3 -m venv "$MCP_VENV"
+    "$MCP_VENV/bin/python3" -m pip install --upgrade pip wheel
+    "$MCP_VENV/bin/python3" -m pip install -r "$MCP_REQUIREMENTS"
+    "$MCP_VENV/bin/python3" -m pip check
+
+    if [ ! -f "$MCP_LAUNCHER" ]; then
+        echo "[Installer][ERROR] MCP privilege-drop launcher is missing."
+        exit 127
+    fi
+    install -d -o root -g root -m 0755 /usr/local/libexec
+    install -o root -g root -m 0755 \
+        "$MCP_LAUNCHER" /usr/local/libexec/matrix-mcp-launch
+fi
 
 if [ ! -f "$TARGET/scripts/matrixd" ]; then
     echo "[Installer][ERROR] matrixd not found in $TARGET/scripts"
