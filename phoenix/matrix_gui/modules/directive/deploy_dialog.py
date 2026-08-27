@@ -3,10 +3,15 @@ import os
 from PyQt6 import QtWidgets, QtCore
 from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 from matrix_gui.modules.railgun.remote_shell import (
-    quote_remote_argument,
+    build_remote_matrixd_command,
+    default_linux_user,
+    derive_runtime_capabilities,
+    validate_linux_user,
     validate_remote_token,
 )
 QtCore.QCoreApplication.processEvents()
+
+
 class DeployDialog(QtWidgets.QDialog):
     """Railgun-style MatrixD controller over SSH, with SSH selector."""
 
@@ -58,6 +63,23 @@ class DeployDialog(QtWidgets.QDialog):
 
         opts_layout.addWidget(QtWidgets.QLabel("Universe:"))
         opts_layout.addWidget(self.universe_edit)
+
+        self.linux_user_edit = QtWidgets.QLineEdit()
+        configured_linux_user = self.deployment.get("linux_user")
+        if not configured_linux_user:
+            try:
+                configured_linux_user = default_linux_user(
+                    self.deployment.get("label", "phoenix")
+                )
+            except ValueError:
+                configured_linux_user = "matrix-phoenix"
+        self.linux_user_edit.setText(configured_linux_user)
+        self.linux_user_edit.setPlaceholderText("matrix-phoenix")
+        self.linux_user_edit.setToolTip(
+            "Least-privilege Linux account used to run Matrix and this universe."
+        )
+        opts_layout.addWidget(QtWidgets.QLabel("Swarm Linux User:"))
+        opts_layout.addWidget(self.linux_user_edit)
 
         # Directive dropdown
         self.directive_dropdown = QtWidgets.QComboBox()
@@ -163,7 +185,13 @@ class DeployDialog(QtWidgets.QDialog):
         if self.flag_clean.isChecked(): flags.append("--clean")
         if self.flag_rugpull.isChecked(): flags.append("--rug-pull")
         if self.flag_reboot_new.isChecked(): flags.append("--reboot-new")
-        flag_str = " ".join(flags)
+        try:
+            linux_user = validate_linux_user(
+                self.linux_user_edit.text(), "Swarm Linux user"
+            )
+        except ValueError as error:
+            self.output.append(f"[ERROR] {error}\n")
+            return
 
         self.output.append(f"[SSH] Connecting to {host} as {user} via {auth_type}\n")
 
@@ -178,57 +206,33 @@ class DeployDialog(QtWidgets.QDialog):
             else:
                 directive_remote = f"/matrix/boot_directives/{universe}.enc.json"
 
-            if not swarm_key:
+            if action != "stop" and not swarm_key:
                 self.output.append("[ERROR] No SWARM_KEY available for this deployment.\n")
                 return
 
             universe = validate_remote_token(universe, "Universe name")
-            quoted_universe = quote_remote_argument(universe, "Universe name")
-            quoted_swarm_key = quote_remote_argument(swarm_key, "SWARM_KEY")
-
             if action == "start":
                 directive_remote = f"/matrix/boot_directives/{directive_file}"
-                quoted_directive = quote_remote_argument(
-                    directive_remote,
-                    "Directive path",
-                )
 
-                cmd = (
-                    f"cd /matrix && "
-                    f"export SITE_ROOT=/matrix && "
-                    f"export SWARM_KEY={quoted_swarm_key} && "
-                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
-                    f"matrixd boot --universe {quoted_universe} "
-                    f"--directive {quoted_directive} {flag_str}"
-                )
-
-            elif action == "restart":
-                quoted_directive = quote_remote_argument(
-                    directive_remote,
-                    "Directive path",
-                )
-                cmd = (
-                    f"cd /matrix && "
-                    f"export SITE_ROOT=/matrix && "
-                    f"export SWARM_KEY={quoted_swarm_key} && "
-                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
-                    f"matrixd kill --universe {quoted_universe} && "
-                    f"matrixd boot --universe {quoted_universe} "
-                    f"--directive {quoted_directive} {flag_str}"
-                )
-            elif action == "stop":
-                cmd = (
-                    f"cd /matrix && "
-                    f"export SITE_ROOT=/matrix && "
-                    f"if [ -f /matrix/.venv/bin/activate ]; then . /matrix/.venv/bin/activate; fi && "
-                    f"matrixd kill --universe {quoted_universe}"
-                )
-
-            display_cmd = cmd.replace(
-                f"export SWARM_KEY={quoted_swarm_key}",
-                "export SWARM_KEY='[REDACTED]'",
+            runtime_capabilities = self.deployment.get(
+                "runtime_capabilities"
+            ) or derive_runtime_capabilities(
+                self.deployment.get("agents", {})
             )
-            self.output.append(f"[CMD] {display_cmd}\n")
+            cmd = build_remote_matrixd_command(
+                action=action,
+                universe=universe,
+                linux_user=linux_user,
+                directive_path=directive_remote if action != "stop" else None,
+                swarm_key=swarm_key if action != "stop" else None,
+                boot_flags=flags,
+                runtime_capabilities=runtime_capabilities,
+            )
+            self.output.append(f"[ACCOUNT] Universe runs as {linux_user}\n")
+            self.output.append(
+                "[CMD] Root provisioning and least-privilege MatrixD launch prepared; "
+                "SWARM_KEY redacted.\n"
+            )
 
             try:
                 client, actual_fingerprint = connect_ssh_profile(ssh_cfg)

@@ -53,14 +53,18 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         )
 
     def test_launchers_use_installed_venv_and_drain_channels(self):
+        helper_source = source(self.shell_helper_path)
+        self.assertIn("/matrix/.venv/bin/python3", helper_source)
+        self.assertIn("PYTHONUNBUFFERED=1", helper_source)
+        self.assertIn("runuser -u", helper_source)
         for path in self.launcher_paths:
             with self.subTest(path=path):
                 text = source(path)
-                self.assertIn("/matrix/.venv/bin/activate", text)
                 self.assertNotIn("source /matrix/venv", text)
                 self.assertIn("while chan.recv_ready()", text)
                 self.assertIn("while chan.recv_stderr_ready()", text)
                 self.assertIn("client.close()", text)
+                self.assertIn("build_remote_matrixd_command", text)
 
     def test_remote_shell_tokens_fail_closed(self):
         helper = load_module(self.shell_helper_path, "remote_shell_policy")
@@ -94,10 +98,20 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                     helper.quote_remote_argument(rejected, "Directive path")
 
     def test_launchers_never_interpolate_untrusted_shell_values(self):
+        helper = load_module(self.shell_helper_path, "remote_shell_builder")
+        command = helper.build_remote_matrixd_command(
+            action="start",
+            universe="phoenix",
+            linux_user="matrix-phoenix",
+            directive_path="/matrix/boot_directives/phoenix.enc.json",
+            swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
+            boot_flags=("--debug",),
+        )
+        self.assertNotIn("{universe}", command)
+        self.assertNotIn("{directive", command)
         for path in self.launcher_paths:
             with self.subTest(path=path):
                 text = source(path)
-                self.assertIn("quote_remote_argument", text)
                 self.assertIn("validate_remote_token", text)
                 self.assertIn(
                     "universe = validate_remote_token(",
@@ -107,6 +121,77 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 self.assertNotIn("--directive {directive_remote}", text)
                 self.assertNotIn("--directive {remote_bundle}", text)
                 self.assertNotIn("--reboot-id {self.opts", text)
+
+    def test_linux_accounts_fail_closed(self):
+        helper = load_module(self.shell_helper_path, "remote_linux_users")
+        self.assertEqual(helper.default_linux_user("phoenix"), "matrix-phoenix")
+        for unsafe in (
+            "root", "ubuntu", "Matrix", "matrix phoenix", "../matrix", "m" * 32
+        ):
+            with self.subTest(unsafe=unsafe):
+                with self.assertRaises(ValueError):
+                    helper.validate_linux_user(unsafe)
+
+    def test_directive_capabilities_are_narrow_and_validated(self):
+        helper = load_module(self.shell_helper_path, "remote_capabilities")
+        tree = {
+            "name": "matrix",
+            "children": [
+                {"name": "apache_watchdog", "config": {"service_name": "httpd"}},
+                {"name": "redis_watchdog", "config": {"service_name": "redis"}},
+                {"name": "mysql_watchdog", "config": {"service_name": "mysqld"}},
+                {"name": "gatekeeper"},
+                {
+                    "name": "wordpress_plugin_guard",
+                    "config": {
+                        "plugin_dir": "/var/www/html/wordpress/wp-content/plugins",
+                        "quarantine_dir": "/opt/quarantine/wp_plugins",
+                        "trusted_plugins_path": "/opt/swarm/guard/trusted_plugins.json",
+                    },
+                },
+            ],
+        }
+        capabilities = helper.derive_runtime_capabilities(tree)
+        self.assertEqual(
+            capabilities["watchdog_services"],
+            ["httpd.service", "redis.service", "mysqld.service"],
+        )
+        self.assertTrue(capabilities["gatekeeper_secure_log"])
+        self.assertIsNotNone(capabilities["wordpress"])
+
+        command = helper.build_remote_matrixd_command(
+            action="start",
+            universe="phoenix",
+            linux_user="matrix-phoenix",
+            directive_path="/matrix/boot_directives/phoenix.enc.json",
+            swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
+            runtime_capabilities=capabilities,
+        )
+        self.assertIn("/usr/bin/systemctl restart httpd.service", command)
+        self.assertIn("matrix-secure-readers", command)
+        self.assertIn("setfacl", command)
+
+        with self.assertRaises(ValueError):
+            helper.validate_runtime_capabilities(
+                {"watchdog_services": ["sshd.service"]}
+            )
+
+    def test_remote_command_redacts_swarm_key(self):
+        helper = load_module(self.shell_helper_path, "remote_secret_redaction")
+        secret = "c2VhbGVkLXN3YXJtLWtleQ=="
+        command = helper.build_remote_matrixd_command(
+            action="start",
+            universe="phoenix",
+            linux_user="matrix-phoenix",
+            directive_path="/matrix/boot_directives/phoenix.enc.json",
+            swarm_key=secret,
+        )
+        self.assertNotIn(secret, helper.redact_remote_secret(command, secret))
+
+    def test_spawn_audit_is_inside_the_universe_static_tree(self):
+        spawner = source("matrixos/core/python_core/core_spawner.py")
+        self.assertNotIn('open("/matrix/spawn.log"', spawner)
+        self.assertIn('Path(self.pm.session.static_root) / "spawn.log"', spawner)
 
 
 if __name__ == "__main__":

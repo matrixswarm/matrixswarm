@@ -56,7 +56,7 @@ class Agent(BootAgent):
     def __init__(self):
         super().__init__()
         try:
-            self.AGENT_VERSION = "1.2.0"
+            self.AGENT_VERSION = "1.2.1"
             cfg = self.tree_node.get("config", {})
 
             self.interval = int(cfg.get("interval", 2))     # seconds between polls
@@ -80,24 +80,49 @@ class Agent(BootAgent):
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – LogStreamer standing guard.")
         threading.Thread(target=self._monitor_sessions, daemon=True).start()
 
-    def _monitor_sessions(self, check_interval: int = 15, threshold: int = 30):
+    def _monitor_sessions(self, check_interval: int = 15, threshold: int = None):
         """
-        Removes log streams whose websocket relay broadcast flags
-        have gone missing or stale.
+        Removes log streams only when every available relay broadcast flag
+        has gone missing or stale.
+
+        A Phoenix session can be visible through more than one hive.rpc relay
+        (for example, websocket and email egress). One relay not owning the
+        session must not tear down a stream that still has another live relay.
         """
         alert_role = self.tree_node.get("rpc_router_role", "hive.rpc")
+        freshness = self.heartbeat_ttl if threshold is None else int(threshold)
 
         while True:
             for sess in list(self.active_streams.keys()):
                 if int(time.time()) % 60 == 0:  # every ~60 seconds
                     self.log(f"[DEBUG] Active streams: {len(self.active_streams)}")
 
-                # Assume one relay for now (if multiple, iterate)
-                for ep in self.get_nodes_by_role(alert_role):
-                    relay_uid = ep.get_universal_id()
-                    if not self.has_fresh_broadcast_flag(relay_uid, sess, threshold):
-                        self.log(f"[SESSION-MONITOR] 🧹 Removing sess={sess} (relay={relay_uid})")
-                        self.cmd_stop_stream_log({"session_id": sess}, None)
+                stream = self.active_streams.get(sess)
+                if not stream:
+                    continue
+
+                fresh_relays, relay_count = self._relay_status_for_session(
+                    sess,
+                    role=alert_role,
+                    threshold=freshness,
+                )
+
+                if fresh_relays:
+                    stream["active_relays"] = fresh_relays
+                    continue
+
+                if relay_count == 0:
+                    continue
+
+                age = time.time() - stream.get("created", time.time())
+                if age <= freshness:
+                    continue
+
+                self.log(
+                    f"[SESSION-MONITOR] 🧹 No fresh relays remain for "
+                    f"sess={sess}; stopping stream"
+                )
+                self.cmd_stop_stream_log({"session_id": sess}, None)
             time.sleep(check_interval)
 
     # ========== COMMAND HANDLERS ==========
@@ -148,6 +173,7 @@ class Agent(BootAgent):
             "token": token,
             "return_handler": return_handler,
             "can_broadcast": False,
+            "active_relays": [],
             "redacting_pem": False,
             "log_path": log_path,
             "created": time.time()
@@ -220,26 +246,25 @@ class Agent(BootAgent):
 
                 # Gate: Don't allow broadcast until broadcast flag appears
                 if not stream.get("can_broadcast", False):
-
-                    endpoints = self.get_nodes_by_role(self.rpc_role)
-                    if not endpoints:
+                    fresh_relays, relay_count = self._relay_status_for_session(
+                        sess,
+                        role=self.rpc_role,
+                        threshold=self.heartbeat_ttl,
+                    )
+                    if relay_count == 0:
                         self.log("No hive.rpc-compatible agents found for 'hive.rpc'.", level="ERROR")
                         return
 
-                    for ep in endpoints:
-                        relay_uid = ep.get_universal_id()
-                        flag_path = os.path.join(
-                            self.path_resolution["comm_path"], relay_uid, "broadcast", f"connected.flag.{sess}"
-                        )
-                        if os.path.exists(flag_path):
-                            age = time.time() - os.path.getmtime(flag_path)
-                            if age < 30:  # safe freshness check
-                                stream["can_broadcast"] = True
-                            self.log(f"[STREAM] ✅ Broadcast flag detected for sess={sess} in relay={relay_uid}, enabling stream.")
-                            break
-                    else:
+                    if not fresh_relays:
                         time.sleep(self.interval)
                         continue
+
+                    stream["can_broadcast"] = True
+                    stream["active_relays"] = fresh_relays
+                    self.log(
+                        f"[STREAM] ✅ Fresh broadcast relay(s) detected for "
+                        f"sess={sess}: {', '.join(fresh_relays)}; enabling stream."
+                    )
 
                 if new_lines:
                     rendered = []
@@ -289,6 +314,25 @@ class Agent(BootAgent):
             self.log(f"[SESSION-MONITOR] ⚠️ Flag stale ({int(age)}s) relay={relay_uid} sess={session_id}")
             return False
         return True
+
+    def _relay_status_for_session(
+        self,
+        session_id: str,
+        role: str = None,
+        threshold: int = None,
+    ) -> tuple[list[str], int]:
+        """Return fresh relay IDs and the number of compatible relays found."""
+        relay_role = role or self.rpc_role
+        freshness = self.heartbeat_ttl if threshold is None else int(threshold)
+        endpoints = list(self.get_nodes_by_role(relay_role))
+        fresh_relays = []
+
+        for endpoint in endpoints:
+            relay_uid = endpoint.get_universal_id()
+            if self.has_fresh_broadcast_flag(relay_uid, session_id, freshness):
+                fresh_relays.append(relay_uid)
+
+        return fresh_relays, len(endpoints)
 
     def _broadcast_log_lines(self, token: str, target: str, sess: str, offset: int, lines: list):
         """

@@ -208,22 +208,26 @@ class RailgunCheckDialog(QDialog):
             self.output_box.append("<span style='color:yellow'>[WARN] Unknown OS type</span>")
 
     def check_python(self):
-        self.output_box.append("[Check] Looking for Python3…")
-        resp = self._run("which python3 || true")
+        self.output_box.append("[Check] Looking for Python 3.12…")
+        resp = self._run("command -v python3.12 || true")
         if resp:
-            self.output_box.append(f"[OK] Found Python3 at {resp}")
+            version = self._run("python3.12 --version 2>&1 || true")
+            self.output_box.append(f"[OK] Found {version} at {resp}")
         else:
-            self.output_box.append("<span style='color:red'>[FAIL] Python3 not found.</span>")
+            self.output_box.append(
+                "<span style='color:red'>[FAIL] Python 3.12 not found; "
+                "Railgun will refuse installation.</span>"
+            )
 
         self.output_box.append("[Check] Checking pip…")
-        resp = self._run("which pip3 || true")
+        resp = self._run("python3.12 -m pip --version 2>/dev/null || true")
         if resp:
             self.output_box.append(f"[OK] Found pip at {resp}")
         else:
-            self.output_box.append("<span style='color:red'>[FAIL] pip3 not found.</span>")
+            self.output_box.append("<span style='color:red'>[FAIL] Python 3.12 pip not found.</span>")
 
         self.output_box.append("[Check] Checking venv…")
-        resp = self._run("python3 -m venv --help >/dev/null 2>&1 && echo OK || echo FAIL")
+        resp = self._run("python3.12 -m venv --help >/dev/null 2>&1 && echo OK || echo FAIL")
         if "OK" in resp:
             self.output_box.append("[OK] venv available")
         else:

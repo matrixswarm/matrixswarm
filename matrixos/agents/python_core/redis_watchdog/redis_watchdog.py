@@ -12,6 +12,11 @@ from core.python_core.utils.swarm_sleep import interruptible_sleep
 from datetime import datetime
 
 from core.python_core.mixin.agent_summary_mixin import AgentSummaryMixin
+from core.python_core.utils.systemd_service import (
+    diagnostic_command,
+    restart_command,
+    status_command,
+)
 
 class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
@@ -53,7 +58,7 @@ class Agent(BootAgent, AgentSummaryMixin):
 
     def is_redis_running(self):
         try:
-            result = subprocess.run(["systemctl", "is-active", "--quiet", self.service_name], check=False)
+            result = subprocess.run(status_command(self.service_name), check=False)
             return result.returncode == 0
         except Exception as e:
             self.log(f"[HAMMER][ERROR] systemctl failed: {e}")
@@ -74,7 +79,7 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.log("[HAMMER] Watchdog disabled. Restart skipped.")
             return
         try:
-            subprocess.run(["systemctl", "restart", self.service_name], check=True)
+            subprocess.run(restart_command(self.service_name), check=True)
             self.log("[HAMMER] ✅ Redis successfully restarted.")
             self.failed_restarts = 0
             self.stats["restarts"] += 1
@@ -194,7 +199,7 @@ class Agent(BootAgent, AgentSummaryMixin):
         # systemd status
         try:
             info['systemd_status'] = subprocess.check_output(
-                ["systemctl", "status", self.service_name],
+                diagnostic_command(self.service_name),
                 text=True, stderr=subprocess.STDOUT
             ).strip()
         except Exception as e:

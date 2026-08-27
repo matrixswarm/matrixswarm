@@ -14,6 +14,10 @@ from core.python_core.utils.swarm_sleep import interruptible_sleep
 from datetime import datetime
 from core.python_core.mixin.agent_summary_mixin import AgentSummaryMixin
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from core.python_core.utils.systemd_service import (
+    restart_command,
+    status_command,
+)
 
 class Agent(BootAgent, AgentSummaryMixin):
     def __init__(self):
@@ -58,7 +62,7 @@ class Agent(BootAgent, AgentSummaryMixin):
 
     def is_apache_running(self):
         try:
-            result = subprocess.run(["systemctl", "is-active", "--quiet", self.service_name], check=False)
+            result = subprocess.run(status_command(self.service_name), check=False)
             return result.returncode == 0
         except Exception as e:
             self.log(f"[WATCHDOG][ERROR] systemctl failed: {e}")
@@ -75,12 +79,7 @@ class Agent(BootAgent, AgentSummaryMixin):
             return False
 
     def build_restart_cmd(self, service_name):
-        if shutil.which("systemctl"):
-            return ["systemctl", "restart", service_name]
-        elif shutil.which("service"):
-            return ["service", service_name, "restart"]
-        else:
-            raise RuntimeError("No known service manager found")
+        return restart_command(service_name)
 
     def restart_service(self, service_name=None):
         """
