@@ -18,6 +18,7 @@ from .agent_root_validator import AgentRootValidator
 from .dialog.railgun import RailgunDialog
 from matrix_gui.modules.vault.crypto.deploy_tools import write_encrypted_bundle_to_file
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
+from matrix_gui.modules.railgun.remote_shell import derive_runtime_capabilities
 
 class Deploy():
 
@@ -49,6 +50,9 @@ class Deploy():
                 QMessageBox.information(None, "Cancelled", "Deployment process cancelled by operator.")
                 return
             opts = opts_dialog.get_options()
+            opts["runtime_capabilities"] = derive_runtime_capabilities(
+                directive_staging.get("agents", {})
+            )
 
             # --- Agent source embedding (Clown Car) ---
             """
@@ -175,6 +179,8 @@ class Deploy():
                 "swarm_key": swarm_key_mem,
                 "encrypted_path": str(out_path),
                 "encrypted_hash": encrypted_hash,
+                "linux_user": opts["linux_user"],
+                "runtime_capabilities": opts["runtime_capabilities"],
                 "agents": deployment_staging.deployment["agents"],
                 "certs": deployment_staging.deployment["certs"],
             }
@@ -220,4 +226,3 @@ class Deploy():
         except Exception as e:
             print(f"Failed directive creation: {e}")
             QMessageBox.critical(None, "Error", f"Deployment error alert:\n{e}")
-

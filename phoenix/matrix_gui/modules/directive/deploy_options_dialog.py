@@ -20,6 +20,11 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QDialogButtonBox, QCheckBox, QToolButton, QGroupBox, QLabel, QComboBox, QLineEdit
 )
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
+from matrix_gui.modules.railgun.remote_shell import (
+    default_linux_user,
+    validate_linux_user,
+    validate_remote_token,
+)
 
 class DeployOptionsDialog(QDialog):
     def __init__(self, ssh_map:dict, label:str, parent=None):
@@ -87,6 +92,28 @@ class DeployOptionsDialog(QDialog):
             rg_lay.addWidget(QLabel("Enter Universe Name:"))
             rg_lay.addWidget(self.universe_name_edit)
 
+            # MatrixD starts as this dedicated service account. Railgun creates
+            # it when absent and owns the root-only permission setup.
+            self.linux_user_edit = QLineEdit()
+            try:
+                suggested_user = default_linux_user(
+                    self.universe_name_edit.text().strip() or "phoenix"
+                )
+            except ValueError:
+                suggested_user = "matrix-phoenix"
+            self._suggested_linux_user = suggested_user
+            self.linux_user_edit.setText(suggested_user)
+            self.linux_user_edit.setPlaceholderText("matrix-phoenix")
+            self.linux_user_edit.setToolTip(
+                "Least-privilege Linux account used to run Matrix and all native "
+                "agents in this universe. Railgun creates it when necessary."
+            )
+            self.universe_name_edit.textChanged.connect(
+                self._update_suggested_linux_user
+            )
+            rg_lay.addWidget(QLabel("Swarm Linux User:"))
+            rg_lay.addWidget(self.linux_user_edit)
+
             if not isinstance(ssh_map, dict):
                 ssh_map={}
 
@@ -152,11 +179,21 @@ class DeployOptionsDialog(QDialog):
         """
         universe_name = self.universe_name_edit.text().strip()
 
-        # Check if the universe name is valid (only alphanumeric)
-        if not universe_name or not universe_name.isalnum():
+        try:
+            return validate_remote_token(universe_name, "Universe name")
+        except ValueError:
             return "phoenix"
 
-        return universe_name
+    def _update_suggested_linux_user(self, universe_name):
+        """Track universe edits until the operator overrides the suggestion."""
+        if self.linux_user_edit.text().strip() != self._suggested_linux_user:
+            return
+        try:
+            suggestion = default_linux_user(universe_name or "phoenix")
+        except ValueError:
+            return
+        self._suggested_linux_user = suggestion
+        self.linux_user_edit.setText(suggestion)
 
 
     def get_options(self):
@@ -174,4 +211,7 @@ class DeployOptionsDialog(QDialog):
             "reboot_new": self.flag_reboot_new.isChecked(),
             "reboot_id": self.flag_reboot_id.text().strip() or None,
             "universe": self.validate_and_get_universe_name() ,
+            "linux_user": validate_linux_user(
+                self.linux_user_edit.text(), "Swarm Linux user"
+            ),
         }

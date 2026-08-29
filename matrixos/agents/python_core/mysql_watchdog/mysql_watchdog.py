@@ -13,6 +13,11 @@ from core.python_core.boot_agent import BootAgent
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.mixin.agent_summary_mixin import AgentSummaryMixin
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from core.python_core.utils.systemd_service import (
+    diagnostic_command,
+    restart_command,
+    status_command,
+)
 
 class Agent(BootAgent, AgentSummaryMixin):
     """
@@ -40,7 +45,7 @@ class Agent(BootAgent, AgentSummaryMixin):
         self._warned_not_installed = False
 
         self.alert_thresholds = cfg.get("alert_thresholds", {"uptime_pct_min": 90, "slow_restart_sec": 10})
-        self.service_name = cfg.get("service_name", "mysql")
+        self.service_name = cfg.get("service_name", "mysqld")
         self.comm_targets = cfg.get("comm_targets", [])
         self.stats = {
             "date": self.today(),
@@ -49,7 +54,8 @@ class Agent(BootAgent, AgentSummaryMixin):
             "downtime_sec": 0,
             "last_status": None,
             "last_status_change": time.time(),
-            "last_state": None
+            "last_state": None,
+            "last_change": time.time(),
         }
         self.last_alerts = {}
         self.last_recovery_alert = 0
@@ -66,12 +72,7 @@ class Agent(BootAgent, AgentSummaryMixin):
         return datetime.now().strftime("%Y-%m-%d")
 
     def build_restart_cmd(self, service_name):
-        if shutil.which("systemctl"):
-            return ["systemctl", "restart", service_name]
-        elif shutil.which("service"):
-            return ["service", service_name, "restart"]
-        else:
-            raise RuntimeError("No known service manager found")
+        return restart_command(service_name)
 
     def is_mysql_running(self):
         """
@@ -82,7 +83,7 @@ class Agent(BootAgent, AgentSummaryMixin):
         """
         try:
             result = subprocess.run(
-                ["systemctl", "is-active", "--quiet", self.service_name],
+                status_command(self.service_name),
                 check=False
             )
             return result.returncode == 0
@@ -113,14 +114,17 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.log(f"[WATCHDOG] ⚙️ Running restart command: {' '.join(cmd)}")
             subprocess.run(cmd, check=True, timeout=300)
             self.log("[WATCHDOG] ✅ MySQL successfully restarted.")
+            self.failed_restart_count = 0
 
             # 🔎 New: verify right after restart
             interruptible_sleep(self, 10) # grace period
 
 
         except subprocess.TimeoutExpired as e:
+            self.failed_restart_count += 1
             self.log(f"[WATCHDOG][FAIL] Restart timed out after {e.timeout}s.", level="ERROR")
         except Exception as e:
+            self.failed_restart_count += 1
             self.log(f"[WATCHDOG][FAIL] Restart failed: {e}", level="ERROR")
 
         if self.failed_restart_count >= self.failed_restart_limit:
@@ -365,7 +369,7 @@ class Agent(BootAgent, AgentSummaryMixin):
         # Get systemd status summary
         try:
             info['systemd_status'] = subprocess.check_output(
-                ["systemctl", "status", self.service_name], text=True, stderr=subprocess.STDOUT
+                diagnostic_command(self.service_name), text=True, stderr=subprocess.STDOUT
             ).strip()
         except Exception as e:
             info['systemd_status'] = f"Error: {e}"

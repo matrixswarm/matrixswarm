@@ -434,7 +434,11 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             if self._keychain.get("encryption_enabled"):
                 logger.set_encryption_key(self._keychain["swarm_key"])
 
-            with open("/matrix/spawn.log", "a", encoding="utf-8") as f:
+            # Keep the audit trail inside the universe-owned static tree.  A
+            # least-privilege swarm account must never need write access to the
+            # shared /matrix installation root.
+            spawn_audit_path = Path(self.pm.session.static_root) / "spawn.log"
+            with open(spawn_audit_path, "a", encoding="utf-8") as f:
                 f.write(f"{datetime.now().isoformat()} :: {universal_id} → {agent_name}\n")
 
             #ensure the runtime pod path is created

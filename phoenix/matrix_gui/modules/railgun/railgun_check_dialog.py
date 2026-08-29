@@ -1,14 +1,266 @@
 # Authored by Daniel F MacDonald and ChatGPT-5.1 aka The Generals
 # Commander Edition — Railgun Remote Host Recon
+import socket
+import time
+
+from PyQt6.QtCore import QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QComboBox, QTextEdit, QMessageBox
 )
-from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.modules.railgun.ssh_support import (
     connect_ssh_profile,
     load_registry_ssh_profiles,
 )
+from matrix_gui.modules.railgun.clock_validation import validate_remote_clock
+
+
+class RailgunCheckWorker(QThread):
+    """Run bounded remote checks without blocking Qt's event loop."""
+
+    output = pyqtSignal(str)
+
+    COMMAND_TIMEOUT = 12
+
+    def __init__(self, ssh_cfg, checks, parent=None):
+        super().__init__(parent)
+        self.ssh_cfg = dict(ssh_cfg)
+        self.checks = tuple(checks)
+        self.client = None
+        self.success = False
+
+    def cancel(self):
+        self.requestInterruption()
+        client = self.client
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def _run_command(self, command, *, emit_output=True):
+        if self.isInterruptionRequested():
+            return None
+
+        try:
+            _stdin, stdout, stderr = self.client.exec_command(
+                command,
+                timeout=self.COMMAND_TIMEOUT,
+            )
+            stdout.channel.settimeout(self.COMMAND_TIMEOUT)
+            out = stdout.read().decode(errors="replace").strip()
+            err = stderr.read().decode(errors="replace").strip()
+        except (socket.timeout, TimeoutError):
+            self.output.emit(
+                "<span style='color:red'>[SSH ERROR] Remote command "
+                "timed out.</span>"
+            )
+            return None
+        except Exception as exc:
+            self.output.emit(
+                f"<span style='color:red'>[SSH ERROR] {exc}</span>"
+            )
+            return None
+
+        if out and emit_output:
+            self.output.emit(out)
+        if err:
+            self.output.emit(f"<span style='color:red'>{err}</span>")
+        return out
+
+    def _check_ssh(self):
+        self.output.emit("[Check] Testing SSH connectivity…")
+        self.output.emit("[OK] SSH connection established.")
+        return True
+
+    def _check_os(self):
+        self.output.emit("[Check] Detecting OS…")
+        response = self._run_command("cat /etc/os-release")
+        if response is None:
+            return False
+        if "Ubuntu" in response or "Debian" in response:
+            self.output.emit("[OK] OS: Debian/Ubuntu family")
+        elif (
+            "CentOS" in response
+            or "Rocky" in response
+            or "Red Hat" in response
+        ):
+            self.output.emit("[OK] OS: RHEL/CentOS/Rocky family")
+        else:
+            self.output.emit(
+                "<span style='color:yellow'>[WARN] Unknown OS type</span>"
+            )
+        return True
+
+    def _check_python(self):
+        self.output.emit("[Check] Looking for Python 3.12…")
+        response = self._run_command("command -v python3.12 || true")
+        if response is None:
+            return False
+        if response:
+            version = self._run_command("python3.12 --version 2>&1 || true")
+            if version is None:
+                return False
+            self.output.emit(f"[OK] Found {version} at {response}")
+        else:
+            self.output.emit(
+                "<span style='color:red'>[FAIL] Python 3.12 not found; "
+                "Railgun will refuse installation.</span>"
+            )
+
+        self.output.emit("[Check] Checking pip…")
+        response = self._run_command(
+            "python3.12 -m pip --version 2>/dev/null || true"
+        )
+        if response is None:
+            return False
+        if response:
+            self.output.emit(f"[OK] Found pip at {response}")
+        else:
+            self.output.emit(
+                "<span style='color:red'>"
+                "[FAIL] Python 3.12 pip not found.</span>"
+            )
+
+        self.output.emit("[Check] Checking venv…")
+        response = self._run_command(
+            "python3.12 -m venv --help >/dev/null 2>&1 "
+            "&& echo OK || echo FAIL"
+        )
+        if response is None:
+            return False
+        if response == "OK":
+            self.output.emit("[OK] venv available")
+        else:
+            self.output.emit(
+                "<span style='color:red'>[FAIL] venv module missing</span>"
+            )
+        return True
+
+    def _check_matrix_path(self):
+        self.output.emit("[Check] Checking /matrix directory…")
+        response = self._run_command(
+            "[ -d /matrix ] && echo EXISTS || echo NO"
+        )
+        if response is None:
+            return False
+        if response == "EXISTS":
+            self.output.emit("[OK] /matrix exists")
+        else:
+            self.output.emit(
+                "[INFO] /matrix missing (will be created by installer)"
+            )
+        return True
+
+    def _check_disk(self):
+        self.output.emit("[Check] Checking disk space…")
+        response = self._run_command("df -h / | tail -1 | awk '{print $4}'")
+        if response is None:
+            return False
+        if response:
+            self.output.emit(f"[OK] Free space: {response}")
+        else:
+            self.output.emit(
+                "<span style='color:red'>[FAIL] Disk check returned no data.</span>"
+            )
+        return True
+
+    def _check_clock(self):
+        self.output.emit("[Check] Checking system clock…")
+        controller_before = time.time()
+        response = self._run_command(
+            "REMOTE_EPOCH=$(date +%s) && "
+            "REMOTE_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ') && "
+            "if command -v timedatectl >/dev/null 2>&1; then "
+            "SYNC_STATE=$(timedatectl show -p NTPSynchronized "
+            "--value 2>/dev/null || true); "
+            "else SYNC_STATE=unknown; fi; "
+            "printf '%s|%s|%s\\n' \"$REMOTE_EPOCH\" "
+            "\"${SYNC_STATE:-unknown}\" \"$REMOTE_ISO\"",
+            emit_output=False,
+        )
+        controller_after = time.time()
+        if response is None:
+            return False
+        try:
+            remote_iso, skew_seconds = validate_remote_clock(
+                response,
+                (controller_before + controller_after) / 2,
+            )
+        except ValueError as exc:
+            self.output.emit(
+                f"<span style='color:red'>[FAIL] {exc}</span>"
+            )
+            return False
+        self.output.emit(
+            f"[OK] System time: {remote_iso} "
+            f"(NTP synchronized, skew {skew_seconds}s)"
+        )
+        return True
+
+    def _check_existing(self):
+        self.output.emit("[Check] Looking for existing MatrixOS install…")
+        response = self._run_command(
+            "if [ -f /matrix/scripts/matrixd ] "
+            "|| [ -x /usr/local/bin/matrixd ]; then echo YES; else echo NO; fi"
+        )
+        if response is None:
+            return False
+        if response == "YES":
+            self.output.emit(
+                "<span style='color:yellow'>"
+                "[WARN] MatrixOS already installed.</span>"
+            )
+        else:
+            self.output.emit("[OK] No existing MatrixOS detected.")
+        return True
+
+    def run(self):
+        try:
+            self.client, actual_fingerprint = connect_ssh_profile(
+                self.ssh_cfg,
+                timeout=self.COMMAND_TIMEOUT,
+            )
+            self.output.emit(
+                f"[SSH] Verified host fingerprint: {actual_fingerprint}"
+            )
+        except Exception as exc:
+            self.output.emit(
+                f"<span style='color:red'>[SSH ERROR] {exc}</span>"
+            )
+            self.output.emit(
+                "<span style='color:red'>"
+                "[FAIL] Recon aborted; no remote checks were executed.</span>"
+            )
+            return
+
+        handlers = {
+            "ssh": self._check_ssh,
+            "os": self._check_os,
+            "python": self._check_python,
+            "matrix_path": self._check_matrix_path,
+            "disk": self._check_disk,
+            "clock": self._check_clock,
+            "existing": self._check_existing,
+        }
+
+        try:
+            for check_name in self.checks:
+                if self.isInterruptionRequested():
+                    return
+                if not handlers[check_name]():
+                    self.output.emit(
+                        "<span style='color:red'>"
+                        "[FAIL] Recon stopped after a failed prerequisite."
+                        "</span>"
+                    )
+                    return
+            self.success = True
+        finally:
+            if self.client is not None:
+                self.client.close()
+                self.client = None
+
 
 class RailgunCheckDialog(QDialog):
     """
@@ -81,6 +333,17 @@ class RailgunCheckDialog(QDialog):
         self.btn_existing.clicked.connect(self.check_existing)
         btn_box.addWidget(self.btn_existing, 4, 0, 1, 2)
 
+        self._action_buttons = (
+            self.btn_run_all,
+            self.btn_check_ssh,
+            self.btn_check_os,
+            self.btn_check_python,
+            self.btn_check_matrix_path,
+            self.btn_disk,
+            self.btn_clock,
+            self.btn_existing,
+        )
+
         layout.addLayout(btn_box)
 
         # =======================
@@ -93,14 +356,15 @@ class RailgunCheckDialog(QDialog):
         )
         layout.addWidget(self.output_box)
 
-        # SSH client
-        self.client = None
+        self._worker = None
 
     # -----------------------------------------------------
     # SSH INIT
     # -----------------------------------------------------
     def refresh_targets(self):
-        selected_serial = self.ssh_selector.currentData()
+        selected_serial = self.ssh_selector.currentData(
+            Qt.ItemDataRole.UserRole + 1
+        )
         self.ssh_selector.clear()
 
         try:
@@ -125,12 +389,25 @@ class RailgunCheckDialog(QDialog):
                 f"{label} ({meta.get('host')})",
                 meta,
             )
+            item_index = self.ssh_selector.count() - 1
+            self.ssh_selector.setItemData(
+                item_index,
+                serial,
+                Qt.ItemDataRole.UserRole + 1,
+            )
             if serial == selected_serial:
-                self.ssh_selector.setCurrentIndex(
-                    self.ssh_selector.count() - 1
-                )
+                self.ssh_selector.setCurrentIndex(item_index)
 
-    def _connect(self):
+    def _set_check_controls_enabled(self, enabled):
+        self.ssh_selector.setEnabled(enabled)
+        for button in self._action_buttons:
+            button.setEnabled(enabled)
+
+    def _start_checks(self, checks, heading=None):
+        if self._worker is not None and self._worker.isRunning():
+            self.output_box.append("[Railgun] A remote check is already running.")
+            return
+
         ssh_cfg = self.ssh_selector.currentData()
         if not ssh_cfg:
             QMessageBox.critical(
@@ -138,134 +415,80 @@ class RailgunCheckDialog(QDialog):
                 "No SSH Target",
                 "No SSH target found in the SSH Registry.",
             )
-            return None
+            return
 
-        try:
-            if self.client is not None:
-                self.client.close()
-                self.client = None
+        if heading:
+            self.output_box.append(heading)
 
-            self.client, actual_fingerprint = connect_ssh_profile(
-                ssh_cfg
-            )
-            self.output_box.append(
-                f"[SSH] Verified host fingerprint: "
-                f"{actual_fingerprint}"
-            )
-            return self.client
+        self._set_check_controls_enabled(False)
+        self._worker = RailgunCheckWorker(ssh_cfg, checks, parent=self)
+        self._worker.output.connect(self.output_box.append)
+        self._worker.finished.connect(self._checks_finished)
+        self._worker.start()
 
-        except Exception as exc:
-            emit_gui_exception_log("RailgunCheck.connect", exc)
-            self.output_box.append(
-                f"<span style='color:red'>[SSH ERROR] {exc}</span>"
-            )
-            return None
+    def _checks_finished(self):
+        worker = self._worker
+        if worker is None:
+            return
 
-    def _run(self, cmd):
-        """Runs a command and streams output."""
-        try:
-            if not self.client:
-                self.client = self._connect()
-                if not self.client:
-                    return ""
+        if worker.isInterruptionRequested():
+            self.output_box.append("[Railgun] Recon cancelled.")
+        elif worker.success:
+            self.output_box.append("\n⚡ <b>Recon Complete.</b>\n")
 
-            stdin, stdout, stderr = self.client.exec_command(cmd)
-
-            out = stdout.read().decode(errors="ignore")
-            err = stderr.read().decode(errors="ignore")
-
-            if out.strip():
-                self.output_box.append(out)
-            if err.strip():
-                self.output_box.append(f"<span style='color:red'>{err}</span>")
-
-            return out.strip()
-
-        except Exception as e:
-            emit_gui_exception_log("RailgunCheck.run", e)
-            self.output_box.append(f"<span style='color:red'>[RUN ERROR] {e}</span>")
-            return ""
+        self._set_check_controls_enabled(True)
+        worker.deleteLater()
+        self._worker = None
 
     # -----------------------------------------------------
     # CHECKS
     # -----------------------------------------------------
     def check_ssh(self):
-        self.output_box.append("[Check] Testing SSH connectivity…")
-        if self._connect():
-            self.output_box.append("[OK] SSH connection established.")
-        else:
-            self.output_box.append("<span style='color:red'>[FAIL] SSH failed.</span>")
+        self._start_checks(("ssh",))
 
     def check_os(self):
-        self.output_box.append("[Check] Detecting OS…")
-        cmd = "cat /etc/os-release"
-        resp = self._run(cmd)
-        if "Ubuntu" in resp or "Debian" in resp:
-            self.output_box.append("[OK] OS: Debian/Ubuntu family")
-        elif "CentOS" in resp or "Rocky" in resp or "Red Hat" in resp:
-            self.output_box.append("[OK] OS: RHEL/CentOS/Rocky family")
-        else:
-            self.output_box.append("<span style='color:yellow'>[WARN] Unknown OS type</span>")
+        self._start_checks(("os",))
 
     def check_python(self):
-        self.output_box.append("[Check] Looking for Python3…")
-        resp = self._run("which python3 || true")
-        if resp:
-            self.output_box.append(f"[OK] Found Python3 at {resp}")
-        else:
-            self.output_box.append("<span style='color:red'>[FAIL] Python3 not found.</span>")
-
-        self.output_box.append("[Check] Checking pip…")
-        resp = self._run("which pip3 || true")
-        if resp:
-            self.output_box.append(f"[OK] Found pip at {resp}")
-        else:
-            self.output_box.append("<span style='color:red'>[FAIL] pip3 not found.</span>")
-
-        self.output_box.append("[Check] Checking venv…")
-        resp = self._run("python3 -m venv --help >/dev/null 2>&1 && echo OK || echo FAIL")
-        if "OK" in resp:
-            self.output_box.append("[OK] venv available")
-        else:
-            self.output_box.append("<span style='color:red'>[FAIL] venv module missing</span>")
+        self._start_checks(("python",))
 
     def check_matrix_path(self):
-        self.output_box.append("[Check] Checking /matrix directory…")
-        resp = self._run("[ -d /matrix ] && echo EXISTS || echo NO")
-        if "EXISTS" in resp:
-            self.output_box.append("[OK] /matrix exists")
-        else:
-            self.output_box.append("[INFO] /matrix missing (will be created by installer)")
+        self._start_checks(("matrix_path",))
 
     def check_disk(self):
-        self.output_box.append("[Check] Checking disk space…")
-        resp = self._run("df -h / | tail -1 | awk '{print $4}'")
-        self.output_box.append(f"[OK] Free space: {resp}")
+        self._start_checks(("disk",))
 
     def check_clock(self):
-        self.output_box.append("[Check] Checking system clock…")
-        resp = self._run("date")
-        self.output_box.append(f"[OK] System time: {resp}")
+        self._start_checks(("clock",))
 
     def check_existing(self):
-        self.output_box.append("[Check] Looking for existing MatrixOS install…")
-        resp = self._run("[ -f /matrix/matrixd ] && echo YES || echo NO")
-        if "YES" in resp:
-            self.output_box.append("<span style='color:yellow'>[WARN] MatrixOS already installed.</span>")
-        else:
-            self.output_box.append("[OK] No existing MatrixOS detected.")
+        self._start_checks(("existing",))
 
     # -----------------------------------------------------
     # RUN ALL
     # -----------------------------------------------------
     def _run_all(self):
-        self.refresh_targets()
-        self.output_box.append("\n⚡ <b>Running Full Recon...</b>\n")
-        self.check_ssh()
-        self.check_os()
-        self.check_python()
-        self.check_matrix_path()
-        self.check_disk()
-        self.check_clock()
-        self.check_existing()
-        self.output_box.append("\n⚡ <b>Recon Complete.</b>\n")
+        self._start_checks(
+            (
+                "ssh",
+                "os",
+                "python",
+                "matrix_path",
+                "disk",
+                "clock",
+                "existing",
+            ),
+            heading="\n⚡ <b>Running Full Recon...</b>\n",
+        )
+
+    def closeEvent(self, event):
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            if not worker.wait(3000):
+                self.output_box.append(
+                    "[Railgun] Waiting for the active SSH operation to stop…"
+                )
+                event.ignore()
+                return
+        event.accept()

@@ -401,14 +401,33 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 77
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-    apt-get update -y
-    apt-get install -y python3 python3-venv python3-pip
+PYTHON_BIN="$(command -v python3.12 || true)"
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Installer][ERROR] Python 3.12 is required; refusing the system python fallback."
+    exit 65
 fi
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
+    echo "[Installer][ERROR] $PYTHON_BIN is not Python 3.12."
+    exit 65
+fi
+echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"
 
-if ! command -v rsync >/dev/null 2>&1; then
-    apt-get update -y
-    apt-get install -y rsync
+install_os_packages() {{
+    if command -v dnf >/dev/null 2>&1; then
+        dnf install -y "$@"
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+    else
+        echo "[Installer][ERROR] Supported package manager (dnf or apt-get) not found."
+        exit 69
+    fi
+}}
+
+if ! command -v rsync >/dev/null 2>&1 || \
+   ! command -v sudo >/dev/null 2>&1 || \
+   ! command -v setfacl >/dev/null 2>&1; then
+    install_os_packages rsync sudo acl
 fi
 
 TARGET="/matrix"
@@ -441,17 +460,20 @@ find "$SRC_DIR" -maxdepth 1 -type f \
 if [ "$PYTHON_MODE" = "create" ]; then
     echo "[Installer] Creating isolated MatrixOS environment..."
     rm -rf "$VENV_DIR"
-    if ! python3 -m venv "$VENV_DIR"; then
+    if ! "$PYTHON_BIN" -m venv "$VENV_DIR"; then
         rm -rf "$VENV_DIR"
-        apt-get update -y
-        apt-get install -y python3-venv python3-pip
-        python3 -m venv "$VENV_DIR"
+        echo "[Installer][ERROR] Python 3.12 venv support is unavailable."
+        exit 70
     fi
 elif [ "$PYTHON_MODE" = "skip" ]; then
     echo "[Installer] Reusing existing MatrixOS environment..."
     if [ ! -x "$VENV_DIR/bin/python3" ]; then
         echo "[Installer][ERROR] Existing environment not found: $VENV_DIR"
         exit 126
+    fi
+    if ! "$VENV_DIR/bin/python3" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then
+        echo "[Installer][ERROR] Existing MatrixOS environment uses Python older than 3.12."
+        exit 65
     fi
 else
     echo "[Installer][ERROR] Unsupported Python mode: $PYTHON_MODE"
@@ -494,16 +516,35 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 77
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-    apt-get update -y
-    apt-get install -y python3 python3-venv python3-pip
+PYTHON_BIN="$(command -v python3.12 || true)"
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Installer][ERROR] Python 3.12 is required; refusing the system python fallback."
+    exit 65
 fi
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
+    echo "[Installer][ERROR] $PYTHON_BIN is not Python 3.12."
+    exit 65
+fi
+echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"
+
+install_os_packages() {{
+    if command -v dnf >/dev/null 2>&1; then
+        dnf install -y "$@"
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+    else
+        echo "[Installer][ERROR] Supported package manager (dnf or apt-get) not found."
+        exit 69
+    fi
+}}
 
 if ! command -v git >/dev/null 2>&1 || \
    ! command -v rsync >/dev/null 2>&1 || \
-   ! command -v flock >/dev/null 2>&1; then
-    apt-get update -y
-    apt-get install -y git rsync util-linux
+   ! command -v flock >/dev/null 2>&1 || \
+   ! command -v sudo >/dev/null 2>&1 || \
+   ! command -v setfacl >/dev/null 2>&1; then
+    install_os_packages git rsync util-linux sudo acl
 fi
 
 LOCK_FILE="/tmp/matrixswarm-railgun-install.lock"
@@ -556,17 +597,20 @@ find "$SRC_DIR" -maxdepth 1 -type f \
 if [ "{pyflag}" = "create" ]; then
     echo "[Installer] Creating isolated MatrixOS environment..."
     rm -rf "$VENV_DIR"
-    if ! python3 -m venv "$VENV_DIR"; then
+    if ! "$PYTHON_BIN" -m venv "$VENV_DIR"; then
         rm -rf "$VENV_DIR"
-        apt-get update -y
-        apt-get install -y python3-venv python3-pip
-        python3 -m venv "$VENV_DIR"
+        echo "[Installer][ERROR] Python 3.12 venv support is unavailable."
+        exit 70
     fi
 elif [ "{pyflag}" = "skip" ]; then
     echo "[Installer] Reusing existing MatrixOS environment..."
     if [ ! -x "$VENV_DIR/bin/python3" ]; then
         echo "[Installer][ERROR] Existing environment not found: $VENV_DIR"
         exit 126
+    fi
+    if ! "$VENV_DIR/bin/python3" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then
+        echo "[Installer][ERROR] Existing MatrixOS environment uses Python older than 3.12."
+        exit 65
     fi
 else
     echo "[Installer][ERROR] Unsupported Python mode: {pyflag}"

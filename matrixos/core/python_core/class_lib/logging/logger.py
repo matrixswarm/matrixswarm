@@ -144,8 +144,12 @@ class Logger:
 
             # 🖨 Console Output
             if print_to_console:
-                if console_mode == "json" or hasattr(self, "_decoded_swarm_key"):
-                    print(output, flush=True)
+                # Console output is an observability channel, not the encrypted
+                # log store. Never emit opaque ciphertext (or key-adjacent
+                # material) to SSH/Railgun stdout. The redacted log entry is
+                # safe to render while ``output`` remains encrypted on disk.
+                if console_mode == "json":
+                    print(json.dumps(log_entry, ensure_ascii=False), flush=True)
                 else:
                     ts = log_entry.get("timestamp", "")
                     lvl = log_entry.get("level", "INFO")
