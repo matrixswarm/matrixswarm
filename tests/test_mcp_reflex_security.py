@@ -28,6 +28,22 @@ from core.python_core.class_lib.packet_delivery.utility.encryption.utility.ident
     IdentityObject,
 )
 
+EDITOR_DIR = (
+    ROOT
+    / "phoenix"
+    / "matrix_gui"
+    / "swarm_workspace"
+    / "cls_lib"
+    / "agent"
+    / "config_editors"
+)
+_editor_model_spec = importlib.util.spec_from_file_location(
+    "mcp_reflex_editor_model", EDITOR_DIR / "mcp_reflex_model.py"
+)
+assert _editor_model_spec and _editor_model_spec.loader
+_editor_model = importlib.util.module_from_spec(_editor_model_spec)
+_editor_model_spec.loader.exec_module(_editor_model)
+
 
 def policy() -> dict:
     return {
@@ -127,6 +143,66 @@ class McpReflexBoundaryTests(unittest.TestCase):
             sandbox["launcher"], "/usr/local/libexec/matrix-mcp-launch"
         )
         self.assertEqual(sandbox["worker_account"], "railgun-managed")
+
+    def test_phoenix_has_structured_airlock_and_probe_editors(self) -> None:
+        reflex_editor = (EDITOR_DIR / "mcp_reflex.py").read_text(encoding="utf-8")
+        probe_editor = (EDITOR_DIR / "mcp_reflex_probe.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("class McpReflex(BaseEditor)", reflex_editor)
+        self.assertIn("class McpServerDialog", reflex_editor)
+        self.assertIn("class McpGrantDialog", reflex_editor)
+        self.assertIn('"require_verified_identity": True', reflex_editor)
+        self.assertIn("class McpReflexProbe(BaseEditor)", probe_editor)
+        self.assertIn("self.run_on_boot.isChecked()", probe_editor)
+
+    def test_phoenix_editor_builds_exact_default_deny_policy(self) -> None:
+        servers = {
+            "smoke": {
+                "command": "/matrix/mcp/.venv/bin/python3",
+                "args": ["/opt/matrixswarm/mcp-smoke/echo_server.py"],
+                "env": {},
+                "allowed_tools": ["hidden", "echo", "echo"],
+                "timeout_sec": 15,
+            }
+        }
+        grants = [{
+            "caller_uid": "mcp-reflex-probe-f90b85",
+            "server_id": "smoke",
+            "tools": ["echo"],
+        }]
+        safe_servers, access = _editor_model.validated_policy(servers, grants)
+        self.assertEqual(safe_servers["smoke"]["allowed_tools"], ["echo", "hidden"])
+        self.assertEqual(access["default"], "deny")
+        self.assertEqual(
+            access["callers"]["mcp-reflex-probe-f90b85"]["servers"]["smoke"],
+            ["echo"],
+        )
+
+    def test_phoenix_editor_rejects_relative_commands_and_overbroad_grants(self) -> None:
+        server = {
+            "smoke": {
+                "command": "python3",
+                "args": [],
+                "env": {},
+                "allowed_tools": ["echo"],
+                "timeout_sec": 15,
+            }
+        }
+        with self.assertRaisesRegex(_editor_model.McpReflexConfigError, "absolute"):
+            _editor_model.validate_servers(server)
+        server["smoke"]["command"] = "/usr/bin/python3"
+        with self.assertRaisesRegex(
+            _editor_model.McpReflexConfigError, "outside.*allowlist"
+        ):
+            _editor_model.build_access_control(
+                [{
+                    "caller_uid": "probe-1",
+                    "server_id": "smoke",
+                    "tools": ["hidden"],
+                }],
+                server,
+            )
 
     def test_privilege_drop_launcher_accepts_no_command_arguments(self) -> None:
         launcher = (
