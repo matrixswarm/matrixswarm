@@ -1,7 +1,10 @@
 import ast
 import importlib.util
+import json
 from pathlib import Path
 import shlex
+import subprocess
+import tempfile
 import unittest
 
 
@@ -183,6 +186,60 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             "Plugin directory not found: %s",
             command,
         )
+        root_shell = helper._root_shell
+        helper._root_shell = lambda script: script
+        try:
+            raw_command = helper.build_remote_matrixd_command(
+                action="start",
+                universe="phoenix",
+                linux_user="matrix-phoenix",
+                directive_path="/matrix/boot_directives/phoenix.enc.json",
+                swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
+                runtime_capabilities=capabilities,
+            )
+        finally:
+            helper._root_shell = root_shell
+
+        self.assertIn(
+            "printf '{\"worker_user\":\"%s\",\"working_directory\":\"%s\","
+            "\"python\":\"/matrix/mcp/.venv/bin/python3\","
+            "\"worker_script\":\"%s\",\"worker_sha256\":\"%s\"}\\n'",
+            raw_command,
+        )
+        self.assertNotIn(
+            "\"working_directory\":\"%s\",' '",
+            raw_command,
+        )
+        profile_line = next(
+            line
+            for line in raw_command.splitlines()
+            if line.startswith("printf '{\"worker_user\"")
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            profile_path = Path(temp_dir) / "matrix-phoenix.json"
+            shell = "\n".join(
+                (
+                    "MCP_USER=matrix-phoenix-mcp",
+                    "MCP_WORK_DIR=/matrix/mcp/workers/phoenix",
+                    "WORKER_SCRIPT=/matrix/agents/python_core/mcp_reflex/worker/mcp_stdio_worker.py",
+                    f"WORKER_HASH={'a' * 64}",
+                    f"PROFILE_TMP={shlex.quote(str(profile_path))}",
+                    profile_line,
+                )
+            )
+            subprocess.run(
+                ["/bin/sh", "-c", shell],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(profile["worker_user"], "matrix-phoenix-mcp")
+        self.assertEqual(
+            profile["working_directory"], "/matrix/mcp/workers/phoenix"
+        )
+        self.assertEqual(profile["worker_sha256"], "a" * 64)
 
         with self.assertRaises(ValueError):
             helper.validate_runtime_capabilities(

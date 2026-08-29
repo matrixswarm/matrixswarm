@@ -420,9 +420,9 @@ def build_remote_matrixd_command(
             "WORKER_SCRIPT=/matrix/agents/python_core/mcp_reflex/worker/mcp_stdio_worker.py",
             "WORKER_HASH=$(sha256sum \"$WORKER_SCRIPT\" | awk '{print $1}')",
             "PROFILE_TMP=$(mktemp /etc/matrixswarm/mcp-launchers/.profile.XXXXXX)",
-            "printf '{\"worker_user\":\"%s\",\"working_directory\":\"%s\",' "
-            "'\"python\":\"/matrix/mcp/.venv/bin/python3\",' "
-            "'\"worker_script\":\"%s\",\"worker_sha256\":\"%s\"}\\n' "
+            "printf '{\"worker_user\":\"%s\",\"working_directory\":\"%s\","
+            "\"python\":\"/matrix/mcp/.venv/bin/python3\","
+            "\"worker_script\":\"%s\",\"worker_sha256\":\"%s\"}\\n' "
             "\"$MCP_USER\" \"$MCP_WORK_DIR\" \"$WORKER_SCRIPT\" \"$WORKER_HASH\" "
             "> \"$PROFILE_TMP\"",
             "chown root:root \"$PROFILE_TMP\" && chmod 0600 \"$PROFILE_TMP\"",
