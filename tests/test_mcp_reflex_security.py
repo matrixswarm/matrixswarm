@@ -323,6 +323,9 @@ class _FakePacket:
     def set_data(self, data: dict) -> None:
         self.data = data
 
+    def set_packet(self, packet: "_FakePacket", field_name: str = "content") -> None:
+        self.data[field_name] = packet.data
+
 
 class _FakeMcpClient(McpReflexClientMixin):
     def __init__(self) -> None:
@@ -332,6 +335,7 @@ class _FakeMcpClient(McpReflexClientMixin):
         self.results: list[tuple[dict, dict]] = []
         self.delivery_result = True
         self.extra_endpoint = False
+        self.logs: list[tuple[str, str]] = []
         self.init_mcp_reflex_client(max_pending=2, request_timeout_sec=60)
 
     def get_nodes_by_role(self, role: str):
@@ -347,7 +351,9 @@ class _FakeMcpClient(McpReflexClientMixin):
         return endpoints
 
     def get_delivery_packet(self, packet_type: str) -> _FakePacket:
-        if packet_type != "standard.command.packet":
+        if packet_type not in {
+            "standard.command.packet", "standard.general.json.packet"
+        }:
             raise AssertionError(packet_type)
         return _FakePacket()
 
@@ -357,6 +363,9 @@ class _FakeMcpClient(McpReflexClientMixin):
 
     def on_mcp_result(self, content: dict, pending: dict) -> None:
         self.results.append((content, pending))
+
+    def log(self, message: str, level: str = "INFO") -> None:
+        self.logs.append((message, level))
 
 
 class McpReflexClientTests(unittest.TestCase):
@@ -376,6 +385,7 @@ class McpReflexClientTests(unittest.TestCase):
         self.assertEqual(packet.data["handler"], "cmd_mcp_call_tool")
         self.assertEqual(packet.data["content"]["tool_name"], "echo")
         self.assertNotIn("cmd_service_request", repr(packet.data))
+        self.assertTrue(any("request delivered" in item[0] for item in client.logs))
 
         reply = {
             "request_id": "probe-1",
@@ -397,6 +407,22 @@ class McpReflexClientTests(unittest.TestCase):
             client.results[0][1]["context"], {"phase": "echo"}
         )
         self.assertNotIn("probe-1", client._mcp_client_pending)
+        self.assertTrue(
+            any("verified callback accepted" in item[0] for item in client.logs)
+        )
+
+    def test_client_audits_rejected_callback_without_releasing_request(self):
+        client = _FakeMcpClient()
+        client.request_mcp_tools("smoke", request_id="audit-1")
+        client.cmd_mcp_result(
+            {"request_id": "audit-1", "operation": "list_tools"},
+            None,
+            IdentityObject(False, "mcp-reflex-1"),
+        )
+        self.assertIn("audit-1", client._mcp_client_pending)
+        self.assertTrue(
+            any("unverified identity" in item[0] for item in client.logs)
+        )
 
     def test_client_rejects_duplicate_request_ids(self):
         client = _FakeMcpClient()

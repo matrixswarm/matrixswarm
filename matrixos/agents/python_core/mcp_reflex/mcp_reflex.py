@@ -97,18 +97,52 @@ class Agent(BootAgent):
 
     def _send_result(
         self, recipient_uid: str, request_id: str, operation: str, **payload: Any
-    ) -> None:
+    ) -> bool:
         inner = self.get_delivery_packet("standard.general.json.packet")
         inner.set_data({"request_id": request_id, "operation": operation, **payload})
         outer = self.get_delivery_packet("standard.command.packet")
         outer.set_data({"handler": REPLY_HANDLER})
         outer.set_packet(inner, "content")
-        self.pass_packet(outer, recipient_uid)
+        delivered = bool(self.pass_packet(outer, recipient_uid))
+        status = payload.get("status", "unknown")
+        self._audit(
+            "CALLBACK" if delivered else "CALLBACK-FAIL",
+            recipient_uid,
+            request_id,
+            operation,
+            f"status={status}",
+            level="INFO" if delivered else "ERROR",
+        )
+        return delivered
 
     def _deny(self, sender_uid: str | None, content: Mapping[str, Any], operation: str, error: str) -> None:
         request_id = content.get("request_id")
         if sender_uid and isinstance(request_id, str) and request_id.strip() and len(request_id) <= MAX_REQUEST_ID_LENGTH:
+            self._audit(
+                "DENY", sender_uid, request_id.strip(), operation, error,
+                level="WARN",
+            )
             self._send_result(sender_uid, request_id.strip(), operation, status="denied", error=error)
+
+    def _audit(
+        self,
+        event: str,
+        sender_uid: str | None,
+        request_id: str | None,
+        operation: str,
+        detail: str = "",
+        *,
+        level: str = "INFO",
+    ) -> None:
+        """Log bounded transaction metadata; never log arguments or server env."""
+        sender = sender_uid if isinstance(sender_uid, str) else "unverified"
+        request = request_id[:12] if isinstance(request_id, str) else "unknown"
+        safe_detail = str(detail).replace("\r", " ").replace("\n", " ")[:256]
+        self.log(
+            f"[MCP-AIRLOCK][{event}] sender={sender[:128]} "
+            f"request={request} operation={operation} {safe_detail}".rstrip(),
+            level=level,
+        )
 
     def cmd_mcp_list_tools(self, content: Any, _packet: Any, identity: Any) -> None:
         self._handle_request("list_tools", content, identity)
@@ -119,9 +153,14 @@ class Agent(BootAgent):
     def _handle_request(self, operation: str, content: Any, identity: Any) -> None:
         sender_uid = self._verified_sender(identity)
         if not isinstance(content, Mapping):
+            self._audit("DROP", sender_uid, None, operation, "malformed content", level="WARN")
             self._deny(sender_uid, {}, operation, "content must be a mapping")
             return
         if sender_uid is None:
+            self._audit(
+                "DROP", None, content.get("request_id"), operation,
+                "unverified sender", level="WARN",
+            )
             return
         try:
             request_id = self._request_id(content)
@@ -139,6 +178,10 @@ class Agent(BootAgent):
         except (ValueError, PolicyError) as exc:
             self._deny(sender_uid, content, operation, str(exc))
             return
+        self._audit(
+            "ACCEPT", sender_uid, request_id, operation,
+            f"server={server_id} tools={','.join(sorted(permitted_tools))}",
+        )
         key = (sender_uid, request_id)
         with self._inflight_lock:
             now = time.monotonic()
@@ -164,7 +207,22 @@ class Agent(BootAgent):
         if operation == "call_tool":
             payload["tool_name"] = tool_name
             payload["arguments"] = dict(arguments)
-        self._executor.submit(self._run_and_reply, sender_uid, request_id, payload)
+        try:
+            self._executor.submit(
+                self._run_and_reply, sender_uid, request_id, payload
+            )
+        except Exception as exc:
+            with self._inflight_lock:
+                self._inflight.discard(key)
+                self._pending.release()
+            self._audit(
+                "WORKER-QUEUE-FAIL", sender_uid, request_id, operation,
+                type(exc).__name__, level="ERROR",
+            )
+            self._send_result(
+                sender_uid, request_id, operation, status="error",
+                error="worker could not be scheduled",
+            )
 
     def _worker_command(self) -> list[str]:
         source_root = self.path_resolution.get("agent_path")
@@ -193,10 +251,19 @@ class Agent(BootAgent):
 
     def _run_and_reply(self, sender_uid: str, request_id: str, payload: dict[str, Any]) -> None:
         operation = payload["operation"]
+        self._audit("WORKER-START", sender_uid, request_id, operation)
         try:
             result = self._invoke_worker(payload)
+            self._audit(
+                "WORKER-END", sender_uid, request_id, operation,
+                f"ok={bool(result.get('ok'))}",
+            )
             self._send_result(sender_uid, request_id, operation, status="ok" if result.get("ok") else "error", result=result.get("result"), error=result.get("error"))
         except Exception as exc:
+            self._audit(
+                "WORKER-FAIL", sender_uid, request_id, operation,
+                type(exc).__name__, level="ERROR",
+            )
             self._send_result(sender_uid, request_id, operation, status="error", error=f"worker failed: {type(exc).__name__}")
         finally:
             with self._inflight_lock:

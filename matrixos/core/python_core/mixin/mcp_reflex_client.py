@@ -133,12 +133,12 @@ class McpReflexClientMixin:
 
         try:
             packet = self.get_delivery_packet("standard.command.packet")
-            packet.set_data(
-                {
-                    "handler": handler,
-                    "content": {"request_id": request_id, **payload},
-                }
+            content_packet = self.get_delivery_packet(
+                "standard.general.json.packet"
             )
+            content_packet.set_data({"request_id": request_id, **payload})
+            packet.set_data({"handler": handler})
+            packet.set_packet(content_packet, "content")
             delivered = self.pass_packet(packet, target_uid)
         except Exception as exc:
             with self._mcp_client_lock:
@@ -150,28 +150,54 @@ class McpReflexClientMixin:
             with self._mcp_client_lock:
                 self._mcp_client_pending.pop(request_id, None)
             raise McpReflexClientError("MCP Reflex request delivery failed")
+        self._mcp_client_audit(
+            f"request delivered operation={operation} "
+            f"request={request_id[:12]} target={target_uid}"
+        )
         return request_id
 
     def cmd_mcp_result(
         self, content: Any, _packet: Any, identity: IdentityObject | None = None
     ) -> None:
         if not isinstance(content, Mapping):
+            self._mcp_client_audit("callback rejected: content is not a mapping", "WARN")
             return
         request_id = content.get("request_id")
         if not isinstance(request_id, str):
+            self._mcp_client_audit("callback rejected: request ID is missing", "WARN")
             return
         with self._mcp_client_lock:
             pending = self._mcp_client_pending.get(request_id)
             if pending is None:
+                self._mcp_client_audit(
+                    f"callback rejected: unknown request={request_id[:12]}",
+                    "WARN",
+                )
                 return
-            if (
-                not isinstance(identity, IdentityObject)
-                or not identity.has_verified_identity()
-                or identity.get_sender_uid() != pending["reflex_uid"]
-                or content.get("operation") != pending["operation"]
-            ):
+            if not isinstance(identity, IdentityObject) or not identity.has_verified_identity():
+                self._mcp_client_audit(
+                    f"callback rejected: unverified identity request={request_id[:12]}",
+                    "WARN",
+                )
+                return
+            sender_uid = identity.get_sender_uid()
+            if sender_uid != pending["reflex_uid"]:
+                self._mcp_client_audit(
+                    f"callback rejected: unexpected sender request={request_id[:12]}",
+                    "WARN",
+                )
+                return
+            if content.get("operation") != pending["operation"]:
+                self._mcp_client_audit(
+                    f"callback rejected: operation mismatch request={request_id[:12]}",
+                    "WARN",
+                )
                 return
             self._mcp_client_pending.pop(request_id, None)
+        self._mcp_client_audit(
+            f"verified callback accepted operation={pending['operation']} "
+            f"request={request_id[:12]}"
+        )
         callback = getattr(self, "on_mcp_result", None)
         if callable(callback):
             callback(dict(content), pending)
@@ -195,6 +221,16 @@ class McpReflexClientMixin:
             for request_id, pending in entries:
                 callback(request_id, pending)
         return expired
+
+    def _mcp_client_audit(self, message: str, level: str = "INFO") -> None:
+        """Emit bounded local diagnostics without exposing tool arguments."""
+        logger = getattr(self, "log", None)
+        if not callable(logger):
+            return
+        try:
+            logger(f"[MCP-CLIENT] {message[:512]}", level=level)
+        except TypeError:
+            logger(f"[MCP-CLIENT] {message[:512]}")
 
     @staticmethod
     def _mcp_text(value: Any, field: str) -> str:
