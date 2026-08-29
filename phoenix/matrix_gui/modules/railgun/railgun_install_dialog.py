@@ -490,6 +490,11 @@ MCP_REQUIREMENTS="$TARGET/agents/python_core/mcp_reflex/worker/requirements.txt"
 MCP_LAUNCHER="$TARGET/scripts/matrix-mcp-launch"
 if [ -f "$MCP_REQUIREMENTS" ]; then
     echo "[Installer] Creating isolated MCP worker environment..."
+    # Windows working copies may arrive with CRLF even for executable Python
+    # sources. Normalize the sealed boundary before hashing or installation.
+    find "$TARGET/agents/python_core/mcp_reflex" -type f -name '*.py' \
+        -exec sed -i 's/\\r$//' {{}} +
+    sed -i 's/\\r$//' "$MCP_LAUNCHER"
     MCP_VENV="$TARGET/mcp/.venv"
     install -d -o root -g root -m 0755 "$TARGET/mcp/workers"
     rm -rf "$MCP_VENV"
@@ -653,6 +658,11 @@ MCP_REQUIREMENTS="$TARGET/agents/python_core/mcp_reflex/worker/requirements.txt"
 MCP_LAUNCHER="$TARGET/scripts/matrix-mcp-launch"
 if [ -f "$MCP_REQUIREMENTS" ]; then
     echo "[Installer] Creating isolated MCP worker environment..."
+    # Windows working copies may arrive with CRLF even for executable Python
+    # sources. Normalize the sealed boundary before hashing or installation.
+    find "$TARGET/agents/python_core/mcp_reflex" -type f -name '*.py' \
+        -exec sed -i 's/\\r$//' {{}} +
+    sed -i 's/\\r$//' "$MCP_LAUNCHER"
     MCP_VENV="$TARGET/mcp/.venv"
     install -d -o root -g root -m 0755 "$TARGET/mcp/workers"
     rm -rf "$MCP_VENV"

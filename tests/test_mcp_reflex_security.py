@@ -68,6 +68,20 @@ class McpReflexPolicyTests(unittest.TestCase):
 
 
 class McpReflexBoundaryTests(unittest.TestCase):
+    def test_sealed_sources_are_forced_to_lf_on_windows_checkouts(self) -> None:
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        self.assertIn(
+            "matrixos/scripts/matrix-mcp-launch text eol=lf", attributes
+        )
+        self.assertIn(
+            "matrixos/agents/python_core/mcp_reflex/*.py text eol=lf",
+            attributes,
+        )
+        self.assertIn(
+            "matrixos/agents/python_core/mcp_reflex/worker/*.py text eol=lf",
+            attributes,
+        )
+
     def test_matrix_agent_does_not_import_mcp_sdk(self) -> None:
         source = (AGENT_DIR / "mcp_reflex.py").read_text(encoding="utf-8")
         self.assertNotIn("from mcp ", source)

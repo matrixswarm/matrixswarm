@@ -129,6 +129,10 @@ class FoundationalHardeningTests(unittest.TestCase):
             "install_os_packages git rsync util-linux sudo acl",
             installer,
         )
+        self.assertEqual(
+            installer.count("sed -i 's/\\\\r$//' \"$MCP_LAUNCHER\""),
+            2,
+        )
 
     def test_railgun_remote_check_does_not_block_or_switch_targets(self):
         checker = source(
