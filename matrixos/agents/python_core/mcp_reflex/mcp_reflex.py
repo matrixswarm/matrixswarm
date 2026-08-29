@@ -145,10 +145,39 @@ class Agent(BootAgent):
         )
 
     def cmd_mcp_list_tools(self, content: Any, _packet: Any, identity: Any) -> None:
-        self._handle_request("list_tools", content, identity)
+        self._dispatch_request("list_tools", content, identity)
 
     def cmd_mcp_call_tool(self, content: Any, _packet: Any, identity: Any) -> None:
-        self._handle_request("call_tool", content, identity)
+        self._dispatch_request("call_tool", content, identity)
+
+    def _dispatch_request(self, operation: str, content: Any, identity: Any) -> None:
+        """Instrument the authenticated handler boundary without logging payloads."""
+        request_id = content.get("request_id") if isinstance(content, Mapping) else None
+        request = request_id[:12] if isinstance(request_id, str) else "unknown"
+        identity_type_match = isinstance(identity, IdentityObject)
+        identity_verified = False
+        uid_present = False
+        if identity_type_match:
+            try:
+                identity_verified = bool(identity.has_verified_identity())
+                sender_uid = identity.get_sender_uid()
+                uid_present = isinstance(sender_uid, str) and bool(sender_uid)
+            except Exception:
+                # Identity inspection is diagnostic only. The authoritative
+                # fail-closed check remains in ``_verified_sender``.
+                pass
+        self.log(
+            f"[MCP-AIRLOCK][HANDLER-ENTER] request={request} "
+            f"operation={operation} identity_type_match={identity_type_match} "
+            f"verified={identity_verified} uid_present={uid_present}"
+        )
+        try:
+            self._handle_request(operation, content, identity)
+        finally:
+            self.log(
+                f"[MCP-AIRLOCK][HANDLER-EXIT] request={request} "
+                f"operation={operation}"
+            )
 
     def _handle_request(self, operation: str, content: Any, identity: Any) -> None:
         sender_uid = self._verified_sender(identity)

@@ -120,6 +120,16 @@ class McpReflexBoundaryTests(unittest.TestCase):
         digest = hashlib.sha256(worker).hexdigest()
         self.assertIn(f'WORKER_SHA256 = "{digest}"', source)
 
+    def test_airlock_handler_diagnostics_are_bounded_and_payload_free(self) -> None:
+        source = (AGENT_DIR / "mcp_reflex.py").read_text(encoding="utf-8")
+        self.assertIn("[MCP-AIRLOCK][HANDLER-ENTER]", source)
+        self.assertIn("[MCP-AIRLOCK][HANDLER-EXIT]", source)
+        self.assertIn("identity_type_match=", source)
+        self.assertIn("uid_present=", source)
+        handler_region = source[source.index("def _dispatch_request"):source.index("def _handle_request")]
+        for secret_field in ('content=', 'arguments=', 'server_env=', 'result='):
+            self.assertNotIn(secret_field, handler_region)
+
     def test_sdk_worker_does_not_import_matrixswarm(self) -> None:
         source = (AGENT_DIR / "worker" / "mcp_stdio_worker.py").read_text(encoding="utf-8")
         for forbidden in ("matrixos", "BootAgent", "IdentityObject"):
