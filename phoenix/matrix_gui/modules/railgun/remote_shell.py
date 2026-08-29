@@ -367,7 +367,7 @@ def build_remote_matrixd_command(
             f"PLUGIN_DIR={q_plugin_dir}",
             f"QUARANTINE_DIR={q_quarantine_dir}",
             f"TRUST_PATH={q_trust_path}",
-            "[ -d \"$PLUGIN_DIR\" ] || { echo '[PLUGIN-GUARD][ERROR] Plugin directory not found.' >&2; exit 66; }",
+            "[ -d \"$PLUGIN_DIR\" ] || { printf '[PLUGIN-GUARD][ERROR] Plugin directory not found: %s\\n' \"$PLUGIN_DIR\" >&2; exit 66; }",
             "install -d -o root -g root -m 0750 \"$QUARANTINE_DIR\"",
             "install -d -o root -g root -m 0750 \"$(dirname \"$TRUST_PATH\")\"",
             "touch \"$TRUST_PATH\"",

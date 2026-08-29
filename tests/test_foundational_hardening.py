@@ -1,4 +1,5 @@
 import base64
+import importlib.util
 import io
 import sys
 import tempfile
@@ -17,6 +18,14 @@ from core.python_core.utils.systemd_service import (
     restart_command,
     status_command,
 )
+
+CLOCK_VALIDATION = ROOT / "phoenix/matrix_gui/modules/railgun/clock_validation.py"
+clock_spec = importlib.util.spec_from_file_location(
+    "railgun_clock_validation",
+    CLOCK_VALIDATION,
+)
+clock_validation = importlib.util.module_from_spec(clock_spec)
+clock_spec.loader.exec_module(clock_validation)
 
 try:
     from core.python_core.class_lib.logging.logger import Logger
@@ -138,6 +147,26 @@ class FoundationalHardeningTests(unittest.TestCase):
             "        self.check_python()",
             checker,
         )
+
+    def test_railgun_clock_check_requires_ntp_and_bounded_skew(self):
+        remote_iso, skew = clock_validation.validate_remote_clock(
+            "1000|yes|1970-01-01T00:16:40Z",
+            1010,
+        )
+        self.assertEqual(remote_iso, "1970-01-01T00:16:40Z")
+        self.assertEqual(skew, 10)
+
+        with self.assertRaisesRegex(ValueError, "not synchronized"):
+            clock_validation.validate_remote_clock(
+                "1000|no|1970-01-01T00:16:40Z",
+                1010,
+            )
+
+        with self.assertRaisesRegex(ValueError, "clock skew is 121s"):
+            clock_validation.validate_remote_clock(
+                "1000|yes|1970-01-01T00:16:40Z",
+                1121,
+            )
 
     def test_log_streamer_keeps_session_when_any_relay_is_fresh(self):
         streamer = source(

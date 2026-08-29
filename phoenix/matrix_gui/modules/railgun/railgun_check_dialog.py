@@ -1,6 +1,7 @@
 # Authored by Daniel F MacDonald and ChatGPT-5.1 aka The Generals
 # Commander Edition — Railgun Remote Host Recon
 import socket
+import time
 
 from PyQt6.QtCore import QThread, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -11,6 +12,7 @@ from matrix_gui.modules.railgun.ssh_support import (
     connect_ssh_profile,
     load_registry_ssh_profiles,
 )
+from matrix_gui.modules.railgun.clock_validation import validate_remote_clock
 
 
 class RailgunCheckWorker(QThread):
@@ -36,7 +38,7 @@ class RailgunCheckWorker(QThread):
             except Exception:
                 pass
 
-    def _run_command(self, command):
+    def _run_command(self, command, *, emit_output=True):
         if self.isInterruptionRequested():
             return None
 
@@ -60,7 +62,7 @@ class RailgunCheckWorker(QThread):
             )
             return None
 
-        if out:
+        if out and emit_output:
             self.output.emit(out)
         if err:
             self.output.emit(f"<span style='color:red'>{err}</span>")
@@ -165,15 +167,35 @@ class RailgunCheckWorker(QThread):
 
     def _check_clock(self):
         self.output.emit("[Check] Checking system clock…")
-        response = self._run_command("date --iso-8601=seconds")
+        controller_before = time.time()
+        response = self._run_command(
+            "REMOTE_EPOCH=$(date +%s) && "
+            "REMOTE_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ') && "
+            "if command -v timedatectl >/dev/null 2>&1; then "
+            "SYNC_STATE=$(timedatectl show -p NTPSynchronized "
+            "--value 2>/dev/null || true); "
+            "else SYNC_STATE=unknown; fi; "
+            "printf '%s|%s|%s\\n' \"$REMOTE_EPOCH\" "
+            "\"${SYNC_STATE:-unknown}\" \"$REMOTE_ISO\"",
+            emit_output=False,
+        )
+        controller_after = time.time()
         if response is None:
             return False
-        if response:
-            self.output.emit(f"[OK] System time: {response}")
-        else:
-            self.output.emit(
-                "<span style='color:red'>[FAIL] Clock check returned no data.</span>"
+        try:
+            remote_iso, skew_seconds = validate_remote_clock(
+                response,
+                (controller_before + controller_after) / 2,
             )
+        except ValueError as exc:
+            self.output.emit(
+                f"<span style='color:red'>[FAIL] {exc}</span>"
+            )
+            return False
+        self.output.emit(
+            f"[OK] System time: {remote_iso} "
+            f"(NTP synchronized, skew {skew_seconds}s)"
+        )
         return True
 
     def _check_existing(self):
@@ -229,7 +251,7 @@ class RailgunCheckWorker(QThread):
                 if not handlers[check_name]():
                     self.output.emit(
                         "<span style='color:red'>"
-                        "[FAIL] Recon stopped after a remote command failure."
+                        "[FAIL] Recon stopped after a failed prerequisite."
                         "</span>"
                     )
                     return

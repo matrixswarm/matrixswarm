@@ -170,6 +170,10 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         self.assertIn("/usr/bin/systemctl restart httpd.service", command)
         self.assertIn("matrix-secure-readers", command)
         self.assertIn("setfacl", command)
+        self.assertIn(
+            "Plugin directory not found: %s",
+            command,
+        )
 
         with self.assertRaises(ValueError):
             helper.validate_runtime_capabilities(
