@@ -46,6 +46,43 @@ the exact caller grant. Unknown callers, servers, and tools fail closed.
 Replies use `cmd_mcp_result`. Request IDs are scoped to the authenticated
 sender and retained for a bounded replay window after completion.
 
+## Authenticated probe
+
+`mcp_reflex_probe` is an opt-in, one-shot validation agent built on the
+reusable `McpReflexClientMixin`. It resolves MCP Reflex through the service
+registry and sends packets directly to that endpoint, preserving the probe's
+signed identity instead of turning Matrix into an MCP proxy.
+
+For the root-owned smoke server at
+`/opt/matrixswarm/mcp-smoke/echo_server.py`, configure the MCP Reflex node with
+the probe node's exact deployed UID:
+
+```json
+{
+  "servers": {
+    "smoke": {
+      "command": "/matrix/mcp/.venv/bin/python3",
+      "args": ["/opt/matrixswarm/mcp-smoke/echo_server.py"],
+      "env": {},
+      "allowed_tools": ["echo", "hidden"],
+      "timeout_sec": 15
+    }
+  },
+  "access_control": {
+    "default": "deny",
+    "callers": {
+      "mcp-reflex-probe-EXACT-DEPLOYED-UID": {
+        "servers": {"smoke": ["echo"]}
+      }
+    }
+  }
+}
+```
+
+Set the probe node's `run_on_boot` to `true`. A successful run logs one final
+`[MCP-PROBE] ✅ PASS` line after verifying filtered discovery, an authorized
+echo, a denied `hidden` call, and the signed callback from MCP Reflex.
+
 ## Runtime boundary
 
 Railgun installs the MCP SDK only in `/matrix/mcp/.venv`, creates a distinct

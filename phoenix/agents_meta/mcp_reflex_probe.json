@@ -1,0 +1,14 @@
+{
+  "name": "mcp_reflex_probe",
+  "universal_id": "mcp-reflex-probe-1",
+  "constraints": [
+    {"packet_signing": {"in": true, "out": true}},
+    {"symmetric_encryption": {"type": "aes"}}
+  ],
+  "config": {
+    "ui": {"agent_tree": {"emoji": "🧪"}},
+    "run_on_boot": false,
+    "server_id": "smoke",
+    "message": "Airlock is tight"
+  }
+}

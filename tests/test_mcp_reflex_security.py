@@ -20,6 +20,13 @@ from core.python_core.mixin.mcp_reflex_policy import (  # noqa: E402
     authorize_tool,
     server_config,
 )
+from core.python_core.mixin.mcp_reflex_client import (  # noqa: E402
+    McpReflexClientError,
+    McpReflexClientMixin,
+)
+from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import (  # noqa: E402
+    IdentityObject,
+)
 
 
 def policy() -> dict:
@@ -79,6 +86,10 @@ class McpReflexBoundaryTests(unittest.TestCase):
         )
         self.assertIn(
             "matrixos/agents/python_core/mcp_reflex/worker/*.py text eol=lf",
+            attributes,
+        )
+        self.assertIn(
+            "matrixos/agents/python_core/mcp_reflex_probe/*.py text eol=lf",
             attributes,
         )
 
@@ -218,6 +229,137 @@ class McpReflexBoundaryTests(unittest.TestCase):
         denied_response = json.loads(denied.stdout)
         self.assertFalse(denied_response["ok"], denied_response)
         self.assertIn("tool is not permitted", denied_response["error"])
+
+
+class _FakeEndpoint:
+    def __init__(self, uid: str, handler: str) -> None:
+        self.uid = uid
+        self.handler = handler
+
+    def get_universal_id(self) -> str:
+        return self.uid
+
+    def get_handler(self) -> str:
+        return self.handler
+
+
+class _FakePacket:
+    def set_data(self, data: dict) -> None:
+        self.data = data
+
+
+class _FakeMcpClient(McpReflexClientMixin):
+    def __init__(self) -> None:
+        self.endpoint = _FakeEndpoint("mcp-reflex-1", "cmd_mcp_call_tool")
+        self.roles: list[str] = []
+        self.deliveries: list[tuple[_FakePacket, str]] = []
+        self.results: list[tuple[dict, dict]] = []
+        self.delivery_result = True
+        self.extra_endpoint = False
+        self.init_mcp_reflex_client(max_pending=2, request_timeout_sec=60)
+
+    def get_nodes_by_role(self, role: str):
+        self.roles.append(role)
+        self.endpoint.handler = (
+            "cmd_mcp_list_tools"
+            if role == "hive.mcp.tools"
+            else "cmd_mcp_call_tool"
+        )
+        endpoints = [self.endpoint]
+        if self.extra_endpoint:
+            endpoints.append(_FakeEndpoint("mcp-reflex-2", self.endpoint.handler))
+        return endpoints
+
+    def get_delivery_packet(self, packet_type: str) -> _FakePacket:
+        if packet_type != "standard.command.packet":
+            raise AssertionError(packet_type)
+        return _FakePacket()
+
+    def pass_packet(self, packet: _FakePacket, target_uid: str) -> bool:
+        self.deliveries.append((packet, target_uid))
+        return self.delivery_result
+
+    def on_mcp_result(self, content: dict, pending: dict) -> None:
+        self.results.append((content, pending))
+
+
+class McpReflexClientTests(unittest.TestCase):
+    def test_signed_client_routes_directly_and_rejects_forged_callback(self):
+        client = _FakeMcpClient()
+        request_id = client.request_mcp_tool_call(
+            "smoke",
+            "echo",
+            {"message": "Airlock is tight"},
+            request_id="probe-1",
+            context={"phase": "echo"},
+        )
+        self.assertEqual(request_id, "probe-1")
+        self.assertEqual(client.roles, ["hive.mcp.call_tool"])
+        packet, target_uid = client.deliveries[0]
+        self.assertEqual(target_uid, "mcp-reflex-1")
+        self.assertEqual(packet.data["handler"], "cmd_mcp_call_tool")
+        self.assertEqual(packet.data["content"]["tool_name"], "echo")
+        self.assertNotIn("cmd_service_request", repr(packet.data))
+
+        reply = {
+            "request_id": "probe-1",
+            "operation": "call_tool",
+            "status": "ok",
+            "result": {"structuredContent": {"message": "Airlock is tight"}},
+        }
+        client.cmd_mcp_result(
+            reply, None, IdentityObject(True, "forged-reflex")
+        )
+        self.assertEqual(client.results, [])
+        self.assertIn("probe-1", client._mcp_client_pending)
+
+        client.cmd_mcp_result(
+            reply, None, IdentityObject(True, "mcp-reflex-1")
+        )
+        self.assertEqual(len(client.results), 1)
+        self.assertEqual(
+            client.results[0][1]["context"], {"phase": "echo"}
+        )
+        self.assertNotIn("probe-1", client._mcp_client_pending)
+
+    def test_client_rejects_duplicate_request_ids(self):
+        client = _FakeMcpClient()
+        client.request_mcp_tools("smoke", request_id="same-id")
+        with self.assertRaisesRegex(McpReflexClientError, "already pending"):
+            client.request_mcp_tools("smoke", request_id="same-id")
+
+    def test_failed_delivery_releases_pending_capacity(self):
+        client = _FakeMcpClient()
+        client.delivery_result = False
+        with self.assertRaisesRegex(McpReflexClientError, "delivery failed"):
+            client.request_mcp_tools("smoke", request_id="not-delivered")
+        self.assertEqual(client._mcp_client_pending, {})
+
+    def test_ambiguous_airlock_endpoints_fail_closed(self):
+        client = _FakeMcpClient()
+        client.extra_endpoint = True
+        with self.assertRaisesRegex(McpReflexClientError, "exactly one"):
+            client.request_mcp_tools("smoke")
+        self.assertEqual(client.deliveries, [])
+
+    def test_probe_is_opt_in_and_exercises_allow_and_deny(self):
+        metadata = json.loads(
+            (
+                ROOT / "phoenix" / "agents_meta" / "mcp_reflex_probe.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertIs(metadata["config"]["run_on_boot"], False)
+        probe = (
+            ROOT
+            / "matrixos"
+            / "agents"
+            / "python_core"
+            / "mcp_reflex_probe"
+            / "mcp_reflex_probe.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"echo"', probe)
+        self.assertIn('"hidden"', probe)
+        self.assertIn("[MCP-PROBE] ✅ PASS", probe)
 
 if __name__ == "__main__":
     unittest.main()
