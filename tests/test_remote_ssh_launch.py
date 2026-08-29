@@ -106,9 +106,11 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             directive_path="/matrix/boot_directives/phoenix.enc.json",
             swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
             boot_flags=("--debug",),
+            runtime_capabilities={"mcp_worker": True},
         )
         self.assertNotIn("{universe}", command)
         self.assertNotIn("{directive", command)
+        self.assertIn("matrix-phoenix-mcp", command)
         for path in self.launcher_paths:
             with self.subTest(path=path):
                 text = source(path)
@@ -122,9 +124,13 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 self.assertNotIn("--directive {remote_bundle}", text)
                 self.assertNotIn("--reboot-id {self.opts", text)
 
-    def test_linux_accounts_fail_closed(self):
+    def test_linux_accounts_fail_closed_and_are_separate(self):
         helper = load_module(self.shell_helper_path, "remote_linux_users")
         self.assertEqual(helper.default_linux_user("phoenix"), "matrix-phoenix")
+        self.assertEqual(
+            helper.mcp_worker_linux_user("matrix-phoenix"),
+            "matrix-phoenix-mcp",
+        )
         for unsafe in (
             "root", "ubuntu", "Matrix", "matrix phoenix", "../matrix", "m" * 32
         ):
@@ -141,6 +147,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 {"name": "redis_watchdog", "config": {"service_name": "redis"}},
                 {"name": "mysql_watchdog", "config": {"service_name": "mysqld"}},
                 {"name": "gatekeeper"},
+                {"name": "mcp_reflex"},
                 {
                     "name": "wordpress_plugin_guard",
                     "config": {
@@ -158,6 +165,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         )
         self.assertTrue(capabilities["gatekeeper_secure_log"])
         self.assertIsNotNone(capabilities["wordpress"])
+        self.assertTrue(capabilities["mcp_worker"])
 
         command = helper.build_remote_matrixd_command(
             action="start",
@@ -170,6 +178,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         self.assertIn("/usr/bin/systemctl restart httpd.service", command)
         self.assertIn("matrix-secure-readers", command)
         self.assertIn("setfacl", command)
+        self.assertIn("matrix-phoenix-mcp", command)
         self.assertIn(
             "Plugin directory not found: %s",
             command,
@@ -180,6 +189,22 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 {"watchdog_services": ["sshd.service"]}
             )
 
+        without_mcp = helper.build_remote_matrixd_command(
+            action="start",
+            universe="phoenix",
+            linux_user="matrix-phoenix",
+            directive_path="/matrix/boot_directives/phoenix.enc.json",
+            swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
+            runtime_capabilities={},
+        )
+        self.assertIn(
+            'rm -f "/etc/sudoers.d/matrixswarm-$SWARM_USER-mcp"',
+            without_mcp,
+        )
+        self.assertIn(
+            'rm -f "/etc/matrixswarm/mcp-launchers/$SWARM_USER.json"',
+            without_mcp,
+        )
     def test_remote_command_redacts_swarm_key(self):
         helper = load_module(self.shell_helper_path, "remote_secret_redaction")
         secret = "c2VhbGVkLXN3YXJtLWtleQ=="

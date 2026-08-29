@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Root-owned, profile-driven privilege drop for one MCP stdio worker.
+
+This program is intentionally argument-free.  A MatrixSwarm universe account
+may invoke it through one exact sudoers rule.  The caller cannot select a user,
+interpreter, script, working directory, or command line; those values come from
+a root-owned deployment profile keyed by SUDO_USER.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import hashlib
+import json
+import os
+import pwd
+import re
+import resource
+import stat
+import sys
+from pathlib import Path
+from typing import NoReturn
+
+
+PROFILE_ROOT = Path("/etc/matrixswarm/mcp-launchers")
+SAFE_USER = re.compile(r"[a-z_][a-z0-9_-]{0,30}\Z")
+MCP_PYTHON_ROOT = Path("/matrix/mcp").resolve()
+WORKER_ROOT = Path("/matrix/agents/python_core/mcp_reflex/worker").resolve()
+MCP_WORK_ROOT = Path("/matrix/mcp/workers").resolve()
+PR_SET_NO_NEW_PRIVS = 38
+
+
+def fail(message: str) -> NoReturn:
+    print(f"[MCP-LAUNCH][DENY] {message}", file=sys.stderr)
+    raise SystemExit(77)
+
+
+def root_owned_private_file(path: Path) -> None:
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode):
+        fail(f"profile is not a regular file: {path}")
+    if info.st_uid != 0:
+        fail(f"profile is not owned by root: {path}")
+    if stat.S_IMODE(info.st_mode) & 0o022:
+        fail(f"profile is group/world writable: {path}")
+
+
+def confined_file(
+    value: object,
+    root: Path,
+    label: str,
+    *,
+    allow_symlink_target_outside: bool = False,
+) -> Path:
+    if not isinstance(value, str) or not value:
+        fail(f"{label} is missing")
+    path = Path(value)
+    if not path.is_absolute():
+        fail(f"{label} must be absolute")
+    lexical = Path(os.path.abspath(path))
+    if lexical != root and root not in lexical.parents:
+        fail(f"{label} escapes its approved root")
+    resolved = path.resolve(strict=True)
+    if (
+        not allow_symlink_target_outside
+        and resolved != root
+        and root not in resolved.parents
+    ):
+        fail(f"{label} symlink escapes its approved root")
+    info = resolved.stat()
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != 0
+        or stat.S_IMODE(info.st_mode) & 0o022
+    ):
+        fail(f"{label} must be root-owned and not writable by group/world")
+    return resolved
+
+
+def apply_limits() -> None:
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (128, 128))
+    resource.setrlimit(resource.RLIMIT_NPROC, (32, 32))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (4 * 1024 * 1024, 4 * 1024 * 1024))
+    # The stdio bridge is short-lived.  External MCP servers inherit these
+    # ceilings and cannot turn one tool call into an unbounded process tree.
+    resource.setrlimit(resource.RLIMIT_CPU, (120, 120))
+    memory = 1024 * 1024 * 1024
+    resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
+
+
+def set_no_new_privileges() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+        errno = ctypes.get_errno()
+        fail(f"cannot set no_new_privs (errno={errno})")
+
+
+def main() -> None:
+    if os.geteuid() != 0:
+        fail("launcher must be invoked through its sudoers rule")
+    if len(sys.argv) != 1:
+        fail("launcher accepts no arguments")
+
+    caller = os.environ.get("SUDO_USER", "")
+    if not SAFE_USER.fullmatch(caller) or caller == "root":
+        fail("SUDO_USER is missing or invalid")
+
+    profile_path = PROFILE_ROOT / f"{caller}.json"
+    root_owned_private_file(profile_path)
+    try:
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        fail(f"cannot read launch profile: {type(exc).__name__}")
+    if not isinstance(profile, dict):
+        fail("launch profile must be an object")
+
+    worker_user = profile.get("worker_user")
+    if not isinstance(worker_user, str) or not SAFE_USER.fullmatch(worker_user):
+        fail("worker_user is invalid")
+    try:
+        caller_account = pwd.getpwnam(caller)
+        account = pwd.getpwnam(worker_user)
+    except KeyError:
+        fail("caller or worker account is not provisioned")
+    if account.pw_uid == 0 or account.pw_uid == caller_account.pw_uid:
+        fail("worker account must be a distinct non-root identity")
+
+    python = confined_file(
+        profile.get("python"),
+        MCP_PYTHON_ROOT,
+        "python",
+        allow_symlink_target_outside=True,
+    )
+    if not os.access(python, os.X_OK):
+        fail("python is not executable")
+    worker_script = confined_file(
+        profile.get("worker_script"), WORKER_ROOT, "worker_script"
+    )
+    expected_hash = profile.get("worker_sha256")
+    if not isinstance(expected_hash, str) or not re.fullmatch(
+        r"[a-f0-9]{64}", expected_hash
+    ):
+        fail("worker_sha256 is invalid")
+    if hashlib.sha256(worker_script.read_bytes()).hexdigest() != expected_hash:
+        fail("worker script integrity check failed")
+
+    working_directory = profile.get("working_directory")
+    if not isinstance(working_directory, str) or not working_directory:
+        fail("working_directory is missing")
+    work = Path(working_directory).resolve(strict=True)
+    work_info = work.stat()
+    if (
+        (work != MCP_WORK_ROOT and MCP_WORK_ROOT not in work.parents)
+        or not work.is_dir()
+        or work_info.st_uid != account.pw_uid
+    ):
+        fail("working_directory is not owned by the worker account")
+
+    apply_limits()
+    set_no_new_privileges()
+    os.setgroups([])
+    os.setgid(account.pw_gid)
+    os.setuid(account.pw_uid)
+    os.chdir(work)
+
+    environment = {
+        "HOME": str(work),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "PATH": "/usr/bin:/bin",
+    }
+    os.execve(str(python), [str(python), str(worker_script)], environment)
+
+
+if __name__ == "__main__":
+    main()
