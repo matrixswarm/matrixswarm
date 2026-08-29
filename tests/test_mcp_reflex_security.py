@@ -336,6 +336,10 @@ class _FakePacket:
     def set_packet(self, packet: "_FakePacket", field_name: str = "content") -> None:
         self.data[field_name] = packet.data
 
+    def set_auto_fill_sub_packet(self, enabled: bool = True) -> "_FakePacket":
+        self.auto_fill_sub_packet = enabled
+        return self
+
 
 class _FakeMcpClient(McpReflexClientMixin):
     def __init__(self) -> None:
@@ -394,6 +398,7 @@ class McpReflexClientTests(unittest.TestCase):
         self.assertEqual(target_uid, "mcp-reflex-1")
         self.assertEqual(packet.data["handler"], "cmd_mcp_call_tool")
         self.assertEqual(packet.data["content"]["tool_name"], "echo")
+        self.assertFalse(packet.auto_fill_sub_packet)
         self.assertNotIn("cmd_service_request", repr(packet.data))
         self.assertTrue(any("request delivered" in item[0] for item in client.logs))
 

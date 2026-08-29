@@ -103,6 +103,10 @@ class Agent(BootAgent):
         outer = self.get_delivery_packet("standard.command.packet")
         outer.set_data({"handler": REPLY_HANDLER})
         outer.set_packet(inner, "content")
+        # Preserve the completed callback payload. The generic packet
+        # auto-fill behavior would otherwise overwrite it with the outer
+        # command packet's empty ``content`` mapping at serialization time.
+        outer.set_auto_fill_sub_packet(False)
         delivered = bool(self.pass_packet(outer, recipient_uid))
         status = payload.get("status", "unknown")
         self._audit(

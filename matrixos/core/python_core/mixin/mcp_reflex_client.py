@@ -139,6 +139,10 @@ class McpReflexClientMixin:
             content_packet.set_data({"request_id": request_id, **payload})
             packet.set_data({"handler": handler})
             packet.set_packet(content_packet, "content")
+            # The inner MCP request is already complete. BasePacket's default
+            # auto-fill behavior would otherwise replace it with the outer
+            # command packet's empty ``content`` mapping during serialization.
+            packet.set_auto_fill_sub_packet(False)
             delivered = self.pass_packet(packet, target_uid)
         except Exception as exc:
             with self._mcp_client_lock:
