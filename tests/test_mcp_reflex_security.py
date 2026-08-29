@@ -129,6 +129,10 @@ class McpReflexBoundaryTests(unittest.TestCase):
         self.assertIn("PR_SET_NO_NEW_PRIVS", launcher)
         self.assertIn("RLIMIT_FSIZE", launcher)
         self.assertNotIn("subprocess", launcher)
+        self.assertIn("preserve_lexical_path=True", launcher)
+        self.assertIn(
+            "return lexical if preserve_lexical_path else resolved", launcher
+        )
 
     def test_parent_bounds_worker_output_and_rejects_replay(self) -> None:
         source = (AGENT_DIR / "mcp_reflex.py").read_text(encoding="utf-8")
