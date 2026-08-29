@@ -116,6 +116,29 @@ class FoundationalHardeningTests(unittest.TestCase):
             installer,
         )
 
+    def test_railgun_remote_check_does_not_block_or_switch_targets(self):
+        checker = source(
+            "phoenix/matrix_gui/modules/railgun/railgun_check_dialog.py"
+        )
+        self.assertIn("class RailgunCheckWorker(QThread)", checker)
+        self.assertIn("timeout=self.COMMAND_TIMEOUT", checker)
+        self.assertIn("Qt.ItemDataRole.UserRole + 1", checker)
+        self.assertIn(
+            "[FAIL] Recon aborted; no remote checks were executed.",
+            checker,
+        )
+        self.assertNotIn(
+            "self.refresh_targets()\n"
+            "        self.output_box.append(\"\\n⚡ <b>Running Full Recon",
+            checker,
+        )
+        self.assertNotIn(
+            "self.check_ssh()\n"
+            "        self.check_os()\n"
+            "        self.check_python()",
+            checker,
+        )
+
     def test_log_streamer_keeps_session_when_any_relay_is_fresh(self):
         streamer = source(
             "matrixos/agents/python_core/log_streamer/log_streamer.py"
