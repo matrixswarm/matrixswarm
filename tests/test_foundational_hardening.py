@@ -107,7 +107,12 @@ class FoundationalHardeningTests(unittest.TestCase):
             "phoenix/matrix_gui/modules/railgun/railgun_install_dialog.py"
         )
         self.assertEqual(installer.count("command -v python3.12"), 2)
-        self.assertEqual(installer.count('"$PYTHON_BIN" -m venv'), 2)
+        self.assertEqual(
+            installer.count('"$PYTHON_BIN" -m venv "$VENV_DIR"'), 2
+        )
+        self.assertEqual(
+            installer.count('"$PYTHON_BIN" -m venv "$MCP_VENV"'), 2
+        )
         self.assertNotIn("python3 -m venv \"$VENV_DIR\"", installer)
         self.assertIn("refusing the system python fallback", installer)
 
@@ -123,6 +128,10 @@ class FoundationalHardeningTests(unittest.TestCase):
         self.assertIn(
             "install_os_packages git rsync util-linux sudo acl",
             installer,
+        )
+        self.assertEqual(
+            installer.count("sed -i 's/\\\\r$//' \"$MCP_LAUNCHER\""),
+            2,
         )
 
     def test_railgun_remote_check_does_not_block_or_switch_targets(self):

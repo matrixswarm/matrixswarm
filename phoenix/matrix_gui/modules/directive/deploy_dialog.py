@@ -6,12 +6,11 @@ from matrix_gui.modules.railgun.remote_shell import (
     build_remote_matrixd_command,
     default_linux_user,
     derive_runtime_capabilities,
+    mcp_worker_linux_user,
     validate_linux_user,
     validate_remote_token,
 )
 QtCore.QCoreApplication.processEvents()
-
-
 class DeployDialog(QtWidgets.QDialog):
     """Railgun-style MatrixD controller over SSH, with SSH selector."""
 
@@ -229,6 +228,11 @@ class DeployDialog(QtWidgets.QDialog):
                 runtime_capabilities=runtime_capabilities,
             )
             self.output.append(f"[ACCOUNT] Universe runs as {linux_user}\n")
+            if runtime_capabilities.get("mcp_worker"):
+                self.output.append(
+                    "[ACCOUNT] MCP worker runs as "
+                    f"{mcp_worker_linux_user(linux_user)} (isolated)\n"
+                )
             self.output.append(
                 "[CMD] Root provisioning and least-privilege MatrixD launch prepared; "
                 "SWARM_KEY redacted.\n"

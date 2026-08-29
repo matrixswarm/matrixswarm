@@ -1,0 +1,2 @@
+# Deliberately isolated from matrixos/requirements.txt.
+mcp>=2,<3

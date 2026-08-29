@@ -115,6 +115,7 @@ def derive_runtime_capabilities(agent_tree):
     services = []
     gatekeeper_secure_log = False
     wordpress = None
+    mcp_worker = False
 
     for node in _walk_agent_nodes(agent_tree):
         if node.get("enabled") is False:
@@ -155,11 +156,14 @@ def derive_runtime_capabilities(agent_tree):
                     "/opt/swarm",
                 ),
             }
+        elif name == "mcp_reflex":
+            mcp_worker = True
 
     return {
         "watchdog_services": services,
         "gatekeeper_secure_log": gatekeeper_secure_log,
         "wordpress": wordpress,
+        "mcp_worker": mcp_worker,
     }
 
 
@@ -196,7 +200,18 @@ def validate_runtime_capabilities(capabilities):
         "watchdog_services": services,
         "gatekeeper_secure_log": bool(data.get("gatekeeper_secure_log", False)),
         "wordpress": wordpress,
+        "mcp_worker": bool(data.get("mcp_worker", False)),
     }
+
+
+def mcp_worker_linux_user(swarm_user):
+    """Derive a separate per-universe account for untrusted MCP workers."""
+    swarm_user = validate_linux_user(swarm_user, "Swarm Linux user")
+    candidate = f"{swarm_user}-mcp"
+    if len(candidate) > 31:
+        digest = hashlib.sha256(swarm_user.encode("utf-8")).hexdigest()[:6]
+        candidate = f"{swarm_user[:20].rstrip('-_')}-mcp-{digest}"
+    return validate_linux_user(candidate, "MCP worker Linux user")
 
 
 def _root_shell(script):
@@ -230,7 +245,8 @@ def build_remote_matrixd_command(
     Root is used only to provision service accounts and directory ownership.
     MatrixD and every native swarm agent run as ``linux_user``. Root grants are
     derived from the compiled directive and restricted to the exact resources
-    required by Gatekeeper, service watchdogs, and WordPress Plugin Guard.
+    required by Gatekeeper, service watchdogs, WordPress Plugin Guard, and the
+    isolated MCP worker. The swarm account receives no general sudo permission.
     """
     if action not in {"start", "restart", "stop"}:
         raise ValueError("Remote action must be start, restart, or stop")
@@ -377,6 +393,53 @@ def build_remote_matrixd_command(
             "done",
             "setfacl -m \"u:$SWARM_USER:rwx\" \"$(dirname \"$TRUST_PATH\")\"",
             "setfacl -m \"u:$SWARM_USER:rw-\" \"$TRUST_PATH\"",
+        ])
+
+    if capabilities["mcp_worker"]:
+        worker_user = mcp_worker_linux_user(linux_user)
+        q_worker_user = quote_remote_argument(worker_user, "MCP worker Linux user")
+        lines.extend([
+            "command -v sudo >/dev/null 2>&1 || "
+            "{ echo '[MCP][ERROR] sudo is required for the sealed worker launcher.' >&2; exit 69; }",
+            "command -v visudo >/dev/null 2>&1 || "
+            "{ echo '[MCP][ERROR] visudo is required for the sealed worker launcher.' >&2; exit 69; }",
+            "test -x /usr/local/libexec/matrix-mcp-launch",
+            "test -x /matrix/mcp/.venv/bin/python3",
+            "test -f /matrix/agents/python_core/mcp_reflex/worker/mcp_stdio_worker.py",
+            f"MCP_USER={q_worker_user}",
+            "if id -u \"$MCP_USER\" >/dev/null 2>&1; then "
+            "ACCOUNT_SHELL=$(getent passwd \"$MCP_USER\" | cut -d: -f7); "
+            "case \"$ACCOUNT_SHELL\" in /usr/sbin/nologin|/sbin/nologin|/bin/false) ;; "
+            "*) echo '[MCP][ERROR] Refusing an existing login-capable account.' >&2; exit 78 ;; esac; "
+            "else useradd --system --no-create-home --home-dir /nonexistent "
+            "--shell /usr/sbin/nologin \"$MCP_USER\"; fi",
+            "MCP_GROUP=$(id -gn \"$MCP_USER\")",
+            "MCP_WORK_DIR=\"/matrix/mcp/workers/$UNIVERSE\"",
+            "install -d -o \"$MCP_USER\" -g \"$MCP_GROUP\" -m 0700 \"$MCP_WORK_DIR\"",
+            "install -d -o root -g root -m 0700 /etc/matrixswarm/mcp-launchers",
+            "WORKER_SCRIPT=/matrix/agents/python_core/mcp_reflex/worker/mcp_stdio_worker.py",
+            "WORKER_HASH=$(sha256sum \"$WORKER_SCRIPT\" | awk '{print $1}')",
+            "PROFILE_TMP=$(mktemp /etc/matrixswarm/mcp-launchers/.profile.XXXXXX)",
+            "printf '{\"worker_user\":\"%s\",\"working_directory\":\"%s\","
+            "\"python\":\"/matrix/mcp/.venv/bin/python3\","
+            "\"worker_script\":\"%s\",\"worker_sha256\":\"%s\"}\\n' "
+            "\"$MCP_USER\" \"$MCP_WORK_DIR\" \"$WORKER_SCRIPT\" \"$WORKER_HASH\" "
+            "> \"$PROFILE_TMP\"",
+            "chown root:root \"$PROFILE_TMP\" && chmod 0600 \"$PROFILE_TMP\"",
+            "mv -f \"$PROFILE_TMP\" \"/etc/matrixswarm/mcp-launchers/$SWARM_USER.json\"",
+            "SUDOERS_TMP=$(mktemp /etc/sudoers.d/.matrixswarm-mcp.XXXXXX)",
+            "printf '%s ALL=(root) NOPASSWD: /usr/local/libexec/matrix-mcp-launch\\n' "
+            "\"$SWARM_USER\" > \"$SUDOERS_TMP\"",
+            "chown root:root \"$SUDOERS_TMP\" && chmod 0440 \"$SUDOERS_TMP\"",
+            "visudo -cf \"$SUDOERS_TMP\" >/dev/null",
+            "mv -f \"$SUDOERS_TMP\" \"/etc/sudoers.d/matrixswarm-$SWARM_USER-mcp\"",
+        ])
+    else:
+        # A later directive that removes MCP must also revoke the exact grant
+        # and root-owned profile created by an earlier MCP-enabled deployment.
+        lines.extend([
+            "rm -f \"/etc/sudoers.d/matrixswarm-$SWARM_USER-mcp\"",
+            "rm -f \"/etc/matrixswarm/mcp-launchers/$SWARM_USER.json\"",
         ])
 
     boot_command = (

@@ -7,6 +7,7 @@ import ntpath
 import posixpath
 from matrix_gui.modules.railgun.remote_shell import (
     build_remote_matrixd_command,
+    mcp_worker_linux_user,
     validate_linux_user,
     validate_remote_token,
 )
@@ -92,6 +93,7 @@ class RailgunWorker(QThread):
                     "use cockpit agent logs for live output.\n"
                 )
 
+            runtime_capabilities = self.opts.get("runtime_capabilities") or {}
             cmd = build_remote_matrixd_command(
                 action="start",
                 universe=universe,
@@ -100,11 +102,16 @@ class RailgunWorker(QThread):
                 swarm_key=self.swarm_key,
                 boot_flags=flags,
                 reboot_id=reboot_id,
-                runtime_capabilities=self.opts.get("runtime_capabilities"),
+                runtime_capabilities=runtime_capabilities,
             )
             self.sig_stdout.emit(
                 f"[RAILGUN] Universe account: {linux_user}\n"
             )
+            if runtime_capabilities.get("mcp_worker"):
+                self.sig_stdout.emit(
+                    "[RAILGUN] MCP worker account: "
+                    f"{mcp_worker_linux_user(linux_user)} (isolated)\n"
+                )
             self.sig_stdout.emit(
                 "[RAILGUN] Root provisioning prepared; SWARM_KEY remains redacted.\n"
             )

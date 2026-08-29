@@ -20,3 +20,7 @@ matrixos/OPERATIONAL-SAFETY.md text eol=lf
 .gitignore text eol=lf
 phoenix/requirements.txt text eol=lf
 matrixos/requirements.txt text eol=lf
+matrixos/scripts/matrix-mcp-launch text eol=lf
+matrixos/agents/python_core/mcp_reflex/*.py text eol=lf
+matrixos/agents/python_core/mcp_reflex/worker/*.py text eol=lf
+matrixos/agents/python_core/mcp_reflex_probe/*.py text eol=lf

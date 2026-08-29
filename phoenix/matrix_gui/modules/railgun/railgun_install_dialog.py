@@ -486,6 +486,37 @@ if [ -f "$TARGET/requirements.txt" ]; then
 fi
 "$VENV_DIR/bin/python3" -m pip check
 
+MCP_REQUIREMENTS="$TARGET/agents/python_core/mcp_reflex/worker/requirements.txt"
+MCP_LAUNCHER="$TARGET/scripts/matrix-mcp-launch"
+if [ -f "$MCP_REQUIREMENTS" ]; then
+    echo "[Installer] Creating isolated MCP worker environment..."
+    # Windows working copies may arrive with CRLF even for executable Python
+    # sources. Normalize the sealed boundary before hashing or installation.
+    find "$TARGET/agents/python_core/mcp_reflex" -type f -name '*.py' \
+        -exec sed -i 's/\\r$//' {{}} +
+    sed -i 's/\\r$//' "$MCP_LAUNCHER"
+    MCP_VENV="$TARGET/mcp/.venv"
+    install -d -o root -g root -m 0755 "$TARGET/mcp/workers"
+    rm -rf "$MCP_VENV"
+    "$PYTHON_BIN" -m venv "$MCP_VENV"
+    "$MCP_VENV/bin/python3" -m pip install --upgrade pip wheel
+    "$MCP_VENV/bin/python3" -m pip install -r "$MCP_REQUIREMENTS"
+    "$MCP_VENV/bin/python3" -m pip check
+
+    if [ ! -f "$MCP_LAUNCHER" ]; then
+        echo "[Installer][ERROR] MCP privilege-drop launcher is missing."
+        exit 127
+    fi
+    install -d -o root -g root -m 0755 /usr/local/libexec
+    install -o root -g root -m 0755 \
+        "$MCP_LAUNCHER" /usr/local/libexec/matrix-mcp-launch
+    chown -R root:root "$TARGET/mcp" "$TARGET/agents/python_core/mcp_reflex"
+    find "$TARGET/mcp" "$TARGET/agents/python_core/mcp_reflex" \
+        -type d -exec chmod go-w {{}} +
+    find "$TARGET/mcp" "$TARGET/agents/python_core/mcp_reflex" \
+        -type f -exec chmod go-w {{}} +
+fi
+
 if [ ! -f "$TARGET/scripts/matrixd" ]; then
     echo "[Installer][ERROR] matrixd script missing under $TARGET/scripts"
     exit 127
@@ -622,6 +653,37 @@ if [ -f "$TARGET/requirements.txt" ]; then
     "$VENV_DIR/bin/python3" -m pip install -r "$TARGET/requirements.txt"
 fi
 "$VENV_DIR/bin/python3" -m pip check
+
+MCP_REQUIREMENTS="$TARGET/agents/python_core/mcp_reflex/worker/requirements.txt"
+MCP_LAUNCHER="$TARGET/scripts/matrix-mcp-launch"
+if [ -f "$MCP_REQUIREMENTS" ]; then
+    echo "[Installer] Creating isolated MCP worker environment..."
+    # Windows working copies may arrive with CRLF even for executable Python
+    # sources. Normalize the sealed boundary before hashing or installation.
+    find "$TARGET/agents/python_core/mcp_reflex" -type f -name '*.py' \
+        -exec sed -i 's/\\r$//' {{}} +
+    sed -i 's/\\r$//' "$MCP_LAUNCHER"
+    MCP_VENV="$TARGET/mcp/.venv"
+    install -d -o root -g root -m 0755 "$TARGET/mcp/workers"
+    rm -rf "$MCP_VENV"
+    "$PYTHON_BIN" -m venv "$MCP_VENV"
+    "$MCP_VENV/bin/python3" -m pip install --upgrade pip wheel
+    "$MCP_VENV/bin/python3" -m pip install -r "$MCP_REQUIREMENTS"
+    "$MCP_VENV/bin/python3" -m pip check
+
+    if [ ! -f "$MCP_LAUNCHER" ]; then
+        echo "[Installer][ERROR] MCP privilege-drop launcher is missing."
+        exit 127
+    fi
+    install -d -o root -g root -m 0755 /usr/local/libexec
+    install -o root -g root -m 0755 \
+        "$MCP_LAUNCHER" /usr/local/libexec/matrix-mcp-launch
+    chown -R root:root "$TARGET/mcp" "$TARGET/agents/python_core/mcp_reflex"
+    find "$TARGET/mcp" "$TARGET/agents/python_core/mcp_reflex" \
+        -type d -exec chmod go-w {{}} +
+    find "$TARGET/mcp" "$TARGET/agents/python_core/mcp_reflex" \
+        -type f -exec chmod go-w {{}} +
+fi
 
 if [ ! -f "$TARGET/scripts/matrixd" ]; then
     echo "[Installer][ERROR] matrixd not found in $TARGET/scripts"
