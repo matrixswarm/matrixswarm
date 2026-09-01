@@ -59,3 +59,23 @@ The matching MCP Reflex policy grants only the tool needed by that workflow:
 The cognitive checkpoint is encrypted under the agent's Phoenix-provisioned
 symmetric key.  If a process restarts while an MCP request is in flight, that
 run moves to `recovery_required`; it is never replayed automatically.
+
+## First production pilot
+
+`mcp_tools/system_status_server.py` is the initial deployment-owned MCP server.
+It exposes one no-argument `read_status` tool, returning only uptime, load,
+memory, and root-filesystem capacity.  It accepts no command, path, service,
+or environment input and performs no mutation.  Run it using the isolated MCP
+venv through the existing MCP Reflex airlock:
+
+```json
+{
+  "system_status": {
+    "command": "/matrix/mcp/.venv/bin/python3",
+    "args": ["/matrix/agents/python_core/operator_agent/mcp_tools/system_status_server.py"],
+    "env": {},
+    "allowed_tools": ["read_status"],
+    "timeout_sec": 15
+  }
+}
+```
