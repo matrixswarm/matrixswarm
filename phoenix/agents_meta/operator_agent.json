@@ -1,0 +1,26 @@
+{
+  "name": "operator_agent",
+  "universal_id": "operator-agent-1",
+  "constraints": [
+    {"packet_signing": {"in": true, "out": true}},
+    {"symmetric_encryption": {"type": "aes"}}
+  ],
+  "config": {
+    "ui": {"agent_tree": {"emoji": "🧠"}},
+    "service-manager": [{"role": [
+      "hive.operator.request@cmd_operator_request",
+      "hive.operator.approve@cmd_operator_approve",
+      "hive.operator.deny@cmd_operator_deny"
+    ]}],
+    "enabled": false,
+    "require_distinct_approver": true,
+    "authorized_requester_uids": [],
+    "authorized_approver_uids": [],
+    "max_active_runs": 8,
+    "max_retained_runs": 128,
+    "default_turn_budget": 4,
+    "max_pending_mcp_requests": 8,
+    "mcp_request_timeout_sec": 60,
+    "workflows": {}
+  }
+}

@@ -20,6 +20,7 @@ This library provides documentation for the pre-built agents included with Matri
 | :--- | :--- | :--- |
 | **`matrix`** | The central brain and message routing core.python_core. | `[Details](./agents/matrix.md)` |
 | **`commander`**| Provides a live, text-based dashboard of all swarm agents' status. | `[Details](./agents/commander.md)` |
+| **`operator_agent`**| Approval-gated cognitive workflow runner that reaches tools only through MCP Reflex. | `[Details](./agents/operator_agent.md)` |
 | **`matrix_https`**| A secure Flask-based web server that exposes an API to interact with the swarm. | `[Details](./agents/matrix_https.md)` |
 | **`matrix_websocket`**| Provides a secure WebSocket server for real-time, bidirectional communication. | `[Details](./agents/matrix_websocket.md)` |
 
