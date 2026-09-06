@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import secrets
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -22,12 +23,45 @@ class BridgeServer:
         self._token = secrets.token_urlsafe(32)
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._connection: dict[str, Any] | None = None
 
     @property
     def connection_path(self) -> Path:
         return self._data_dir / "bridge.json"
 
+    @staticmethod
+    def _endpoint_is_listening(connection: dict[str, Any]) -> bool:
+        host = connection.get("host")
+        port = connection.get("port")
+        if host != "127.0.0.1" or not isinstance(port, int):
+            return False
+        try:
+            with socket.create_connection((host, port), timeout=0.25):
+                return True
+        except OSError:
+            return False
+
+    def _reject_active_or_remove_stale_connection(self) -> None:
+        if not self.connection_path.exists():
+            return
+        try:
+            existing = json.loads(self.connection_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if isinstance(existing, dict) and self._endpoint_is_listening(existing):
+            owner = existing.get("pid", "unknown")
+            raise RuntimeError(
+                f"Another Phoenix LLM Bridge is already enabled (PID {owner}). "
+                "Disable it in that Phoenix window before enabling this one."
+            )
+        try:
+            self.connection_path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise RuntimeError(f"Could not remove stale bridge connection file: {exc}") from exc
+
     def start(self) -> dict[str, Any]:
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._reject_active_or_remove_stale_connection()
         bridge = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -72,7 +106,6 @@ class BridgeServer:
         self._thread = threading.Thread(target=self._server.serve_forever, name="phoenix-bridge", daemon=True)
         self._thread.start()
 
-        self._data_dir.mkdir(parents=True, exist_ok=True)
         connection = {
             "version": 1,
             "host": "127.0.0.1",
@@ -85,6 +118,7 @@ class BridgeServer:
             self.connection_path.chmod(0o600)
         except OSError:
             pass
+        self._connection = connection
         return {key: value for key, value in connection.items() if key != "token"}
 
     def stop(self) -> None:
@@ -94,9 +128,14 @@ class BridgeServer:
         if self._thread is not None:
             self._thread.join(timeout=2)
         try:
-            if self.connection_path.exists():
+            if self._connection is not None and self.connection_path.exists():
                 current = json.loads(self.connection_path.read_text(encoding="utf-8"))
-                if current.get("pid") == os.getpid():
+                owns_connection = all(
+                    current.get(key) == self._connection.get(key)
+                    for key in ("pid", "port", "token")
+                )
+                if owns_connection:
                     self.connection_path.unlink()
         except (OSError, json.JSONDecodeError):
             pass
+        self._connection = None
