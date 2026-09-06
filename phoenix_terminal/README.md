@@ -38,6 +38,14 @@ On Windows, the launcher automatically uses the sibling `phoenix` directory and 
 .\launch-pycharm.ps1
 ```
 
+If Windows requires locally created PowerShell scripts to be signed, keep that policy in place and invoke the module directly:
+
+```powershell
+$py = 'C:\path\to\phoenix_gui\.venv\Scripts\python.exe'
+$phoenixRoot = (Resolve-Path '..\phoenix').Path
+& $py -m phoenix_terminal launch --phoenix-root $phoenixRoot
+```
+
 To test against a separate PyCharm checkout, pass both paths explicitly or set the `PHOENIX_ROOT` and `PHOENIX_PYTHON` environment variables:
 
 ```powershell
@@ -65,6 +73,8 @@ python -m phoenix_terminal bridge logs-read SUBSCRIPTION_ID_FROM_LOGS_START
 `bridge launch` opens a Phoenix deployment connection session; it does not run `matrixd boot`. Phoenix displays a human confirmation dialog before opening the session. Agent log requests are routed through the active Phoenix session and its existing `cmd_service_request`, signing, encryption, and connector pipeline.
 
 Turning the bridge off stops its loopback listener, deletes its connection/token file, and revokes all log subscriptions. Closing the vault or Phoenix forces the bridge off. Every enable generates a new random token; reopening a vault never re-enables the bridge automatically. Launching Phoenix directly with `python phoenix.py` does not load any bridge code.
+
+Only one Phoenix LLM Bridge can be enabled per Windows user profile. Opening another Phoenix window does not disturb the active endpoint; attempting to enable its bridge reports which existing Phoenix process owns the endpoint and leaves that endpoint intact.
 
 The Phoenix status bar provides an activity LED for the current application session: gray **OFF**, green **ON**, and amber **ACTIVE** whenever an authenticated LLM request crosses the bridge. The attachment permission and token exist only for that Phoenix run.
 

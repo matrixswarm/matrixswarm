@@ -40,12 +40,6 @@ def launch(phoenix_root: Path, data_dir: Path) -> int:
             self._llm_dispatcher = QtBridgeDispatcher(self._llm_backend)
             self._llm_server = None
 
-            stale_connection = data_dir / "bridge.json"
-            try:
-                stale_connection.unlink(missing_ok=True)
-            except OSError as exc:
-                print(f"[PHOENIX-BRIDGE] Could not remove stale connection file: {exc}")
-
             bridge_menu = self.menuBar().addMenu("LLM Bridge")
             self._llm_toggle = QAction("Enable LLM Bridge…", self)
             self._llm_toggle.setCheckable(True)

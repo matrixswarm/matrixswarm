@@ -256,6 +256,35 @@ class BridgeTests(unittest.TestCase):
                 server.stop()
             self.assertFalse(server.connection_path.exists())
 
+    def test_second_server_cannot_replace_an_active_bridge(self):
+        with TemporaryDirectory() as temporary_directory:
+            data_dir = Path(temporary_directory)
+            first = BridgeServer(lambda _method, _params: {"owner": "first"}, data_dir)
+            second = BridgeServer(lambda _method, _params: {"owner": "second"}, data_dir)
+            first.start()
+            original_connection = first.connection_path.read_text(encoding="utf-8")
+            try:
+                with self.assertRaisesRegex(RuntimeError, "already enabled"):
+                    second.start()
+                self.assertEqual(first.connection_path.read_text(encoding="utf-8"), original_connection)
+                self.assertEqual(call_bridge(data_dir, "bridge.status"), {"owner": "first"})
+                second.stop()
+                self.assertTrue(first.connection_path.exists())
+            finally:
+                first.stop()
+
+    def test_stale_connection_file_is_replaced_when_bridge_is_enabled(self):
+        with TemporaryDirectory() as temporary_directory:
+            data_dir = Path(temporary_directory)
+            data_dir.joinpath("bridge.json").write_text('{"host":"127.0.0.1","port":0}', encoding="utf-8")
+            server = BridgeServer(lambda _method, _params: {"state": "ok"}, data_dir)
+            try:
+                info = server.start()
+                self.assertGreater(info["port"], 0)
+                self.assertEqual(call_bridge(data_dir, "bridge.status"), {"state": "ok"})
+            finally:
+                server.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

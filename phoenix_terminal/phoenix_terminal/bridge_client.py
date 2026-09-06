@@ -33,6 +33,8 @@ def call_bridge(data_dir: Path, method: str, params: dict[str, Any] | None = Non
         result = json.loads(exc.read().decode("utf-8"))
     except URLError as exc:
         raise RuntimeError(f"Phoenix bridge is unreachable: {exc.reason}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"Phoenix bridge connection was interrupted: {exc}") from exc
     if not result.get("ok"):
         raise RuntimeError(str(result.get("error", "bridge request failed")))
     return result.get("result", {})
