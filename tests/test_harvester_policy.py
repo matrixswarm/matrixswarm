@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import io
 import json
 from pathlib import Path
 import unittest
@@ -259,6 +260,23 @@ class HarvesterPolicyTests(unittest.TestCase):
             self.assertNotIn(policy["swarm_key"], command)
             self.assertIn("matrixd boot", command)
             self.assertIn("test -f", command)
+
+    def test_transport_accepts_vault_provisioned_multiline_private_key(self):
+        if SSH is None:
+            self.skipTest("paramiko is not installed")
+
+        generated = SSH.paramiko.RSAKey.generate(1024)
+        pem_buffer = io.StringIO()
+        generated.write_private_key(pem_buffer)
+        pem = pem_buffer.getvalue()
+
+        provisioned = SSH._required_private_key({"private_key": pem})
+        parsed = SSH._load_private_key(provisioned)
+
+        self.assertIn("\n", provisioned)
+        self.assertEqual(parsed.get_base64(), generated.get_base64())
+        with self.assertRaises(ValueError):
+            SSH._required_private_key({"private_key": "key\x00material"})
 
     def test_agent_uses_only_fixed_matrixd_operations(self):
         source = AGENT_PATH.read_text(encoding="utf-8")

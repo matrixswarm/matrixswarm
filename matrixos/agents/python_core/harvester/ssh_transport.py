@@ -49,7 +49,7 @@ def connect_pinned(profile: dict[str, Any], timeout: int):
         args["password"] = _required(profile, "password")
     elif auth_type == "private_key":
         args["pkey"] = _load_private_key(
-            _required(profile, "private_key"),
+            _required_private_key(profile),
             profile.get("private_key_passphrase"),
         )
     elif auth_type == "agent":
@@ -204,6 +204,20 @@ def _required(profile: dict[str, Any], key: str) -> str:
         character in value for character in ("\x00", "\r", "\n")
     ):
         raise ValueError(f"SSH profile field {key} is invalid")
+    return value
+
+
+def _required_private_key(profile: dict[str, Any]) -> str:
+    """Return a required PEM key while rejecting only unsafe NUL bytes.
+
+    SSH identity keys are intentionally multiline, unlike host, username, and
+    password profile fields.  Applying the single-line validator to a PEM
+    caused every vault-provisioned private key to fail before Paramiko could
+    parse it.
+    """
+    value = _clean_secret(profile.get("private_key"))
+    if value is None or "\x00" in value:
+        raise ValueError("SSH profile field private_key is invalid")
     return value
 
 
