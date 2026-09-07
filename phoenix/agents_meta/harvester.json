@@ -1,0 +1,30 @@
+{
+    "name": "harvester",
+    "universal_id": "harvester-1",
+    "constraints": [
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        },
+        {
+            "symmetric_encryption": {
+                "type": "aes"
+            }
+        }
+    ],
+    "config": {
+        "enabled": false,
+        "mode": "local",
+        "check_interval_sec": 30,
+        "matrixd_timeout_sec": 60,
+        "alert_to_role": "hive.alert",
+        "targets": [],
+        "ui": {
+            "agent_tree": {
+                "emoji": "🌾"
+            }
+        }
+    }
+}

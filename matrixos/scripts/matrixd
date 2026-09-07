@@ -301,7 +301,9 @@ def main():
     boot.add_argument("--reboot-id", help="Resume a specific previous reboot UUID (timestamp directory).")
 
     # subcommands
-    sub.add_parser("list").add_argument("--base", default="/matrix", help="List existing universes under the given base path.")
+    list_cmd = sub.add_parser("list")
+    list_cmd.add_argument("--base", default="/matrix", help="List existing universes under the given base path.")
+    list_cmd.add_argument("--json", action="store_true", help="Emit a bounded machine-readable snapshot.")
     kill = sub.add_parser("kill")
     kill.add_argument(
         "--universe",
@@ -348,7 +350,7 @@ def main():
             rug_pull=args.rug_pull
         )
     elif args.cmd == "list":
-        list_universes(args.base)
+        list_universes(args.base, json_output=args.json)
     elif args.cmd == "kill":
         if not args.universe and not args.delete_directive_with_key:
             kill.error(
@@ -402,17 +404,16 @@ def main():
         parser.print_help()
 
 
-def list_universes(base="/matrix"):
+def universe_snapshot(base="/matrix"):
+    """Return active universes without command lines or runtime paths."""
     infos = get_all_swarm_agent_info(universe=None, base=base)
-    if not infos:
-        print("[LIST] No active swarm agents found")
-        return
-
     universes = {}
     for info in infos:
         universes.setdefault(info["universe"], []).append(info)
 
-    for universe, agents in universes.items():
+    snapshot = []
+    for universe in sorted(universes):
+        agents = universes[universe]
         total_rss = total_cpu = 0
         for proc in psutil.process_iter(['pid', 'memory_info', 'cpu_percent', 'cmdline']):
             try:
@@ -426,8 +427,38 @@ def list_universes(base="/matrix"):
             except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError):
                 continue
 
-        print(f"🌌 {universe} :: {len(agents)} agents, {total_rss/1024/1024:.1f} MB RAM, {total_cpu:.1f}% CPU")
-        for agent in agents:
+        public_agents = [
+            {"pid": int(agent["pid"]), "universal_id": agent["universal_id"]}
+            for agent in agents
+        ]
+        public_agents.sort(key=lambda item: (item["universal_id"], item["pid"]))
+        snapshot.append({
+            "universe": universe,
+            "status": "active",
+            "agent_count": len(public_agents),
+            "rss_bytes": total_rss,
+            "cpu_percent": round(total_cpu, 2),
+            "agents": public_agents,
+        })
+    return {"version": 1, "universes": snapshot}
+
+
+def list_universes(base="/matrix", json_output=False):
+    snapshot = universe_snapshot(base)
+    if json_output:
+        print(json.dumps(snapshot, separators=(",", ":"), sort_keys=True))
+        return
+    if not snapshot["universes"]:
+        print("[LIST] No active swarm agents found")
+        return
+
+    for entry in snapshot["universes"]:
+        print(
+            f"🌌 {entry['universe']} :: {entry['agent_count']} agents, "
+            f"{entry['rss_bytes']/1024/1024:.1f} MB RAM, "
+            f"{entry['cpu_percent']:.1f}% CPU"
+        )
+        for agent in entry["agents"]:
             print(f" └── PID {agent['pid']} :: {agent['universal_id']}")
 
 
