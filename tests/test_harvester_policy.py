@@ -149,19 +149,23 @@ class HarvesterPolicyTests(unittest.TestCase):
     def test_phoenix_metadata_is_inert_and_editor_compiles(self):
         metadata = json.loads(META_PATH.read_text(encoding="utf-8"))
         self.assertEqual(metadata["name"], "harvester")
-        self.assertEqual(metadata["config"]["mode"], "local")
+        self.assertEqual(metadata["config"]["mode"], "ssh")
         self.assertIs(metadata["config"]["enabled"], False)
         self.assertEqual(metadata["config"]["targets"], [])
+        constraint_names = [next(iter(item)) for item in metadata["constraints"]]
+        self.assertIn("ssh", constraint_names)
+        ssh_constraint = metadata["constraints"][constraint_names.index("ssh")]
+        self.assertIs(ssh_constraint["ssh"], None)
         compile(
             EDITOR_PATH.read_text(encoding="utf-8"),
             str(EDITOR_PATH),
             "exec",
         )
         editor_source = EDITOR_PATH.read_text(encoding="utf-8")
-        self.assertIn('self.node.add_constraint("ssh")', editor_source)
-        self.assertIn('self.node.remove_constraint("ssh")', editor_source)
         self.assertIn("VaultCoreSingleton", editor_source)
-        self.assertIn('deployment.get("ssh_serial")', editor_source)
+        self.assertNotIn("add_constraint", editor_source)
+        self.assertNotIn("remove_constraint", editor_source)
+        self.assertNotIn("ssh_serial", editor_source)
         self.assertNotIn("swarm_key", editor_source)
         self.assertNotIn("automatic_recovery", editor_source)
 

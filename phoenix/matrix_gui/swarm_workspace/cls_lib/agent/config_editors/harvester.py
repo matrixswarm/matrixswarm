@@ -33,9 +33,7 @@ class Harvester(BaseEditor):
 
         self.enabled = QCheckBox("Enable matrixd checks")
         self.enabled.setChecked(cfg.get("enabled") is True)
-        self.mode = QComboBox()
-        self.mode.addItems(["local", "ssh"])
-        self.mode.setCurrentText(cfg.get("mode", "local"))
+        self.mode = QLabel("ssh — assign the required SSH constraint below")
         self.interval = QSpinBox()
         self.interval.setRange(5, 3_600)
         self.interval.setValue(int(cfg.get("check_interval_sec", 30)))
@@ -55,7 +53,7 @@ class Harvester(BaseEditor):
         target_box = QWidget()
         targets = QFormLayout(target_box)
         self.deployment = QComboBox()
-        self.deployment.addItem("Manual observation only", None)
+        self.deployment.addItem("Custom target (no deployment binding)", None)
         for deployment_id, deployment in self._deployments.items():
             label = str(deployment.get("label") or deployment_id)
             universe = self._deployment_universe(deployment)
@@ -71,8 +69,9 @@ class Harvester(BaseEditor):
             target, "alert_cooldown_sec", 300, 0, 86_400
         )
         self.vault_binding = QLabel(
-            "Observation only. Phoenix binds the deployment identity and SSH "
-            "registry profile; no target swarm key is loaded."
+            "Observation only. Assign the required SSH constraint from the "
+            "encrypted Registry/Vault in the Requirements panel. No target "
+            "swarm key is loaded."
         )
         self.vault_binding.setWordWrap(True)
 
@@ -107,7 +106,6 @@ class Harvester(BaseEditor):
             str(deployment_id): {
                 "label": deployment.get("label"),
                 "encrypted_path": deployment.get("encrypted_path"),
-                "ssh_serial": deployment.get("ssh_serial"),
             }
             for deployment_id, deployment in deployments.items()
             if isinstance(deployment, dict)
@@ -143,7 +141,7 @@ class Harvester(BaseEditor):
         return widget
 
     def _save(self):
-        mode = self.mode.currentText()
+        mode = "ssh"
         deployment_id = self.deployment.currentData()
         deployment = self._deployments.get(deployment_id)
         target_id = str(deployment_id) if deployment else self.target_id.text().strip()
@@ -161,7 +159,6 @@ class Harvester(BaseEditor):
             QMessageBox.warning(self, "Harvester Target", "Universe is invalid.")
             return
 
-        self._configure_ssh_constraint(mode, deployment)
         target = {
             "id": target_id,
             "universe": universe,
@@ -185,25 +182,3 @@ class Harvester(BaseEditor):
         )
         self.node.mark_dirty()
         self.accept()
-
-    def _configure_ssh_constraint(self, mode, deployment):
-        constraints = [
-            constraint
-            for constraint in self.node.get_constraints()
-            if constraint.get("class") == "ssh"
-        ]
-        if mode == "local":
-            if constraints:
-                self.node.remove_constraint("ssh")
-            return
-        if not constraints:
-            self.node.add_constraint("ssh")
-            constraints = [
-                constraint
-                for constraint in self.node.get_constraints()
-                if constraint.get("class") == "ssh"
-            ]
-        ssh_serial = deployment.get("ssh_serial") if deployment else None
-        if ssh_serial and constraints:
-            constraints[0]["serial"] = ssh_serial
-            constraints[0]["met"] = True

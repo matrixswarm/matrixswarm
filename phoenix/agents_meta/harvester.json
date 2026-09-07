@@ -12,11 +12,14 @@
             "symmetric_encryption": {
                 "type": "aes"
             }
+        },
+        {
+            "ssh": null
         }
     ],
     "config": {
         "enabled": false,
-        "mode": "local",
+        "mode": "ssh",
         "check_interval_sec": 30,
         "matrixd_timeout_sec": 60,
         "alert_to_role": "hive.alert",
