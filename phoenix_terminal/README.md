@@ -124,6 +124,17 @@ The server publishes instructions and exact tool schemas to the LLM:
 
 There is deliberately no generic RPC, shell, filesystem, vault, credential, deploy, Railgun, restart, injection, or agent-control tool. Disabling the Phoenix bridge immediately makes every MCP call fail and revokes existing log subscriptions.
 
+After launching Phoenix, unlocking a test vault, and enabling the bridge, verify
+the real STDIO boundary with:
+
+```powershell
+.\.venv-mcp\Scripts\python.exe .\scripts\verify_live_mcp.py --exercise-logs
+```
+
+The harness checks the exact eight-tool allowlist, structured results, and
+sensitive-field redaction. Pass `--launch-deployment ID` only when an operator is
+present to answer Phoenix's separate connection confirmation.
+
 `monitor watch --interval 60` continuously checks the configured public endpoints. It does not authenticate, crawl, submit forms, or modify remote systems.
 
 ## Safety model
