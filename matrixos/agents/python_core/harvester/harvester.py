@@ -207,7 +207,10 @@ class Agent(BootAgent):
         for endpoint in endpoints:
             packet.set_payload_item("handler", endpoint.get_handler())
             self.pass_packet(packet, endpoint.get_universal_id())
-        self.log(f"[HARVESTER][ALERT] event={event} target={target['id']}")
+        self.log(
+            f"[HARVESTER][ALERT] event={event} target={target['id']}",
+            level="INFO" if event == "RECOVERY" else "CRITICAL",
+        )
 
     def _attempt_recovery(self, target) -> None:
         try:
