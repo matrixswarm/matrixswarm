@@ -20,7 +20,8 @@
 - Include:
   - `swarm_key` (for deployment + log decryption).  
   - `encrypted_hash` (fingerprint of sealed directive).  
-  - `encrypted_path` (where the `.enc.json` is saved).  
+  - `encrypted_bundle` (sealed directive retained inside the encrypted vault).
+  - `universe` (validated MatrixD target name).
   - `interfaces` (HTTPS, WebSocket, Discord, Telegram, etc. each with host, port, cert, fingerprint).  
 - Used by GUI to list sites and launch sessions.  
 
@@ -30,7 +31,7 @@
 - Auto-create `.config["security"]` if missing.  
 - Embed agent sources (Clown Car) if option set.  
 - Add `_hashbang` if option set.  
-- Encrypt with swarm key → write `.vault` file.  
+- Encrypt with swarm key → retain the sealed bundle in the Phoenix vault.
 - Save swarm key + hash back into deployment record.  
 
 ### 4. GUI Control Panel
@@ -65,7 +66,7 @@
 ## 🧩 Blueprint Summary
 - **Vault = brain**: stores deployments with swarm_key, interfaces, and hashes.  
 - **Deployment = site record**: flat JSON + metadata, never shipped, GUI reference.  
-- **Directive = runtime**: minted, stamped with certs + options, encrypted, uploaded to server.  
+- **Directive = runtime**: minted, stamped with certs + options, encrypted, and streamed by Railgun without a loose boot file.
 - **GUI = operator bridge**: enterprise-style, user-friendly panels, one-click swarm connect.  
 - **Security = enforced**: unique keys per swarm, vault password lock, cert silos.  
 
@@ -77,8 +78,8 @@
 flowchart LR
     A[Template Directive] --> B[Deployment<br/>(flat agents + certs)]
     B --> C[Mint Runtime Directive<br/>+ embed/hashbang]
-    C --> D[Encrypted Directive<br/>(.enc.json + swarm_key)]
-    D --> E[Server Swarm Boot<br/>matrixswarm-boot]
+    C --> D[Encrypted Bundle + Key<br/>inside Phoenix Vault]
+    D --> E[Railgun SSH Stdin<br/>MatrixD In-Memory Boot]
 
     subgraph GUI
     B --> F[Vault<br/>Deployments List]

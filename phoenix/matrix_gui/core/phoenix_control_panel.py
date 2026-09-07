@@ -57,16 +57,25 @@ class PhoenixControlPanel(QWidget):
             self.conn_btn.clicked.connect(self.launch_registry_manager)
             self.layout.addWidget(self.conn_btn)
 
-            self.directives_btn = QPushButton("🗘 Deploy")
+            self.directives_btn = QPushButton("🚀 Deploy")
             self.directives_btn.setObjectName("document")
+            self.directives_btn.setToolTip(
+                "Create or open a swarm workspace, then launch it securely "
+                "through Railgun."
+            )
+            self.directives_btn.setAccessibleName("Deploy a swarm")
             self.directives_btn.clicked.connect(self.open_directive_manager)
             self.layout.addWidget(self.directives_btn)
 
             #railgun build
             self.build_railgun_menu()
 
-            self.vault_btn = QPushButton(" Vault")
+            self.vault_btn = QPushButton("🔐 Vault")
             self.vault_btn.setObjectName("vault")
+            self.vault_btn.setToolTip(
+                "Close the active encrypted vault and return to vault unlock."
+            )
+            self.vault_btn.setAccessibleName("Manage encrypted vault")
             self.vault_btn.clicked.connect(self.reopen_vault)
             self.layout.addWidget(self.vault_btn)
 

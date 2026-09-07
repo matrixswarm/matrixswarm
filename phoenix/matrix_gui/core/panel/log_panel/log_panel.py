@@ -37,7 +37,10 @@ class LogPanel(QPlainTextEdit):
         try:
 
             fmt = QTextCharFormat()
-            if "[ERROR]" in line:
+            if "[CRITICAL]" in line or "[FATAL]" in line:
+                fmt.setForeground(QColor("#ff3333"))
+                fmt.setFontWeight(QFont.Weight.Bold)
+            elif "[ERROR]" in line:
                 fmt.setForeground(QColor("red"))
             elif "[WARN" in line or "[WARNING]" in line:
                 fmt.setForeground(QColor("orange"))

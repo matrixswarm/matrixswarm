@@ -32,7 +32,6 @@ class PhoenixStaticPanel(QWidget):
         self.deployment_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         self.deployment_tree.customContextMenuRequested.connect(self._on_deployment_context_menu)
-        layout.addWidget(self.deployment_tree)
 
         self._recent_alerts = {}  # message-hash → timestamp
 
@@ -52,17 +51,43 @@ class PhoenixStaticPanel(QWidget):
         sound_box.setLayout(sound_layout)
         layout.addWidget(sound_box)
 
+        # === First-swarm operator guide ===
+        guide_box = QGroupBox("🚀 Deploy Your First Swarm")
+        guide_layout = QVBoxLayout()
+        self.first_swarm_guide = QLabel(
+            "<b>1 · Registry</b> — add and test the target server's SSH "
+            "connection.<br>"
+            "<b>2 · Deploy</b> — create or open a workspace, build the agent "
+            "tree, and resolve its constraints.<br>"
+            "<b>3 · Workspace Deploy</b> — select the vault SSH target; Railgun "
+            "streams the sealed directive directly into MatrixD memory.<br>"
+            "<b>4 · Connect</b> — select the deployment above and open its live "
+            "cockpit session."
+        )
+        self.first_swarm_guide.setObjectName("firstSwarmGuide")
+        self.first_swarm_guide.setWordWrap(True)
+        self.first_swarm_guide.setTextFormat(Qt.TextFormat.RichText)
+        self.first_swarm_guide.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.first_swarm_guide.setStyleSheet(
+            "QLabel#firstSwarmGuide { color: #d6e4e8; padding: 6px 8px; "
+            "line-height: 1.35; }"
+        )
+        guide_layout.addWidget(self.first_swarm_guide)
+        guide_box.setLayout(guide_layout)
+        layout.addWidget(guide_box)
+
         # === Swarm Feed ===
         self.feed = QTextEdit()
         self.feed.setReadOnly(True)
-        layout.addWidget(self.feed)
 
         self.parent=parent
         self._has_unread_alert = False
         self._update_static_tab_indicator()
 
         # === Deployments summary ===
-        deploy_box = QGroupBox("Deployments")
+        deploy_box = QGroupBox("🚀 Deployments")
         deploy_layout = QVBoxLayout()
         deploy_layout.addWidget(self.deployment_tree)
         deploy_box.setLayout(deploy_layout)

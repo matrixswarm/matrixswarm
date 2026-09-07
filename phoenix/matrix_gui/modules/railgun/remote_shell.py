@@ -1,6 +1,8 @@
 """Fail-closed builders for MatrixOS SSH launch commands."""
 
+import base64
 import hashlib
+import json
 import posixpath
 import re
 import shlex
@@ -27,6 +29,78 @@ _ALLOWED_WATCHDOG_UNITS = {
     "mysqld.service",
     "redis.service",
 }
+MAX_BOOT_ENVELOPE_BYTES = 16 * 1024 * 1024
+_BOOT_BUNDLE_FIELDS = {"nonce", "tag", "ciphertext"}
+_MATRIXD_STDIN_PROBE = (
+    "if /matrix/.venv/bin/python3 /matrix/scripts/matrixd boot --help "
+    "2>&1 | grep -F -- '--directive-stdin' >/dev/null; then exit 0; "
+    "else exit 65; fi"
+)
+
+
+def encode_boot_envelope(encrypted_bundle, swarm_key_b64):
+    """Serialize one bounded, encrypted MatrixD boot payload for SSH stdin."""
+    if not isinstance(encrypted_bundle, dict):
+        raise ValueError("Encrypted directive bundle must be an object")
+    if set(encrypted_bundle) != _BOOT_BUNDLE_FIELDS:
+        raise ValueError("Encrypted directive bundle has unexpected fields")
+    for field in sorted(_BOOT_BUNDLE_FIELDS):
+        value = encrypted_bundle.get(field)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"Encrypted directive {field} is required")
+        try:
+            base64.b64decode(value, validate=True)
+        except (ValueError, TypeError) as error:
+            raise ValueError(
+                f"Encrypted directive {field} is not valid Base64"
+            ) from error
+
+    key_text = str(swarm_key_b64 or "").strip()
+    try:
+        decoded_key = base64.b64decode(key_text, validate=True)
+    except (ValueError, TypeError) as error:
+        raise ValueError("Vault swarm key is not valid Base64") from error
+    if not 16 <= len(decoded_key) <= 64:
+        raise ValueError("Vault swarm key has an invalid length")
+
+    payload = json.dumps(
+        {
+            "version": 1,
+            "encrypted_bundle": encrypted_bundle,
+            "swarm_key": key_text,
+        },
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    if len(payload) > MAX_BOOT_ENVELOPE_BYTES:
+        raise ValueError("Encrypted boot envelope exceeds the 16 MiB limit")
+    return payload
+
+
+def send_boot_envelope(channel, encrypted_bundle, swarm_key_b64):
+    """Send a boot envelope once, then close only the SSH write direction."""
+    payload = encode_boot_envelope(encrypted_bundle, swarm_key_b64)
+    channel.sendall(payload)
+    channel.shutdown_write()
+    return len(payload)
+
+
+def verify_remote_matrixd_stdin(client, timeout=30):
+    """Fail before secret transfer when remote MatrixD lacks sealed stdin boot."""
+    _stdin, stdout, stderr = client.exec_command(
+        _MATRIXD_STDIN_PROBE, timeout=timeout
+    )
+    output = stdout.read(4_097)
+    error = stderr.read(4_097)
+    status = stdout.channel.recv_exit_status()
+    if len(output) > 4_096 or len(error) > 4_096:
+        raise RuntimeError("Remote MatrixD capability probe exceeded its limit")
+    if status != 0:
+        raise RuntimeError(
+            "Remote MatrixOS update required: matrixd does not support "
+            "sealed --directive-stdin boot"
+        )
+    return True
 
 
 def validate_remote_token(value, label):
@@ -234,8 +308,6 @@ def build_remote_matrixd_command(
     action,
     universe,
     linux_user,
-    directive_path=None,
-    swarm_key=None,
     boot_flags=(),
     reboot_id=None,
     runtime_capabilities=None,
@@ -287,13 +359,6 @@ def build_remote_matrixd_command(
         ])
         return _root_shell("\n".join(lines))
 
-    if not directive_path:
-        raise ValueError("Directive path is required for start or restart")
-    if not swarm_key:
-        raise ValueError("SWARM_KEY is required for start or restart")
-
-    q_directive = quote_remote_argument(directive_path, "Directive path")
-    q_swarm_key = quote_remote_argument(swarm_key, "SWARM_KEY")
     q_flags = " ".join(
         quote_remote_argument(flag, "MatrixD boot argument") for flag in flags
     )
@@ -317,9 +382,6 @@ def build_remote_matrixd_command(
         "chown -hR \"$SWARM_USER:$SWARM_GROUP\" "
         "\"/matrix/universes/runtime/$UNIVERSE\" "
         "\"/matrix/universes/static/$UNIVERSE\"",
-        f"test -f {q_directive}",
-        f"chown \"$SWARM_USER:$SWARM_GROUP\" {q_directive}",
-        f"chmod 0600 {q_directive}",
     ])
 
     watchdog_services = capabilities["watchdog_services"]
@@ -443,21 +505,11 @@ def build_remote_matrixd_command(
         ])
 
     boot_command = (
-        f"runuser -u \"$SWARM_USER\" -- {common_env} SWARM_KEY={q_swarm_key} "
-        f"{matrixd} boot --universe {q_universe} --directive {q_directive}"
+        f"runuser -u \"$SWARM_USER\" -- {common_env} "
+        f"{matrixd} boot --universe {q_universe} --directive-stdin"
     )
     if q_flags:
         boot_command += f" {q_flags}"
 
     lines.append(boot_command)
     return _root_shell("\n".join(lines))
-
-
-def redact_remote_secret(command, secret):
-    """Redact a quoted secret from a command displayed in Phoenix."""
-    if not secret:
-        return command
-    return command.replace(
-        quote_remote_argument(secret, "secret"),
-        "'[REDACTED]'",
-    )

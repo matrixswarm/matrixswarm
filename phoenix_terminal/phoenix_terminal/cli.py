@@ -7,12 +7,18 @@ import json
 import os
 import sys
 import time
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from . import __version__
 from .catalog import as_jsonable, find
 from .bridge_client import call_bridge
 from .monitor import add_target, check_target, load_config, record_results, save_config
+
+
+try:
+    __version__ = package_version("phoenix-terminal")
+except PackageNotFoundError:  # Source-tree execution without an installed distribution.
+    __version__ = "0.2.0"
 
 
 def default_data_dir() -> Path:
@@ -93,6 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     bridge_call = bridge_sub.add_parser("call", help="Call an allowlisted method with JSON parameters")
     bridge_call.add_argument("method")
     bridge_call.add_argument("--params", default="{}", help="JSON object")
+    subparsers.add_parser("mcp", help="Run the native Phoenix MCP adapter over stdio")
     return parser
 
 
@@ -256,6 +263,9 @@ def main(argv: list[str] | None = None) -> int:
             return run_monitor(args)
         if args.command == "bridge":
             return run_bridge(args)
+        if args.command == "mcp":
+            from .mcp_server import main as run_mcp
+            return run_mcp(args.data_dir)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

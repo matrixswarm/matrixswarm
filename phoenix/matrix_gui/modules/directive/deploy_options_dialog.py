@@ -17,7 +17,7 @@ class DeployOptionsDialog(QDialog):
 """
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QDialogButtonBox, QCheckBox, QToolButton, QGroupBox, QLabel, QComboBox, QLineEdit
+    QDialog, QVBoxLayout, QDialogButtonBox, QCheckBox, QToolButton, QGroupBox, QLabel, QComboBox, QLineEdit, QMessageBox
 )
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.modules.railgun.remote_shell import (
@@ -69,12 +69,16 @@ class DeployOptionsDialog(QDialog):
             layout.addWidget(rg_box)
 
             # Initialize Rail-Gun Section
-            rg_box = QGroupBox("Railgun Launch && Boot Flags (Optional)")
+            rg_box = QGroupBox("Railgun Launch && Boot Flags (Required)")
             rg_lay = QVBoxLayout()
 
-            self.chk_railgun = QCheckBox("Enable Railgun Upload + Remote Boot")
             self.ssh_selector = QComboBox()
-            rg_lay.addWidget(self.chk_railgun)
+            railgun_notice = QLabel(
+                "Railgun streams the sealed directive directly to MatrixD; "
+                "no directive or key file is written."
+            )
+            railgun_notice.setWordWrap(True)
+            rg_lay.addWidget(railgun_notice)
             rg_lay.addWidget(QLabel("SSH Target:"))
             rg_lay.addWidget(self.ssh_selector)
 
@@ -157,7 +161,7 @@ class DeployOptionsDialog(QDialog):
 
             layout.addWidget(self.buttons)
 
-            self.buttons.accepted.connect(self.accept)
+            self.buttons.accepted.connect(self._accept_if_valid)
             self.buttons.rejected.connect(self.reject)
 
         except Exception as e:
@@ -169,6 +173,24 @@ class DeployOptionsDialog(QDialog):
         if callable(self._refresh_hosts_cb):
             hosts = list(dict.fromkeys(self._refresh_hosts_cb() or []))  # de-dupe, keep order
 
+    def _accept_if_valid(self):
+        if self.ssh_selector.currentData() is None:
+            QMessageBox.warning(
+                self,
+                "Railgun Target Required",
+                "Create or select a vault-backed SSH target before deployment.",
+            )
+            return
+        try:
+            validate_remote_token(
+                self.universe_name_edit.text().strip(), "Universe name"
+            )
+            validate_linux_user(self.linux_user_edit.text(), "Swarm Linux user")
+        except ValueError as error:
+            QMessageBox.warning(self, "Invalid Railgun Options", str(error))
+            return
+        self.accept()
+
     def validate_and_get_universe_name(self) -> str:
         """
         Validates the user input for the universe name. If the input is invalid,
@@ -179,10 +201,7 @@ class DeployOptionsDialog(QDialog):
         """
         universe_name = self.universe_name_edit.text().strip()
 
-        try:
-            return validate_remote_token(universe_name, "Universe name")
-        except ValueError:
-            return "phoenix"
+        return validate_remote_token(universe_name, "Universe name")
 
     def _update_suggested_linux_user(self, universe_name):
         """Track universe edits until the operator overrides the suggestion."""
@@ -201,7 +220,6 @@ class DeployOptionsDialog(QDialog):
 
             "clown_car": self.clown_car_cb.isChecked(),
             "preview": self.preview_cb.isChecked(),
-            "railgun_enabled": self.chk_railgun.isChecked(),
             "railgun_target": self.ssh_selector.currentData(),
             "reboot": self.flag_reboot.isChecked(),
             "verbose": self.flag_verbose.isChecked(),

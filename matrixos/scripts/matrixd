@@ -34,57 +34,70 @@ from core.python_core.class_lib.packet_delivery.utility.crypto_processors.packet
 from core.python_core.class_lib.packet_delivery.utility.crypto_processors.football import Football
 from core.python_core.class_lib.processes.b2_bomber import B2Bomber
 
+MAX_BOOT_ENVELOPE_BYTES = 16 * 1024 * 1024
+_BOOT_BUNDLE_FIELDS = {"nonce", "tag", "ciphertext"}
 
-def resolve_swarm_key(swarm_key_arg: str) -> bytes:
-    """
-    Accepts either:
-      1) A BASE64-encoded swarm key string
-      2) A filesystem path pointing to a file containing that key
 
-    Returns: raw bytes of the decoded key
-    """
-    # Try Base64 directly
+def resolve_inline_swarm_key(swarm_key_b64: str) -> bytes:
+    """Decode an in-memory key without treating secret text as a path."""
     try:
-        key = base64.b64decode(swarm_key_arg, validate=True)
-        if 16 <= len(key) <= 64:
-            print("[matrixd] Swarm key accepted as inline Base64.")
-            return key
-        else:
-            print(f"[matrixd] Base64 decoded but length out of range ({len(key)} bytes). Trying as file...")
-    except Exception:
-        pass  # Not Base64, fall through
+        key = base64.b64decode(str(swarm_key_b64 or ""), validate=True)
+    except (ValueError, TypeError) as error:
+        raise ValueError("[matrixd] Streamed swarm key is not valid Base64.") from error
+    if not 16 <= len(key) <= 64:
+        raise ValueError("[matrixd] Streamed swarm key has an invalid length.")
+    return key
 
-    # Try as file path
+
+def read_boot_envelope(stream=None) -> tuple[dict, str]:
+    """Read and validate one bounded Railgun boot envelope from stdin."""
+    source = stream if stream is not None else sys.stdin
+    binary_source = getattr(source, "buffer", source)
+    raw = binary_source.read(MAX_BOOT_ENVELOPE_BYTES + 1)
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    if not raw:
+        raise ValueError("[matrixd] Empty Railgun boot envelope.")
+    if len(raw) > MAX_BOOT_ENVELOPE_BYTES:
+        raise ValueError("[matrixd] Railgun boot envelope exceeds the 16 MiB limit.")
     try:
-        p = Path(swarm_key_arg)
-        if not p.exists():
-            raise ValueError(f"[matrixd] swarm_key is neither valid Base64 nor a file: {swarm_key_arg}")
+        envelope = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("[matrixd] Invalid Railgun boot envelope JSON.") from error
+    if not isinstance(envelope, dict) or set(envelope) != {
+        "version", "encrypted_bundle", "swarm_key"
+    }:
+        raise ValueError("[matrixd] Railgun boot envelope has unexpected fields.")
+    if envelope.get("version") != 1:
+        raise ValueError("[matrixd] Unsupported Railgun boot envelope version.")
+    bundle = envelope.get("encrypted_bundle")
+    if not isinstance(bundle, dict) or set(bundle) != _BOOT_BUNDLE_FIELDS:
+        raise ValueError("[matrixd] Invalid encrypted directive bundle.")
+    for field in sorted(_BOOT_BUNDLE_FIELDS):
+        value = bundle.get(field)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"[matrixd] Encrypted directive {field} is required.")
+        try:
+            base64.b64decode(value, validate=True)
+        except (ValueError, TypeError) as error:
+            raise ValueError(
+                f"[matrixd] Encrypted directive {field} is not valid Base64."
+            ) from error
+    swarm_key_b64 = envelope.get("swarm_key")
+    resolve_inline_swarm_key(swarm_key_b64)
+    return bundle, swarm_key_b64
 
-        content = p.read_text().strip()
-        key = base64.b64decode(content, validate=True)
-        if 16 <= len(key) <= 64:
-            print(f"[matrixd] Loaded swarm key from file: {p}")
-            return key
-        raise ValueError(f"[matrixd] Key file '{p}' decoded but is wrong size ({len(key)} bytes).")
 
-    except Exception as e:
-        raise RuntimeError(str(e))
-
-    raise RuntimeError("[matrixd] FATAL: unable to resolve swarm key.")
-    return None
-
-def decrypt_directive(path: Path, swarm_key_b64: str) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        bubble = json.load(f)
-
-    print(f"[matrixd] Decrypting directive: {path}")
-    key = resolve_swarm_key(swarm_key_b64)
-    nonce = base64.b64decode(bubble["nonce"])
-    tag = base64.b64decode(bubble["tag"])
-    ciphertext = base64.b64decode(bubble["ciphertext"])
+def decrypt_directive_bundle(bundle: dict, swarm_key_b64: str) -> dict:
+    """Decrypt a validated in-memory AES-GCM directive bundle."""
+    key = resolve_inline_swarm_key(swarm_key_b64)
+    nonce = base64.b64decode(bundle["nonce"], validate=True)
+    tag = base64.b64decode(bundle["tag"], validate=True)
+    ciphertext = base64.b64decode(bundle["ciphertext"], validate=True)
     cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
     decrypted = cipher.decrypt_and_verify(ciphertext, tag)
-    return json.loads(decrypted.decode())
+    return json.loads(decrypted.decode("utf-8"))
+
 
 def get_all_swarm_agent_info(universe=None, base="/matrix"):
     """
@@ -140,11 +153,12 @@ def get_all_swarm_agent_info(universe=None, base="/matrix"):
 
 
 def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executable,
-                  directive_file=None, swarm_key=None, encryption_off=False,
                   reboot=False, verbose=False, debug=False, rug_pull=False):
 
-    directives_dir = Path(base) / "boot_directives"
-    keys_dir = directives_dir / "keys"
+    if not getattr(args, "directive_stdin", False):
+        raise ValueError(
+            "[matrixd] Boot is Railgun-only; --directive-stdin is required."
+        )
     runtime_universe_path = Path(base) / "universes" / "runtime" / universe / "latest"
 
     runtime_universe_path.mkdir(parents=True, exist_ok=True)
@@ -157,27 +171,9 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
         enforce_single_matrix_instance(universe)
     os.environ["UNIVERSE_ID"] = universe
 
-    directive_path = directive_file or (directives_dir / f"{universe}.enc.json")
-
-    if isinstance(directive_path, str):
-        directive_path = Path(directive_path)
-    if not directive_path.exists():
-        print(f"[ERROR] Directive not found: {directive_path}")
-        return
-
-    swarm_key = (
-            args.swarm_key
-            or os.getenv("SWARM_KEY")
-            or (keys_dir / directive_path.name.replace(".enc.json", ".key")).read_text().strip()
-    )
-
-
-    if directive_path.name.endswith(".enc.json"):
-        directive = decrypt_directive(directive_path, swarm_key)
-        print("[BOOT] Encrypted directive decrypted successfully")
-    else:
-        directive = json.loads(directive_path.read_text())
-        print("[BOOT] Loaded plaintext directive")
+    bundle, swarm_key = read_boot_envelope()
+    directive = decrypt_directive_bundle(bundle, swarm_key)
+    print("[BOOT] Railgun envelope decrypted in memory; no boot files created")
 
     tp = TreeParser.load_tree_direct(directive)
     if not tp:
@@ -221,8 +217,6 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
 
     # encryption is turned on here
     mode = "encrypt"
-    if bool(encryption_off):
-        mode = "plaintext_encrypt"
 
     matrix_node = tp.nodes.get("matrix")
 
@@ -261,7 +255,7 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
 
     full_cmdline = " ".join(sys.argv)
     trust_payload = {
-        "encryption_enabled": int(not encryption_off),
+        "encryption_enabled": 1,
         "pub": matrix_pub,
         "priv": matrix_priv,
         "swarm_key": swarm_key,
@@ -287,11 +281,17 @@ def main():
 
     boot = sub.add_parser("boot")
     boot.add_argument("--universe", required=True, help="Target universe name (directory under /matrix/universes).")
-    boot.add_argument("--directive", help="Optional path to a specific directive JSON to override vault default.")
+    boot.add_argument(
+        "--directive-stdin",
+        action="store_true",
+        required=True,
+        help=(
+            "Read a bounded encrypted directive and inline swarm key envelope "
+            "from stdin without creating boot files."
+        ),
+    )
     boot.add_argument("--base", default="/matrix", help="Base installation path for MatrixSwarm (default: /matrix).")
     boot.add_argument("--python-exec", default=sys.executable, help="Python interpreter to use when spawning agents.")
-    boot.add_argument("--swarm_key", help="Base64-encoded swarm AES key. Required if encryption is enabled.")
-    boot.add_argument("--encryption-off", action="store_true", help="Disable swarm encryption; all comms/logs written as plaintext.")
     boot.add_argument("--reboot", action="store_true", help="Restart agents in the current universe without full reinit.")
     boot.add_argument("--verbose", action="store_true", help="Enable stdout logging for spawned agents.")
     boot.add_argument("--debug", action="store_true", help="Enable verbose internal debugging output.")
@@ -301,7 +301,9 @@ def main():
     boot.add_argument("--reboot-id", help="Resume a specific previous reboot UUID (timestamp directory).")
 
     # subcommands
-    sub.add_parser("list").add_argument("--base", default="/matrix", help="List existing universes under the given base path.")
+    list_cmd = sub.add_parser("list")
+    list_cmd.add_argument("--base", default="/matrix", help="List existing universes under the given base path.")
+    list_cmd.add_argument("--json", action="store_true", help="Emit a bounded machine-readable snapshot.")
     kill = sub.add_parser("kill")
     kill.add_argument(
         "--universe",
@@ -339,16 +341,13 @@ def main():
             args=args,
             base=args.base,
             python_exec=args.python_exec,
-            directive_file=args.directive,
-            swarm_key=args.swarm_key,
-            encryption_off=args.encryption_off,
             reboot=args.reboot,
             verbose=args.verbose,
             debug=args.debug,
             rug_pull=args.rug_pull
         )
     elif args.cmd == "list":
-        list_universes(args.base)
+        list_universes(args.base, json_output=args.json)
     elif args.cmd == "kill":
         if not args.universe and not args.delete_directive_with_key:
             kill.error(
@@ -402,17 +401,16 @@ def main():
         parser.print_help()
 
 
-def list_universes(base="/matrix"):
+def universe_snapshot(base="/matrix"):
+    """Return active universes without command lines or runtime paths."""
     infos = get_all_swarm_agent_info(universe=None, base=base)
-    if not infos:
-        print("[LIST] No active swarm agents found")
-        return
-
     universes = {}
     for info in infos:
         universes.setdefault(info["universe"], []).append(info)
 
-    for universe, agents in universes.items():
+    snapshot = []
+    for universe in sorted(universes):
+        agents = universes[universe]
         total_rss = total_cpu = 0
         for proc in psutil.process_iter(['pid', 'memory_info', 'cpu_percent', 'cmdline']):
             try:
@@ -426,8 +424,38 @@ def list_universes(base="/matrix"):
             except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError):
                 continue
 
-        print(f"🌌 {universe} :: {len(agents)} agents, {total_rss/1024/1024:.1f} MB RAM, {total_cpu:.1f}% CPU")
-        for agent in agents:
+        public_agents = [
+            {"pid": int(agent["pid"]), "universal_id": agent["universal_id"]}
+            for agent in agents
+        ]
+        public_agents.sort(key=lambda item: (item["universal_id"], item["pid"]))
+        snapshot.append({
+            "universe": universe,
+            "status": "active",
+            "agent_count": len(public_agents),
+            "rss_bytes": total_rss,
+            "cpu_percent": round(total_cpu, 2),
+            "agents": public_agents,
+        })
+    return {"version": 1, "universes": snapshot}
+
+
+def list_universes(base="/matrix", json_output=False):
+    snapshot = universe_snapshot(base)
+    if json_output:
+        print(json.dumps(snapshot, separators=(",", ":"), sort_keys=True))
+        return
+    if not snapshot["universes"]:
+        print("[LIST] No active swarm agents found")
+        return
+
+    for entry in snapshot["universes"]:
+        print(
+            f"🌌 {entry['universe']} :: {entry['agent_count']} agents, "
+            f"{entry['rss_bytes']/1024/1024:.1f} MB RAM, "
+            f"{entry['cpu_percent']:.1f}% CPU"
+        )
+        for agent in entry["agents"]:
             print(f" └── PID {agent['pid']} :: {agent['universal_id']}")
 
 

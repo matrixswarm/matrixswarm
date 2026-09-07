@@ -2,11 +2,12 @@
 
 `phoenixctl` is a separate, terminal-first companion to Phoenix Cockpit. It does not edit or overwrite the `phoenix/` source tree; the opt-in launcher imports Phoenix at runtime and attaches narrow bridge hooks in memory.
 
-The first release establishes three things:
+Phoenix Terminal establishes four things:
 
 1. a read-only inspector for a Phoenix workspace; and
 2. opt-in HTTP/HTTPS uptime monitoring for sites you own or are authorized to monitor; and
-3. a session-scoped, operator-enabled bridge into a running Phoenix Cockpit.
+3. a session-scoped, operator-enabled bridge into a running Phoenix Cockpit; and
+4. a native stdio MCP adapter through which a local LLM can use that guarded bridge.
 
 It also includes the first Phoenix Bridge implementation. The bridge is loaded into the Phoenix process by a separate launcher, while the original `phoenix/` tree remains unchanged. Phoenix continues to own the vault, connections, packet signing, encryption, and agent communication.
 
@@ -77,6 +78,62 @@ Turning the bridge off stops its loopback listener, deletes its connection/token
 Only one Phoenix LLM Bridge can be enabled per Windows user profile. Opening another Phoenix window does not disturb the active endpoint; attempting to enable its bridge reports which existing Phoenix process owns the endpoint and leaves that endpoint intact.
 
 The Phoenix status bar provides an activity LED for the current application session: gray **OFF**, green **ON**, and amber **ACTIVE** whenever an authenticated LLM request crosses the bridge. The attachment permission and token exist only for that Phoenix run.
+
+## Native MCP adapter
+
+The MCP adapter is a separate local stdio process. It can stay configured in an MCP client, but every Phoenix tool fails closed until a human unlocks the vault and enables **LLM Bridge** in Phoenix. The adapter reads the current one-time bridge token from local protected state; the token is never copied into MCP or Codex configuration.
+
+Using Python 3.10 or newer, install Phoenix Terminal and its MCP SDK dependency into a dedicated virtual environment:
+
+```powershell
+py -3 -m venv .venv-mcp
+.\.venv-mcp\Scripts\python.exe -m pip install -e ".[mcp]"
+```
+
+Configure a local Codex host in `~/.codex/config.toml` (or use the equivalent MCP Servers settings screen). Replace the example paths with the dedicated environment and this `phoenix_terminal` directory:
+
+```toml
+[mcp_servers.phoenix]
+command = "C:\\path\\to\\phoenix_terminal\\.venv-mcp\\Scripts\\python.exe"
+args = ["-m", "phoenix_terminal.mcp_server"]
+cwd = "C:\\path\\to\\phoenix_terminal"
+startup_timeout_sec = 20
+tool_timeout_sec = 180
+default_tools_approval_mode = "writes"
+enabled = true
+
+[mcp_servers.phoenix.tools.phoenix_launch_deployment]
+approval_mode = "prompt"
+
+[mcp_servers.phoenix.tools.phoenix_start_agent_logs]
+approval_mode = "prompt"
+```
+
+The server publishes instructions and exact tool schemas to the LLM:
+
+| Tool | Effect |
+| --- | --- |
+| `phoenix_bridge_status` | Read bridge, vault, and session state. |
+| `phoenix_list_deployments` | Read redacted deployment IDs and labels. |
+| `phoenix_list_sessions` | Read active Phoenix sessions. |
+| `phoenix_list_agents` | Read a deployment's redacted agent inventory. |
+| `phoenix_agent_tree` | Read or refresh the redacted live agent tree. |
+| `phoenix_start_agent_logs` | Create a temporary redacted log subscription. |
+| `phoenix_read_agent_logs` | Read redacted buffered log lines by cursor. |
+| `phoenix_launch_deployment` | Request a connection; Phoenix separately asks the human. |
+
+There is deliberately no generic RPC, shell, filesystem, vault, credential, deploy, Railgun, restart, injection, or agent-control tool. Disabling the Phoenix bridge immediately makes every MCP call fail and revokes existing log subscriptions.
+
+After launching Phoenix, unlocking a test vault, and enabling the bridge, verify
+the real STDIO boundary with:
+
+```powershell
+.\.venv-mcp\Scripts\python.exe .\scripts\verify_live_mcp.py --exercise-logs
+```
+
+The harness checks the exact eight-tool allowlist, structured results, and
+sensitive-field redaction. Pass `--launch-deployment ID` only when an operator is
+present to answer Phoenix's separate connection confirmation.
 
 `monitor watch --interval 60` continuously checks the configured public endpoints. It does not authenticate, crawl, submit forms, or modify remote systems.
 

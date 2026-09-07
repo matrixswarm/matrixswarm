@@ -159,6 +159,12 @@ class SSH(BaseEditor):
             out["password"] = "None"
             out["private_key"] = "None"
 
+        out["sensitive_fields"] = {
+            "username": "1",
+            "password": "1",
+            "private_key": "1",
+            "private_key_passphrase": "1",
+        }
         return out
 
     # --------------------------
@@ -213,7 +219,12 @@ class SSH(BaseEditor):
             out["private_key_passphrase"] = self.passphrase.text().strip() or "None"
             out["password"] = self.password.text().strip() or "None"
 
-        out['sensitive_fields']={"username": "1", "password": "1", "private_key": "1", "private_key_passphrase": "1"},
+        out["sensitive_fields"] = {
+            "username": "1",
+            "password": "1",
+            "private_key": "1",
+            "private_key_passphrase": "1",
+        }
 
         return out
 
