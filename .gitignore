@@ -103,6 +103,9 @@ Thumbs.db
 **/boot_directives/*.json
 !**/boot_directives/SAMPLE*.json
 !**/boot_directives/*.example.json
+/phoenix/boot_directives/*.py
+!/phoenix/boot_directives/SAMPLE*.py
+!/phoenix/boot_directives/*.example.py
 
 # Runtime configuration containing credentials or infrastructure details
 **/settings.json
