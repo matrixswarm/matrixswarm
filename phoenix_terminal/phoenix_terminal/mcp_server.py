@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import sys
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from . import __version__
 from .bridge_client import call_bridge
 from .cli import default_data_dir
+
+
+try:
+    __version__ = package_version("phoenix-terminal")
+except PackageNotFoundError:  # Source-tree execution without an installed distribution.
+    __version__ = "0.2.0"
 
 
 BridgeCall = Callable[[Path, str, Optional[dict[str, Any]]], dict[str, Any]]

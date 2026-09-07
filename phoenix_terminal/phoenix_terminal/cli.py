@@ -7,12 +7,18 @@ import json
 import os
 import sys
 import time
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 
-from . import __version__
 from .catalog import as_jsonable, find
 from .bridge_client import call_bridge
 from .monitor import add_target, check_target, load_config, record_results, save_config
+
+
+try:
+    __version__ = package_version("phoenix-terminal")
+except PackageNotFoundError:  # Source-tree execution without an installed distribution.
+    __version__ = "0.2.0"
 
 
 def default_data_dir() -> Path:
