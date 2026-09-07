@@ -21,12 +21,14 @@ from harvester.policy import (
     normalize_target,
     observation_for_target,
     parse_matrixd_snapshot,
+    record_recovery_attempt,
+    recovery_due,
 )
-from harvester.ssh_transport import run_matrixd_list
+from harvester.ssh_transport import run_matrixd_boot, run_matrixd_list
 
 
 class Agent(BootAgent):
-    """Observation-only matrixd watcher for one assigned universe."""
+    """Observe one assigned universe and apply only its granted authority."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -42,6 +44,9 @@ class Agent(BootAgent):
         )
         self.timeout = self._bounded_config_int("matrixd_timeout_sec", 60, 2, 300)
         self.alert_role = self._role("alert_to_role", "hive.alert")
+        self.automatic_recovery_enabled = (
+            self.config.get("automatic_recovery_enabled") is True
+        )
         self.targets = self._load_targets(self.config.get("targets", []))
         self._states = {target["id"]: initial_state() for target in self.targets}
         self._emit_beacon = self.check_for_thread_poke(
@@ -74,7 +79,8 @@ class Agent(BootAgent):
         else:
             self.log(
                 f"[HARVESTER] Watching target={self.targets[0]['id']} via "
-                f"{self.mode} matrixd; observation-only policy active."
+                f"{self.mode} matrixd; automatic_recovery="
+                f"{self.automatic_recovery_enabled}."
             )
 
     def worker(self, config: dict | None = None, identity=None) -> None:
@@ -131,6 +137,17 @@ class Agent(BootAgent):
                 continue
             if event is not None:
                 self._emit_alert(target, event, status, observed_at)
+            if recovery_due(
+                state,
+                target,
+                globally_enabled=self.automatic_recovery_enabled,
+                collection_available=collection_error is None,
+                observed_at=observed_at,
+            ):
+                self._states[target_id] = record_recovery_attempt(
+                    state, observed_at=observed_at
+                )
+                self._attempt_recovery(target)
 
     def _matrixd_list(self) -> str:
         if self.mode == "ssh":
@@ -191,6 +208,21 @@ class Agent(BootAgent):
             packet.set_payload_item("handler", endpoint.get_handler())
             self.pass_packet(packet, endpoint.get_universal_id())
         self.log(f"[HARVESTER][ALERT] event={event} target={target['id']}")
+
+    def _attempt_recovery(self, target) -> None:
+        try:
+            run_matrixd_boot(dict(self.config["ssh"]), target, self.timeout)
+            self.log(
+                f"[HARVESTER][RECOVERY] Boot launched for target="
+                f"{target['id']}",
+                level="WARN",
+            )
+        except Exception as exc:
+            self.log(
+                f"[HARVESTER][RECOVERY] Boot failed for target="
+                f"{target['id']} error={type(exc).__name__[:64]}",
+                level="ERROR",
+            )
 
     def _load_targets(self, value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list) or len(value) > 1:

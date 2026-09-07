@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 from collections.abc import Mapping
@@ -25,6 +26,9 @@ def normalize_target(value: Any) -> dict[str, Any]:
     note = value.get("note", "")
     if not isinstance(note, str) or len(note) > 128 or _has_control(note):
         raise HarvesterPolicyError("target note is invalid")
+    recovery_mode = value.get("recovery_mode", "disabled")
+    if recovery_mode not in {"disabled", "automatic"}:
+        raise HarvesterPolicyError("recovery_mode must be disabled or automatic")
     normalized = {
         "id": target_id,
         "universe": universe,
@@ -35,7 +39,16 @@ def normalize_target(value: Any) -> dict[str, Any]:
         "alert_cooldown_sec": _bounded_int(
             value, "alert_cooldown_sec", 300, 0, 86_400
         ),
+        "recovery_mode": recovery_mode,
+        "recovery_attempt_limit": _bounded_int(
+            value, "recovery_attempt_limit", 3, 1, 10
+        ),
+        "recovery_cooldown_sec": _bounded_int(
+            value, "recovery_cooldown_sec", 60, 10, 3_600
+        ),
     }
+    if recovery_mode == "automatic":
+        normalized.update(_normalize_recovery_capability(value, universe))
     return normalized
 
 
@@ -91,6 +104,8 @@ def initial_state() -> dict[str, Any]:
         "failure_hits": 0,
         "recovery_hits": 0,
         "last_alert_at": None,
+        "recovery_attempts": 0,
+        "last_recovery_at": None,
     }
 
 
@@ -109,6 +124,8 @@ def evaluate_observation(
         "failure_hits": _counter(state.get("failure_hits", 0)),
         "recovery_hits": _counter(state.get("recovery_hits", 0)),
         "last_alert_at": state.get("last_alert_at"),
+        "recovery_attempts": _counter(state.get("recovery_attempts", 0)),
+        "last_recovery_at": state.get("last_recovery_at"),
     }
     if success:
         next_state["failure_hits"] = 0
@@ -119,6 +136,8 @@ def evaluate_observation(
                     status="up",
                     recovery_hits=0,
                     last_alert_at=observed_at,
+                    recovery_attempts=0,
+                    last_recovery_at=None,
                 )
                 return next_state, "RECOVERY"
         else:
@@ -139,6 +158,68 @@ def evaluate_observation(
             next_state["last_alert_at"] = observed_at
             return next_state, "DOWN_REMINDER"
     return next_state, None
+
+
+def recovery_due(
+    state: Mapping[str, Any],
+    target: Mapping[str, Any],
+    *,
+    globally_enabled: bool,
+    collection_available: bool,
+    observed_at: float,
+) -> bool:
+    return (
+        globally_enabled is True
+        and collection_available is True
+        and state.get("status") == "down"
+        and target.get("recovery_mode") == "automatic"
+        and state.get("recovery_attempts", 0) < target["recovery_attempt_limit"]
+        and (
+            state.get("last_recovery_at") is None
+            or observed_at - float(state["last_recovery_at"])
+            >= target["recovery_cooldown_sec"]
+        )
+    )
+
+
+def record_recovery_attempt(
+    state: Mapping[str, Any], *, observed_at: float
+) -> dict[str, Any]:
+    updated = dict(state)
+    updated["recovery_attempts"] = _counter(
+        updated.get("recovery_attempts", 0)
+    ) + 1
+    updated["last_recovery_at"] = observed_at
+    return updated
+
+
+def _normalize_recovery_capability(
+    value: Mapping[str, Any], universe: str
+) -> dict[str, str]:
+    linux_user = value.get("linux_user")
+    if (
+        not isinstance(linux_user, str)
+        or not re.fullmatch(r"matrix-[a-z0-9_-]{1,24}", linux_user)
+    ):
+        raise HarvesterPolicyError("automatic recovery requires a matrix-* Linux user")
+    expected_path = f"/matrix/boot_directives/{universe}.enc.json"
+    directive_path = value.get("directive_path", expected_path)
+    if directive_path != expected_path:
+        raise HarvesterPolicyError("automatic recovery directive path is invalid")
+    swarm_key = value.get("swarm_key")
+    if not isinstance(swarm_key, str):
+        raise HarvesterPolicyError("automatic recovery requires a swarm key")
+    try:
+        decoded = base64.b64decode(swarm_key, validate=True)
+    except ValueError as exc:
+        raise HarvesterPolicyError("automatic recovery swarm key is invalid") from exc
+    if not 16 <= len(decoded) <= 64:
+        raise HarvesterPolicyError("automatic recovery swarm key length is invalid")
+    return {
+        "linux_user": linux_user,
+        "directive_path": expected_path,
+        "swarm_key": swarm_key,
+    }
 
 
 def _identifier(value: Any, field: str, pattern) -> str:

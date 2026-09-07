@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 from pathlib import Path
@@ -23,6 +24,33 @@ EDITOR_PATH = (
     / "agent"
     / "config_editors"
     / "harvester.py"
+)
+ASSIGNMENT_EDITOR_PATH = (
+    ROOT
+    / "phoenix"
+    / "matrix_gui"
+    / "registry"
+    / "object_classes"
+    / "editors"
+    / "harvester_assignment.py"
+)
+ASSIGNMENT_PROVIDER_PATH = (
+    ROOT
+    / "phoenix"
+    / "matrix_gui"
+    / "registry"
+    / "object_classes"
+    / "providers"
+    / "harvester_assignment.py"
+)
+SSH_EDITOR_PATH = (
+    ROOT
+    / "phoenix"
+    / "matrix_gui"
+    / "registry"
+    / "object_classes"
+    / "editors"
+    / "ssh.py"
 )
 
 SPEC = importlib.util.spec_from_file_location("harvester_policy", POLICY_PATH)
@@ -48,6 +76,7 @@ def target(**overrides):
         "failure_threshold": 2,
         "recovery_threshold": 2,
         "alert_cooldown_sec": 30,
+        "recovery_mode": "disabled",
     }
     value.update(overrides)
     return POLICY.normalize_target(value)
@@ -119,9 +148,98 @@ class HarvesterPolicyTests(unittest.TestCase):
         )
         self.assertEqual(event, "RECOVERY")
 
+    def test_resurrection_is_explicit_double_gated_and_bounded(self):
+        policy = target(
+            recovery_mode="automatic",
+            linux_user="matrix-phoenix",
+            directive_path="/matrix/boot_directives/phoenix.enc.json",
+            swarm_key=base64.b64encode(b"x" * 32).decode("ascii"),
+            recovery_attempt_limit=2,
+            recovery_cooldown_sec=60,
+        )
+        state = POLICY.initial_state()
+        state.update(status="down")
+        self.assertFalse(
+            POLICY.recovery_due(
+                state,
+                policy,
+                globally_enabled=False,
+                collection_available=True,
+                observed_at=100,
+            )
+        )
+        self.assertTrue(
+            POLICY.recovery_due(
+                state,
+                policy,
+                globally_enabled=True,
+                collection_available=True,
+                observed_at=100,
+            )
+        )
+        state = POLICY.record_recovery_attempt(state, observed_at=100)
+        self.assertFalse(
+            POLICY.recovery_due(
+                state,
+                policy,
+                globally_enabled=True,
+                collection_available=True,
+                observed_at=159,
+            )
+        )
+        self.assertTrue(
+            POLICY.recovery_due(
+                state,
+                policy,
+                globally_enabled=True,
+                collection_available=True,
+                observed_at=160,
+            )
+        )
+        state = POLICY.record_recovery_attempt(state, observed_at=160)
+        self.assertFalse(
+            POLICY.recovery_due(
+                state,
+                policy,
+                globally_enabled=True,
+                collection_available=True,
+                observed_at=1_000,
+            )
+        )
+
+    def test_resurrection_requires_exact_directive_and_valid_key(self):
+        automatic = {
+            "recovery_mode": "automatic",
+            "linux_user": "matrix-phoenix",
+            "swarm_key": base64.b64encode(b"x" * 32).decode("ascii"),
+        }
+        policy = target(**automatic)
+        self.assertEqual(
+            policy["directive_path"],
+            "/matrix/boot_directives/phoenix.enc.json",
+        )
+        with self.assertRaises(POLICY.HarvesterPolicyError):
+            target(**(automatic | {"directive_path": "/tmp/phoenix.enc.json"}))
+        with self.assertRaises(POLICY.HarvesterPolicyError):
+            target(
+                **(
+                    automatic
+                    | {
+                        "directive_path": (
+                            "/matrix/unused/../boot_directives/phoenix.enc.json"
+                        )
+                    }
+                )
+            )
+        with self.assertRaises(POLICY.HarvesterPolicyError):
+            target(**(automatic | {"swarm_key": "not-a-key"}))
+
     def test_transport_is_fixed_and_host_key_pinned(self):
         source = SSH_PATH.read_text(encoding="utf-8")
         self.assertIn("matrixd list --json", source)
+        self.assertIn("run_matrixd_boot", source)
+        self.assertIn("stdin.write", source)
+        self.assertIn("test -f", source)
         self.assertIn("/usr/bin/sudo -n", source)
         self.assertIn("_PinnedPolicy", source)
         self.assertIn("hmac.compare_digest", source)
@@ -129,45 +247,76 @@ class HarvesterPolicyTests(unittest.TestCase):
         self.assertNotIn("AutoAddPolicy", source)
         self.assertNotIn("StrictHostKeyChecking=no", source)
         self.assertNotIn("sshpass", source)
-        self.assertNotIn("matrixd boot", source)
-        self.assertNotIn("swarm_key", source)
 
         if SSH is not None:
             self.assertIn("matrixd list --json", SSH.MATRIXD_LIST_COMMAND)
+            policy = target(
+                recovery_mode="automatic",
+                linux_user="matrix-phoenix",
+                swarm_key=base64.b64encode(b"k" * 32).decode("ascii"),
+            )
+            command = SSH._remote_boot_command(policy)
+            self.assertNotIn(policy["swarm_key"], command)
+            self.assertIn("matrixd boot", command)
+            self.assertIn("test -f", command)
 
-    def test_agent_executes_only_fixed_local_matrixd_argv(self):
+    def test_agent_uses_only_fixed_matrixd_operations(self):
         source = AGENT_PATH.read_text(encoding="utf-8")
         self.assertIn('"/matrix/scripts/matrixd",', source)
         self.assertIn('"list",', source)
         self.assertIn('"--json",', source)
         self.assertIn("shell=False", source)
         self.assertNotIn('"kill",', source)
-        self.assertNotIn("matrixd boot", source)
-        self.assertNotIn("swarm_key", source)
+        self.assertIn("run_matrixd_boot", source)
         self.assertIn("len(value) > 1", source)
 
-    def test_phoenix_metadata_is_inert_and_editor_compiles(self):
+    def test_phoenix_metadata_uses_harvester_assignment_constraint(self):
         metadata = json.loads(META_PATH.read_text(encoding="utf-8"))
         self.assertEqual(metadata["name"], "harvester")
-        self.assertEqual(metadata["config"]["mode"], "ssh")
+        self.assertNotIn("mode", metadata["config"])
         self.assertIs(metadata["config"]["enabled"], False)
         self.assertEqual(metadata["config"]["targets"], [])
         constraint_names = [next(iter(item)) for item in metadata["constraints"]]
-        self.assertIn("ssh", constraint_names)
-        ssh_constraint = metadata["constraints"][constraint_names.index("ssh")]
-        self.assertIs(ssh_constraint["ssh"], None)
-        compile(
-            EDITOR_PATH.read_text(encoding="utf-8"),
-            str(EDITOR_PATH),
-            "exec",
-        )
+        self.assertNotIn("ssh", constraint_names)
+        self.assertIn("harvester_assignment", constraint_names)
+        assignment = metadata["constraints"][
+            constraint_names.index("harvester_assignment")
+        ]
+        self.assertIs(assignment["harvester_assignment"], None)
+
+    def test_phoenix_editors_keep_assignment_separate_from_runtime_policy(self):
+        for path in (
+            EDITOR_PATH,
+            ASSIGNMENT_EDITOR_PATH,
+            ASSIGNMENT_PROVIDER_PATH,
+            SSH_EDITOR_PATH,
+        ):
+            compile(path.read_text(encoding="utf-8"), str(path), "exec")
         editor_source = EDITOR_PATH.read_text(encoding="utf-8")
-        self.assertIn("VaultCoreSingleton", editor_source)
-        self.assertNotIn("add_constraint", editor_source)
-        self.assertNotIn("remove_constraint", editor_source)
-        self.assertNotIn("ssh_serial", editor_source)
+        self.assertNotIn("VaultCoreSingleton", editor_source)
         self.assertNotIn("swarm_key", editor_source)
-        self.assertNotIn("automatic_recovery", editor_source)
+        assignment_source = ASSIGNMENT_EDITOR_PATH.read_text(encoding="utf-8")
+        self.assertIn("VaultCoreSingleton", assignment_source)
+        self.assertIn('"Contact only", "contact_only"', assignment_source)
+        self.assertIn("Contact + resurrect", assignment_source)
+        self.assertIn('"ssh": ssh_fields', assignment_source)
+        serialize_source = assignment_source[
+            assignment_source.index("def serialize"):
+            assignment_source.index("def deploy_fields")
+        ]
+        self.assertNotIn("swarm_key", serialize_source)
+        self.assertNotIn("password", serialize_source)
+        ssh_editor_source = SSH_EDITOR_PATH.read_text(encoding="utf-8")
+        deploy_source = ssh_editor_source[
+            ssh_editor_source.index("def deploy_fields"):
+            ssh_editor_source.index("def on_load")
+        ]
+        self.assertIn('out["sensitive_fields"]', deploy_source)
+        self.assertNotIn(
+            'out[\'sensitive_fields\']={"username": "1", "password": "1", '
+            '"private_key": "1", "private_key_passphrase": "1"},',
+            ssh_editor_source,
+        )
 
     def test_matrixd_exposes_bounded_json_list_mode(self):
         source = (ROOT / "matrixos" / "scripts" / "matrixd").read_text(

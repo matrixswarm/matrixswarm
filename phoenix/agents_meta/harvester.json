@@ -14,12 +14,11 @@
             }
         },
         {
-            "ssh": null
+            "harvester_assignment": null
         }
     ],
     "config": {
         "enabled": false,
-        "mode": "ssh",
         "check_interval_sec": 30,
         "matrixd_timeout_sec": 60,
         "alert_to_role": "hive.alert",

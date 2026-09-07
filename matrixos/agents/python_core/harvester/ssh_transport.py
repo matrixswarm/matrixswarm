@@ -1,10 +1,11 @@
-"""Pinned-host SSH transport for Harvester's fixed matrixd read command."""
+"""Pinned-host SSH transport for Harvester's fixed matrixd operations."""
 
 from __future__ import annotations
 
 import base64
 import hmac
 import io
+import shlex
 from hashlib import sha256
 from typing import Any
 
@@ -91,6 +92,66 @@ def run_matrixd_list(
         return output.decode("utf-8", errors="strict")
     finally:
         client.close()
+
+
+def run_matrixd_boot(
+    profile: dict[str, Any], target: dict[str, Any], timeout: int
+) -> None:
+    """Boot one validated universe while delivering its key over SSH stdin."""
+    client = connect_pinned(profile, timeout)
+    try:
+        command = _remote_boot_command(target)
+        stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+        stdin.write(target["swarm_key"] + "\n")
+        stdin.flush()
+        stdin.channel.shutdown_write()
+        output = stdout.read(65_537)
+        error = stderr.read(65_537)
+        exit_code = stdout.channel.recv_exit_status()
+        if len(output) > 65_536 or len(error) > 65_536:
+            raise RuntimeError("remote matrixd boot output exceeded limit")
+        if exit_code != 0:
+            raise RuntimeError(
+                f"remote matrixd boot failed with status {exit_code}"
+            )
+    finally:
+        client.close()
+
+
+def _remote_boot_command(target: dict[str, Any]) -> str:
+    runuser = " ".join(
+        shlex.quote(part) for part in _boot_command(target)
+    )
+    return (
+        'if [ "$(id -u)" -eq 0 ]; then '
+        f"exec {runuser}; "
+        "elif command -v sudo >/dev/null 2>&1; then "
+        f"exec /usr/bin/sudo -n {runuser}; "
+        "else exit 77; fi"
+    )
+
+
+def _boot_command(target: dict[str, Any]) -> list[str]:
+    return [
+        "/usr/sbin/runuser",
+        "-u",
+        target["linux_user"],
+        "--",
+        "/bin/sh",
+        "-c",
+        _boot_inner_script(target),
+    ]
+
+
+def _boot_inner_script(target: dict[str, Any]) -> str:
+    universe = shlex.quote(target["universe"])
+    directive = shlex.quote(target["directive_path"])
+    return (
+        f"test -f {directive} || exit 66; "
+        "IFS= read -r SWARM_KEY || exit 65; export SWARM_KEY; "
+        "cd /matrix; exec /matrix/.venv/bin/python3 /matrix/scripts/matrixd "
+        f"boot --universe {universe} --directive {directive} --reboot"
+    )
 
 
 class _PinnedPolicy(paramiko.MissingHostKeyPolicy):
