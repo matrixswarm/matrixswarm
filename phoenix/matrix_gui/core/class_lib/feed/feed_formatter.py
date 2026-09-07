@@ -18,7 +18,7 @@ class FeedFormatter:
         "WARN": "#ffcc00",
         "ERROR": "red",
         "ALERT": "crimson",
-        "CRITICAL": "mediumorchid",
+        "CRITICAL": "#ff3333",
         "EMERGENCY": "deeppink",
     }
 
