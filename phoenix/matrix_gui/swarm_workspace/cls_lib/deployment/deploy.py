@@ -1,5 +1,4 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-import os
 import json
 import hashlib
 import uuid
@@ -7,16 +6,12 @@ import base64
 from datetime import datetime
 from copy import deepcopy
 from PyQt6.QtWidgets import QMessageBox, QDialog, QInputDialog
-from pathlib import Path
 
 from matrix_gui.modules.vault.crypto.deploy_tools import generate_swarm_encrypted_directive
 from matrix_gui.modules.directive.encryption_staging_dialog import EncryptionStagingDialog
-from matrix_gui.modules.directive.ui.deployment_dialog import DeploymentDialog
 from matrix_gui.modules.directive.deploy_options_dialog import DeployOptionsDialog
-from matrix_gui.core.event_bus import EventBus
 from .agent_root_validator import AgentRootValidator
 from .dialog.railgun import RailgunDialog
-from matrix_gui.modules.vault.crypto.deploy_tools import write_encrypted_bundle_to_file
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
 from matrix_gui.modules.railgun.remote_shell import derive_runtime_capabilities
 
@@ -137,47 +132,25 @@ class Deploy():
                 QMessageBox.information(None, "Cancelled", "Directive encryption cancelled by operator.")
                 return
 
-            # Choose save location (default under /deploy/)
-            cwd = Path.cwd()  # This is your working directory (repo root if you launch Phoenix there)
-            deploy_dir = cwd / "boot_directives"
-            deploy_dir.mkdir(parents=True, exist_ok=True)
-
-            keys_dir = deploy_dir / "keys"
-            keys_dir.mkdir(parents=True, exist_ok=True)
-
-            universe = f"{label.strip()}"
-
-            universe_temp = opts.get("universe", False)
-            railgun_enabled = bool(opts.get("railgun_enabled", False))
-            if universe_temp and railgun_enabled:
-                universe = universe_temp.strip()
-
-            out_path = deploy_dir / f"{universe}.enc.json"
-            key_path = keys_dir / f"{universe}.key"
-
-            # Directive path
-            write_encrypted_bundle_to_file(bundle, out_path)
-
-            # Swarm key path
-            if not bool(opts.get("railgun_enabled", False)):
-                # Only save to disk if Railgun is NOT used
-                print(f"[DEPLOY] Writing swarm key to {key_path}")
-                with open(key_path, "w", encoding="utf-8") as f:
-                    f.write(base64.b64encode(aes_key).decode())
-                os.chmod(key_path, 0o600)
-            else:
-                print("[DEPLOY] Railgun active — swarm key held in memory only.")
+            universe = str(opts["universe"]).strip()
+            print(
+                "[DEPLOY] Railgun sealed-stream mode — directive and swarm "
+                "key retained only inside the encrypted Phoenix vault."
+            )
 
             # step 10. Update deployment record in the vault with encryption details
-            with open(out_path, "rb") as f:
-                encrypted_hash = hashlib.sha256(f.read()).hexdigest()
+            bundle_bytes = json.dumps(
+                bundle, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            encrypted_hash = hashlib.sha256(bundle_bytes).hexdigest()
 
             deployment_record = {
                 "label": label,
                 "workspace_id": workspace_id,
                 "deployed_at": datetime.now().isoformat(),
                 "swarm_key": swarm_key_mem,
-                "encrypted_path": str(out_path),
+                "universe": universe,
+                "encrypted_bundle": bundle,
                 "encrypted_hash": encrypted_hash,
                 "linux_user": opts["linux_user"],
                 "runtime_capabilities": opts["runtime_capabilities"],
@@ -198,30 +171,10 @@ class Deploy():
             vcs.patch("deployments", deployments)
             #self.refresh_lists()
 
-            # === Optional Rail-Gun Fire ===
-            if bool(opts.get("railgun_enabled", False)):
-                ssh_cfg = opts.get("railgun_target", None)
-                if ssh_cfg:
-                    # pass the key directly
-                    RailgunDialog.launch(parent_dialog, ssh_cfg, out_path, swarm_key_mem, opts)
-            else:
-                # step 11. Show final deploy command to operator
-                deploy_cmd = f"""
-                🚀 Your directive has been encrypted and saved.
-    
-                Directive: {out_path}
-                Swarm Key: /matrix/boot_directives/keys/{universe}.key
-    
-                ⚠️ Secure your swarm key:
-                    chmod 600 /matrix/boot_directives/keys/{universe}.key
-    
-                To deploy from command line, use:
-    
-                    matrixd boot --universe {universe}
-    
-                Matrix will automatically resolve the encrypted directive and swarm key.
-                """
-                DeploymentDialog(deploy_cmd).exec()
+            ssh_cfg = opts["railgun_target"]
+            RailgunDialog.launch(
+                parent_dialog, ssh_cfg, bundle, swarm_key_mem, opts
+            )
 
         except Exception as e:
             print(f"Failed directive creation: {e}")

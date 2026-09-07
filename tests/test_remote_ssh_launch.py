@@ -1,8 +1,11 @@
 import ast
+import base64
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -106,13 +109,14 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             action="start",
             universe="phoenix",
             linux_user="matrix-phoenix",
-            directive_path="/matrix/boot_directives/phoenix.enc.json",
-            swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
             boot_flags=("--debug",),
             runtime_capabilities={"mcp_worker": True},
         )
         self.assertNotIn("{universe}", command)
         self.assertNotIn("{directive", command)
+        self.assertIn("--directive-stdin", command)
+        self.assertNotIn("/matrix/boot_directives", command)
+        self.assertNotIn("SWARM_KEY=", command)
         self.assertIn("matrix-phoenix-mcp", command)
         for path in self.launcher_paths:
             with self.subTest(path=path):
@@ -174,8 +178,6 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             action="start",
             universe="phoenix",
             linux_user="matrix-phoenix",
-            directive_path="/matrix/boot_directives/phoenix.enc.json",
-            swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
             runtime_capabilities=capabilities,
         )
         self.assertIn("/usr/bin/systemctl restart httpd.service", command)
@@ -193,8 +195,6 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 action="start",
                 universe="phoenix",
                 linux_user="matrix-phoenix",
-                directive_path="/matrix/boot_directives/phoenix.enc.json",
-                swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
                 runtime_capabilities=capabilities,
             )
         finally:
@@ -215,6 +215,9 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             for line in raw_command.splitlines()
             if line.startswith("printf '{\"worker_user\"")
         )
+        shell_program = shutil.which("sh")
+        if not shell_program:
+            self.skipTest("POSIX sh is not available for profile rendering test")
         with tempfile.TemporaryDirectory() as temp_dir:
             profile_path = Path(temp_dir) / "matrix-phoenix.json"
             shell = "\n".join(
@@ -228,7 +231,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 )
             )
             subprocess.run(
-                ["/bin/sh", "-c", shell],
+                [shell_program, "-c", shell],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -250,8 +253,6 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             action="start",
             universe="phoenix",
             linux_user="matrix-phoenix",
-            directive_path="/matrix/boot_directives/phoenix.enc.json",
-            swarm_key="c2VhbGVkLXN3YXJtLWtleQ==",
             runtime_capabilities={},
         )
         self.assertIn(
@@ -262,17 +263,153 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             'rm -f "/etc/matrixswarm/mcp-launchers/$SWARM_USER.json"',
             without_mcp,
         )
-    def test_remote_command_redacts_swarm_key(self):
-        helper = load_module(self.shell_helper_path, "remote_secret_redaction")
-        secret = "c2VhbGVkLXN3YXJtLWtleQ=="
+    def test_remote_command_never_contains_boot_secrets(self):
+        helper = load_module(self.shell_helper_path, "remote_secret_boundary")
+        secret = base64.b64encode(b"k" * 32).decode("ascii")
+        bundle = {
+            "nonce": base64.b64encode(b"n" * 12).decode("ascii"),
+            "tag": base64.b64encode(b"t" * 16).decode("ascii"),
+            "ciphertext": base64.b64encode(b"sealed-directive").decode("ascii"),
+        }
         command = helper.build_remote_matrixd_command(
             action="start",
             universe="phoenix",
             linux_user="matrix-phoenix",
-            directive_path="/matrix/boot_directives/phoenix.enc.json",
-            swarm_key=secret,
         )
-        self.assertNotIn(secret, helper.redact_remote_secret(command, secret))
+        self.assertNotIn(secret, command)
+        self.assertNotIn(bundle["ciphertext"], command)
+        self.assertNotIn("SWARM_KEY", command)
+        self.assertIn("--directive-stdin", command)
+
+        class Channel:
+            def __init__(self):
+                self.payload = b""
+                self.write_closed = False
+
+            def sendall(self, payload):
+                self.payload += payload
+
+            def shutdown_write(self):
+                self.write_closed = True
+
+        channel = Channel()
+        size = helper.send_boot_envelope(channel, bundle, secret)
+        self.assertEqual(size, len(channel.payload))
+        self.assertTrue(channel.write_closed)
+        envelope = json.loads(channel.payload.decode("utf-8"))
+        self.assertEqual(envelope["version"], 1)
+        self.assertEqual(envelope["encrypted_bundle"], bundle)
+        self.assertEqual(envelope["swarm_key"], secret)
+
+    def test_remote_matrixd_is_probed_before_secret_transfer(self):
+        helper = load_module(self.shell_helper_path, "remote_matrixd_probe")
+
+        class Channel:
+            def __init__(self, status):
+                self.status = status
+
+            def recv_exit_status(self):
+                return self.status
+
+        class Stream(io.BytesIO):
+            def __init__(self, payload, status):
+                super().__init__(payload)
+                self.channel = Channel(status)
+
+        class Client:
+            def __init__(self, status):
+                self.status = status
+                self.command = None
+
+            def exec_command(self, command, timeout):
+                self.command = command
+                return (
+                    Stream(b"", self.status),
+                    Stream(b"", self.status),
+                    Stream(b"", self.status),
+                )
+
+        current = Client(0)
+        self.assertTrue(helper.verify_remote_matrixd_stdin(current))
+        self.assertIn("--directive-stdin", current.command)
+        self.assertNotIn("swarm_key", current.command.lower())
+
+        legacy = Client(65)
+        with self.assertRaisesRegex(RuntimeError, "MatrixOS update required"):
+            helper.verify_remote_matrixd_stdin(legacy)
+
+        for path in self.launcher_paths:
+            with self.subTest(path=path):
+                launcher_source = source(path)
+                probe_index = launcher_source.index(
+                    "verify_remote_matrixd_stdin(client)"
+                )
+                send_index = launcher_source.index(
+                    "payload_size = send_boot_envelope("
+                )
+                self.assertLess(probe_index, send_index)
+
+    def test_matrixd_accepts_only_bounded_stdin_envelopes(self):
+        matrixd_source = source("matrixos/scripts/matrixd")
+        tree = ast.parse(matrixd_source, filename="matrixos/scripts/matrixd")
+        selected = [
+            node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.Assign))
+            and (
+                not isinstance(node, ast.FunctionDef)
+                or node.name in {
+                    "resolve_inline_swarm_key",
+                    "read_boot_envelope",
+                }
+            )
+        ]
+        namespace = {
+            "base64": base64,
+            "json": json,
+            "sys": __import__("sys"),
+        }
+        exec(compile(ast.Module(body=selected, type_ignores=[]), "matrixd", "exec"), namespace)
+
+        key = base64.b64encode(b"k" * 32).decode("ascii")
+        bundle = {
+            "nonce": base64.b64encode(b"n" * 12).decode("ascii"),
+            "tag": base64.b64encode(b"t" * 16).decode("ascii"),
+            "ciphertext": base64.b64encode(b"ciphertext").decode("ascii"),
+        }
+        raw = json.dumps({
+            "version": 1,
+            "encrypted_bundle": bundle,
+            "swarm_key": key,
+        }).encode("utf-8")
+        loaded_bundle, loaded_key = namespace["read_boot_envelope"](
+            io.BytesIO(raw)
+        )
+        self.assertEqual(loaded_bundle, bundle)
+        self.assertEqual(loaded_key, key)
+        with self.assertRaises(ValueError):
+            namespace["read_boot_envelope"](
+                io.BytesIO(raw[:-1] + b',"extra":1}')
+            )
+
+        self.assertIn('boot.add_argument(\n        "--directive-stdin"', matrixd_source)
+        self.assertIn("required=True", matrixd_source)
+        self.assertNotIn('boot.add_argument("--directive"', matrixd_source)
+        self.assertNotIn('boot.add_argument("--swarm_key"', matrixd_source)
+        self.assertNotIn("def resolve_swarm_key", matrixd_source)
+        self.assertIn("decrypt_directive_bundle(bundle, swarm_key)", matrixd_source)
+
+    def test_new_deployments_never_write_generated_boot_files(self):
+        deploy_source = source(
+            "phoenix/matrix_gui/swarm_workspace/cls_lib/deployment/deploy.py"
+        )
+        railgun_source = source(
+            "phoenix/matrix_gui/swarm_workspace/cls_lib/deployment/dialog/railgun.py"
+        )
+        self.assertNotIn("write_encrypted_bundle_to_file", deploy_source)
+        self.assertNotIn("encrypted_path", deploy_source)
+        self.assertNotIn("open_sftp", railgun_source)
+        self.assertNotIn("sftp.put", railgun_source)
+        self.assertIn('"encrypted_bundle": bundle', deploy_source)
 
     def test_spawn_audit_is_inside_the_universe_static_tree(self):
         spawner = source("matrixos/core/python_core/core_spawner.py")

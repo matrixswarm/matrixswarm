@@ -3,13 +3,13 @@
 Commander Edition — Standalone Railgun Module
 Non-blocking SSH deploy with full live output streaming.
 """
-import ntpath
-import posixpath
 from matrix_gui.modules.railgun.remote_shell import (
     build_remote_matrixd_command,
     mcp_worker_linux_user,
+    send_boot_envelope,
     validate_linux_user,
     validate_remote_token,
+    verify_remote_matrixd_stdin,
 )
 from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 
@@ -21,7 +21,7 @@ from PyQt6.QtGui import QMovie
 
 
 # ============================================================
-# QThread Worker — Handles SSH, SFTP, and remote boot
+# QThread Worker — Handles SSH and diskless remote boot
 # ============================================================
 
 class RailgunWorker(QThread):
@@ -30,10 +30,10 @@ class RailgunWorker(QThread):
     sig_done = pyqtSignal(int)
     sig_error = pyqtSignal(str)
 
-    def __init__(self, ssh_meta, local_bundle, swarm_key_b64, opts):
+    def __init__(self, ssh_meta, encrypted_bundle, swarm_key_b64, opts):
         super().__init__()
         self.ssh_meta = ssh_meta
-        self.local_bundle = local_bundle
+        self.encrypted_bundle = encrypted_bundle
         self.swarm_key = swarm_key_b64.strip()
         self.opts = opts
 
@@ -41,17 +41,13 @@ class RailgunWorker(QThread):
         client = None
         chan = None
         try:
-            # Reject malformed command data before opening SSH or uploading.
+            # Reject malformed command data before opening SSH.
             universe = validate_remote_token(
                 self.opts["universe"],
                 "Universe name",
             )
             linux_user = validate_linux_user(
                 self.opts["linux_user"], "Swarm Linux user"
-            )
-            bundle_name = validate_remote_token(
-                ntpath.basename(self.local_bundle),
-                "Directive filename",
             )
             reboot_id = None
             if self.opts.get("reboot_id"):
@@ -66,21 +62,12 @@ class RailgunWorker(QThread):
                 f"[RAILGUN] Host fingerprint verified: "
                 f"{actual_fingerprint}\n"
             )
+            verify_remote_matrixd_stdin(client)
+            self.sig_stdout.emit(
+                "[RAILGUN] Remote MatrixD sealed-stream capability verified.\n"
+            )
 
-            # 2. Upload directive
-            sftp = client.open_sftp()
-            remote_root = "/matrix/boot_directives"
-
-            try:
-                sftp.stat(remote_root)
-            except FileNotFoundError:
-                sftp.mkdir(remote_root)
-
-            remote_bundle = posixpath.join(remote_root, bundle_name)
-            sftp.put(self.local_bundle, remote_bundle)
-            sftp.close()
-
-            # 3. Build boot command. Detached agents must never inherit this
+            # 2. Build boot command. Detached agents must never inherit this
             # SSH channel, so --verbose is deliberately suppressed here.
             flags = []
             for flag in ["debug", "clean", "reboot", "rug_pull", "reboot_new"]:
@@ -98,8 +85,6 @@ class RailgunWorker(QThread):
                 action="start",
                 universe=universe,
                 linux_user=linux_user,
-                directive_path=remote_bundle,
-                swarm_key=self.swarm_key,
                 boot_flags=flags,
                 reboot_id=reboot_id,
                 runtime_capabilities=runtime_capabilities,
@@ -113,14 +98,22 @@ class RailgunWorker(QThread):
                     f"{mcp_worker_linux_user(linux_user)} (isolated)\n"
                 )
             self.sig_stdout.emit(
-                "[RAILGUN] Root provisioning prepared; SWARM_KEY remains redacted.\n"
+                "[RAILGUN] Root provisioning prepared; sealed boot payload "
+                "will travel only over SSH stdin.\n"
             )
 
-            # 4. This is a non-interactive background deployment. Do not
+            # 3. This is a non-interactive background deployment. Do not
             # allocate a PTY: matrixd's detached children must not retain it.
             transport = client.get_transport()
             chan = transport.open_session()
             chan.exec_command(cmd)
+            payload_size = send_boot_envelope(
+                chan, self.encrypted_bundle, self.swarm_key
+            )
+            self.sig_stdout.emit(
+                f"[RAILGUN] Streamed sealed boot envelope "
+                f"({payload_size} bytes); no remote directive/key file created.\n"
+            )
 
             while True:
                 while chan.recv_ready():
@@ -161,11 +154,13 @@ class RailgunWorker(QThread):
 class RailgunDialog(QDialog):
 
     @staticmethod
-    def launch(parent, ssh_meta, local_bundle, swarm_key_b64, opts):
-        dlg = RailgunDialog(parent, ssh_meta, local_bundle, swarm_key_b64, opts)
+    def launch(parent, ssh_meta, encrypted_bundle, swarm_key_b64, opts):
+        dlg = RailgunDialog(
+            parent, ssh_meta, encrypted_bundle, swarm_key_b64, opts
+        )
         dlg.show()
 
-    def __init__(self, parent, ssh_meta, local_bundle, swarm_key_b64, opts):
+    def __init__(self, parent, ssh_meta, encrypted_bundle, swarm_key_b64, opts):
         super().__init__(parent)
 
         self.setWindowTitle(f"Railgun Deploy: {ssh_meta.get('host')}")
@@ -198,7 +193,9 @@ class RailgunDialog(QDialog):
         layout.addWidget(self.console)
 
         # --- Worker Setup ---
-        self.worker = RailgunWorker(ssh_meta, local_bundle, swarm_key_b64, opts)
+        self.worker = RailgunWorker(
+            ssh_meta, encrypted_bundle, swarm_key_b64, opts
+        )
 
         # Connect signals → UI
         self.worker.sig_stdout.connect(self.append_stdout)

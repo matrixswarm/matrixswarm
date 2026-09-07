@@ -315,9 +315,12 @@ class HarvesterPolicyTests(unittest.TestCase):
         self.assertNotIn("swarm_key", editor_source)
         assignment_source = ASSIGNMENT_EDITOR_PATH.read_text(encoding="utf-8")
         self.assertIn("VaultCoreSingleton", assignment_source)
-        self.assertIn('"Contact only", "contact_only"', assignment_source)
-        self.assertIn("Contact + resurrect", assignment_source)
+        self.assertIn('"Contact only (resurrection deferred)", "contact_only"', assignment_source)
+        self.assertNotIn("Contact + resurrect", assignment_source)
         self.assertIn('"ssh": ssh_fields', assignment_source)
+        self.assertIn('"automatic_recovery_enabled": False', assignment_source)
+        harvester_source = AGENT_PATH.read_text(encoding="utf-8")
+        self.assertIn("self.automatic_recovery_enabled = False", harvester_source)
         serialize_source = assignment_source[
             assignment_source.index("def serialize"):
             assignment_source.index("def deploy_fields")

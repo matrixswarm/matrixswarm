@@ -44,9 +44,12 @@ class Agent(BootAgent):
         )
         self.timeout = self._bounded_config_int("matrixd_timeout_sec", 60, 2, 300)
         self.alert_role = self._role("alert_to_role", "hive.alert")
-        self.automatic_recovery_enabled = (
+        self.automatic_recovery_requested = (
             self.config.get("automatic_recovery_enabled") is True
         )
+        # Resurrection remains deliberately dormant until its authority and
+        # sealed-stream handoff receive a separate operator approval cycle.
+        self.automatic_recovery_enabled = False
         self.targets = self._load_targets(self.config.get("targets", []))
         self._states = {target["id"]: initial_state() for target in self.targets}
         self._emit_beacon = self.check_for_thread_poke(
@@ -77,6 +80,12 @@ class Agent(BootAgent):
                 level="WARN",
             )
         else:
+            if self.automatic_recovery_requested:
+                self.log(
+                    "[HARVESTER] Automatic recovery was requested but is "
+                    "disabled by the current observation-only release.",
+                    level="WARN",
+                )
             self.log(
                 f"[HARVESTER] Watching target={self.targets[0]['id']} via "
                 f"{self.mode} matrixd; automatic_recovery="

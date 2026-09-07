@@ -1,6 +1,5 @@
 """Vault-backed Harvester hive and SSH assignment editor."""
 
-import base64
 import re
 
 from PyQt6.QtWidgets import (
@@ -21,9 +20,8 @@ from .ssh import SSH
 
 
 _UNIVERSE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
-_LINUX_USER = re.compile(r"^matrix-[a-z0-9_-]{1,24}$")
 _DEPLOYMENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
-_CAPABILITIES = {"contact_only", "contact_and_resurrect"}
+_CAPABILITIES = {"contact_only"}
 _FORBIDDEN_TEXT = re.compile(r"[\x00\r\n]")
 
 
@@ -38,9 +36,8 @@ class HarvesterAssignment(BaseEditor):
         self.deployment = QComboBox()
         self.ssh = QComboBox()
         self.capability = QComboBox()
-        self.capability.addItem("Contact only", "contact_only")
         self.capability.addItem(
-            "Contact + resurrect", "contact_and_resurrect"
+            "Contact only (resurrection deferred)", "contact_only"
         )
         self.note = QLineEdit()
         self.minimum_agents = self._spin(1, 1, 10_000)
@@ -123,6 +120,9 @@ class HarvesterAssignment(BaseEditor):
 
     @staticmethod
     def _deployment_universe(deployment):
+        universe = deployment.get("universe")
+        if isinstance(universe, str) and universe.strip():
+            return universe.strip()
         encrypted_path = deployment.get("encrypted_path")
         if not isinstance(encrypted_path, str):
             return ""
@@ -144,9 +144,8 @@ class HarvesterAssignment(BaseEditor):
             self.ssh.setCurrentIndex(index)
 
     def _render_capability(self):
-        enabled = self.capability.currentData() == "contact_and_resurrect"
-        self.recovery_attempt_limit.setEnabled(enabled)
-        self.recovery_cooldown.setEnabled(enabled)
+        self.recovery_attempt_limit.setEnabled(False)
+        self.recovery_cooldown.setEnabled(False)
 
     def on_load(self, data):
         self._loading = True
@@ -231,27 +230,11 @@ class HarvesterAssignment(BaseEditor):
             "alert_cooldown_sec": self.alert_cooldown.value(),
             "recovery_mode": "disabled",
         }
-        recovery_enabled = capability == "contact_and_resurrect"
-        if recovery_enabled:
-            target.update(
-                {
-                    "recovery_mode": "automatic",
-                    "recovery_attempt_limit": self.recovery_attempt_limit.value(),
-                    "recovery_cooldown_sec": self.recovery_cooldown.value(),
-                    "linux_user": str(deployment["linux_user"]).strip(),
-                    "directive_path": (
-                        f"/matrix/boot_directives/{universe}.enc.json"
-                    ),
-                    "swarm_key": str(deployment["swarm_key"]).strip(),
-                    "sensitive_fields": {"swarm_key": "1"},
-                }
-            )
-
         return {
             "mode": "ssh",
             "ssh": ssh_fields,
             "targets": [target],
-            "automatic_recovery_enabled": recovery_enabled,
+            "automatic_recovery_enabled": False,
         }
 
     def is_validated(self):
@@ -300,21 +283,5 @@ class HarvesterAssignment(BaseEditor):
         ssh_ok, ssh_message = ssh_editor.is_validated()
         if not ssh_ok:
             return False, f"SSH object is invalid: {ssh_message}"
-
-        if capability == "contact_and_resurrect":
-            linux_user = deployment.get("linux_user")
-            if not isinstance(linux_user, str) or not _LINUX_USER.fullmatch(
-                linux_user
-            ):
-                return False, "Resurrection requires a valid matrix-* Linux user."
-            swarm_key = deployment.get("swarm_key")
-            if not isinstance(swarm_key, str):
-                return False, "Resurrection requires the hive's vault swarm key."
-            try:
-                decoded = base64.b64decode(swarm_key, validate=True)
-            except ValueError:
-                return False, "The hive's vault swarm key is invalid."
-            if not 16 <= len(decoded) <= 64:
-                return False, "The hive's vault swarm key length is invalid."
 
         return True, ""

@@ -1,5 +1,4 @@
 # Authored by Daniel F MacDonald & ChatGPT-5 aka The Generals
-import os
 from PyQt6 import QtWidgets, QtCore
 from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 from matrix_gui.modules.railgun.remote_shell import (
@@ -7,8 +6,10 @@ from matrix_gui.modules.railgun.remote_shell import (
     default_linux_user,
     derive_runtime_capabilities,
     mcp_worker_linux_user,
+    send_boot_envelope,
     validate_linux_user,
     validate_remote_token,
+    verify_remote_matrixd_stdin,
 )
 QtCore.QCoreApplication.processEvents()
 class DeployDialog(QtWidgets.QDialog):
@@ -58,7 +59,10 @@ class DeployDialog(QtWidgets.QDialog):
         self.universe_edit = QtWidgets.QLineEdit()
         self.universe_edit.setPlaceholderText("Universe name (default: deployment label)")
         if self.deployment:
-            self.universe_edit.setText(self.deployment.get("label", ""))
+            self.universe_edit.setText(
+                self.deployment.get("universe")
+                or self.deployment.get("label", "")
+            )
 
         opts_layout.addWidget(QtWidgets.QLabel("Universe:"))
         opts_layout.addWidget(self.universe_edit)
@@ -80,14 +84,12 @@ class DeployDialog(QtWidgets.QDialog):
         opts_layout.addWidget(QtWidgets.QLabel("Swarm Linux User:"))
         opts_layout.addWidget(self.linux_user_edit)
 
-        # Directive dropdown
-        self.directive_dropdown = QtWidgets.QComboBox()
-        self.directive_dropdown.addItem(
-            os.path.basename(self.deployment.get("encrypted_path", "")),
-            self.deployment.get("encrypted_path")
+        sealed_status = QtWidgets.QLabel(
+            "Sealed directive: retained inside the encrypted Phoenix vault; "
+            "streamed to MatrixD only for Start/Restart."
         )
-        opts_layout.addWidget(QtWidgets.QLabel("Directive File:"))
-        opts_layout.addWidget(self.directive_dropdown)
+        sealed_status.setWordWrap(True)
+        opts_layout.addWidget(sealed_status)
 
         # Flags
         self.flag_verbose = QtWidgets.QCheckBox("--verbose")
@@ -147,6 +149,9 @@ class DeployDialog(QtWidgets.QDialog):
     # ----------------------------------------------------
     def _run_remote(self, action: str):
         ssh_cfg = self.ssh_selector.currentData()
+        if not isinstance(ssh_cfg, dict):
+            self.output.append("[ERROR] Select a vault-backed SSH target.\n")
+            return
 
         # SSH data (registry)
         host = ssh_cfg["host"]
@@ -160,20 +165,12 @@ class DeployDialog(QtWidgets.QDialog):
             return
 
         # Deployment data (runtime)
-        swarm_key = self.deployment["swarm_key"]
-        directive_name = self.deployment["encrypted_path"]
-        # Collect options
-        directive_path = self.directive_dropdown.currentData()
+        swarm_key = self.deployment.get("swarm_key")
+        encrypted_bundle = self.deployment.get("encrypted_bundle")
         try:
             universe = validate_remote_token(
                 self.universe_edit.text().strip() or self.deployment["label"],
                 "Universe name",
-            )
-            if not directive_path:
-                raise ValueError("Directive path is required")
-            directive_file = validate_remote_token(
-                os.path.basename(str(directive_path)),
-                "Directive filename",
             )
         except ValueError as error:
             self.output.append(f"[ERROR] {error}\n")
@@ -196,22 +193,16 @@ class DeployDialog(QtWidgets.QDialog):
 
         try:
 
-            if directive_name:
-                directive_leaf = validate_remote_token(
-                    str(directive_name).replace("\\", "/").rsplit("/", 1)[-1],
-                    "Directive filename",
+            if action != "stop" and (
+                not swarm_key or not isinstance(encrypted_bundle, dict)
+            ):
+                self.output.append(
+                    "[ERROR] This deployment predates sealed-stream Railgun. "
+                    "Redeploy it from Phoenix before Start/Restart.\n"
                 )
-                directive_remote = f"/matrix/boot_directives/{directive_leaf}"
-            else:
-                directive_remote = f"/matrix/boot_directives/{universe}.enc.json"
-
-            if action != "stop" and not swarm_key:
-                self.output.append("[ERROR] No SWARM_KEY available for this deployment.\n")
                 return
 
             universe = validate_remote_token(universe, "Universe name")
-            if action == "start":
-                directive_remote = f"/matrix/boot_directives/{directive_file}"
 
             runtime_capabilities = self.deployment.get(
                 "runtime_capabilities"
@@ -222,8 +213,6 @@ class DeployDialog(QtWidgets.QDialog):
                 action=action,
                 universe=universe,
                 linux_user=linux_user,
-                directive_path=directive_remote if action != "stop" else None,
-                swarm_key=swarm_key if action != "stop" else None,
                 boot_flags=flags,
                 runtime_capabilities=runtime_capabilities,
             )
@@ -235,7 +224,7 @@ class DeployDialog(QtWidgets.QDialog):
                 )
             self.output.append(
                 "[CMD] Root provisioning and least-privilege MatrixD launch prepared; "
-                "SWARM_KEY redacted.\n"
+                "no directive or key is present in the command.\n"
             )
 
             try:
@@ -244,10 +233,24 @@ class DeployDialog(QtWidgets.QDialog):
                     f"[SSH] Host fingerprint verified: "
                     f"{actual_fingerprint}\n"
                 )
+                if action != "stop":
+                    verify_remote_matrixd_stdin(client)
+                    self.output.append(
+                        "[RAILGUN] Remote MatrixD sealed-stream capability "
+                        "verified.\n"
+                    )
 
                 transport = client.get_transport()
                 chan = transport.open_session()
                 chan.exec_command(cmd)
+                if action != "stop":
+                    payload_size = send_boot_envelope(
+                        chan, encrypted_bundle, swarm_key
+                    )
+                    self.output.append(
+                        f"[RAILGUN] Streamed sealed boot envelope "
+                        f"({payload_size} bytes); no remote boot files created.\n"
+                    )
 
                 # store references so poller can read them
                 self._ssh_client = client

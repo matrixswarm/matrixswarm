@@ -24,13 +24,13 @@ Minted from a template directive combined with a deployment record.
 
 Includes only security-tag-defined cert fields per agent.
 
-Encrypted and uploaded to the swarm server.
+Retained inside the encrypted Phoenix vault and streamed to MatrixD over a pinned SSH channel.
 
 📚 Deployment Record (vault stored):
 
 Flat structure (agents[]) with all cert pairs (priv/pub keys, certs, CA, serial).
 
-Stores swarm_key, encrypted_hash, encrypted_path, interfaces (IP, ports, cert fingerprints).
+Stores swarm_key, encrypted_hash, encrypted_bundle, universe, interfaces (IP, ports, cert fingerprints).
 
 Internal GUI reference, never uploaded directly.
 
@@ -126,19 +126,19 @@ Generate a fresh AES swarm_key.
 
 Encrypt runtime directive clearly with generate_swarm_encrypted_directive(...).
 
-1️⃣1️⃣ Save Encrypted Directive File
+1️⃣1️⃣ Seal for Railgun
 
-Clearly save encrypted directive to filesystem (.enc.json) at operator-chosen path.
+Keep the encrypted directive bundle and swarm key inside the encrypted Phoenix vault. Do not create loose directive or key files.
 
 1️⃣2️⃣ Update Deployment Record
 
-Compute SHA256 hash of encrypted directive file (encrypted_hash).
+Compute SHA256 hash of the canonical encrypted bundle (encrypted_hash).
 
 Clearly update vault deployment record:
 
 Store swarm_key (base64-encoded).
 
-encrypted_path, encrypted_hash.
+encrypted_bundle, universe, encrypted_hash.
 
 Clearly-defined interfaces (IP/port, cert fingerprints).
 
@@ -148,23 +148,20 @@ Emit vault update event: EventBus.emit("vault.update", ...).
 
 Clearly refresh GUI deployment listings.
 
-1️⃣4️⃣ Show Operator Deploy Command
+1️⃣4️⃣ Railgun Stream + Boot
 
-Provide clearly formatted command for operator deployment:
-
-matrixswarm-boot --universe ai --reboot \
-  --encrypted-directive "<path_to_enc_json>" \
-  --swarm_key <base64_swarm_key>
+Stream one bounded sealed envelope over the pinned SSH channel to `matrixd boot --directive-stdin`. The envelope is accepted only on stdin and is decrypted in memory; neither its directive nor swarm key is placed in argv, environment variables, or remote boot files.
 
 🎯 Final Workflow Diagram (clearly illustrated)
 flowchart LR
   TD[Template Directive from Vault]
   Deployment{Deployment Record - Flat Agents & Certs}
   Runtime[Minted Runtime Directive]
-  ENC[Encrypted Directive File .enc.json]
+  ENC[Encrypted Directive Bundle in Phoenix Vault]
   SV[Vault Save - Swarm Key, Hash, Interfaces]
 
   TD --> Deployment --> Runtime --> ENC --> SV
+  ENC --> RG[Railgun SSH Stdin] --> MD[MatrixD In-Memory Decrypt]
 
 📌 Important Outcomes (clearly stated):
 

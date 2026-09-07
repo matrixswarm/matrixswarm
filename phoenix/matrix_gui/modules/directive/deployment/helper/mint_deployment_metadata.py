@@ -18,7 +18,8 @@ def mint_deployment_metadata(
     label: str,
     source_directive_id: str,
     aes_key_b64: str,
-    encrypted_path: str,
+    encrypted_bundle: dict,
+    universe: str,
     encrypted_hash: str
 ) -> dict:
     try:
@@ -85,7 +86,8 @@ def mint_deployment_metadata(
             "source_directive": source_directive_id,
             "deployed_at": datetime.now().isoformat(),
             "swarm_key": aes_key_b64,
-            "encrypted_path": encrypted_path,
+            "encrypted_bundle": encrypted_bundle,
+            "universe": universe,
             "encrypted_hash": encrypted_hash,
             "agents": agents_out,
             "certs": certs_out
