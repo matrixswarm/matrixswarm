@@ -85,6 +85,18 @@ class BridgeServer:
                 supplied = self.headers.get("Authorization", "")
                 expected = f"Bearer {bridge._token}"
                 if not hmac.compare_digest(supplied, expected):
+                    # On Windows, closing a socket with an unread request body
+                    # can reset the connection before the client receives the
+                    # fail-closed 401 response.  Drain only the same bounded
+                    # body size accepted by authenticated RPC calls.
+                    try:
+                        rejected_length = int(
+                            self.headers.get("Content-Length", "0")
+                        )
+                    except (TypeError, ValueError):
+                        rejected_length = 0
+                    if 0 < rejected_length <= 65536:
+                        self.rfile.read(rejected_length)
                     self._json(401, {"ok": False, "error": "unauthorized"})
                     return
                 try:
