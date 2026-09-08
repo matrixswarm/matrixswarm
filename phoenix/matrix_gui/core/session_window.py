@@ -247,11 +247,12 @@ class SessionWindow(QMainWindow):
             default_layout = QHBoxLayout()
             self.default_panel.setLayout(default_layout)
             self._setup_main_layout(default_layout)  # reuses existing builder
-            default_layout.setContentsMargins(0, 0, 0, 0)
+            default_layout.setContentsMargins(0, 4, 0, 4)
             default_layout.setSpacing(0)
 
             # Stacked widget for extensibility
             self.stacked = QStackedWidget()
+            self.stacked.setObjectName("SessionPanelStack")
             self.stacked.addWidget(self.default_panel)  # index 0 = default cockpit view
             self.setCentralWidget(self.stacked)
 
@@ -1404,19 +1405,32 @@ class SessionWindow(QMainWindow):
             # Primary status label
             status_bar.addWidget(self.status_label)
 
-            # --- NEW BADGES ---
+            # Keep the connection badges on one consistently spaced rail.
+            badge_row = QWidget(status_bar)
+            badge_layout = QHBoxLayout(badge_row)
+            badge_layout.setContentsMargins(6, 0, 0, 0)
+            badge_layout.setSpacing(6)
+
             self.incoming_badge = QLabel("Incoming: —")
             self.incoming_badge.setStyleSheet("padding-left: 12px; color: #8f8f8f;")
-            status_bar.addWidget(self.incoming_badge)
+            self.incoming_badge.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+            badge_layout.addWidget(self.incoming_badge)
 
             self.outgoing_badge = QLabel("Outgoing: —")
             self.outgoing_badge.setStyleSheet("padding-left: 12px; color: #8f8f8f;")
-            status_bar.addWidget(self.outgoing_badge)
+            self.outgoing_badge.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+            badge_layout.addWidget(self.outgoing_badge)
 
-            # session ID shown at far right
             self.session_id_label = QLabel(f"🆔 {self.session_id}")
-            self.session_id_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            status_bar.addWidget(self.session_id_label)
+            self.session_id_label.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            badge_layout.addWidget(self.session_id_label)
+            status_bar.addWidget(badge_row)
 
             self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, status_bar)
 

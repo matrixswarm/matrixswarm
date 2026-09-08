@@ -24,6 +24,8 @@ class PhoenixStaticPanel(QWidget):
         self.tab_index = tab_index
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 0)
+        layout.setSpacing(0)
 
         self.deployment_tree = QTreeWidget()
 
@@ -89,6 +91,8 @@ class PhoenixStaticPanel(QWidget):
         # === Deployments summary ===
         deploy_box = QGroupBox("🚀 Deployments")
         deploy_layout = QVBoxLayout()
+        deploy_layout.setContentsMargins(6, 4, 6, 4)
+        deploy_layout.setSpacing(4)
         deploy_layout.addWidget(self.deployment_tree)
         deploy_box.setLayout(deploy_layout)
         layout.addWidget(deploy_box)
@@ -96,6 +100,8 @@ class PhoenixStaticPanel(QWidget):
         # === Swarm Feed ===
         feed_box = QGroupBox("🛰️ Swarm Feed")
         feed_layout = QVBoxLayout()
+        feed_layout.setContentsMargins(6, 4, 6, 4)
+        feed_layout.setSpacing(4)
         feed_layout.addWidget(self.feed)
         feed_box.setLayout(feed_layout)
         layout.addWidget(feed_box)
