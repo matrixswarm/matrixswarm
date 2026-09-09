@@ -1,6 +1,10 @@
 from PyQt6.QtWidgets import QLabel, QGroupBox, QVBoxLayout
 from PyQt6.QtCore import Qt
 
+# Keep the dashboard and live-session content on the same horizontal grid.
+COCKPIT_CONTENT_GUTTER = 6
+
+
 class StatusLabel(QLabel):
     def __init__(self, text="—"):
         super().__init__(text)

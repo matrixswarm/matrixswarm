@@ -180,7 +180,7 @@ QLineEdit:focus {
 #HomeTab {
     background-color: #0d0d0f;
     border: none;
-    padding: 6px;
+    padding: 0;
 }
 #HomeTab QGroupBox::title {
     color: #0ae8b5;
@@ -336,11 +336,10 @@ QPushButton:hover {
     background-color: #242424;
     border: 1px solid #555;
 }
-/* Commander fix: remove outer container borders */
-#CockpitWrapper QFrame,
-#CockpitWrapper QGroupBox {
+/* The session stack is a QFrame internally; do not draw a frame around panels. */
+QStackedWidget#CockpitStack {
     border: none;
-    background: transparent;
+    background: #0d0d0f;
     padding: 0;
     margin: 0;
 }
@@ -348,4 +347,18 @@ QPushButton:hover {
 QGroupBox {
     margin: 8px 8px 12px 8px;   /* L, T, R, B */
     padding: 8px;
+}
+
+/* Keep dashboard and session panel edges on the control-deck grid. */
+#HomeTab QGroupBox,
+QGroupBox#CockpitTreePanel,
+QGroupBox#logs {
+    margin-left: 0;
+    margin-right: 0;
+}
+
+/* Let the two main panels meet the status rail without a hidden lower inset. */
+QGroupBox#CockpitTreePanel,
+QGroupBox#logs {
+    margin-bottom: 0;
 }

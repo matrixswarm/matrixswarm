@@ -16,7 +16,7 @@ from matrix_gui.core.panel.control_bar import PanelButton
 from matrix_gui.core.panel.agent_detail.agent_detail_panel import AgentDetailPanel
 from matrix_gui.core.panel.crypto_alert.crypto_alert import CryptoAlertPanel
 from matrix_gui.core.panel.delete_agent_panel import DeleteAgentPanel
-from matrix_gui.theme.utils.hive_ui import StatusLabel
+from matrix_gui.theme.utils.hive_ui import COCKPIT_CONTENT_GUTTER, StatusLabel
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.core.panel.log_panel.log_panel import LogPanel
 from matrix_gui.core.panel.agent_tree.agent_tree import PhoenixAgentTree
@@ -247,11 +247,14 @@ class SessionWindow(QMainWindow):
             default_layout = QHBoxLayout()
             self.default_panel.setLayout(default_layout)
             self._setup_main_layout(default_layout)  # reuses existing builder
-            default_layout.setContentsMargins(0, 0, 0, 0)
-            default_layout.setSpacing(0)
+            default_layout.setContentsMargins(
+                COCKPIT_CONTENT_GUTTER, 0, COCKPIT_CONTENT_GUTTER, 0
+            )
+            default_layout.setSpacing(COCKPIT_CONTENT_GUTTER)
 
             # Stacked widget for extensibility
             self.stacked = QStackedWidget()
+            self.stacked.setObjectName("CockpitStack")
             self.stacked.addWidget(self.default_panel)  # index 0 = default cockpit view
             self.setCentralWidget(self.stacked)
 
@@ -516,6 +519,7 @@ class SessionWindow(QMainWindow):
         """
         try:
             box = QGroupBox("🦉 Agent Tree")
+            box.setObjectName("CockpitTreePanel")
             layout = QVBoxLayout()
             layout.setContentsMargins(6, 4, 6, 4)  # (L, T, R, B)
             layout.setSpacing(4)
@@ -1399,18 +1403,29 @@ class SessionWindow(QMainWindow):
         """
         try:
             status_bar = QToolBar("Session Status", self)
+            status_bar.setObjectName("SessionStatusBar")
             status_bar.setMovable(False)
+            status_bar.setContentsMargins(
+                COCKPIT_CONTENT_GUTTER, 3, COCKPIT_CONTENT_GUTTER, 3
+            )
 
             # Primary status label
             status_bar.addWidget(self.status_label)
 
             # --- NEW BADGES ---
+            badge_style = "padding: 4px 8px; color: #8f8f8f;"
             self.incoming_badge = QLabel("Incoming: —")
-            self.incoming_badge.setStyleSheet("padding-left: 12px; color: #8f8f8f;")
+            self.incoming_badge.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+            self.incoming_badge.setStyleSheet(badge_style)
             status_bar.addWidget(self.incoming_badge)
 
             self.outgoing_badge = QLabel("Outgoing: —")
-            self.outgoing_badge.setStyleSheet("padding-left: 12px; color: #8f8f8f;")
+            self.outgoing_badge.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+            self.outgoing_badge.setStyleSheet(badge_style)
             status_bar.addWidget(self.outgoing_badge)
 
             # session ID shown at far right
