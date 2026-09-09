@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QMenu
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QLabel, QGraphicsDropShadowEffect
+from matrix_gui.theme.utils.hive_ui import COCKPIT_CONTENT_GUTTER
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.core.event_bus import EventBus
@@ -24,6 +25,9 @@ class PhoenixStaticPanel(QWidget):
         self.tab_index = tab_index
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(
+            COCKPIT_CONTENT_GUTTER, 0, COCKPIT_CONTENT_GUTTER, 0
+        )
 
         self.deployment_tree = QTreeWidget()
 
