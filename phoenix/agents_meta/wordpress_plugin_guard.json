@@ -19,8 +19,8 @@
             ]
         },
         "plugin_dir": "/var/www/html/wordpress/wp-content/plugins",
+        "snapshot_root": "/opt/swarm/guard/snapshots",
         "quarantine_dir": "/opt/quarantine/wp_plugins",
-        "trusted_plugins_path": "/opt/swarm/guard/trusted_plugins.json",
         "enforce": false,
         "interval": 15,
         "restart_php_after_quarantine": false,

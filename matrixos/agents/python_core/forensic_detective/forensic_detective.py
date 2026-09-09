@@ -13,9 +13,10 @@ import uuid
 from collections import OrderedDict
 
 from core.python_core.boot_agent import BootAgent
+from core.python_core.mixin.encrypted_state import EncryptedStateMixin
 
 
-class Agent(BootAgent):
+class Agent(EncryptedStateMixin, BootAgent):
     def __init__(self):
         super().__init__()
         self.name = "ForensicDetective"
@@ -37,8 +38,49 @@ class Agent(BootAgent):
         self.oracle_role = oracle_config.get("role", "hive.oracle")
 
         self.last_alerts = {}
-        self.summary_path = os.path.join(self.path_resolution["comm_path_resolved"], "summary")
-        os.makedirs(self.summary_path, exist_ok=True)
+        self.init_encrypted_state(namespace="forensic_journal")
+        self.verify_existing_journal()
+
+    def verify_existing_journal(self):
+        """Authenticate a prior incident after boot so key reuse is visible."""
+        incidents_dir = self._encrypted_state_root / "incidents"
+        entries = sorted(
+            incidents_dir.glob("*.json.aes") if incidents_dir.exists() else (),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        state_id = self._encrypted_state_identity
+        if not entries:
+            self.log(
+                f"[PERSISTENCE] Encrypted forensic journal ready for "
+                f"state_id={state_id}; no prior incidents found."
+            )
+            return
+
+        latest_path = entries[0]
+        incident_id = latest_path.name.removesuffix(".json.aes")
+        try:
+            restored = self.load_encrypted_state(
+                incident_id,
+                directory="incidents",
+            )
+            if not isinstance(restored, dict):
+                raise ValueError("incident payload is not an object")
+            if restored.get("incident_id") != incident_id:
+                raise ValueError("incident identity does not match its filename")
+        except Exception as exc:
+            self.log(
+                f"[PERSISTENCE] FAILED to authenticate existing forensic "
+                f"journal for state_id={state_id}: {exc}",
+                level="CRITICAL",
+            )
+            raise
+
+        self.log(
+            f"[PERSISTENCE] Reopened encrypted forensic journal for "
+            f"state_id={state_id}; authenticated latest incident "
+            f"{incident_id} ({len(entries)} stored)."
+        )
 
     def _hash_event(self, event_data):
         """Creates a consistent hash based on the event's content."""
@@ -256,14 +298,17 @@ class Agent(BootAgent):
             "correlated_events": correlated_events,
             "full_forensic_report": forensic_report
         }
-        filename = f"{time.strftime('%Y%m%d-%H%M%S')}-{critical_event['service_name']}-failure.json"
-        filepath = os.path.join(self.summary_path, filename)
         try:
-            with open(filepath, 'w', encoding="utf-8") as f:
-                json.dump(summary_data, f, indent=4)
-            self.log(f"Full incident summary saved to: {filepath}")
+            self.save_encrypted_state(
+                incident_id,
+                summary_data,
+                directory="incidents",
+            )
+            self.log(
+                f"Encrypted incident journal updated for incident {incident_id}."
+            )
         except Exception as e:
-            self.log(f"Failed to save event summary: {e}", level="ERROR")
+            self.log(f"Failed to save encrypted incident journal: {e}", level="ERROR")
 
     def run_forensics(self, service_name, recent_events):
         """Dynamically loads and runs the appropriate investigator."""

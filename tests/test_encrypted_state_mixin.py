@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -20,7 +21,10 @@ from core.python_core.mixin.encrypted_state import (  # noqa: E402
 
 class _StateAgent(EncryptedStateMixin):
     def __init__(self, root: str) -> None:
-        self.command_line_args = {"universal_id": "cognitive-agent-1"}
+        self.command_line_args = {
+            "universal_id": "cognitive-agent-1",
+            "universe": "test-universe",
+        }
         self.tree_node = {
             "config": {
                 "security": {
@@ -31,7 +35,23 @@ class _StateAgent(EncryptedStateMixin):
                 }
             }
         }
-        self.path_resolution = {"static_comm_path_resolved": root}
+        self.path_resolution = {
+            "root_path": root,
+            "static_comm_path_resolved": root,
+        }
+
+    def add_persistent_state_profile(
+        self,
+        *,
+        state_id: str = "incident-analyst-primary",
+        key: bytes = b"p" * 32,
+    ) -> None:
+        self.tree_node["config"]["security"]["persistent_state"] = {
+            "state_id": state_id,
+            "algorithm": "AES-256-GCM",
+            "key": base64.b64encode(key).decode("ascii"),
+            "key_version": 1,
+        }
 
 
 class EncryptedStateMixinTests(unittest.TestCase):
@@ -47,7 +67,8 @@ class EncryptedStateMixinTests(unittest.TestCase):
             path = Path(directory, "cognitive", "checkpoint.json.aes")
             on_disk = path.read_text()
             self.assertNotIn("response_id", on_disk)
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertTrue(agent.delete_encrypted_state("checkpoint"))
             self.assertIsNone(agent.load_encrypted_state("checkpoint"))
 
@@ -105,12 +126,93 @@ class EncryptedStateMixinTests(unittest.TestCase):
             with self.assertRaises(EncryptedStateError):
                 second.load_encrypted_state("checkpoint")
 
+    def test_persistent_profile_survives_runtime_identity_and_transport_key_rotation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first = _StateAgent(directory)
+            first.add_persistent_state_profile()
+            first.init_encrypted_state(namespace="forensic_journal")
+            first.save_encrypted_state("incident-1", {"status": "open"})
+            journal = Path(
+                directory,
+                "universes",
+                "static",
+                "test-universe",
+                "persistent",
+                "incident-analyst-primary",
+                "forensic_journal",
+                "incident-1.json.aes",
+            )
+            self.assertTrue(journal.is_file())
+
+            redeployed = _StateAgent(directory)
+            redeployed.command_line_args["universal_id"] = "replacement-agent"
+            redeployed.tree_node["config"]["security"]["symmetric_encryption"][
+                "key"
+            ] = base64.b64encode(b"z" * 32).decode("ascii")
+            redeployed.add_persistent_state_profile()
+            redeployed.init_encrypted_state(namespace="forensic_journal")
+
+            self.assertEqual(
+                redeployed.load_encrypted_state("incident-1"),
+                {"status": "open"},
+            )
+
+    def test_persistent_state_identity_is_authenticated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first = _StateAgent(directory)
+            first.add_persistent_state_profile(state_id="journal-a")
+            first.init_encrypted_state(namespace="forensic_journal")
+            first.save_encrypted_state("incident-1", {"status": "open"})
+
+            second = _StateAgent(directory)
+            second.add_persistent_state_profile(state_id="journal-b")
+            second.init_encrypted_state(namespace="forensic_journal")
+            source = Path(
+                directory,
+                "universes",
+                "static",
+                "test-universe",
+                "persistent",
+                "journal-a",
+                "forensic_journal",
+                "incident-1.json.aes",
+            )
+            destination = Path(
+                directory,
+                "universes",
+                "static",
+                "test-universe",
+                "persistent",
+                "journal-b",
+                "forensic_journal",
+                "incident-1.json.aes",
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(source.read_bytes())
+            with self.assertRaises(EncryptedStateError):
+                second.load_encrypted_state("incident-1")
+
     def test_missing_phoenix_symmetric_key_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             agent = _StateAgent(directory)
             agent.tree_node = {"config": {}}
             with self.assertRaises(EncryptedStateError):
                 agent.init_encrypted_state(namespace="cognitive")
+
+    def test_malformed_persistent_profile_never_falls_back_to_transport_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            agent = _StateAgent(directory)
+            agent.tree_node["config"]["security"]["persistent_state"] = {
+                "state_id": "journal-a",
+                "algorithm": "AES-256-GCM",
+                "key_version": 1,
+            }
+            with self.assertRaises(EncryptedStateError):
+                agent.init_encrypted_state(namespace="forensic_journal")
+
+            agent.add_persistent_state_profile(key=b"short")
+            with self.assertRaises(EncryptedStateError):
+                agent.init_encrypted_state(namespace="forensic_journal")
 
     def test_ciphertext_and_path_are_authenticated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

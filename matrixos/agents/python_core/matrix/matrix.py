@@ -140,11 +140,90 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         self.canonize_gospel()
 
     def post_boot(self):
+        self._log_runtime_privileges()
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – panopticon live and lethal...")
         message = "I'm watching..."
         # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
         self.command_line_args.get("universal_id", "matrix")
         print(message)
+
+    def _log_runtime_privileges(self):
+        """Announce the bounded, non-secret grants attested by Railgun."""
+        encoded = os.getenv("MATRIX_RUNTIME_CAPABILITIES_B64", "").strip()
+        try:
+            uid = os.geteuid() if hasattr(os, "geteuid") else "unknown"
+            account = "unknown"
+            if uid != "unknown" and os.name == "posix":
+                import pwd
+                account = pwd.getpwuid(uid).pw_name
+            self.log(f"[PRIVILEGES] Runtime account={account} uid={uid}")
+            self.log(
+                "[PRIVILEGES] Universe-wide boundary: Matrix and all native "
+                "child agents inherit this account policy."
+            )
+            if os.name == "posix":
+                import grp
+                groups = sorted({
+                    grp.getgrgid(group_id).gr_name for group_id in os.getgroups()
+                })
+                self.log(
+                    "[PRIVILEGES] OS groups="
+                    + (",".join(groups) if groups else "none")
+                )
+                status = {}
+                try:
+                    with open("/proc/self/status", "r", encoding="utf-8") as stream:
+                        for line in stream:
+                            key, separator, value = line.partition(":")
+                            if separator and key in {"CapEff", "NoNewPrivs"}:
+                                status[key] = value.strip()
+                except OSError:
+                    pass
+                if status:
+                    self.log(
+                        "[PRIVILEGES] Linux "
+                        f"CapEff={status.get('CapEff', 'unknown')} "
+                        f"NoNewPrivs={status.get('NoNewPrivs', 'unknown')}"
+                    )
+
+            if not encoded:
+                self.log(
+                    "[PRIVILEGES] No Railgun capability attestation received; "
+                    "managed grants are unknown.",
+                    level="WARNING",
+                )
+                return
+            if len(encoded) > 65536:
+                raise ValueError("capability attestation exceeds 64 KiB")
+            payload = json.loads(
+                base64.b64decode(encoded, validate=True).decode("utf-8")
+            )
+            if not isinstance(payload, dict) or set(payload) != {"version", "grants"}:
+                raise ValueError("unexpected capability attestation fields")
+            if payload.get("version") != 1:
+                raise ValueError("unsupported capability attestation version")
+            grants = payload.get("grants")
+            if not isinstance(grants, list) or len(grants) > 128 or any(
+                not isinstance(grant, str)
+                or not grant
+                or len(grant) > 512
+                for grant in grants
+            ):
+                raise ValueError("invalid capability grant list")
+
+            self.log(
+                f"[PRIVILEGES] Railgun-managed active grants: {len(grants)}"
+            )
+            if not grants:
+                self.log("[PRIVILEGES]   none — unprivileged universe account")
+            for grant in grants:
+                self.log(f"[PRIVILEGES]   {grant}")
+        except Exception as error:
+            self.log(
+                "[PRIVILEGES] Invalid Railgun capability attestation",
+                error=error,
+                level="CRITICAL",
+            )
 
     def worker_pre(self):
         self.log("Pre-boot checks complete. Swarm ready.")

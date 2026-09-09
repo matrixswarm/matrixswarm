@@ -1,0 +1,51 @@
+{
+    "name": "site_sentinel",
+    "universal_id": "site-sentinel-1",
+    "constraints": [],
+    "config": {
+        "ui": {
+            "agent_tree": {
+                "emoji": "🛰️"
+            }
+        },
+        "interval_sec": 30,
+        "request_timeout_sec": 8,
+        "failure_threshold": 3,
+        "recovery_threshold": 2,
+        "latency_warning_ms": 2500,
+        "tls_warning_days": 21,
+        "check_assets": true,
+        "max_assets": 8,
+        "log_every": 300,
+        "report_to_role": "hive.forensics.data_feed",
+        "targets": [],
+        "traffic": {
+            "enabled": true,
+            "access_logs": [
+                "/var/log/httpd/access_log",
+                "/var/log/nginx/access.log"
+            ],
+            "window_sec": 60,
+            "top_n_ips": 10,
+            "ignored_ips": [
+                "127.0.0.1",
+                "::1"
+            ],
+            "prefer_forwarded_ip": true,
+            "per_ip_warning_rpm": 120,
+            "per_ip_critical_rpm": 300,
+            "total_warning_rpm": 600,
+            "total_critical_rpm": 1500,
+            "unique_path_warning": 80,
+            "error_ratio_warning": 0.35
+        },
+        "load": {
+            "cpu_warning_pct": 80,
+            "cpu_critical_pct": 95,
+            "memory_warning_pct": 90,
+            "memory_critical_pct": 97,
+            "load_warning_per_cpu": 1.5,
+            "load_critical_per_cpu": 3.0
+        }
+    }
+}

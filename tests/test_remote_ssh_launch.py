@@ -72,6 +72,12 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 self.assertIn("client.close()", text)
                 self.assertIn("build_remote_matrixd_command", text)
 
+        control_source = source(self.launcher_paths[0])
+        self.assertIn(
+            "derive_runtime_capabilities(stored_agents)",
+            control_source,
+        )
+
     def test_remote_shell_tokens_fail_closed(self):
         helper = load_module(self.shell_helper_path, "remote_shell_policy")
         self.assertEqual(
@@ -151,6 +157,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             "name": "matrix",
             "children": [
                 {"name": "apache_watchdog", "config": {"service_name": "httpd"}},
+                {"name": "nginx_watchdog", "config": {"service_name": "nginx"}},
                 {"name": "redis_watchdog", "config": {"service_name": "redis"}},
                 {"name": "mysql_watchdog", "config": {"service_name": "mysqld"}},
                 {"name": "gatekeeper"},
@@ -160,7 +167,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                     "config": {
                         "plugin_dir": "/var/www/html/wordpress/wp-content/plugins",
                         "quarantine_dir": "/opt/quarantine/wp_plugins",
-                        "trusted_plugins_path": "/opt/swarm/guard/trusted_plugins.json",
+                        "snapshot_root": "/opt/swarm/guard/snapshots",
                     },
                 },
             ],
@@ -168,11 +175,14 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         capabilities = helper.derive_runtime_capabilities(tree)
         self.assertEqual(
             capabilities["watchdog_services"],
-            ["httpd.service", "redis.service", "mysqld.service"],
+            ["httpd.service", "nginx.service", "redis.service", "mysqld.service"],
         )
         self.assertTrue(capabilities["gatekeeper_secure_log"])
         self.assertIsNotNone(capabilities["wordpress"])
         self.assertTrue(capabilities["mcp_worker"])
+        self.assertIn("/var/log/httpd", capabilities["log_read_scopes"])
+        self.assertIn("/var/log/redis", capabilities["log_read_scopes"])
+        self.assertIn("/var/log/secure", capabilities["log_read_files"])
 
         command = helper.build_remote_matrixd_command(
             action="start",
@@ -184,6 +194,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         self.assertIn("matrix-secure-readers", command)
         self.assertIn("setfacl", command)
         self.assertIn("matrix-phoenix-mcp", command)
+        self.assertIn("MATRIX_RUNTIME_CAPABILITIES_B64=", command)
         self.assertIn(
             "Plugin directory not found: %s",
             command,
@@ -248,6 +259,8 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             helper.validate_runtime_capabilities(
                 {"watchdog_services": ["sshd.service"]}
             )
+        with self.assertRaises(ValueError):
+            helper.validate_runtime_capabilities({"arbitrary_sudo": True})
 
         without_mcp = helper.build_remote_matrixd_command(
             action="start",
@@ -263,6 +276,98 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             'rm -f "/etc/matrixswarm/mcp-launchers/$SWARM_USER.json"',
             without_mcp,
         )
+        self.assertIn(
+            'rm -f "/etc/sudoers.d/matrixswarm-$SWARM_USER-watchdogs"',
+            without_mcp,
+        )
+        self.assertIn(
+            'gpasswd -d "$SWARM_USER" matrix-secure-readers',
+            without_mcp,
+        )
+        self.assertIn("wordpress-acl", command)
+        self.assertIn('SNAPSHOT_ROOT=/opt/swarm/guard/snapshots', command)
+        self.assertIn('done < "$WP_ACL_MANIFEST"', without_mcp)
+
+    def test_forensic_detective_gets_diagnostic_logs_but_not_kernel_or_root(self):
+        helper = load_module(self.shell_helper_path, "forensic_capabilities")
+        capabilities = helper.derive_runtime_capabilities({
+            "name": "matrix",
+            "children": [{"name": "forensic_detective", "config": {}}],
+        })
+        self.assertEqual(
+            capabilities["log_read_scopes"],
+            [
+                "/var/log/apache2",
+                "/var/log/httpd",
+                "/var/log/nginx",
+                "/var/log/mariadb",
+                "/var/log/mysql",
+                "/var/log/redis",
+            ],
+        )
+        self.assertEqual(capabilities["log_read_files"], ["/var/log/mysqld.log"])
+        grants = helper.describe_runtime_capabilities(capabilities)
+        self.assertFalse(any("dmesg" in grant or "/root" in grant for grant in grants))
+
+    def test_site_sentinel_receives_only_approved_read_only_log_scopes(self):
+        helper = load_module(self.shell_helper_path, "site_sentinel_capabilities")
+        tree = {
+            "name": "matrix",
+            "children": [{
+                "name": "site_sentinel",
+                "config": {
+                    "traffic": {
+                        "enabled": True,
+                        "access_logs": [
+                            "/var/log/httpd/access_log",
+                            "/var/log/nginx/access.log",
+                        ],
+                    }
+                },
+            }],
+        }
+        capabilities = helper.derive_runtime_capabilities(tree)
+        self.assertEqual(
+            capabilities["log_read_scopes"],
+            ["/var/log/httpd", "/var/log/nginx"],
+        )
+        self.assertEqual(capabilities["log_read_files"], [])
+        self.assertEqual(
+            helper.describe_runtime_capabilities(capabilities),
+            ["READ /var/log/httpd/**", "READ /var/log/nginx/**"],
+        )
+
+        encoded = helper.encode_runtime_capability_manifest(capabilities)
+        manifest = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        self.assertEqual(manifest["version"], 1)
+        self.assertEqual(manifest["grants"], [
+            "READ /var/log/httpd/**",
+            "READ /var/log/nginx/**",
+        ])
+
+        command = helper.build_remote_matrixd_command(
+            action="start",
+            universe="dragoart",
+            linux_user="matrix-dragoart",
+            runtime_capabilities=capabilities,
+        )
+        self.assertIn("setfacl -m", command)
+        self.assertIn("[LOG-ACCESS] READ /var/log/httpd/**", command)
+        self.assertNotIn("chmod 777", command)
+
+        tree["children"][0]["config"]["traffic"]["access_logs"] = [
+            "/root/private.log"
+        ]
+        with self.assertRaises(ValueError):
+            helper.derive_runtime_capabilities(tree)
+
+    def test_matrix_announces_railgun_managed_grants_at_boot(self):
+        matrix_source = source(
+            ROOT / "matrixos/agents/python_core/matrix/matrix.py"
+        )
+        self.assertIn("MATRIX_RUNTIME_CAPABILITIES_B64", matrix_source)
+        self.assertIn("Railgun-managed active grants", matrix_source)
+        self.assertIn("Universe-wide boundary", matrix_source)
     def test_remote_command_never_contains_boot_secrets(self):
         helper = load_module(self.shell_helper_path, "remote_secret_boundary")
         secret = base64.b64encode(b"k" * 32).decode("ascii")

@@ -5,6 +5,7 @@ Non-blocking SSH deploy with full live output streaming.
 """
 from matrix_gui.modules.railgun.remote_shell import (
     build_remote_matrixd_command,
+    describe_runtime_capabilities,
     mcp_worker_linux_user,
     send_boot_envelope,
     validate_linux_user,
@@ -92,6 +93,16 @@ class RailgunWorker(QThread):
             self.sig_stdout.emit(
                 f"[RAILGUN] Universe account: {linux_user}\n"
             )
+            grants = describe_runtime_capabilities(runtime_capabilities)
+            self.sig_stdout.emit(
+                f"[RAILGUN] Railgun-managed active grants: {len(grants)}\n"
+            )
+            for grant in grants:
+                self.sig_stdout.emit(f"[RAILGUN]   {grant}\n")
+            if not grants:
+                self.sig_stdout.emit(
+                    "[RAILGUN]   none — unprivileged universe account\n"
+                )
             if runtime_capabilities.get("mcp_worker"):
                 self.sig_stdout.emit(
                     "[RAILGUN] MCP worker account: "

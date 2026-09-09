@@ -4,6 +4,7 @@ from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 from matrix_gui.modules.railgun.remote_shell import (
     build_remote_matrixd_command,
     default_linux_user,
+    describe_runtime_capabilities,
     derive_runtime_capabilities,
     mcp_worker_linux_user,
     send_boot_envelope,
@@ -204,10 +205,11 @@ class DeployDialog(QtWidgets.QDialog):
 
             universe = validate_remote_token(universe, "Universe name")
 
-            runtime_capabilities = self.deployment.get(
-                "runtime_capabilities"
-            ) or derive_runtime_capabilities(
-                self.deployment.get("agents", {})
+            stored_agents = self.deployment.get("agents", {})
+            runtime_capabilities = (
+                derive_runtime_capabilities(stored_agents)
+                if stored_agents
+                else self.deployment.get("runtime_capabilities") or {}
             )
             cmd = build_remote_matrixd_command(
                 action=action,
@@ -217,6 +219,16 @@ class DeployDialog(QtWidgets.QDialog):
                 runtime_capabilities=runtime_capabilities,
             )
             self.output.append(f"[ACCOUNT] Universe runs as {linux_user}\n")
+            grants = describe_runtime_capabilities(runtime_capabilities)
+            self.output.append(
+                f"[ACCOUNT] Railgun-managed active grants: {len(grants)}\n"
+            )
+            for grant in grants:
+                self.output.append(f"[ACCOUNT]   {grant}\n")
+            if not grants:
+                self.output.append(
+                    "[ACCOUNT]   none — unprivileged universe account\n"
+                )
             if runtime_capabilities.get("mcp_worker"):
                 self.output.append(
                     "[ACCOUNT] MCP worker runs as "
