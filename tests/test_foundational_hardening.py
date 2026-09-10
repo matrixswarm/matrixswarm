@@ -100,6 +100,16 @@ class FoundationalHardeningTests(unittest.TestCase):
         requirements = source("matrixos/requirements.txt")
         self.assertNotIn("mysql-connector-python", requirements)
 
+    def test_runtime_requirements_exclude_unused_data_science_stack(self):
+        for requirements_path in (
+            "matrixos/requirements.txt",
+            "phoenix/requirements.txt",
+        ):
+            requirements = source(requirements_path).lower()
+            self.assertNotIn("numpy", requirements)
+            self.assertNotIn("pandas", requirements)
+            self.assertNotIn("pytrends", requirements)
+
     def test_logger_source_never_prints_encrypted_payload(self):
         logger = source(
             "matrixos/core/python_core/class_lib/logging/logger.py"
@@ -109,6 +119,22 @@ class FoundationalHardeningTests(unittest.TestCase):
             logger,
         )
         self.assertIn("print(json.dumps(log_entry", logger)
+
+    def test_agent_arms_encrypted_logger_before_first_structured_log(self):
+        boot_agent = source("matrixos/core/python_core/boot_agent.py")
+        key_activation = boot_agent.index(
+            "self.logger.set_encryption_key(self.swarm_key)"
+        )
+        first_agent_log = boot_agent.index('"[BOOT][MEMORY] protected:')
+        self.assertLess(key_activation, first_agent_log)
+
+    def test_log_streamer_accepts_legacy_plaintext_structured_records(self):
+        streamer = source(
+            "matrixos/agents/python_core/log_streamer/log_streamer.py"
+        )
+        self.assertIn("entry = json.loads(candidate)", streamer)
+        self.assertIn("candidate = Logger.decrypt_log_line", streamer)
+        self.assertIn('rendered.append(f"[MALFORMED] {candidate}")', streamer)
 
     def test_railgun_requires_python_312_for_new_environments(self):
         installer = source(
