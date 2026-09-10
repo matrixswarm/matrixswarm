@@ -159,7 +159,11 @@ class Agent(BootAgent):
 
             self._cfg_lock = threading.Lock()
 
-            self.payload_dir = os.path.join(self.path_resolution['comm_path'], "matrix", "payload")
+            self.payload_dir = os.path.join(
+                self.path_resolution['comm_path'],
+                self.get_matrix_universal_id(),
+                "payload",
+            )
 
             security = config.get("security")
             conn = security.get("connection")
@@ -442,7 +446,7 @@ class Agent(BootAgent):
                 pk.set_data({'handler': "cmd_the_source", "content":matrix_packet})  # relay the verified inner command
 
                 # 9) Forward to Matrix
-                self.pass_packet(pk, target_uid="matrix")
+                self.pass_packet(pk, target_uid=self.get_matrix_universal_id())
                 return jsonify({"status": "ok", "message": "Relayed to Matrix"})
 
             except Exception as e:

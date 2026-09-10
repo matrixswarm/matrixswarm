@@ -128,6 +128,7 @@ class DeployOptionsDialog(QDialog):
             # === Boot Flags ===
 
             self.flag_reboot = QCheckBox("--reboot  (Restart agents without full reinit)")
+            self.flag_reboot.setChecked(True)
             self.flag_reboot.setToolTip("Restart agents in the current universe without full reinitialization.")
             rg_lay.addWidget(self.flag_reboot)
 
@@ -142,6 +143,17 @@ class DeployOptionsDialog(QDialog):
             self.flag_rugpull = QCheckBox("--rug-pull  (Each agent's run-file self-deletes after boot)")
             self.flag_rugpull.setToolTip("Force rug-pull mode: each agent's pod-run-file self-deletes after boot.")
             rg_lay.addWidget(self.flag_rugpull)
+
+            self.flag_protect_memory = QCheckBox(
+                "--protect-memory  (Restrict agent memory and environment to root)"
+            )
+            self.flag_protect_memory.setChecked(True)
+            self.flag_protect_memory.setToolTip(
+                "Launch every agent as a Linux non-dumpable process. Other "
+                "users, including the swarm account's peer processes, cannot "
+                "inspect its memory or environment; root retains access."
+            )
+            rg_lay.addWidget(self.flag_protect_memory)
 
             self.flag_clean = QCheckBox("--clean  (Purge runtime directories before boot)")
             self.flag_clean.setToolTip("Purge all runtime directories before booting.")
@@ -225,6 +237,7 @@ class DeployOptionsDialog(QDialog):
             "verbose": self.flag_verbose.isChecked(),
             "debug": self.flag_debug.isChecked(),
             "rug_pull": self.flag_rugpull.isChecked(),
+            "protect_memory": self.flag_protect_memory.isChecked(),
             "clean": self.flag_clean.isChecked(),
             "reboot_new": self.flag_reboot_new.isChecked(),
             "reboot_id": self.flag_reboot_id.text().strip() or None,

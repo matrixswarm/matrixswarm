@@ -16,6 +16,7 @@ _ALLOWED_BOOT_FLAGS = {
     "--reboot",
     "--reboot-new",
     "--rug-pull",
+    "--protect-memory",
 }
 _WATCHDOG_SERVICE_BY_AGENT = {
     "apache_watchdog": "httpd",
@@ -76,9 +77,10 @@ _RUNTIME_CAPABILITY_FIELDS = {
 MAX_BOOT_ENVELOPE_BYTES = 16 * 1024 * 1024
 _BOOT_BUNDLE_FIELDS = {"nonce", "tag", "ciphertext"}
 _MATRIXD_STDIN_PROBE = (
-    "if /matrix/.venv/bin/python3 /matrix/scripts/matrixd boot --help "
-    "2>&1 | grep -F -- '--directive-stdin' >/dev/null; then exit 0; "
-    "else exit 65; fi"
+    "HELP=$(/matrix/.venv/bin/python3 /matrix/scripts/matrixd boot --help 2>&1); "
+    "if printf '%s' \"$HELP\" | grep -F -- '--directive-stdin' >/dev/null "
+    "&& printf '%s' \"$HELP\" | grep -F -- '--protect-memory' >/dev/null; "
+    "then exit 0; else exit 65; fi"
 )
 
 
@@ -142,7 +144,7 @@ def verify_remote_matrixd_stdin(client, timeout=30):
     if status != 0:
         raise RuntimeError(
             "Remote MatrixOS update required: matrixd does not support "
-            "sealed --directive-stdin boot"
+            "sealed --directive-stdin and --protect-memory boot"
         )
     return True
 
@@ -278,10 +280,21 @@ def describe_runtime_capabilities(capabilities):
     return grants
 
 
-def encode_runtime_capability_manifest(capabilities):
+def describe_universe_teardown_grant(universe):
+    """Describe the exact control-plane cleanup grant for one universe."""
+    universe = validate_remote_token(universe, "Universe name")
+    return (
+        f"SUDO teardown {universe} directive/key; optional runtime/static trees"
+    )
+
+
+def encode_runtime_capability_manifest(capabilities, *, universe=None):
     """Encode a public capability attestation for Matrix's boot log."""
+    grants = describe_runtime_capabilities(capabilities)
+    if universe is not None:
+        grants.append(describe_universe_teardown_grant(universe))
     payload = json.dumps(
-        {"version": 1, "grants": describe_runtime_capabilities(capabilities)},
+        {"version": 1, "grants": grants},
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
@@ -522,7 +535,9 @@ def build_remote_matrixd_command(
     universe = validate_remote_token(universe, "Universe name")
     linux_user = validate_linux_user(linux_user, "Swarm Linux user")
     capabilities = validate_runtime_capabilities(runtime_capabilities)
-    capability_manifest = encode_runtime_capability_manifest(capabilities)
+    capability_manifest = encode_runtime_capability_manifest(
+        capabilities, universe=universe
+    )
     flags = []
     for flag in boot_flags:
         if flag not in _ALLOWED_BOOT_FLAGS:
@@ -531,6 +546,10 @@ def build_remote_matrixd_command(
     if reboot_id:
         reboot_id = validate_remote_token(reboot_id, "Reboot ID")
         flags.extend(("--reboot-id", reboot_id))
+
+    restart_requested = action == "restart" or any(
+        flag in flags for flag in ("--reboot", "--reboot-new", "--reboot-id")
+    )
 
     q_universe = quote_remote_argument(universe, "Universe name")
     q_user = quote_remote_argument(linux_user, "Swarm Linux user")
@@ -565,7 +584,7 @@ def build_remote_matrixd_command(
     lines.extend([
         *(
             [f"{common_env} {matrixd} kill --universe {q_universe}"]
-            if action == "restart" or "--reboot" in flags
+            if restart_requested
             else []
         ),
         "if id -u \"$SWARM_USER\" >/dev/null 2>&1; then "
@@ -666,6 +685,35 @@ def build_remote_matrixd_command(
         ])
     else:
         lines.append('rm -f "/etc/sudoers.d/matrixswarm-$SWARM_USER-watchdogs"')
+
+    # Matrix normally runs as the isolated universe account, so it cannot
+    # unlink legacy boot directives from the root-owned boot_directives
+    # directory.  Grant only the two exact cleanup forms exposed by the
+    # confirmed teardown dialog.  The validated universe is embedded in the
+    # sudoers command; no wildcard, shell, arbitrary matrixd action, or other
+    # universe is authorized.
+    teardown_commands = ", ".join((
+        f"/matrix/.venv/bin/python3 /matrix/scripts/matrixd kill "
+        f"--universe {universe} --delete-directive-with-key",
+        f"/matrix/.venv/bin/python3 /matrix/scripts/matrixd kill "
+        f"--universe {universe} --delete-directive-with-key --clean-up",
+    ))
+    q_teardown_commands = quote_remote_argument(
+        teardown_commands, "Universe teardown sudo commands"
+    )
+    lines.extend([
+        "command -v sudo >/dev/null 2>&1 || "
+        "{ echo '[TEARDOWN][ERROR] sudo is required.' >&2; exit 69; }",
+        "command -v visudo >/dev/null 2>&1 || "
+        "{ echo '[TEARDOWN][ERROR] visudo is required.' >&2; exit 69; }",
+        "SUDOERS_TMP=$(mktemp /etc/sudoers.d/.matrixswarm-teardown.XXXXXX)",
+        f"printf '%s ALL=(root) NOPASSWD: %s\\n' \"$SWARM_USER\" "
+        f"{q_teardown_commands} > \"$SUDOERS_TMP\"",
+        "chown root:root \"$SUDOERS_TMP\" && chmod 0440 \"$SUDOERS_TMP\"",
+        "visudo -cf \"$SUDOERS_TMP\" >/dev/null",
+        "mv -f \"$SUDOERS_TMP\" "
+        "\"/etc/sudoers.d/matrixswarm-$SWARM_USER-teardown\"",
+    ])
 
     if capabilities["gatekeeper_secure_log"]:
         lines.extend([

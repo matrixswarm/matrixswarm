@@ -283,7 +283,7 @@ class Agent(BootAgent):
             pk = self.get_delivery_packet("standard.command.packet")
             pk.set_data({'handler': "cmd_the_source", "content": matrix_packet})  # relay the verified inner command
 
-            self.pass_packet(pk, "matrix")
+            self.pass_packet(pk, self.get_matrix_universal_id())
 
             return True
 

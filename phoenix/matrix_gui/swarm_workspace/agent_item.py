@@ -84,7 +84,7 @@ class AgentItem(QGraphicsRectItem):
         except (ImportError, AttributeError):
             Editor = BaseEditor
 
-        dlg = Editor(self.node)
+        dlg = Editor(self.node, parent=getattr(self.scene(), "workspace", None))
         if dlg.exec():
             self.scene().workspace.save()  # save workspace immediately
 

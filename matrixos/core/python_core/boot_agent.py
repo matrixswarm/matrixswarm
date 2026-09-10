@@ -1,6 +1,8 @@
 # Authored by Daniel F MacDonald and ChatGPT aka The Generals
 # Docstrings by Gemini
 import os
+import sys
+import ctypes
 import time
 import traceback
 import threading
@@ -91,6 +93,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.path_resolution = payload["path_resolution"]
         self.command_line_args = payload["args"]
         self.tree_node = payload["tree_node"]
+        self.matrix_universal_id = str(
+            self.command_line_args.get("matrix") or "matrix"
+        )
+        self.memory_protection = bool(
+            self.command_line_args.get("protect_memory", 0)
+        )
 
         #used by the swarm to encrypt packets
         self.swarm_key = payload.get("swarm_key")  #swarm AES Key
@@ -125,6 +133,27 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.debug = DebugConfig()
 
         self.logger = Logger(self.path_resolution["static_comm_path_resolved"], "logs", "agent.log")
+
+        if self.memory_protection:
+            if not sys.platform.startswith("linux"):
+                self.log(
+                    "[BOOT][FATAL] Root-only memory protection requires Linux.",
+                    level="CRITICAL",
+                )
+                raise RuntimeError("Root-only memory protection requires Linux")
+            dumpable = ctypes.CDLL(None, use_errno=True).prctl(3, 0, 0, 0, 0)
+            if dumpable != 0:
+                self.log(
+                    "[BOOT][FATAL] Agent process is dumpable; secure boot denied.",
+                    level="CRITICAL",
+                )
+                raise RuntimeError("PR_GET_DUMPABLE did not confirm protection")
+            self.log(
+                "[BOOT][MEMORY] protected: PR_SET_DUMPABLE=0; inspection "
+                "restricted to root/CAP_SYS_PTRACE."
+            )
+        else:
+            self.log("[BOOT][MEMORY] protection not requested.")
 
         self.encryption_enabled=bool(payload.get("encryption_enabled",0))
         if self.encryption_enabled:
@@ -283,6 +312,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self._catch_football.set_identity_base_path(self.path_resolution['comm_path'])
 
         self.last_tree_mtime = 0
+
+    def get_matrix_universal_id(self):
+        """Return the authoritative root address supplied by CoreSpawner."""
+        return self.matrix_universal_id
 
     class FootballType(Enum):
         PASS = 1
@@ -551,7 +584,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 #"sig": sign_packet(
             }
 
-            target = self.command_line_args.get("matrix")
+            target = self.get_matrix_universal_id()
 
             pk1 = self.get_delivery_packet("standard.command.packet")
             pk1.set_data(payload)
@@ -881,7 +914,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         try:
 
             if ENCRYPTION_CONFIG.is_enabled():
-                football.set_allowed_sender_ids(["matrix"])
+                football.set_allowed_sender_ids([self.get_matrix_universal_id()])
 
             pk1 = self.get_delivery_packet("standard.tree.packet", new=True)
 
@@ -1280,10 +1313,36 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             return []
 
     def get_cached_service_managers(self):
-        if hasattr(self, "_service_manager_services") and self._service_manager_services:
-            return self._service_manager_services
-        else:
-            return []
+        cached = getattr(self, "_service_manager_services", None)
+        if cached:
+            return cached
+
+        # Matrix already owns the authoritative master tree in memory.  During
+        # sealed-stream boots its delegated agent_tree.json may not have been
+        # consumed by spawn_manager yet, so waiting on that file leaves service
+        # discovery empty even though the swarm and its WSS relay are healthy.
+        # Prime the same minimal catalog directly from the loaded master tree.
+        master = getattr(self, "_agent_tree_master", None)
+        if master is not None and hasattr(master, "get_minimal_services_tree"):
+            try:
+                cached = master.get_minimal_services_tree(
+                    self.get_matrix_universal_id()
+                )
+                self._service_manager_services = cached
+                if cached:
+                    self.log(
+                        f"[INTEL] Service catalog primed from master tree "
+                        f"({len(cached)} endpoints)."
+                    )
+                return cached
+            except Exception as e:
+                self.log(
+                    "[INTEL][ERROR] Failed to prime service catalog from "
+                    "master tree",
+                    error=e,
+                )
+
+        return []
 
     #orginizes level one children by role
     def track_direct_subordinates(self):
@@ -1500,7 +1559,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             keychain["encryption_enabled"]=int(self.encryption_enabled)
             keychain["security_box"] = self.security_box.copy()
             #Matrix is running, and currently spawning
-            if node.get("universal_id") == 'matrix':
+            if node.get("universal_id") == self.get_matrix_universal_id():
                 keychain["matrix_priv"] = self.matrix_priv
                 keychain["private_key"] = self.private_key
 
@@ -1547,6 +1606,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 python_site=self.path_resolution["python_site"],
                 detected_python=self.path_resolution["python_exec"],
             )
+            cp.set_matrix_universal_id(self.get_matrix_universal_id())
+            cp.set_protect_memory(self.memory_protection)
 
             if keychain and len(keychain) > 0:
                 cp.set_keys(keychain)

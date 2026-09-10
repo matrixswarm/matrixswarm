@@ -7,6 +7,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtCore import QRect, QSize, Qt, QPoint, QTimer
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
+from matrix_gui.core.class_lib.packet_delivery.utility.security.packet_security import resolve_matrix_universal_id
 
 import uuid
 class CryptoAlertPanel(QWidget):
@@ -40,6 +41,9 @@ class CryptoAlertPanel(QWidget):
         if partial:
             config["partial_config"] = True
 
+        deployment = getattr(self.session_window, "deployment", {}) or {}
+        matrix_uid = resolve_matrix_universal_id(deployment)
+
         agent_packet = {
             "name": "crypto_alert",
             "universal_id": alert.get("universal_id"),
@@ -51,7 +55,7 @@ class CryptoAlertPanel(QWidget):
         packet_data = {
             "handler": "cmd_inject_agents",
             "content": {
-                "target_universal_id": "matrix",
+                "target_universal_id": matrix_uid,
                 "subtree": agent_packet,
                 "confirm_response": 1,
                 "respond_to": "crypto_gui_1",

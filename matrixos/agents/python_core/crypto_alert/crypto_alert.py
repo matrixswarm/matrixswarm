@@ -644,7 +644,7 @@ class Agent(BootAgent):
                 "content": patch
             })
 
-            self.pass_packet(pkt, "matrix")
+            self.pass_packet(pkt, self.get_matrix_universal_id())
 
         except Exception as e:
             self.log("Error saving config patch", error=e)
@@ -660,7 +660,7 @@ class Agent(BootAgent):
                 }
             })
 
-            self.pass_packet(pk, "matrix")
+            self.pass_packet(pk, self.get_matrix_universal_id())
 
         except Exception as e:
             self.log(error=e)

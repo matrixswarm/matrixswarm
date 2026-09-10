@@ -152,11 +152,41 @@ class PhoenixControlPanel(QWidget):
 
             self.deployment_selector.clear()
 
-            for dep_id, meta in deployments.items():
-                if not isinstance(meta, dict):
-                    continue
-                label = meta.get("label", dep_id)
-                self.deployment_selector.addItem(label, dep_id)
+            # A universe may be deployed repeatedly under the same friendly
+            # label.  Each deployment owns a fresh TLS/signing bundle, so an
+            # older record is not interchangeable with the currently running
+            # one.  Put the newest record first and make otherwise-identical
+            # labels visibly distinct.
+            choices = [
+                (dep_id, meta)
+                for dep_id, meta in deployments.items()
+                if isinstance(meta, dict)
+            ]
+            choices.sort(
+                key=lambda item: str(item[1].get("deployed_at") or ""),
+                reverse=True,
+            )
+
+            for dep_id, meta in choices:
+                label = str(meta.get("label") or dep_id)
+                deployed_at = str(meta.get("deployed_at") or "").strip()
+                stamp = deployed_at.replace("T", " ")[:16] if deployed_at else "unknown time"
+                display = f"{label} · {stamp} · {str(dep_id)[:6]}"
+                self.deployment_selector.addItem(display, dep_id)
+                index = self.deployment_selector.count() - 1
+                self.deployment_selector.setItemData(
+                    index,
+                    (
+                        f"Deployment ID: {dep_id}\n"
+                        f"Deployed: {deployed_at or 'unknown'}\n"
+                        "Connect must match the certificate bundle currently "
+                        "running on MatrixOS."
+                    ),
+                    QtCore.Qt.ItemDataRole.ToolTipRole,
+                )
+
+            if choices:
+                self.deployment_selector.setCurrentIndex(0)
 
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.refresh_deployments", e)

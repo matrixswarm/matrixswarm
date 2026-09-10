@@ -11,7 +11,12 @@ class Agent(BootAgent):
     def __init__(self, ):
         super().__init__()
 
-        self.codex_dir = os.path.join(self.path_resolution["comm_path"], "matrix", "codex", "apps")
+        self.codex_dir = os.path.join(
+            self.path_resolution["comm_path"],
+            self.get_matrix_universal_id(),
+            "codex",
+            "apps",
+        )
 
     def worker_pre(self):
         self.log("[CONTEXT] AppContextAgent online. Awaiting deployment commands.")
@@ -48,7 +53,11 @@ class Agent(BootAgent):
                         }
                     }
                 }
-                path = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
+                path = os.path.join(
+                    self.path_resolution["comm_path"],
+                    self.get_matrix_universal_id(),
+                    "payload",
+                )
                 fname = f"spawn_{universal_id}_{int(time.time())}.json"
                 with open(os.path.join(path, fname), "w", encoding="utf-8") as f:
                     json.dump(spawn_cmd, f, indent=2)

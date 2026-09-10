@@ -144,7 +144,11 @@ class ReapStatusHandlerMixin:
             self.meta["swarm_state"]["reserved_agent_ids"]["reaper"] = reaper_id
 
             reaper_node = make_reaper_node(universal_id=reaper_id)
-            tp.insert_node(reaper_node, parent_universal_id="matrix", matrix_priv_obj=self.matrix_priv_obj)
+            tp.insert_node(
+                reaper_node,
+                parent_universal_id=self.get_matrix_universal_id(),
+                matrix_priv_obj=self.matrix_priv_obj,
+            )
             self.save_agent_tree_master()
             self.delegate_tree_to_agent(self.command_line_args['universal_id'], self.tree_path_dict)
 

@@ -5,12 +5,37 @@ from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet im
 from matrix_gui.core.utils.crypto_utils import encrypt_with_ephemeral_aes, sign_data
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 
-def wrap_packet_securely(inner_data, deployment, sign=False, encrypt=False, target_uid="matrix", extra_fields=None):
+
+def _walk_deployment_agents(agents):
+    if isinstance(agents, dict):
+        yield agents
+        for child in agents.get("children", []) or []:
+            yield from _walk_deployment_agents(child)
+    elif isinstance(agents, list):
+        for agent in agents:
+            yield from _walk_deployment_agents(agent)
+
+
+def resolve_matrix_universal_id(deployment):
+    """Resolve the Matrix root by stable source name, never by a fixed UID."""
+    for agent in _walk_deployment_agents((deployment or {}).get("agents", [])):
+        if str(agent.get("name") or "").strip().lower() == "matrix":
+            universal_id = str(agent.get("universal_id") or "").strip()
+            if universal_id:
+                return universal_id
+    raise ValueError("Deployment does not contain a Matrix root universal_id")
+
+def wrap_packet_securely(inner_data, deployment, sign=False, encrypt=False, target_uid=None, extra_fields=None):
     if not (sign or encrypt):
         # fallback passthrough
         pk = Packet()
         pk.set_data(inner_data)
         return pk
+
+    # "matrix" remains a compatibility alias for old callers and directives;
+    # modern deployments resolve the root's generated universal ID by name.
+    if target_uid in (None, "matrix"):
+        target_uid = resolve_matrix_universal_id(deployment)
 
     # Get encryption and signing keys
     remote_pubkey = _find_pubkey(deployment, target_uid)

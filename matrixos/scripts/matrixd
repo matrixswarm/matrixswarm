@@ -110,43 +110,120 @@ def get_all_swarm_agent_info(universe=None, base="/matrix"):
 
     Optional: pass a universe name to filter only that swarm.
     """
-    base_root = str(Path(base)).rstrip("/") or "/"
-    pattern = re.compile(
+    base_root = str(base).replace("\\", "/").rstrip("/") or "/"
+    runtime_pattern = re.compile(
         rf"{re.escape(base_root)}/universes/runtime/"
         r"(?P<universe>[a-zA-Z0-9_\-]+)/"
         r"(?P<reboot>[0-9_]+)/pod/(?P<uuid>[a-f0-9\-]+)/run\s+"
-        r"--job\s+(?P<job_universe>[a-zA-Z0-9_\-]+):"
+        r"--job(?:=|\s+)"
+        r"(?P<job_universe>[a-zA-Z0-9_\-]+):"
         r"(?P<universal_id>[a-zA-Z0-9_\-]+)"
     )
+    job_pattern = re.compile(
+        r"^(?P<job_universe>[a-zA-Z0-9_\-]{1,32}):"
+        r"(?P<universal_id>[a-zA-Z0-9_\-]+)$"
+    )
+    protected_launcher = (
+        Path(base_root) / "core" / "python_core" / "protected_launcher.py"
+    ).as_posix()
+
+    def extract_job(cmdline_parts):
+        for index, value in enumerate(cmdline_parts):
+            if value == "--job" and index + 1 < len(cmdline_parts):
+                return job_pattern.fullmatch(str(cmdline_parts[index + 1]))
+            if str(value).startswith("--job="):
+                return job_pattern.fullmatch(str(value).split("=", 1)[1])
+        return None
+
+    def runtime_details(cmdline, proc, job_universe, universal_id):
+        match = runtime_pattern.search(cmdline)
+        if match and match.group("universe") == job_universe:
+            return match.group("reboot")
+
+        # Protected processes intentionally expose only the fixed launcher and
+        # the universe-scoped --job label. Root matrixd may use the private
+        # launch-path environment entry to recover the graceful-shutdown comm
+        # directory; PID termination remains available if /proc denies it.
+        try:
+            run_path = (proc.environ() or {}).get("MATRIX_AGENT_RUN_PATH", "")
+        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+            run_path = ""
+        if run_path:
+            protected_cmdline = f"{run_path} --job {job_universe}:{universal_id}"
+            match = runtime_pattern.search(protected_cmdline)
+            if match and match.group("universe") == job_universe:
+                return match.group("reboot")
+
+        # The protected launcher removes its private path from the live Python
+        # environment. Locate the matching comm directory instead; UUIDs are
+        # unique inside a universe, so this retains graceful die-cookie
+        # shutdown without disclosing the source path on the command line.
+        runtime_universe = Path(base) / "universes" / "runtime" / job_universe
+        try:
+            boots = sorted(
+                (
+                    child for child in runtime_universe.iterdir()
+                    if child.name != "latest"
+                    and child.is_dir()
+                    and re.fullmatch(r"[0-9_]+", child.name)
+                ),
+                key=lambda child: child.name,
+                reverse=True,
+            )
+            for boot in boots:
+                if (boot / "comm" / universal_id).is_dir():
+                    return boot.name
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+
+        return None
 
     results = []
 
     for proc in psutil.process_iter(['pid', 'cmdline']):
         try:
-            cmdline = " ".join(proc.info['cmdline'])
-            match = pattern.search(cmdline)
-            if match:
-                gd = match.groupdict()
+            cmdline_parts = [str(value) for value in (proc.info.get('cmdline') or [])]
+            job_match = extract_job(cmdline_parts)
+            if not job_match:
+                continue
+            job_universe = job_match.group("job_universe")
+            universal_id = job_match.group("universal_id")
+            if universe and job_universe != universe:
+                continue
 
-                # ✅ Skip if a target universe was requested and doesn't match
-                if universe and gd["universe"] != universe:
-                    continue
+            cmdline = " ".join(cmdline_parts)
+            direct_match = runtime_pattern.search(cmdline)
+            if direct_match and (
+                direct_match.group("universe") != job_universe
+                or direct_match.group("job_universe") != job_universe
+                or direct_match.group("universal_id") != universal_id
+            ):
+                direct_match = None
+            approved_launcher = bool(
+                direct_match or protected_launcher in cmdline_parts
+            )
+            if not approved_launcher:
+                continue
 
-                if gd["universe"] != gd["job_universe"]:
-                    continue  # sanity check mismatch
+            reboot_uuid = runtime_details(
+                cmdline, proc, job_universe, universal_id
+            )
+            runtime_root = (
+                Path(base) / "universes" / "runtime" / job_universe / reboot_uuid
+                if reboot_uuid
+                else None
+            )
 
-                runtime_root = Path(base) / "universes" / "runtime" / gd["universe"] / gd["reboot"]
-
-                results.append({
-                    "pid": proc.info['pid'],
-                    "universe": gd["universe"],
-                    "reboot_uuid": gd["reboot"],
-                    "universal_id": gd["universal_id"],
-                    "pod_path": str(runtime_root / "pod"),
-                    "comm_path": str(runtime_root / "comm"),
-                    "details": {"cmd": cmdline},
-                })
-        except Exception:
+            results.append({
+                "pid": proc.info['pid'],
+                "universe": job_universe,
+                "reboot_uuid": reboot_uuid,
+                "universal_id": universal_id,
+                "pod_path": str(runtime_root / "pod") if runtime_root else None,
+                "comm_path": str(runtime_root / "comm") if runtime_root else None,
+                "details": {"cmd": cmdline},
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError, TypeError):
             continue
 
     return results
@@ -183,7 +260,10 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
     print(f"[REBOOT] 💣 Full MIRV deployment initiated: {universe}")
     target_paths = get_all_swarm_agent_info(universe=universe, base=base)
 
-    B2Bomber().level_it(target_paths)
+    if not B2Bomber().level_it(target_paths):
+        raise RuntimeError(
+            f"[REBOOT][ABORT] Prior '{universe}' agents survived shutdown."
+        )
 
     rejected_nodes=    tp.get_rejected_nodes()
     if rejected_nodes:
@@ -194,6 +274,8 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
     print(f"{universe}, {base}, ")
 
     cp = CoreSpawner(universe, base, python_site=base, detected_python=python_exec, booting=True, args=args)
+    cp.set_matrix_universal_id(MATRIX_UUID)
+    cp.set_protect_memory(getattr(args, "protect_memory", False))
 
     if verbose: cp.set_verbose(True)
     if debug: cp.set_debug(True)
@@ -212,20 +294,25 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
         matrix_priv_obj,
         matrix_pub=matrix_pub,
         matrix_priv=matrix_priv,
-        matrix_key_b64=matrix_key_b64
+        matrix_key_b64=matrix_key_b64,
+        matrix_uid=MATRIX_UUID,
     )
 
     # encryption is turned on here
     mode = "encrypt"
 
-    matrix_node = tp.nodes.get("matrix")
+    matrix_node = tp.nodes.get(MATRIX_UUID)
+    if not matrix_node:
+        raise RuntimeError(
+            f"[FATAL] Matrix root '{MATRIX_UUID}' is missing from the directive"
+        )
 
     fb = Football()
     fb.set_identity_sig_verifier_pubkey(matrix_pub)
     fb.add_identity(matrix_node['vault'],
                     identity_name="agent_owner", #owner identity
                     verify_universal_id=True,      #make sure the name of the agent is the same as the one in the identity
-                    universal_id="matrix",         #agent name to compare to the identity
+                    universal_id=MATRIX_UUID,       #root ID to compare to the identity
                     is_payload_identity=True,         #yes, this payload is an identity; used during receiving packets; this will be the senders packet
                     sig_verifier_pubkey=matrix_pub,   #this pubkey is used to verify the identity, always Matrix's pubkey; used during sending packets
                     is_pubkey_for_encryption=False,    #if you turn on asymmetric encryption the pubkey contained in the identity will encrypt, check payload size
@@ -240,7 +327,7 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
     fb.set_pubkey_verifier(matrix_pub)
 
     #matrix identity needs to be loaded as the target, because the pubkey is used to encrypt the aes key
-    fb.load_identity_file(vault=matrix_node['vault'], universal_id='matrix')
+    fb.load_identity_file(vault=matrix_node['vault'], universal_id=MATRIX_UUID)
     fb.set_aes_encryption_pubkey(matrix_pub)
     agent = DeliveryAgent()
     agent.set_crypto_handler(packet_encryption_factory(mode, fb))
@@ -270,7 +357,14 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
 
     matrix_node['children'] = []
     new_uuid, pod_path = cp.create_runtime()
-    cp.spawn_agent(universe, "site_boot", MATRIX_UUID, MATRIX_UUID, new_uuid, matrix_node)
+    cp.spawn_agent(
+        universe=universe,
+        spawner="site_boot",
+        universal_id=MATRIX_UUID,
+        agent_name=matrix_node.get("name") or "matrix",
+        spawn_uuid=new_uuid,
+        tree_node=matrix_node,
+    )
 
     print(f"[✅] Matrix deployed at: {pod_path}")
     print(f"[🧠] Swarm online :: {MATRIX_UUID} :: fingerprint: {hashlib.sha256(matrix_pub.encode()).hexdigest()[:12]}")
@@ -298,6 +392,14 @@ def main():
     boot.add_argument("--rug-pull", action="store_true", help="Force rug-pull mode (agents terminate after boot).")
     boot.add_argument("--clean", action="store_true", help="Purge all runtime directories before booting.")
     boot.add_argument("--reboot-new", action="store_true", help="Force creation of a new reboot UUID (fresh timestamp).")
+    boot.add_argument(
+        "--protect-memory",
+        action="store_true",
+        help=(
+            "Mark every agent non-dumpable before secure boot so only root or "
+            "CAP_SYS_PTRACE may inspect its memory and environment."
+        ),
+    )
     boot.add_argument("--reboot-id", help="Resume a specific previous reboot UUID (timestamp directory).")
 
     # subcommands
@@ -336,12 +438,13 @@ def main():
 
     args = parser.parse_args()
     if args.cmd == "boot":
+        reboot_requested = bool(args.reboot or args.reboot_new or args.reboot_id)
         boot_universe(
             universe=args.universe,
             args=args,
             base=args.base,
             python_exec=args.python_exec,
-            reboot=args.reboot,
+            reboot=reboot_requested,
             verbose=args.verbose,
             debug=args.debug,
             rug_pull=args.rug_pull

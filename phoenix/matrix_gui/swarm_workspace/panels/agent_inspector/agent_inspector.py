@@ -1,7 +1,8 @@
 # Authored by Daniel F MacDonald and ChatGPT-5.1 aka The Generals
 # Works with RegistryManager, ConstraintRowWidget, WorkspaceBus
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit, QScrollArea
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QPushButton, QMessageBox
 )
 from PyQt6.QtCore import Qt
 from matrix_gui.registry.registry_manager import RegistryManagerDialog
@@ -47,9 +48,18 @@ class AgentInspector(QWidget):
         self.uid_edit.setReadOnly(False)
         self.uid_edit.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        #universal_id
+        # universal_id and workspace-wide identity rotation
         main.addWidget(QLabel("Universal ID"))
-        main.addWidget(self.uid_edit)
+        uid_row = QHBoxLayout()
+        uid_row.addWidget(self.uid_edit, 1)
+        self.generate_all_uids_btn = QPushButton("Generate All UUIDs")
+        self.generate_all_uids_btn.setToolTip(
+            "Assign Matrix and every agent a fresh, unique universal ID and "
+            "update all workspace references."
+        )
+        self.generate_all_uids_btn.clicked.connect(self._generate_all_uids)
+        uid_row.addWidget(self.generate_all_uids_btn)
+        main.addLayout(uid_row)
 
         # CONSTRAINT SECTION HEADER
         main.addWidget(QLabel("<b>Requirements</b>"))
@@ -137,10 +147,12 @@ class AgentInspector(QWidget):
         uid = node.get_universal_id()
         self.uid_edit.setText(uid)
 
-        # Matrix UID is locked
+        # Individual edits remain locked for Matrix.  Workspace-wide UUID
+        # generation updates Matrix and all dependent references atomically.
         is_matrix = node.get_name().lower() == "matrix"
         self.uid_edit.setReadOnly(is_matrix)
         self.uid_edit.setEnabled(not is_matrix)
+        self.generate_all_uids_btn.setEnabled(True)
 
         self._reload_constraints()
 
@@ -350,6 +362,34 @@ class AgentInspector(QWidget):
         self.node.set_universal_id(new_uid)
 
         ws.save()
+
+    def _generate_all_uids(self):
+        ws = self.workspace
+        if not ws or not hasattr(ws, "controller") or not ws.controller.nodes:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Generate New Universal IDs?",
+            "Assign Matrix and every agent a fresh UUID?\n\n"
+            "All exact agent-ID references in this workspace will be updated.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        current_node = self.node
+        replacements = ws.controller.regenerate_all_universal_ids()
+        ws.save()
+        if current_node is not None:
+            self.load(current_node)
+        QMessageBox.information(
+            self,
+            "Universal IDs Generated",
+            f"Assigned {len(replacements)} fresh universal IDs and updated "
+            "workspace references.",
+        )
 
     def clear(self):
         """Reset the inspector UI to a neutral state."""

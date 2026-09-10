@@ -153,6 +153,7 @@ class Deploy():
                 "encrypted_bundle": bundle,
                 "encrypted_hash": encrypted_hash,
                 "linux_user": opts["linux_user"],
+                "protect_memory": bool(opts.get("protect_memory", True)),
                 "runtime_capabilities": opts["runtime_capabilities"],
                 "agents": deployment_staging.deployment["agents"],
                 "certs": deployment_staging.deployment["certs"],

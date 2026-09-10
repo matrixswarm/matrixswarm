@@ -151,7 +151,7 @@ class Agent(BootAgent):
     def send_confirmation(self, universal_id, status="terminated"):
         try:
 
-            target = "matrix"
+            target = self.get_matrix_universal_id()
 
             if not universal_id:
                 return

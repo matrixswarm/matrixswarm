@@ -103,10 +103,19 @@ class DeployDialog(QtWidgets.QDialog):
         self.flag_clean = QtWidgets.QCheckBox("--clean")
         self.flag_rugpull = QtWidgets.QCheckBox("--rug-pull")
         self.flag_reboot_new = QtWidgets.QCheckBox("--reboot-new")
+        self.flag_protect_memory = QtWidgets.QCheckBox("--protect-memory")
+        self.flag_protect_memory.setChecked(
+            bool(self.deployment.get("protect_memory", True))
+        )
+        self.flag_protect_memory.setToolTip(
+            "Restrict agent memory and environment inspection to root or "
+            "CAP_SYS_PTRACE."
+        )
 
         flag_row = QtWidgets.QHBoxLayout()
         for f in (self.flag_verbose, self.flag_debug, self.flag_clean,
-                  self.flag_rugpull, self.flag_reboot_new):
+                  self.flag_rugpull, self.flag_reboot_new,
+                  self.flag_protect_memory):
             flag_row.addWidget(f)
 
         opts_layout.addWidget(QtWidgets.QLabel("Boot Flags:"))
@@ -182,6 +191,7 @@ class DeployDialog(QtWidgets.QDialog):
         if self.flag_clean.isChecked(): flags.append("--clean")
         if self.flag_rugpull.isChecked(): flags.append("--rug-pull")
         if self.flag_reboot_new.isChecked(): flags.append("--reboot-new")
+        if self.flag_protect_memory.isChecked(): flags.append("--protect-memory")
         try:
             linux_user = validate_linux_user(
                 self.linux_user_edit.text(), "Swarm Linux user"

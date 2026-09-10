@@ -113,7 +113,9 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             self._serial_num= self.tree_node.get('serial')
 
             # delegate Matrix her Tree
-            self.delegate_tree_to_agent("matrix", self.tree_path_dict)
+            self.delegate_tree_to_agent(
+                self.get_matrix_universal_id(), self.tree_path_dict
+            )
 
             self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
@@ -442,7 +444,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             mark = {
                 "lifecycle_status": {
                     "locked": {
-                        "by": "matrix",
+                        "by": self.get_matrix_universal_id(),
                         "reason": "shutdown_delete",
                         "timestamp": time.time(),
                     },
@@ -1046,7 +1048,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 return False
             name = tree.get("name", "").lower()
             uid = tree.get("universal_id", "").lower()
-            if name == "matrix" or uid == "matrix":
+            if name == "matrix" or uid == self.get_matrix_universal_id().lower():
                 return True
             for child in tree.get("children", []):
                 if contains_matrix_node(child):
@@ -1059,7 +1061,10 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 ret['error_code'] = 4
                 return ret
         else:
-            if agent_name == "matrix" or universal_id == "matrix":
+            if (
+                agent_name == "matrix"
+                or universal_id == self.get_matrix_universal_id()
+            ):
                 self.log("[INJECT][BLOCKED] Direct Matrix injection attempt denied.")
                 ret['error_code'] = 4
                 return ret
@@ -1237,7 +1242,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             mark = {
                 "lifecycle_status": {
                     "locked": {
-                        "by": "matrix",
+                        "by": self.get_matrix_universal_id(),
                         "reason": "shutdown_restart",
                         "timestamp": time.time()
                     },
@@ -1453,7 +1458,10 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
             data = {"agent_tree": self._agent_tree_master.root, "meta": self.meta}
             football = self.get_football(type=self.FootballType.PASS)
-            football.load_identity_file(vault=self.tree_node['vault'], universal_id='matrix')
+            football.load_identity_file(
+                vault=self.tree_node['vault'],
+                universal_id=self.get_matrix_universal_id(),
+            )
             self.save_directive(self.tree_path_dict, data, football=football)
 
             if self.debug.is_enabled():
@@ -1849,6 +1857,21 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 cmd.append("--delete-directive-with-key")
             if clean_up:
                 cmd.append("--clean-up")
+
+            # The universe account can level its own processes, but removing
+            # a legacy directive from root-owned /matrix/boot_directives needs
+            # the exact Railgun-provisioned sudoers grant.  Sudo receives a
+            # fixed matrixd argv (validated universe plus one of two cleanup
+            # forms); no shell or general root command is exposed.
+            if delete_directive_with_key and os.geteuid() != 0:
+                sudo = shutil.which("sudo")
+                if not sudo:
+                    self.log(
+                        "[MATRIX-DELETE][ERROR] sudo is unavailable for "
+                        "privileged directive cleanup."
+                    )
+                    return
+                cmd = [sudo, "-n"] + cmd
 
             selected_cleanup = (
                 "directive/key and runtime/static trees"

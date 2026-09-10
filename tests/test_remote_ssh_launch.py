@@ -1,5 +1,6 @@
 import ast
 import base64
+import importlib.machinery
 import importlib.util
 import io
 import json
@@ -7,8 +8,10 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +26,20 @@ def load_module(relative_path, module_name):
     spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def load_matrixd(module_name):
+    path = ROOT / "matrixos" / "scripts" / "matrixd"
+    loader = importlib.machinery.SourceFileLoader(module_name, str(path))
+    spec = importlib.util.spec_from_loader(module_name, loader)
+    module = importlib.util.module_from_spec(spec)
+    original_path = list(sys.path)
+    sys.path.insert(0, str(ROOT / "matrixos"))
+    try:
+        loader.exec_module(module)
+    finally:
+        sys.path[:] = original_path
     return module
 
 
@@ -53,10 +70,8 @@ class RemoteSSHLaunchTests(unittest.TestCase):
 
         railgun_source = source(self.launcher_paths[1])
         self.assertIn("--verbose suppressed for detached SSH boot", railgun_source)
-        self.assertIn(
-            'for flag in ["debug", "clean", "reboot", "rug_pull", "reboot_new"]',
-            railgun_source,
-        )
+        self.assertIn('"protect_memory",', railgun_source)
+        self.assertNotIn('self.opts.get("verbose"):\n                flags.append', railgun_source)
 
     def test_launchers_use_installed_venv_and_drain_channels(self):
         helper_source = source(self.shell_helper_path)
@@ -437,6 +452,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         current = Client(0)
         self.assertTrue(helper.verify_remote_matrixd_stdin(current))
         self.assertIn("--directive-stdin", current.command)
+        self.assertIn("--protect-memory", current.command)
         self.assertNotIn("swarm_key", current.command.lower())
 
         legacy = Client(65)
@@ -520,6 +536,179 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         spawner = source("matrixos/core/python_core/core_spawner.py")
         self.assertNotIn('open("/matrix/spawn.log"', spawner)
         self.assertIn('Path(self.pm.session.static_root) / "spawn.log"', spawner)
+
+    def test_root_only_memory_protection_is_wired_end_to_end(self):
+        helper = load_module(self.shell_helper_path, "memory_protection_flag")
+        command = helper.build_remote_matrixd_command(
+            action="start",
+            universe="phoenix",
+            linux_user="matrix-phoenix",
+            boot_flags=("--protect-memory",),
+        )
+        self.assertIn("--protect-memory", command)
+
+        matrixd_source = source("matrixos/scripts/matrixd")
+        spawner_source = source("matrixos/core/python_core/core_spawner.py")
+        launcher_source = source("matrixos/core/python_core/protected_launcher.py")
+        boot_source = source("matrixos/core/python_core/boot_agent.py")
+        self.assertIn('"--protect-memory",', matrixd_source)
+        self.assertIn("protected_launcher.py", spawner_source)
+        self.assertNotIn('"-c"', spawner_source)
+        self.assertIn("PR_SET_DUMPABLE", launcher_source)
+        self.assertIn("runpy.run_path", launcher_source)
+        self.assertIn("PR_GET_DUMPABLE did not confirm protection", boot_source)
+        self.assertIn(
+            "cp.set_protect_memory(self.memory_protection)", boot_source
+        )
+
+    def test_railgun_redeploy_replaces_an_active_universe(self):
+        helper = load_module(self.shell_helper_path, "railgun_redeploy")
+        command = helper.build_remote_matrixd_command(
+            action="start",
+            universe="phoenix",
+            linux_user="matrix-phoenix",
+            boot_flags=("--reboot-new",),
+        )
+        self.assertLess(
+            command.index("matrixd kill --universe phoenix"),
+            command.index("matrixd boot --universe phoenix"),
+        )
+
+        options_source = source(
+            "phoenix/matrix_gui/modules/directive/deploy_options_dialog.py"
+        )
+        matrixd_source = source("matrixos/scripts/matrixd")
+        self.assertIn("self.flag_reboot.setChecked(True)", options_source)
+        self.assertIn(
+            "args.reboot or args.reboot_new or args.reboot_id",
+            matrixd_source,
+        )
+        self.assertIn(
+            "[REBOOT][ABORT] Prior '{universe}' agents survived shutdown.",
+            matrixd_source,
+        )
+
+    def test_protected_and_direct_agents_share_the_universe_kill_boundary(self):
+        matrixd = load_matrixd("matrixd_protected_inventory")
+
+        class FakeProcess:
+            def __init__(self, pid, cmdline, environment=None):
+                self.info = {"pid": pid, "cmdline": cmdline}
+                self._environment = environment or {}
+
+            def environ(self):
+                return dict(self._environment)
+
+        old_uid = "873adca8b378468c9de5a20f9026b85c"
+        new_uid = "ceb670c1856f4812b3b9b62443f9cd36"
+        old_run = (
+            "/matrix/universes/runtime/phoenix/20260909_233000/"
+            "pod/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/run"
+        )
+        new_run = (
+            "/matrix/universes/runtime/phoenix/20260909_233300/"
+            "pod/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/run"
+        )
+        processes = [
+            FakeProcess(
+                108928,
+                ["/matrix/.venv/bin/python3", old_run, "--job", f"phoenix:{old_uid}"],
+            ),
+            FakeProcess(
+                109272,
+                [
+                    "/matrix/.venv/bin/python3",
+                    "/matrix/core/python_core/protected_launcher.py",
+                    "--job",
+                    f"phoenix:{new_uid}",
+                ],
+                {"MATRIX_AGENT_RUN_PATH": new_run},
+            ),
+            FakeProcess(
+                109999,
+                ["/tmp/protected_launcher.py", "--job", "phoenix:decoy"],
+            ),
+            FakeProcess(
+                110000,
+                [
+                    "/matrix/.venv/bin/python3",
+                    old_run.replace("/phoenix/", "/dragoart/"),
+                    "--job",
+                    "phoenix:mismatched",
+                ],
+            ),
+        ]
+
+        with mock.patch.object(matrixd.psutil, "process_iter", return_value=processes):
+            agents = matrixd.get_all_swarm_agent_info(universe="phoenix")
+
+        self.assertEqual([agent["pid"] for agent in agents], [108928, 109272])
+        self.assertEqual(
+            [agent["universal_id"] for agent in agents], [old_uid, new_uid]
+        )
+        self.assertEqual(
+            [agent["reboot_uuid"] for agent in agents],
+            ["20260909_233000", "20260909_233300"],
+        )
+        self.assertTrue(all(agent["comm_path"] for agent in agents))
+
+    def test_universe_teardown_sudo_is_exact_and_universe_scoped(self):
+        helper = load_module(self.shell_helper_path, "teardown_sudo_scope")
+        command = helper.build_remote_matrixd_command(
+            action="start",
+            universe="phoenix",
+            linux_user="matrix-phoenix",
+            boot_flags=(),
+        )
+
+        delete_only = (
+            "/matrix/.venv/bin/python3 /matrix/scripts/matrixd kill "
+            "--universe phoenix --delete-directive-with-key"
+        )
+        full_cleanup = delete_only + " --clean-up"
+        self.assertIn(delete_only, command)
+        self.assertIn(full_cleanup, command)
+        self.assertIn(
+            "/etc/sudoers.d/matrixswarm-$SWARM_USER-teardown",
+            command,
+        )
+        self.assertNotIn("NOPASSWD: ALL", command)
+        self.assertNotIn("matrixd *", command)
+
+        encoded = helper.encode_runtime_capability_manifest(
+            {}, universe="phoenix"
+        )
+        manifest = json.loads(base64.b64decode(encoded).decode("utf-8"))
+        self.assertIn(
+            "SUDO teardown phoenix directive/key; optional runtime/static trees",
+            manifest["grants"],
+        )
+
+        matrix_source = source("matrixos/agents/python_core/matrix/matrix.py")
+        self.assertIn('cmd = [sudo, "-n"] + cmd', matrix_source)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux prctl test")
+    def test_memory_bootstrap_remains_nondumpable_while_agent_runs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            probe = Path(temp_dir) / "probe.py"
+            probe.write_text(
+                "import ctypes\n"
+                "print(ctypes.CDLL(None).prctl(3, 0, 0, 0, 0))\n",
+                encoding="utf-8",
+            )
+            env = dict(os.environ)
+            env["MATRIX_AGENT_RUN_PATH"] = str(probe)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "matrixos/core/python_core/protected_launcher.py"),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        self.assertEqual(result.stdout.strip(), "0")
 
 
 if __name__ == "__main__":

@@ -70,7 +70,9 @@ class Agent(BootAgent):
         """
         try:
 
-            if not self.verify_identity(identity, ['matrix']):
+            if not self.verify_identity(
+                identity, [self.get_matrix_universal_id()]
+            ):
                 return
 
             targets = content.get("targets", [])
@@ -373,7 +375,7 @@ class Agent(BootAgent):
                 raise RuntimeError("Failed to create delivery packet.")
 
             pk.set_data(payload)
-            self.pass_packet(pk, "matrix")
+            self.pass_packet(pk, self.get_matrix_universal_id())
 
         except Exception as e:
             self.log(f"[REAPER][ERROR] Failed to report to Matrix (stage: {stage}, uid: {uid}): {e}",

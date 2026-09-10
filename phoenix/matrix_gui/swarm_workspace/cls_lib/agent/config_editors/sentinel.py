@@ -16,6 +16,15 @@ class Sentinel(BaseEditor):
         # A place to store selection if "Watch Specific Agent…" is used
         self.manual_target = None
 
+    def _matrix_universal_id(self):
+        workspace = self.parent()
+        controller = getattr(workspace, "controller", None)
+        if controller is not None:
+            for item in controller.nodes.values():
+                if item.node.get_name().lower() == "matrix":
+                    return item.node.get_universal_id()
+        return "matrix"
+
     # ---------------------------------------------------------
     # BUILD CLEAN UI
     # ---------------------------------------------------------
@@ -37,7 +46,7 @@ class Sentinel(BaseEditor):
         # REHYDRATE FROM CONFIG
         watched = cfg.get("universal_id_under_watch")
 
-        if watched == "matrix":
+        if watched in {"matrix", self._matrix_universal_id()}:
             self.mode.setCurrentIndex(1)
         else:
             self.mode.setCurrentIndex(0)
@@ -136,7 +145,7 @@ class Sentinel(BaseEditor):
             if msg.exec() != QMessageBox.StandardButton.Ok:
                 return
 
-            self.node.config["universal_id_under_watch"] = "matrix"
+            self.node.config["universal_id_under_watch"] = self._matrix_universal_id()
             self.node.mark_dirty()
             self.accept()
             return

@@ -105,7 +105,7 @@ class OutboundDispatcher:
                          packet: Packet,
                          security_sig=True,
                          security_encryption=True,
-                         security_target_universal_id="matrix"):
+                         security_target_universal_id=None):
         """
         Event handler for outbound.message
 
