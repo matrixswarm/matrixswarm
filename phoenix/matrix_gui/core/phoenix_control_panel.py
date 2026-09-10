@@ -8,7 +8,7 @@ from matrix_gui.core.event_bus import EventBus
 from matrix_gui.modules.directive.directive_manager_dialog import DirectiveManagerDialog
 from matrix_gui.modules.net.connection_manager_dialog import ConnectionManagerDialog
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
-from matrix_gui.registry.registry_manager_v2 import RegistryManagerDialogV2
+from matrix_gui.registry.registry_manager import RegistryManagerDialog
 
 from matrix_gui.modules.railgun.railgun_check_dialog import RailgunCheckDialog
 from matrix_gui.modules.railgun.railgun_install_dialog import RailgunInstallDialog
@@ -204,13 +204,11 @@ class PhoenixControlPanel(QWidget):
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.on_vault_update", e)
 
-    from matrix_gui.registry.registry_manager_v2 import RegistryManagerDialogV2
-
     def launch_registry_manager(self):
         try:
             # Create once
             if self._registry_dialog is None:
-                self._registry_dialog = RegistryManagerDialogV2(parent=self)
+                self._registry_dialog = RegistryManagerDialog(parent=self)
 
                 # Ensure reference is cleared if user closes it
                 self._registry_dialog.finished.connect(self._on_registry_closed)
