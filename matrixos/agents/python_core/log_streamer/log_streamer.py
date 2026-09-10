@@ -269,14 +269,26 @@ class Agent(BootAgent):
                 if new_lines:
                     rendered = []
                     for line in new_lines:
+                        candidate = line.strip()
                         try:
-                            if self.key_bytes:
-                                line = Logger.decrypt_log_line(line, self.key_bytes)
-                            entry = json.loads(line)
+                            # Older encrypted deployments can contain one
+                            # plaintext structured boot record written before
+                            # the logger key was armed. Accept and redact that
+                            # valid JSON directly; ciphertext still takes the
+                            # authenticated decrypt path, and corrupt content is
+                            # still surfaced as malformed below.
+                            try:
+                                entry = json.loads(candidate)
+                            except json.JSONDecodeError:
+                                if self.key_bytes:
+                                    candidate = Logger.decrypt_log_line(
+                                        candidate, self.key_bytes
+                                    )
+                                entry = json.loads(candidate)
                             safe_entry = Logger.redact_structure(entry)
                             rendered.append(Logger.render_log_line(safe_entry))
                         except Exception:
-                            rendered.append(f"[MALFORMED] {line.strip()}")
+                            rendered.append(f"[MALFORMED] {candidate}")
 
                     # Structured redaction above protects normal Logger
                     # entries. This second pass covers renderer output and

@@ -134,6 +134,16 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         self.logger = Logger(self.path_resolution["static_comm_path_resolved"], "logs", "agent.log")
 
+        # Arm encrypted logging before emitting any agent record. Previously
+        # the memory-boundary status was written as one plaintext JSON line,
+        # which was harmless but looked like a decrypt failure when streamed.
+        self.encryption_enabled = bool(payload.get("encryption_enabled", 0))
+        if self.encryption_enabled:
+            config.set_swarm_key(self.swarm_key)
+            config.set_private_key(self.private_key)
+            config.set_enabled(True)
+            self.logger.set_encryption_key(self.swarm_key)
+
         if self.memory_protection:
             if not sys.platform.startswith("linux"):
                 self.log(
@@ -154,13 +164,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             )
         else:
             self.log("[BOOT][MEMORY] protection not requested.")
-
-        self.encryption_enabled=bool(payload.get("encryption_enabled",0))
-        if self.encryption_enabled:
-            config.set_swarm_key(self.swarm_key)
-            config.set_private_key(self.private_key)
-            config.set_enabled(True)
-            self.logger.set_encryption_key(self.swarm_key)
 
         # Optional fingerprint of Matrix public key
         try:
