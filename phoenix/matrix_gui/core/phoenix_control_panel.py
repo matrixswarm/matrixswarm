@@ -8,7 +8,7 @@ from matrix_gui.core.event_bus import EventBus
 from matrix_gui.modules.directive.directive_manager_dialog import DirectiveManagerDialog
 from matrix_gui.modules.net.connection_manager_dialog import ConnectionManagerDialog
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
-from matrix_gui.registry.registry_manager_v2 import RegistryManagerDialogV2
+from matrix_gui.registry.registry_manager import RegistryManagerDialog
 
 from matrix_gui.modules.railgun.railgun_check_dialog import RailgunCheckDialog
 from matrix_gui.modules.railgun.railgun_install_dialog import RailgunInstallDialog
@@ -152,11 +152,41 @@ class PhoenixControlPanel(QWidget):
 
             self.deployment_selector.clear()
 
-            for dep_id, meta in deployments.items():
-                if not isinstance(meta, dict):
-                    continue
-                label = meta.get("label", dep_id)
-                self.deployment_selector.addItem(label, dep_id)
+            # A universe may be deployed repeatedly under the same friendly
+            # label.  Each deployment owns a fresh TLS/signing bundle, so an
+            # older record is not interchangeable with the currently running
+            # one.  Put the newest record first and make otherwise-identical
+            # labels visibly distinct.
+            choices = [
+                (dep_id, meta)
+                for dep_id, meta in deployments.items()
+                if isinstance(meta, dict)
+            ]
+            choices.sort(
+                key=lambda item: str(item[1].get("deployed_at") or ""),
+                reverse=True,
+            )
+
+            for dep_id, meta in choices:
+                label = str(meta.get("label") or dep_id)
+                deployed_at = str(meta.get("deployed_at") or "").strip()
+                stamp = deployed_at.replace("T", " ")[:16] if deployed_at else "unknown time"
+                display = f"{label} · {stamp} · {str(dep_id)[:6]}"
+                self.deployment_selector.addItem(display, dep_id)
+                index = self.deployment_selector.count() - 1
+                self.deployment_selector.setItemData(
+                    index,
+                    (
+                        f"Deployment ID: {dep_id}\n"
+                        f"Deployed: {deployed_at or 'unknown'}\n"
+                        "Connect must match the certificate bundle currently "
+                        "running on MatrixOS."
+                    ),
+                    QtCore.Qt.ItemDataRole.ToolTipRole,
+                )
+
+            if choices:
+                self.deployment_selector.setCurrentIndex(0)
 
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.refresh_deployments", e)
@@ -174,13 +204,11 @@ class PhoenixControlPanel(QWidget):
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.on_vault_update", e)
 
-    from matrix_gui.registry.registry_manager_v2 import RegistryManagerDialogV2
-
     def launch_registry_manager(self):
         try:
             # Create once
             if self._registry_dialog is None:
-                self._registry_dialog = RegistryManagerDialogV2(parent=self)
+                self._registry_dialog = RegistryManagerDialog(parent=self)
 
                 # Ensure reference is cleared if user closes it
                 self._registry_dialog.finished.connect(self._on_registry_closed)

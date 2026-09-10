@@ -9,9 +9,14 @@ import time
 import json
 
 class SwarmManager:
-    def __init__(self, path_resolution):
+    def __init__(self, path_resolution, matrix_universal_id="matrix"):
         self.path_resolution = path_resolution
-        self.tree_path = os.path.join(self.path_resolution['comm_path'], 'matrix', 'agent_tree_master.json')
+        self.matrix_universal_id = matrix_universal_id
+        self.tree_path = os.path.join(
+            self.path_resolution['comm_path'],
+            self.matrix_universal_id,
+            'agent_tree_master.json',
+        )
         self.logger = Logger(self.path_resolution["comm_path_resolved"])
 
     def handle_injection(self, content):
@@ -81,7 +86,7 @@ class SwarmManager:
         # Trigger only the root node of the injected subtree — and let the chain reaction begin
         root_id = subtree.get("universal_id")
         if root_id:
-            request_path = os.path.join(self.path_resolution["comm_path"], "matrix", "incoming",
+            request_path = os.path.join(self.path_resolution["comm_path"], self.matrix_universal_id, "incoming",
                                         f"{target_universal_id}:_tree_slice_request.cmd")
             JsonSafeWrite.safe_write(request_path, "1")
             self.logger.log(f"[TEAM-INJECT] Slice request primed for root: {root_id}")

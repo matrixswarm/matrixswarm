@@ -203,7 +203,11 @@ def sign_pubkey_registry(self, pubkey_path):
 
 def verify_pubkey_registry(self):
     try:
-        pubkey_path = os.path.join(self.path_resolution["comm_path"], "matrix", "pubkeys.json")
+        pubkey_path = os.path.join(
+            self.path_resolution["comm_path"],
+            self.get_matrix_universal_id(),
+            "pubkeys.json",
+        )
         sig_path = pubkey_path + ".sig"
 
         if not os.path.exists(pubkey_path) or not os.path.exists(sig_path):

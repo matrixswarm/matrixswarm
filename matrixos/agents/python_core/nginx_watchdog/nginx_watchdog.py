@@ -12,6 +12,12 @@ from core.python_core.utils.swarm_sleep import interruptible_sleep
 from datetime import datetime
 from core.python_core.mixin.agent_summary_mixin import AgentSummaryMixin
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from core.python_core.utils.systemd_service import (
+    SYSTEMCTL,
+    diagnostic_command,
+    restart_command,
+    status_command,
+)
 
 class Agent(BootAgent, AgentSummaryMixin):
     """
@@ -67,7 +73,7 @@ class Agent(BootAgent, AgentSummaryMixin):
             bool: True if the service is active, False otherwise.
         """
         try:
-            result = subprocess.run(["systemctl", "is-active", "--quiet", self.service_name], check=False)
+            result = subprocess.run(status_command(self.service_name), check=False)
             return result.returncode == 0
         except Exception as e:
             self.log(f"[SENTINEL][ERROR] systemctl failed: {e}")
@@ -98,7 +104,7 @@ class Agent(BootAgent, AgentSummaryMixin):
             self.log("[SENTINEL][DISABLED] Agent is disabled after repeated restart failures.")
             return
         try:
-            subprocess.run(["systemctl", "restart", self.service_name], check=True)
+            subprocess.run(restart_command(self.service_name), check=True)
             self.log("[SENTINEL] ✅ Nginx successfully restarted.")
             self.failed_restart_count = 0
             self.stats["restarts"] += 1
@@ -151,7 +157,10 @@ class Agent(BootAgent, AgentSummaryMixin):
         Returns True if enabled, False otherwise.
         """
         try:
-            result = subprocess.run(["systemctl", "is-enabled", "--quiet", self.service_name], check=False)
+            result = subprocess.run(
+                [SYSTEMCTL, "is-enabled", "--quiet", self.service_name],
+                check=False,
+            )
             return result.returncode == 0
         except Exception as e:
             self.log(f"[SENTINEL][ERROR] systemctl is-enabled failed: {e}")
@@ -354,7 +363,7 @@ class Agent(BootAgent, AgentSummaryMixin):
         # Get systemd status summary
         try:
             info['systemd_status'] = subprocess.check_output(
-                ["systemctl", "status", self.service_name], text=True, stderr=subprocess.STDOUT
+                diagnostic_command(self.service_name), text=True, stderr=subprocess.STDOUT
             ).strip()
         except Exception as e:
             info['systemd_status'] = f"Error: {e}"

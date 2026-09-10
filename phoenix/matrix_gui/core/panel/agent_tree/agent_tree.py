@@ -348,7 +348,8 @@ class PhoenixAgentTree(QWidget):
                 return
 
             uid = node.get("universal_id")
-            if not uid or uid == "matrix":  # don’t allow nuking Matrix itself
+            is_matrix = str(node.get("name") or "").strip().lower() == "matrix"
+            if not uid or is_matrix or uid == "matrix":  # legacy root ID
                 return
 
             menu = QMenu(self)

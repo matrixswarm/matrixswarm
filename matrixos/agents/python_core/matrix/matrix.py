@@ -113,7 +113,9 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             self._serial_num= self.tree_node.get('serial')
 
             # delegate Matrix her Tree
-            self.delegate_tree_to_agent("matrix", self.tree_path_dict)
+            self.delegate_tree_to_agent(
+                self.get_matrix_universal_id(), self.tree_path_dict
+            )
 
             self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
 
@@ -140,11 +142,90 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         self.canonize_gospel()
 
     def post_boot(self):
+        self._log_runtime_privileges()
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – panopticon live and lethal...")
         message = "I'm watching..."
         # Manually check if our own comm directory exists (it does), and deliver the tree slice directly
         self.command_line_args.get("universal_id", "matrix")
         print(message)
+
+    def _log_runtime_privileges(self):
+        """Announce the bounded, non-secret grants attested by Railgun."""
+        encoded = os.getenv("MATRIX_RUNTIME_CAPABILITIES_B64", "").strip()
+        try:
+            uid = os.geteuid() if hasattr(os, "geteuid") else "unknown"
+            account = "unknown"
+            if uid != "unknown" and os.name == "posix":
+                import pwd
+                account = pwd.getpwuid(uid).pw_name
+            self.log(f"[PRIVILEGES] Runtime account={account} uid={uid}")
+            self.log(
+                "[PRIVILEGES] Universe-wide boundary: Matrix and all native "
+                "child agents inherit this account policy."
+            )
+            if os.name == "posix":
+                import grp
+                groups = sorted({
+                    grp.getgrgid(group_id).gr_name for group_id in os.getgroups()
+                })
+                self.log(
+                    "[PRIVILEGES] OS groups="
+                    + (",".join(groups) if groups else "none")
+                )
+                status = {}
+                try:
+                    with open("/proc/self/status", "r", encoding="utf-8") as stream:
+                        for line in stream:
+                            key, separator, value = line.partition(":")
+                            if separator and key in {"CapEff", "NoNewPrivs"}:
+                                status[key] = value.strip()
+                except OSError:
+                    pass
+                if status:
+                    self.log(
+                        "[PRIVILEGES] Linux "
+                        f"CapEff={status.get('CapEff', 'unknown')} "
+                        f"NoNewPrivs={status.get('NoNewPrivs', 'unknown')}"
+                    )
+
+            if not encoded:
+                self.log(
+                    "[PRIVILEGES] No Railgun capability attestation received; "
+                    "managed grants are unknown.",
+                    level="WARNING",
+                )
+                return
+            if len(encoded) > 65536:
+                raise ValueError("capability attestation exceeds 64 KiB")
+            payload = json.loads(
+                base64.b64decode(encoded, validate=True).decode("utf-8")
+            )
+            if not isinstance(payload, dict) or set(payload) != {"version", "grants"}:
+                raise ValueError("unexpected capability attestation fields")
+            if payload.get("version") != 1:
+                raise ValueError("unsupported capability attestation version")
+            grants = payload.get("grants")
+            if not isinstance(grants, list) or len(grants) > 128 or any(
+                not isinstance(grant, str)
+                or not grant
+                or len(grant) > 512
+                for grant in grants
+            ):
+                raise ValueError("invalid capability grant list")
+
+            self.log(
+                f"[PRIVILEGES] Railgun-managed active grants: {len(grants)}"
+            )
+            if not grants:
+                self.log("[PRIVILEGES]   none — unprivileged universe account")
+            for grant in grants:
+                self.log(f"[PRIVILEGES]   {grant}")
+        except Exception as error:
+            self.log(
+                "[PRIVILEGES] Invalid Railgun capability attestation",
+                error=error,
+                level="CRITICAL",
+            )
 
     def worker_pre(self):
         self.log("Pre-boot checks complete. Swarm ready.")
@@ -363,7 +444,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             mark = {
                 "lifecycle_status": {
                     "locked": {
-                        "by": "matrix",
+                        "by": self.get_matrix_universal_id(),
                         "reason": "shutdown_delete",
                         "timestamp": time.time(),
                     },
@@ -967,7 +1048,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 return False
             name = tree.get("name", "").lower()
             uid = tree.get("universal_id", "").lower()
-            if name == "matrix" or uid == "matrix":
+            if name == "matrix" or uid == self.get_matrix_universal_id().lower():
                 return True
             for child in tree.get("children", []):
                 if contains_matrix_node(child):
@@ -980,7 +1061,10 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 ret['error_code'] = 4
                 return ret
         else:
-            if agent_name == "matrix" or universal_id == "matrix":
+            if (
+                agent_name == "matrix"
+                or universal_id == self.get_matrix_universal_id()
+            ):
                 self.log("[INJECT][BLOCKED] Direct Matrix injection attempt denied.")
                 ret['error_code'] = 4
                 return ret
@@ -1158,7 +1242,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             mark = {
                 "lifecycle_status": {
                     "locked": {
-                        "by": "matrix",
+                        "by": self.get_matrix_universal_id(),
                         "reason": "shutdown_restart",
                         "timestamp": time.time()
                     },
@@ -1374,7 +1458,10 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
             data = {"agent_tree": self._agent_tree_master.root, "meta": self.meta}
             football = self.get_football(type=self.FootballType.PASS)
-            football.load_identity_file(vault=self.tree_node['vault'], universal_id='matrix')
+            football.load_identity_file(
+                vault=self.tree_node['vault'],
+                universal_id=self.get_matrix_universal_id(),
+            )
             self.save_directive(self.tree_path_dict, data, football=football)
 
             if self.debug.is_enabled():
@@ -1770,6 +1857,21 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 cmd.append("--delete-directive-with-key")
             if clean_up:
                 cmd.append("--clean-up")
+
+            # The universe account can level its own processes, but removing
+            # a legacy directive from root-owned /matrix/boot_directives needs
+            # the exact Railgun-provisioned sudoers grant.  Sudo receives a
+            # fixed matrixd argv (validated universe plus one of two cleanup
+            # forms); no shell or general root command is exposed.
+            if delete_directive_with_key and os.geteuid() != 0:
+                sudo = shutil.which("sudo")
+                if not sudo:
+                    self.log(
+                        "[MATRIX-DELETE][ERROR] sudo is unavailable for "
+                        "privileged directive cleanup."
+                    )
+                    return
+                cmd = [sudo, "-n"] + cmd
 
             selected_cleanup = (
                 "directive/key and runtime/static trees"

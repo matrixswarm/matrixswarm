@@ -60,6 +60,64 @@ class TreeGraphController:
         # attach right-click context menu
         item.contextMenuEvent = lambda evt, i=item: self._show_context_menu(evt, i)
 
+    @staticmethod
+    def _replace_universal_id_references(value, replacements):
+        """Replace exact universal-ID references inside workspace-owned data."""
+        if isinstance(value, str):
+            return replacements.get(value, value)
+        if isinstance(value, list):
+            return [
+                TreeGraphController._replace_universal_id_references(item, replacements)
+                for item in value
+            ]
+        if isinstance(value, tuple):
+            return tuple(
+                TreeGraphController._replace_universal_id_references(item, replacements)
+                for item in value
+            )
+        if isinstance(value, dict):
+            return {
+                replacements.get(key, key):
+                    TreeGraphController._replace_universal_id_references(item, replacements)
+                for key, item in value.items()
+            }
+        return value
+
+    def regenerate_all_universal_ids(self):
+        """Give every workspace agent, including Matrix, a fresh full UUID."""
+        replacements = {}
+        generated = set()
+
+        for item in self.nodes.values():
+            node = item.node
+            while True:
+                new_uid = uuid.uuid4().hex
+                if new_uid not in generated:
+                    generated.add(new_uid)
+                    break
+            replacements[node.get_universal_id()] = new_uid
+
+        for item in self.nodes.values():
+            node = item.node
+            node.set_universal_id(replacements[node.get_universal_id()])
+            node.connections = self._replace_universal_id_references(
+                node.connections, replacements
+            )
+            node.params = self._replace_universal_id_references(
+                node.params, replacements
+            )
+            node.config = self._replace_universal_id_references(
+                node.config, replacements
+            )
+            node.constraints = self._replace_universal_id_references(
+                node.constraints, replacements
+            )
+            node.mark_dirty()
+            item.update()
+
+        self.scene.update()
+        return replacements
+
     # ----------------------------------------------
     # CONTEXT MENU
     # ----------------------------------------------

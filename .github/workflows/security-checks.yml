@@ -23,7 +23,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install security-test dependencies
-        run: python -m pip install cryptography==45.0.4 -e "./phoenix_terminal[mcp]"
+        run: python -m pip install cryptography==45.0.4 psutil==7.0.0 pycryptodome==3.23.0 -e "./phoenix_terminal[mcp]"
 
       - name: Compile Python sources
         run: python -m compileall -q matrixos phoenix phoenix_terminal
@@ -32,4 +32,5 @@ jobs:
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Run Phoenix Terminal bridge and MCP tests
-        run: python -m unittest discover -s phoenix_terminal/tests -p "test_*.py" -v
+        working-directory: phoenix_terminal
+        run: python -m unittest discover -s tests -p "test_*.py" -v

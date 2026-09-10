@@ -1,7 +1,11 @@
 {
     "name": "forensic_detective",
     "universal_id": "forensic-detective-1",
-    "constraints": [],
+    "constraints": [
+        {
+            "persistent_state": null
+        }
+    ],
     "config": {
         "ui": {
             "agent_tree": {

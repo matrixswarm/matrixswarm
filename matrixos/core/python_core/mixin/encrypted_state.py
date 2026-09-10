@@ -49,41 +49,94 @@ class EncryptedStateMixin:
         namespace: str = "agent_state",
         root: str | os.PathLike[str] | None = None,
         key_b64: str | None = None,
+        state_identity: str | None = None,
     ) -> None:
         """Initialize state after BootAgent initialization.
 
-        By default Phoenix's ``symmetric_encryption`` constraint provides the
-        key material and ``static_comm_path_resolved`` provides the base root.
-        The optional root and key parameters are for migration/tests.
+        Phoenix's dedicated ``persistent_state`` constraint is preferred when
+        present and uses a universe-level static root that survives a new boot
+        UUID. The per-deployment ``symmetric_encryption`` key and agent static
+        root remain a backwards-compatible fallback. Optional overrides are
+        intended for migration/tests.
         """
         if not self._state_name_re.fullmatch(namespace):
             raise EncryptedStateError("invalid encrypted-state namespace")
         uid = getattr(self, "command_line_args", {}).get("universal_id")
         if not isinstance(uid, str) or not uid:
             raise EncryptedStateError("agent universal_id is required")
-        material = key_b64 or self._phoenix_state_key()
+        profile = self._phoenix_persistent_state_profile()
+        if key_b64 is not None:
+            material = key_b64
+        elif profile:
+            material = profile.get("key")
+        else:
+            material = self._phoenix_state_key()
         if not isinstance(material, str) or not material:
             raise EncryptedStateError(
-                "Phoenix-provisioned symmetric_encryption key is required"
+                "Phoenix-provisioned state encryption key is required"
             )
+        if profile:
+            if profile.get("algorithm") != "AES-256-GCM":
+                raise EncryptedStateError(
+                    "persistent-state algorithm must be AES-256-GCM"
+                )
+            key_version = profile.get("key_version")
+            if (
+                not isinstance(key_version, int)
+                or isinstance(key_version, bool)
+                or key_version < 1
+            ):
+                raise EncryptedStateError("invalid persistent-state key version")
+        identity = state_identity or profile.get("state_id") or uid
+        if (
+            not isinstance(identity, str)
+            or not self._state_name_re.fullmatch(identity)
+        ):
+            raise EncryptedStateError("invalid persistent-state identity")
         try:
             raw_key = base64.b64decode(material, validate=True)
         except Exception as exc:
             raise EncryptedStateError("agent state key is not valid base64") from exc
+        if profile and len(raw_key) != 32:
+            raise EncryptedStateError(
+                "persistent-state key must be exactly 256 bits"
+            )
         if len(raw_key) < 16:
             raise EncryptedStateError("agent state key is too short")
         derived_key = HKDF(
             algorithm=SHA256(), length=32,
             salt=b"matrixswarm.encrypted-state.v1",
-            info=f"{uid}:{namespace}".encode("utf-8"),
+            info=f"{identity}:{namespace}".encode("utf-8"),
         ).derive(raw_key)
         if root is None:
-            root = getattr(self, "path_resolution", {}).get(
-                "static_comm_path_resolved"
-            )
-            if not isinstance(root, str) or not root:
+            paths = getattr(self, "path_resolution", {})
+            if profile:
+                universe = getattr(self, "command_line_args", {}).get("universe")
+                site_root = paths.get("root_path") or paths.get("site_root_path")
+                if not isinstance(universe, str) or not self._state_name_re.fullmatch(
+                    universe
+                ):
+                    raise EncryptedStateError(
+                        "universe is required for persistent-state storage"
+                    )
+                if not isinstance(site_root, str) or not site_root:
+                    raise EncryptedStateError(
+                        "site root is required for persistent-state storage"
+                    )
+                root = (
+                    Path(site_root)
+                    / "universes"
+                    / "static"
+                    / universe
+                    / "persistent"
+                    / identity
+                )
+            else:
+                root = paths.get("static_comm_path_resolved")
+            if not isinstance(root, (str, os.PathLike)) or not str(root):
                 raise EncryptedStateError("static communication path is required")
         self._encrypted_state_uid = uid
+        self._encrypted_state_identity = identity
         self._encrypted_state_namespace = namespace
         self._encrypted_state_root = Path(root).resolve() / namespace
         self._encrypted_state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -93,6 +146,19 @@ class EncryptedStateMixin:
             pass
         self._encrypted_state_aes = AESGCM(derived_key)
         self._encrypted_state_lock = threading.RLock()
+
+    def _phoenix_persistent_state_profile(self) -> Mapping[str, Any]:
+        tree_node = getattr(self, "tree_node", {})
+        if not isinstance(tree_node, Mapping):
+            return {}
+        config = tree_node.get("config", {})
+        if not isinstance(config, Mapping):
+            return {}
+        security = config.get("security", {})
+        if not isinstance(security, Mapping):
+            return {}
+        profile = security.get("persistent_state", {})
+        return profile if isinstance(profile, Mapping) else {}
 
     def _phoenix_state_key(self) -> str | None:
         tree_node = getattr(self, "tree_node", {})
@@ -229,7 +295,7 @@ class EncryptedStateMixin:
     def _encrypted_state_aad(self, relative_name: str) -> bytes:
         return (
             f"matrixswarm.encrypted-state.v1:"
-            f"{self._encrypted_state_uid}:"
+            f"{self._encrypted_state_identity}:"
             f"{self._encrypted_state_namespace}:{relative_name}"
         ).encode("utf-8")
 

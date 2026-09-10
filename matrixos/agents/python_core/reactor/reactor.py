@@ -16,7 +16,11 @@ class Agent(BootAgent):
 
         self.payload_dir = os.path.join(self.path_resolution["comm_path_resolved"], "payload")
         os.makedirs(self.payload_dir, exist_ok=True)
-        self.spawn_target = os.path.join(self.path_resolution["comm_path"], "matrix", "payload")
+        self.spawn_target = os.path.join(
+            self.path_resolution["comm_path"],
+            self.get_matrix_universal_id(),
+            "payload",
+        )
         os.makedirs(self.spawn_target, exist_ok=True)
         self._emit_beacon = self.check_for_thread_poke("worker", timeout=30, emit_to_file_interval=10)
 

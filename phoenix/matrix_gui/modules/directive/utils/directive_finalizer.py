@@ -155,6 +155,7 @@ def mint_deployment_agents(template_directive: dict,
     """
     agents = []
     seen = set()
+    matrix_seen = False
 
     for node in _walk_template_nodes(template_directive):
         uid = node.get("universal_id")
@@ -177,9 +178,12 @@ def mint_deployment_agents(template_directive: dict,
 
         agents.append(agent_obj)
         seen.add(uid)
+        if str(node.get("name") or "").strip().lower() == "matrix":
+            matrix_seen = True
 
-    # Safety: If for any reason 'matrix' wasn’t in template, synthesize it
-    if "matrix" not in seen:
+    # Safety: identify Matrix by its stable source name. Its universal ID may
+    # now be a generated UUID rather than the legacy literal "matrix".
+    if not matrix_seen:
         node = {"universal_id": "matrix", "name": "matrix", "tags": {"packet_signing": {"in": True, "out": True}}}
         agg_row = (agent_aggregator or {}).get("matrix", {})
         creds = (creds_by_uid or {}).get("matrix", {})

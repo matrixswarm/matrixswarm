@@ -9,7 +9,10 @@ def validate_universe_id(uid):
         os._exit(1)
 
 def enforce_single_matrix_instance(universe_id):
-    label = f"--job {universe_id}:site_boot:matrix:matrix"
+    # Matrix now has a generated universal ID, so the universe prefix is the
+    # stable singleton boundary.  Any surviving agent means this universe is
+    # still active and a second root must not be launched over it.
+    label = f"--job {universe_id}:"
     for proc in psutil.process_iter(['cmdline']):
         try:
             cmdline = " ".join(proc.info.get("cmdline") or [])

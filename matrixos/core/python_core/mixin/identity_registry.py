@@ -5,11 +5,12 @@ import base64
 
 class IdentityRegistryMixin:
 
-    def dispatch_identity_command(self, target_uid="matrix"):
+    def dispatch_identity_command(self, target_uid=None):
         """
         Creates a command.dispatch packet that embeds a notify.identity.register packet,
         then routes it to the target_uid (defaults to Matrix).
         """
+        target_uid = target_uid or self.get_matrix_universal_id()
         pubkey = self.secure_keys.get("pub")
         bootsig = self.tree_node.get("bootsig")
 
@@ -30,14 +31,14 @@ class IdentityRegistryMixin:
         dispatch_packet.set_packet(identity_packet, field_name="command")
 
         dispatch_packet.set_data({
-            "target_universal_id": self.command_line_args["matrix"],
+            "target_universal_id": target_uid,
             "origin": self.command_line_args["universal_id"],
             "drop_zone": "incoming",
             "delivery": "file.json_file"
         })
 
 
-        self.pass_packet(dispatch_packet, "matrix")
+        self.pass_packet(dispatch_packet, target_uid)
 
     def register_identity(self):
         """

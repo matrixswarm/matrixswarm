@@ -38,6 +38,19 @@ class _Identity:
     pass
 
 
+_STUB_MODULE_NAMES = (
+    "requests",
+    "core.python_core.boot_agent",
+    "core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity",
+    "core.python_core.class_lib.packet_delivery.utility.security.packet_security",
+    "core.python_core.utils.crypto_utils",
+    "core.python_core.utils.swarm_sleep",
+    "Crypto",
+    "Crypto.PublicKey",
+    "telegram_alert_security_under_test",
+)
+
+
 def _install_module(name, **attributes):
     module = types.ModuleType(name)
     for key, value in attributes.items():
@@ -84,7 +97,18 @@ def _load_telegram_agent():
 class TelegramAlertSecurityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls._saved_modules = {
+            name: sys.modules.get(name) for name in _STUB_MODULE_NAMES
+        }
         cls.module = _load_telegram_agent()
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, module in cls._saved_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
     def _agent(self, *, enabled=True, encrypted=True):
         agent = self.module.Agent.__new__(self.module.Agent)

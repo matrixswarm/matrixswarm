@@ -1,255 +1,292 @@
-# Authored by Daniel F MacDonald and ChatGPT-5.1 aka The Generals
-# Commander Edition Registry Manager
+# Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
+"""Unified Phoenix registry explorer and constraint assignment dialog."""
 
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QTabWidget, QMessageBox
-)
+from datetime import datetime
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
-from matrix_gui.registry.object_classes import EDITOR_REGISTRY, PROVIDER_REGISTRY
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
+from matrix_gui.modules.vault.services.vault_core_singleton import (
+    VaultCoreSingleton,
+)
+from matrix_gui.registry.object_classes import EDITOR_REGISTRY, PROVIDER_REGISTRY
+from matrix_gui.swarm_workspace.cls_lib.constraint.constraint_resolver import (
+    ConstraintResolver,
+)
+
 
 class RegistryManagerDialog(QDialog):
+    """Manage registry objects in explorer or constraint-assignment mode.
+
+    With no ``class_lock``, the category selector is visible and the operator
+    can browse every live, registry-backed category. Supplying a
+    ``class_lock`` hides the selector and exposes only that category, which is
+    the mode used by a workspace constraint. An ``assign_callback`` adds the
+    explicit assignment action without changing category visibility itself.
+    Double-click always opens the selected object's editor in either mode.
     """
-    Commander Edition Registry Manager.
-    Works in two modes:
-        1) Full Mode – shows all object classes
-        2) Class-Locked Mode – shows ONLY the requested class
-    """
+
     def __init__(self, parent=None, class_lock=None, assign_callback=None):
         super().__init__(parent)
-        self.class_lock = class_lock
+
+        self.class_lock = str(class_lock).strip() if class_lock else None
         self.assign_callback = assign_callback
-        self.setWindowTitle("Registry Manager")
-        self.setMinimumSize(800, 600)
+
+        self.setWindowFlag(Qt.WindowType.Tool, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setWindowTitle(
+            "Registry Explorer"
+            if not self.class_lock
+            else f"Registry – {self.class_lock}"
+        )
+        self.setMinimumSize(900, 640)
 
         vcs = VaultCoreSingleton.get()
         self.registry_store = vcs.get_store("registry")
+
         self._build_ui()
         self._populate_tabs()
 
     # ---------------------------------------------------------
+    # UI
+    # ---------------------------------------------------------
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
-        # === Optional Class Dropdown (only for add mode) ===
-        from PyQt6.QtWidgets import QComboBox
-        if not self.class_lock:
-            top_row = QHBoxLayout()
-            top_row.addWidget(QLabel("Class:"))
-            self.class_combo = QComboBox()
-            self.class_combo.addItems(list(EDITOR_REGISTRY.keys()))
-            top_row.addWidget(self.class_combo)
-            layout.addLayout(top_row)
-        else:
-            self.class_combo = None
+        # Both entry points use this same widget. A constraint lock merely
+        # hides the category controls instead of selecting another dialog.
+        self.category_row = QWidget(self)
+        category_layout = QHBoxLayout(self.category_row)
+        category_layout.setContentsMargins(0, 0, 0, 0)
+        category_layout.addWidget(QLabel("Category:"))
+        self.class_combo = QComboBox()
+        self.class_combo.addItems(self.get_live_constraint_classes())
+        category_layout.addWidget(self.class_combo)
+        self.category_row.setVisible(not bool(self.class_lock))
+        layout.addWidget(self.category_row)
 
-        # === Tabs ===
         self.tabs = QTabWidget()
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.tabs)
 
-        # === Buttons ===
-        btn_row = QHBoxLayout()
+        button_row = QHBoxLayout()
         self.add_btn = QPushButton("Add")
         self.edit_btn = QPushButton("Edit")
         self.del_btn = QPushButton("Delete")
-        btn_row.addWidget(self.add_btn)
-        btn_row.addWidget(self.edit_btn)
-        btn_row.addWidget(self.del_btn)
-        btn_row.addStretch()
+        button_row.addWidget(self.add_btn)
+        button_row.addWidget(self.edit_btn)
+        button_row.addWidget(self.del_btn)
+        button_row.addStretch()
 
-        # Assign button (if callback provided)
+        self.assign_btn = None
         if self.assign_callback:
             self.assign_btn = QPushButton("Assign to Agent")
-            btn_row.addWidget(self.assign_btn)
             self.assign_btn.clicked.connect(self._assign)
+            button_row.addWidget(self.assign_btn)
 
-        # Close button
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.accept)
-        btn_row.addWidget(self.close_btn)
-        layout.addLayout(btn_row)
+        button_row.addWidget(self.close_btn)
+        layout.addLayout(button_row)
 
-        # Wire up CRUD
         self.add_btn.clicked.connect(self._add)
         self.edit_btn.clicked.connect(self._edit)
         self.del_btn.clicked.connect(self._delete)
+        self.class_combo.currentTextChanged.connect(self._on_class_changed)
+
+    def get_live_constraint_classes(self):
+        """Return manual registry categories that have both UI components."""
+        resolver = ConstraintResolver()
+        live = []
+        for class_name in EDITOR_REGISTRY:
+            if resolver.is_autogen(class_name):
+                continue
+            if not resolver.has_editor(class_name):
+                continue
+            if class_name not in PROVIDER_REGISTRY:
+                continue
+            live.append(class_name)
+        return sorted(live)
 
     # ---------------------------------------------------------
+    # Population and selection
+    # ---------------------------------------------------------
+    def _active_class(self):
+        if self.class_lock:
+            return self.class_lock
+        value = self.class_combo.currentText().strip()
+        return value or None
+
     def _populate_tabs(self):
         self.tabs.clear()
-
-        if not self.class_lock and getattr(self, "class_combo", None):
-            classes = [self.class_combo.currentText()]
-        else:
-            classes = [self.class_lock] if self.class_lock else list(EDITOR_REGISTRY.keys())
-
-        for cls in classes:
-            tab = QListWidget()
-            tab.itemDoubleClicked.connect(self._assign_via_double_click)
-            self._populate_class(cls, tab)
-            self.tabs.addTab(tab, cls.upper())
-
-    def _assign_via_double_click(self, item):
-        data = item.data(Qt.ItemDataRole.UserRole)
-        if not data:
+        class_name = self._active_class()
+        if not class_name:
             return
 
-        cls, serial = data
-        if not serial:
-            return
+        list_widget = QListWidget()
+        list_widget.itemDoubleClicked.connect(self._edit_via_double_click)
+        self._populate_class(class_name, list_widget)
+        self.tabs.addTab(list_widget, class_name.upper())
+        self.tabs.setCurrentIndex(0)
 
-        if self.assign_callback:
-            self.assign_callback(cls, serial)
-            self.accept()
-
-    def _populate_class(self, cls, list_widget):
+    def _populate_class(self, class_name, list_widget):
         list_widget.clear()
-
-        provider = PROVIDER_REGISTRY.get(cls)
+        provider = PROVIDER_REGISTRY.get(class_name)
         if not provider:
-            list_widget.addItem(f"❗ No provider for class: {cls}")
+            list_widget.addItem(f"❗ No provider for category: {class_name}")
             return
 
-        columns = provider.get_columns()
-
-        # --- HEADER ROW (Chrome) ---
-        header = "   |   ".join(columns)
+        header = "   |   ".join(str(value) for value in provider.get_columns())
         header_item = QListWidgetItem(header)
-        header_item.setFlags(header_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-        header_item.setForeground(QColor(128,128,128) )
+        header_item.setFlags(
+            header_item.flags() & ~Qt.ItemFlag.ItemIsSelectable
+        )
+        header_item.setForeground(QColor(128, 128, 128))
         list_widget.addItem(header_item)
 
-        # --- DATA ROWS ---
-        ns = self.registry_store.get_namespace(cls)
-        for serial, obj in ns.items():
+        namespace = self.registry_store.get_namespace(class_name)
+        for serial, obj in namespace.items():
             row = provider.get_row(obj)
-            row_display = "   |   ".join(row)
-            item = QListWidgetItem(row_display)
-            item.setData(Qt.ItemDataRole.UserRole, (cls, serial))
+            item = QListWidgetItem("   |   ".join(str(value) for value in row))
+            item.setData(Qt.ItemDataRole.UserRole, (class_name, serial))
             list_widget.addItem(item)
 
-    def _edit_via_double_click(self, item):
-        cls, serial = item.data(Qt.ItemDataRole.UserRole)
-        self._edit_existing(cls, serial)
-
-    def _edit_existing(self, cls, serial):
-        provider = PROVIDER_REGISTRY.get(cls)
-        editor_cls = EDITOR_REGISTRY.get(cls)
-        if not editor_cls:
-            QMessageBox.warning(self, "Missing Editor", f"No editor for {cls}")
-            return
-
-        ns = self.registry_store.get_namespace(cls)
-        obj = ns.get(serial)
-        if not obj:
-            return
-
-        editor = editor_cls(new_conn=False)
-        editor._load_data(obj)
-
-        if editor.exec():
-            updated = editor.serialize()
-            updated["class"] = cls
-            updated["path"] = editor.get_directory_path()
-            updated["serial"] = serial
-
-            from datetime import datetime
-            updated.setdefault("meta", {})
-            updated["meta"]["modified"] = datetime.utcnow().isoformat() + "Z"
-
-            ns[serial] = updated
-            self.registry_store.commit()
+    def _on_class_changed(self, _class_name):
+        if not self.class_lock:
             self._populate_tabs()
+
+    def _on_tab_changed(self, index):
+        if index < 0:
+            return
+        list_widget = self.tabs.widget(index)
+        class_name = self._active_class()
+        if list_widget and class_name:
+            self._populate_class(class_name, list_widget)
+
+    def _edit_via_double_click(self, item):
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data:
+            self._edit_existing(*data)
 
     def _current_selection(self):
-        tab = self.tabs.currentWidget()
-        if not tab:
-            return None, None
-        item = tab.currentItem()
-        if not item:
-            return None, None
-        return item.data(Qt.ItemDataRole.UserRole)
+        list_widget = self.tabs.currentWidget()
+        item = list_widget.currentItem() if list_widget else None
+        data = item.data(Qt.ItemDataRole.UserRole) if item else None
+        return data if data else (None, None)
 
     # ---------------------------------------------------------
-    def _add(self):
+    # CRUD
+    # ---------------------------------------------------------
+    @staticmethod
+    def _stamp_record(data, class_name, serial, *, created=False):
+        now = datetime.utcnow().isoformat() + "Z"
+        data["class"] = class_name
+        data["serial"] = serial
+        metadata = data.setdefault("meta", {})
+        if created:
+            metadata.setdefault("created", now)
+            metadata.setdefault("version", 1)
+        metadata["modified"] = now
+        return data
 
+    def _add(self):
         try:
-            cls = self.class_lock or (
-                self.class_combo.currentText() if self.class_combo else None
-            )
-            editor_cls = EDITOR_REGISTRY.get(cls)
-            if not editor_cls:
-                QMessageBox.warning(self, "Missing Editor", f"No editor for {cls}")
+            class_name = self._active_class()
+            editor_class = EDITOR_REGISTRY.get(class_name)
+            if not editor_class:
+                QMessageBox.warning(
+                    self, "Missing Editor", f"No editor for {class_name}"
+                )
                 return
 
-            editor = editor_cls(new_conn=True)
+            editor = editor_class(new_conn=True)
+            if not editor.exec():
+                return
 
-            if editor.exec():
-                serial = editor.get_serial()
-                data = editor.serialize()
-                data["class"] = cls
-                data["path"] = editor.get_directory_path()
+            serial = editor.get_serial()
+            data = editor.serialize()
+            data["path"] = editor.get_directory_path()
+            self._stamp_record(data, class_name, serial, created=True)
 
-                # Add metadata
-                from datetime import datetime
-                data.setdefault("meta", {
-                    "created": datetime.utcnow().isoformat() + "Z",
-                    "modified": datetime.utcnow().isoformat() + "Z",
-                    "version": 1
-                })
-
-
-
-                ns = self.registry_store.get_namespace(cls)
-                ns[serial] = data
-
-                print("Namespace object id:", id(ns))
-                #print("Store registry obj id:", id(self.registry_store.get_data()["discord"]))
-                self.registry_store.commit()
-                self._populate_tabs()
-
-        except Exception as e:
-            emit_gui_exception_log("[RegistryManagerDialog][_add]:", e)
-
-
-    def _edit(self):
-        cls, serial = self._current_selection()
-        if not serial:
-            return
-
-        data = self.registry_store.get_namespace(cls).get(serial)
-        editor_cls = EDITOR_REGISTRY.get(cls)
-        if not editor_cls:
-            QMessageBox.warning(self, "Missing Editor", f"No editor for {cls}")
-            return
-
-        editor = editor_cls()
-        editor.on_load(data)
-        if editor.exec():
-            new_data = editor.serialize()
-            ns = self.registry_store.get_data().setdefault(cls, {})
-            ns[serial] = new_data
+            namespace = self.registry_store.get_namespace(class_name)
+            namespace[serial] = data
             self.registry_store.commit()
             self._populate_tabs()
+        except Exception as error:
+            emit_gui_exception_log("RegistryManagerDialog._add", error)
+
+    def _edit(self):
+        class_name, serial = self._current_selection()
+        if serial:
+            self._edit_existing(class_name, serial)
+
+    def _edit_existing(self, class_name, serial):
+        try:
+            editor_class = EDITOR_REGISTRY.get(class_name)
+            if not editor_class:
+                QMessageBox.warning(
+                    self, "Missing Editor", f"No editor for {class_name}"
+                )
+                return
+
+            namespace = self.registry_store.get_namespace(class_name)
+            current = namespace.get(serial)
+            if not current:
+                return
+
+            editor = editor_class(new_conn=False)
+            editor._load_data(current)
+            if not editor.exec():
+                return
+
+            updated = editor.serialize()
+            updated["path"] = editor.get_directory_path()
+            # Keep creation/version metadata while advancing modification time.
+            updated["meta"] = dict(current.get("meta", {}))
+            self._stamp_record(updated, class_name, serial)
+            namespace[serial] = updated
+            self.registry_store.commit()
+            self._populate_tabs()
+        except Exception as error:
+            emit_gui_exception_log("RegistryManagerDialog._edit_existing", error)
 
     def _delete(self):
-        cls, serial = self._current_selection()
+        class_name, serial = self._current_selection()
         if not serial:
             return
-        confirmed = QMessageBox.question(self, "Delete?", f"Delete resource '{serial}' from {cls}?")
+
+        confirmed = QMessageBox.question(
+            self,
+            "Delete?",
+            f"Delete resource '{serial}' from {class_name}?",
+        )
         if confirmed != QMessageBox.StandardButton.Yes:
             return
-        ns = self.registry_store.get_data().setdefault(cls, {})
-        ns.pop(serial, None)
+
+        namespace = self.registry_store.get_namespace(class_name)
+        namespace.pop(serial, None)
         self.registry_store.commit()
         self._populate_tabs()
 
+    # ---------------------------------------------------------
+    # Constraint assignment
+    # ---------------------------------------------------------
     def _assign(self):
-        cls, serial = self._current_selection()
+        class_name, serial = self._current_selection()
         if serial and self.assign_callback:
-            self.assign_callback(cls, serial)
+            self.assign_callback(class_name, serial)
             self.accept()

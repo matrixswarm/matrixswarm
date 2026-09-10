@@ -75,6 +75,8 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         self.verbose=False
         self.debug = False
         self.rug_pull = False
+        self.protect_memory = False
+        self.matrix_universal_id = "matrix"
 
         self.python_site=python_site
         self.python_exec= detected_python
@@ -257,6 +259,17 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             debug (bool): If True, agents may run with additional debugging logic.
         """
         self.debug = bool(debug)
+
+    def set_protect_memory(self, enabled=True):
+        """Require Linux to mark spawned agents non-dumpable before boot."""
+        self.protect_memory = bool(enabled)
+
+    def set_matrix_universal_id(self, universal_id):
+        """Set the authoritative root address propagated to every child."""
+        value = str(universal_id or "").strip()
+        if not value:
+            raise ValueError("Matrix universal_id is required")
+        self.matrix_universal_id = value
 
     def reset_hard(self):
         """
@@ -520,7 +533,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 },
                 "args": {
                     "install_name": spawn_uuid,
-                    "matrix": "matrix",
+                    "matrix": self.matrix_universal_id,
                     "spawner": spawner,
                     "universal_id": universal_id,
                     "agent_name": agent_name,
@@ -529,6 +542,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "verbose": int(self.verbose),
                     "debug": int(self.debug),
                     "rug_pull": int(self.rug_pull),
+                    "protect_memory": int(self.protect_memory),
                 },
                 "tree_node": tree_node,
                 "secure_keys": {
@@ -565,7 +579,27 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             })
 
             # --- Launch Process ---
-            cmd = [self.python_exec or "python3", run_path, "--job", f"{universe}:{universal_id}"]
+            python_exec = self.python_exec or "python3"
+            if self.protect_memory:
+                if not sys.platform.startswith("linux"):
+                    raise RuntimeError(
+                        "Root-only agent memory protection requires Linux prctl"
+                    )
+                # The boundary must be applied after Python's exec transition.
+                # A fixed, non-secret launcher keeps implementation source and
+                # the agent run path out of the public process command line.
+                env["MATRIX_AGENT_RUN_PATH"] = run_path
+                protected_launcher = os.path.join(
+                    site_root_path, "core", "python_core", "protected_launcher.py"
+                )
+                cmd = [
+                    python_exec,
+                    protected_launcher,
+                    "--job",
+                    f"{universe}:{universal_id}",
+                ]
+            else:
+                cmd = [python_exec, run_path, "--job", f"{universe}:{universal_id}"]
             kwargs = {"preexec_fn": os.setsid} if os.name == "posix" else {}
             process = subprocess.Popen(
                 cmd,

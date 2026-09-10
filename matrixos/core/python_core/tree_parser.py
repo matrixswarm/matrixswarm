@@ -709,7 +709,7 @@ class TreeParser(LogMixin):
         return clone
 
     def assign_identity_to_all_nodes(self, matrix_priv_obj, matrix_pub=None, matrix_priv=None, matrix_key_b64=None,
-                                     encryption_enabled=True, force=False):
+                                     encryption_enabled=True, force=False, matrix_uid=None):
         """
         Consolidated identity assignment routine.
 
@@ -728,13 +728,15 @@ class TreeParser(LogMixin):
                 "Matrix signing capability is required for identity assignment."
             )
 
+        matrix_uid = str(matrix_uid or self.root.get("universal_id") or "matrix")
+
         for node in self.walk_tree(self.root):
             uid = node.get("universal_id")
             if not uid:
                 continue
 
             # === CASE 1: Matrix Node ===
-            if uid == "matrix":
+            if uid == matrix_uid:
                 self.assign_identity_token_to_node(
                     uid,
                     matrix_priv_obj=matrix_priv_obj,
@@ -760,7 +762,7 @@ class TreeParser(LogMixin):
                 node["config"]["matrix_secure_store"]["matrix_priv"] = matrix_priv
                 node["config"]["matrix_secure_store"]["matrix_pub"] = matrix_pub
                 node["config"]["matrix_secure_store"]["matrix_key"] = matrix_key_b64
-                node["config"]["matrix_secure_store"]["matrix_node"] = self.get_node_shallow('matrix')
+                node["config"]["matrix_secure_store"]["matrix_node"] = self.get_node_shallow(matrix_uid)
                 node["config"]["matrix_secure_store"]["verified_timestamp"] = int(time.time())
                 print(f"[ASSIGN-ALL] 🔐 Sentinel '{uid}' given Matrix credentials.")
 

@@ -32,8 +32,9 @@ class CoreSpawnerSecureMixin:
             "args": {
                 "universal_id": universal_id,
                 "agent_name": agent_name,
-                "matrix": "matrix",
-                "spawner": spawner
+                "matrix": self.matrix_universal_id,
+                "spawner": spawner,
+                "protect_memory": int(self.protect_memory),
             },
             "tree_node": tree_node,
             "parent_pub": self._trust_tree.get("parent"),

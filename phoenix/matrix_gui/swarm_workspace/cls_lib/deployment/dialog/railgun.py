@@ -5,6 +5,8 @@ Non-blocking SSH deploy with full live output streaming.
 """
 from matrix_gui.modules.railgun.remote_shell import (
     build_remote_matrixd_command,
+    describe_runtime_capabilities,
+    describe_universe_teardown_grant,
     mcp_worker_linux_user,
     send_boot_envelope,
     validate_linux_user,
@@ -70,7 +72,10 @@ class RailgunWorker(QThread):
             # 2. Build boot command. Detached agents must never inherit this
             # SSH channel, so --verbose is deliberately suppressed here.
             flags = []
-            for flag in ["debug", "clean", "reboot", "rug_pull", "reboot_new"]:
+            for flag in [
+                "debug", "clean", "reboot", "rug_pull", "reboot_new",
+                "protect_memory",
+            ]:
                 if self.opts.get(flag):
                     flags.append("--" + flag.replace("_", "-"))
 
@@ -92,6 +97,22 @@ class RailgunWorker(QThread):
             self.sig_stdout.emit(
                 f"[RAILGUN] Universe account: {linux_user}\n"
             )
+            if self.opts.get("protect_memory"):
+                self.sig_stdout.emit(
+                    "[RAILGUN] Agent memory boundary: root-only inspection "
+                    "requested.\n"
+                )
+            grants = describe_runtime_capabilities(runtime_capabilities)
+            grants.append(describe_universe_teardown_grant(universe))
+            self.sig_stdout.emit(
+                f"[RAILGUN] Railgun-managed active grants: {len(grants)}\n"
+            )
+            for grant in grants:
+                self.sig_stdout.emit(f"[RAILGUN]   {grant}\n")
+            if not grants:
+                self.sig_stdout.emit(
+                    "[RAILGUN]   none — unprivileged universe account\n"
+                )
             if runtime_capabilities.get("mcp_worker"):
                 self.sig_stdout.emit(
                     "[RAILGUN] MCP worker account: "

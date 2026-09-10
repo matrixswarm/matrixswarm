@@ -34,6 +34,19 @@ class _Identity:
     pass
 
 
+_STUB_MODULE_NAMES = (
+    "agents.python_core.email_send.factory.email_queue_manager",
+    "core.python_core.boot_agent",
+    "core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity",
+    "core.python_core.class_lib.packet_delivery.utility.security.packet_security",
+    "core.python_core.class_lib.processes.thread_launcher",
+    "core.python_core.utils.crypto_utils",
+    "Crypto",
+    "Crypto.PublicKey",
+    "email_send_alert_encryption_under_test",
+)
+
+
 def _install_module(name, **attributes):
     module = types.ModuleType(name)
     for key, value in attributes.items():
@@ -81,7 +94,18 @@ def _load_agent_module():
 class EmailAlertEncryptionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls._saved_modules = {
+            name: sys.modules.get(name) for name in _STUB_MODULE_NAMES
+        }
         cls.module = _load_agent_module()
+
+    @classmethod
+    def tearDownClass(cls):
+        for name, module in cls._saved_modules.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
     def _agent(self, encrypt_alerts):
         agent = self.module.Agent.__new__(self.module.Agent)

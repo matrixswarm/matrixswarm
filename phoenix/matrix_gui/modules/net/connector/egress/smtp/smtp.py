@@ -43,6 +43,9 @@ class SMTPConnector(BaseConnector):
         self.smtp_user = conn.get("smtp_username")
         self.smtp_pass = conn.get("smtp_password")
         self.to_addr   = conn.get("smtp_to")
+        self.smtp_encryption = str(
+            conn.get("smtp_encryption") or "STARTTLS"
+        ).strip().upper()
 
         if not all([self.smtp_host, self.smtp_port, self.smtp_user, self.smtp_pass, self.to_addr]):
             print("[SMTPConnector] ⚠️ Incomplete SMTP configuration.")
@@ -66,8 +69,10 @@ class SMTPConnector(BaseConnector):
                 print("[SMTPConnector] ❌ No packet found in shared context.")
                 return
 
-            self.send(packet)
-            print("[SMTPConnector] ✅ Mission complete.")
+            if self.send(packet):
+                print("[SMTPConnector] ✅ Mission complete.")
+            else:
+                print("[SMTPConnector] ❌ Mission failed; payload was not accepted by SMTP.")
 
         except Exception as e:
             print(f"[SMTPConnector][ERROR] {e}")
@@ -142,6 +147,7 @@ class SMTPConnector(BaseConnector):
             msg = EmailMessage()
             msg["From"] = self.smtp_user
             msg["To"] = self.to_addr
+            msg["Subject"] = "[MatrixSwarm]"
             msg.set_content(payload_b64)
 
             # Secure connection
@@ -149,15 +155,52 @@ class SMTPConnector(BaseConnector):
             # certificate-chain validation before sending SMTP credentials.
             context = create_mail_tls_context()
 
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=timeout) as server:
-                server.starttls(context=context)
-                server.login(self.smtp_user, self.smtp_pass)
-                server.send_message(msg)
+            mode = self.smtp_encryption
+            if mode not in {"SSL", "TLS", "STARTTLS"}:
+                raise ValueError(
+                    "SMTP encryption must be SSL, TLS, or STARTTLS"
+                )
+
+            envelope_to = [self.to_addr]
+            if mode == "SSL":
+                with smtplib.SMTP_SSL(
+                    self.smtp_host,
+                    self.smtp_port,
+                    timeout=timeout,
+                    context=context,
+                ) as server:
+                    server.login(self.smtp_user, self.smtp_pass)
+                    refused = server.send_message(
+                        msg,
+                        from_addr=self.smtp_user,
+                        to_addrs=envelope_to,
+                    )
+            else:
+                with smtplib.SMTP(
+                    self.smtp_host,
+                    self.smtp_port,
+                    timeout=timeout,
+                ) as server:
+                    server.starttls(context=context)
+                    server.login(self.smtp_user, self.smtp_pass)
+                    refused = server.send_message(
+                        msg,
+                        from_addr=self.smtp_user,
+                        to_addrs=envelope_to,
+                    )
+
+            if refused:
+                print(f"[SMTPConnector] ❌ SMTP refused recipients: {refused!r}")
+                self._emit_status("error")
+                return False
 
             print(f"[SMTPConnector] 📧 Sent packet to {self.to_addr}")
+            return True
 
         except Exception as e:
             print(f"[SMTPConnector] ❌ SMTP send error: {e}")
+            self._emit_status("error")
+            return False
 
         finally:
             if hasattr(ctx, "bus"):

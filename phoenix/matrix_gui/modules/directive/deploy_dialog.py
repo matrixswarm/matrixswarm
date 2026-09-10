@@ -4,6 +4,7 @@ from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 from matrix_gui.modules.railgun.remote_shell import (
     build_remote_matrixd_command,
     default_linux_user,
+    describe_runtime_capabilities,
     derive_runtime_capabilities,
     mcp_worker_linux_user,
     send_boot_envelope,
@@ -102,10 +103,19 @@ class DeployDialog(QtWidgets.QDialog):
         self.flag_clean = QtWidgets.QCheckBox("--clean")
         self.flag_rugpull = QtWidgets.QCheckBox("--rug-pull")
         self.flag_reboot_new = QtWidgets.QCheckBox("--reboot-new")
+        self.flag_protect_memory = QtWidgets.QCheckBox("--protect-memory")
+        self.flag_protect_memory.setChecked(
+            bool(self.deployment.get("protect_memory", True))
+        )
+        self.flag_protect_memory.setToolTip(
+            "Restrict agent memory and environment inspection to root or "
+            "CAP_SYS_PTRACE."
+        )
 
         flag_row = QtWidgets.QHBoxLayout()
         for f in (self.flag_verbose, self.flag_debug, self.flag_clean,
-                  self.flag_rugpull, self.flag_reboot_new):
+                  self.flag_rugpull, self.flag_reboot_new,
+                  self.flag_protect_memory):
             flag_row.addWidget(f)
 
         opts_layout.addWidget(QtWidgets.QLabel("Boot Flags:"))
@@ -181,6 +191,7 @@ class DeployDialog(QtWidgets.QDialog):
         if self.flag_clean.isChecked(): flags.append("--clean")
         if self.flag_rugpull.isChecked(): flags.append("--rug-pull")
         if self.flag_reboot_new.isChecked(): flags.append("--reboot-new")
+        if self.flag_protect_memory.isChecked(): flags.append("--protect-memory")
         try:
             linux_user = validate_linux_user(
                 self.linux_user_edit.text(), "Swarm Linux user"
@@ -204,10 +215,11 @@ class DeployDialog(QtWidgets.QDialog):
 
             universe = validate_remote_token(universe, "Universe name")
 
-            runtime_capabilities = self.deployment.get(
-                "runtime_capabilities"
-            ) or derive_runtime_capabilities(
-                self.deployment.get("agents", {})
+            stored_agents = self.deployment.get("agents", {})
+            runtime_capabilities = (
+                derive_runtime_capabilities(stored_agents)
+                if stored_agents
+                else self.deployment.get("runtime_capabilities") or {}
             )
             cmd = build_remote_matrixd_command(
                 action=action,
@@ -217,6 +229,16 @@ class DeployDialog(QtWidgets.QDialog):
                 runtime_capabilities=runtime_capabilities,
             )
             self.output.append(f"[ACCOUNT] Universe runs as {linux_user}\n")
+            grants = describe_runtime_capabilities(runtime_capabilities)
+            self.output.append(
+                f"[ACCOUNT] Railgun-managed active grants: {len(grants)}\n"
+            )
+            for grant in grants:
+                self.output.append(f"[ACCOUNT]   {grant}\n")
+            if not grants:
+                self.output.append(
+                    "[ACCOUNT]   none — unprivileged universe account\n"
+                )
             if runtime_capabilities.get("mcp_worker"):
                 self.output.append(
                     "[ACCOUNT] MCP worker runs as "

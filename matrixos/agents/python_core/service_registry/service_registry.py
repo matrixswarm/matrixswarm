@@ -16,7 +16,11 @@ class Agent(BootAgent):
         super().__init__()
 
         self.directory = {}
-        self.tree_path = os.path.join(self.path_resolution["comm_path"], "matrix", "agent_tree_master.json")
+        self.tree_path = os.path.join(
+            self.path_resolution["comm_path"],
+            self.get_matrix_universal_id(),
+            "agent_tree_master.json",
+        )
         self.incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
         self._emit_beacon = self.check_for_thread_poke("scan_tree", timeout=30, emit_to_file_interval=10)
 

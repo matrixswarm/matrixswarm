@@ -87,6 +87,14 @@ class FoundationalHardeningTests(unittest.TestCase):
                 "redis.service",
             ],
         )
+        nginx = source(
+            "matrixos/agents/python_core/nginx_watchdog/nginx_watchdog.py"
+        )
+        self.assertIn("restart_command(self.service_name)", nginx)
+        self.assertNotIn(
+            '["systemctl", "restart", self.service_name]',
+            nginx,
+        )
 
     def test_core_requirements_do_not_include_sora_mysql_connector(self):
         requirements = source("matrixos/requirements.txt")
