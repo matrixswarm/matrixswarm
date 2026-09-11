@@ -3,6 +3,10 @@ from contextlib import redirect_stdout
 import io
 import sys
 import unittest
+import ast
+import uuid
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,12 +92,69 @@ class DynamicUniversalIdTests(unittest.TestCase):
             "phoenix/matrix_gui/swarm_workspace/panels/agent_inspector/"
             "agent_inspector.py"
         )
-        self.assertIn("def regenerate_all_universal_ids(self):", controller)
+        self.assertIn("def regenerate_all_universal_ids(self, *, named=False):", controller)
         self.assertIn("new_uid = uuid.uuid4().hex", controller)
         self.assertNotIn('new_uid = f"{prefix}-{uuid.uuid4().hex}"', controller)
         for field in ("connections", "params", "config", "constraints"):
             self.assertIn(f"node.{field} = self._replace_universal_id_references", controller)
         self.assertIn('QPushButton("Generate All UUIDs")', inspector)
+
+    def test_both_rotation_modes_preserve_links_and_replace_nested_references(self):
+        # Execute the actual controller methods without importing the Qt UI.
+        text = source(
+            "phoenix/matrix_gui/swarm_workspace/cls_lib/graph/tree_graph_controller.py"
+        )
+        tree = ast.parse(text)
+        cls = next(node for node in tree.body if isinstance(node, ast.ClassDef))
+        cls.body = [node for node in cls.body if isinstance(node, ast.FunctionDef)
+                    and node.name in {"_replace_universal_id_references",
+                                      "regenerate_all_universal_ids"}]
+        namespace = {"uuid": uuid}
+        exec(compile(ast.Module(body=[cls], type_ignores=[]), "controller", "exec"), namespace)
+        controller_type = namespace["TreeGraphController"]
+
+        for named in (False, True):
+            with self.subTest(named=named):
+                controller = controller_type()
+                controller.scene = Mock()
+                controller.nodes = {}
+                for index, name in enumerate(("matrix", "apache_watchdog", "apache_watchdog")):
+                    node = SimpleNamespace(
+                        name=name, universal_id=f"old-{index}", parent="graph-0",
+                        connections=["old-0"], params={"target": "old-1"},
+                        config={"old-2": ["old-0", ("old-1",)],
+                                "note": "prefix-old-1", "state_id": "persistent-state"},
+                        constraints=[{"raw": {"target": "old-2"}}], mark_dirty=Mock(),
+                    )
+                    node.get_name = lambda n=node: n.name
+                    node.get_universal_id = lambda n=node: n.universal_id
+                    node.set_universal_id = lambda value, n=node: setattr(n, "universal_id", value)
+                    controller.nodes[f"graph-{index}"] = SimpleNamespace(node=node, update=Mock())
+
+                # Duplicate suffixes for same-name agents must be retried.
+                values = [uuid.UUID(int=0), uuid.UUID(int=0), uuid.UUID(int=0),
+                          uuid.UUID(hex="abcdef" + "0" * 26), uuid.uuid4(), uuid.uuid4()]
+                with patch.object(uuid, "uuid4", side_effect=values):
+                    replacements = controller.regenerate_all_universal_ids(named=named)
+                self.assertEqual(3, len(set(replacements.values())))
+                self.assertFalse(set(replacements) & set(replacements.values()))
+                for index, item in enumerate(controller.nodes.values()):
+                    node = item.node
+                    pattern = (node.name.replace('_', '-') + r"-[0-9a-f]{6}"
+                               if named else r"[0-9a-f]{32}")
+                    self.assertRegex(node.universal_id, "^" + pattern + "$")
+                    self.assertEqual(replacements[f"old-{index}"], node.universal_id)
+                    self.assertEqual([replacements["old-0"]], node.connections)
+                    self.assertEqual({"target": replacements["old-1"]}, node.params)
+                    self.assertEqual([replacements["old-0"], (replacements["old-1"],)],
+                                     node.config[replacements["old-2"]])
+                    self.assertEqual("prefix-old-1", node.config["note"])
+                    self.assertEqual("persistent-state", node.config["state_id"])
+                    self.assertEqual(replacements["old-2"], node.constraints[0]["raw"]["target"])
+                    self.assertEqual("graph-0", node.parent)
+                    node.mark_dirty.assert_called_once()
+                    item.update.assert_called_once()
+                controller.scene.update.assert_called_once()
 
     def test_phoenix_resolves_matrix_by_name_after_uuid_rotation(self):
         packet_security = source(
