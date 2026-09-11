@@ -83,15 +83,18 @@ class TreeGraphController:
             }
         return value
 
-    def regenerate_all_universal_ids(self):
-        """Give every workspace agent, including Matrix, a fresh full UUID."""
+    def regenerate_all_universal_ids(self, *, named=False):
+        """Rotate all IDs, optionally using agent-name plus a UUID suffix."""
         replacements = {}
-        generated = set()
+        generated = {item.node.get_universal_id() for item in self.nodes.values()}
 
         for item in self.nodes.values():
             node = item.node
             while True:
                 new_uid = uuid.uuid4().hex
+                if named:
+                    prefix = node.get_name().replace('_', '-')
+                    new_uid = f"{prefix}-{new_uid[:6]}"
                 if new_uid not in generated:
                     generated.add(new_uid)
                     break

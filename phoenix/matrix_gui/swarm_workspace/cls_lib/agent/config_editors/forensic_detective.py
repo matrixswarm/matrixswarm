@@ -48,8 +48,18 @@ class ForensicDetective(BaseEditor):
             oracle_cfg.get("role", "hive.oracle")
         )
 
+        self.oracle_timeout = QSpinBox()
+        self.oracle_timeout.setRange(10, 600)
+        self.oracle_timeout.setValue(oracle_cfg.get("timeout_sec", 90))
+
+        self.oracle_context = QSpinBox()
+        self.oracle_context.setRange(1, 30)
+        self.oracle_context.setValue(oracle_cfg.get("max_context_events", 12))
+
         ol.addRow(self.enable_oracle)
         ol.addRow("Oracle Role:", self.oracle_role)
+        ol.addRow("Timeout (sec):", self.oracle_timeout)
+        ol.addRow("Context Events:", self.oracle_context)
 
         self.layout.addRow(QLabel("🧠 Oracle Analysis"))
         self.layout.addRow(oracle_box)
@@ -60,7 +70,9 @@ class ForensicDetective(BaseEditor):
             "alert_to_role": self.alert_to_role.text().strip(),
             "oracle_analysis": {
                 "enable_oracle": int(self.enable_oracle.isChecked()),
-                "role": self.oracle_role.text().strip()
+                "role": self.oracle_role.text().strip(),
+                "timeout_sec": self.oracle_timeout.value(),
+                "max_context_events": self.oracle_context.value(),
             }
         })
 

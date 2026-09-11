@@ -21,7 +21,9 @@
         ],
         "oracle_analysis": {
             "enable_oracle": 1,
-            "role": "hive.oracle"
+            "role": "hive.oracle",
+            "timeout_sec": 90,
+            "max_context_events": 12
         }
     }
 }

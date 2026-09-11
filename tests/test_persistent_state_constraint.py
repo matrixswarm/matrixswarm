@@ -42,7 +42,10 @@ class PersistentStateConstraintTests(unittest.TestCase):
         self.assertIn("persistent_state", constraints)
 
         source = AGENT.read_text(encoding="utf-8")
-        self.assertIn("class Agent(EncryptedStateMixin, BootAgent):", source)
+        self.assertIn(
+            "class Agent(OracleQueryMixin, EncryptedStateMixin, BootAgent):",
+            source,
+        )
         self.assertIn(
             'self.init_encrypted_state(namespace="forensic_journal")', source
         )

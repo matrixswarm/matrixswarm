@@ -1,5 +1,6 @@
 # Authored by Daniel F MacDonald and ChatGPT 5.2 aka The Generals
 import time
+import threading
 import uuid
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
@@ -63,6 +64,8 @@ class OracleQueryMixin:
     def _ensure_oracle_cache(self):
         if not hasattr(self, "_oracle_queries"):
             self._oracle_queries: Dict[str, OracleQuery] = {}
+        if not hasattr(self, "_oracle_query_lock"):
+            self._oracle_query_lock = threading.RLock()
         if not hasattr(self, "oracle_timeout"):
             # per-agent override is allowed; otherwise default 300s
             self.oracle_timeout: int = 300
@@ -136,9 +139,16 @@ class OracleQueryMixin:
             "content": content,
         })
 
+        # Cache before dispatch so a fast in-process response cannot arrive before
+        # the query is visible to cmd_oracle_response().
+        with self._oracle_query_lock:
+            self._oracle_queries[query.query_id] = query
+
         try:
             self.pass_packet(pk, oracle.get_universal_id())
         except Exception as e:
+            with self._oracle_query_lock:
+                self._oracle_queries.pop(query.query_id, None)
             # send failure – call handler immediately
             handler = getattr(self, query.response_handler, None)
             if handler:
@@ -148,8 +158,6 @@ class OracleQueryMixin:
                          f"not found: {e}", error=e, level="ERROR")
             return
 
-        # success: cache the query for later response or timeout
-        self._oracle_queries[query.query_id] = query
         self.log(f"[ORACLE-MIXIN] Sent query {query.query_id} → {oracle.get_universal_id()}")
 
     # ----------------------------------------------------------
@@ -175,7 +183,8 @@ class OracleQueryMixin:
 
             self.log(f"[ORACLE-MIXIN] cmd_oracle_response for {query_id}")
 
-            query = self._oracle_queries.pop(query_id, None)
+            with self._oracle_query_lock:
+                query = self._oracle_queries.pop(query_id, None)
             if not query:
                 self.log(f"[ORACLE-MIXIN][WARN] No pending query found for query_id={query_id}")
                 return
@@ -206,19 +215,16 @@ class OracleQueryMixin:
         """
         try:
             self._ensure_oracle_cache()
-            if not self._oracle_queries:
-                return
-
             now = time.time()
-            expired_ids = [
-                qid for qid, q in self._oracle_queries.items()
-                if now - q.created_at > q.timeout_sec
-            ]
+            with self._oracle_query_lock:
+                expired_queries = [
+                    self._oracle_queries.pop(qid)
+                    for qid, query in list(self._oracle_queries.items())
+                    if now - query.created_at > query.timeout_sec
+                ]
 
-            for qid in expired_ids:
-                query = self._oracle_queries.pop(qid, None)
-                if not query:
-                    continue
+            for query in expired_queries:
+                qid = query.query_id
                 handler = getattr(self, query.response_handler, None)
                 if handler:
                     self.log(f"[ORACLE-MIXIN] Timeout for query {qid}, calling handler.")

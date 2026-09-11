@@ -50,8 +50,8 @@ class AgentInspector(QWidget):
 
         # universal_id and workspace-wide identity rotation
         main.addWidget(QLabel("Universal ID"))
+        main.addWidget(self.uid_edit)
         uid_row = QHBoxLayout()
-        uid_row.addWidget(self.uid_edit, 1)
         self.generate_all_uids_btn = QPushButton("Generate All UUIDs")
         self.generate_all_uids_btn.setToolTip(
             "Assign Matrix and every agent a fresh, unique universal ID and "
@@ -59,6 +59,15 @@ class AgentInspector(QWidget):
         )
         self.generate_all_uids_btn.clicked.connect(self._generate_all_uids)
         uid_row.addWidget(self.generate_all_uids_btn)
+        self.generate_named_uids_btn = QPushButton("Generate All Named IDs")
+        self.generate_named_uids_btn.setToolTip(
+            "Assign Matrix and every agent an ID such as apache-watchdog-a1b2c3 "
+            "and update all workspace references."
+        )
+        self.generate_named_uids_btn.clicked.connect(
+            lambda checked=False: self._generate_all_uids(named=True)
+        )
+        uid_row.addWidget(self.generate_named_uids_btn)
         main.addLayout(uid_row)
 
         # CONSTRAINT SECTION HEADER
@@ -363,16 +372,20 @@ class AgentInspector(QWidget):
 
         ws.save()
 
-    def _generate_all_uids(self):
+    def _generate_all_uids(self, checked=False, *, named=False):
         ws = self.workspace
         if not ws or not hasattr(ws, "controller") or not ws.controller.nodes:
             return
 
+        description = (
+            "Assign Matrix and every agent a fresh name-based ID "
+            "(e.g. apache-watchdog-a1b2c3)?\n\n"
+            if named else "Assign Matrix and every agent a fresh UUID?\n\n"
+        )
         answer = QMessageBox.question(
             self,
             "Generate New Universal IDs?",
-            "Assign Matrix and every agent a fresh UUID?\n\n"
-            "All exact agent-ID references in this workspace will be updated.",
+            description + "All exact agent-ID references in this workspace will be updated.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -380,7 +393,7 @@ class AgentInspector(QWidget):
             return
 
         current_node = self.node
-        replacements = ws.controller.regenerate_all_universal_ids()
+        replacements = ws.controller.regenerate_all_universal_ids(named=named)
         ws.save()
         if current_node is not None:
             self.load(current_node)

@@ -42,7 +42,7 @@ class Agent(BootAgent):
             openai = config.get("openai", {}) or config
 
             self.api_key = openai.get("api_key")
-            self.model = config.get("model", "gpt-3.5-turbo")
+            self.model = config.get("model", "gpt-5.6-terra")
             self.temperature = config.get("temperature",0)
             self.response_mode = config.get("response_mode", "terse")
             self.client = OpenAI(api_key=self.api_key)
@@ -199,11 +199,15 @@ class Agent(BootAgent):
 
                     self.dump_messages_check(messages)
 
+                    request = {
+                        "model": model,
+                        "messages": messages,
+                        "timeout": 30,
+                    }
+                    if not model.startswith(("gpt-5", "gpt-6")):
+                        request["temperature"] = temperature
                     response = client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        temperature=temperature,
-                        timeout=30
+                        **request
                     ).choices[0].message.content.strip()
                 except TimeoutError:
                     self.log("[ORACLE][TIMEOUT] OpenAI call exceeded 30s, aborting.")
@@ -450,11 +454,15 @@ class Agent(BootAgent):
 
             try:
                 self.dump_messages_check(prompt)
+                request = {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "timeout": 30,
+                }
+                if not self.model.startswith(("gpt-5", "gpt-6")):
+                    request["temperature"] = 0.3
                 response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    timeout=30
+                    **request
                 ).choices[0].message.content
             except TimeoutError:
                 self.log("[ORACLE][CLUSTERS][TIMEOUT] OpenAI call exceeded 30s, aborting.")
