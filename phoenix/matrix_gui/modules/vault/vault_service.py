@@ -19,8 +19,18 @@ class VaultService:
         save_vault_singlefile(data, password, path)
 
     @staticmethod
-    def initialize_runtime(vault_data: dict, password: str, path: str):
-        """Initialize the running Phoenix cockpit vault + emit event."""
+    def initialize_runtime(
+        vault_data: dict,
+        password: str,
+        path: str,
+        auth_method: str = "password",
+    ):
+        """Initialize the cockpit vault and publish session authentication metadata."""
+        auth_method = (
+            "yubikey"
+            if str(auth_method).strip().casefold() == "yubikey"
+            else "password"
+        )
         VaultCoreSingleton.initialize(
             vault_data=vault_data,
             password=password,
@@ -31,7 +41,8 @@ class VaultService:
             "vault.unlocked",
             vault_path=path,
             password=password,
-            vault_data=vault_data
+            vault_data=vault_data,
+            auth_method=auth_method,
         )
 
     @staticmethod

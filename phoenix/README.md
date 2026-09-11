@@ -137,6 +137,28 @@ When Phoenix starts, you’ll see only the 🔐 UNLOCK button.
 Enter your vault password — the cockpit decrypts and loads trusted deployments.
 No unlock = no swarm control.
 
+#### Optional YubiKey vault unlock
+
+Phoenix can derive the vault credential from a YubiKey and one case-sensitive
+secondary word. Insert the key, enter the word, choose **Unlock with YubiKey**,
+and touch the key when prompted. The generated 256-bit credential is never
+shown or stored separately; the vault continues to use its own random internal
+KDF salt.
+
+One-time setup requires YubiKey Manager and an available slot 2. The following
+command **overwrites slot 2**, so inspect the slot first with `ykman otp info`
+and do not run it if that slot contains a credential you need:
+
+```bash
+ykman otp chalresp --generate --touch 2
+```
+
+Phoenix only reads that slot and never configures, replaces, or deletes it.
+Use **Change Vault Password** and select **Protect new credential with
+YubiKey** to migrate an existing password vault. Keep a tested backup before
+migrating: losing either the configured YubiKey or the exact secondary word
+makes a YubiKey-protected vault unrecoverable.
+
 #### Connect to Deployment
 
 Right-click a deployment → 🔌 Connect.
