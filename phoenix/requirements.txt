@@ -10,3 +10,4 @@ PyQt6==6.10.0
 requests==2.32.4
 rsa==4.9.1
 websocket-client==1.8.0
+yubikey-manager==5.9.2

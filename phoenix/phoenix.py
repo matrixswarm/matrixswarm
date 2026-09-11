@@ -615,7 +615,9 @@ class PhoenixCockpit(QMainWindow):
             vcs = VaultCoreSingleton.get()
             deployments = vcs.read().get("deployments", {})
             dep_count = len(deployments)
-            self.status_vault.setText("Vault: 🔓")
+            method = str(kwargs.get("auth_method", "password")).strip().casefold()
+            credential = "🔑 YubiKey" if method == "yubikey" else "🔐 Password"
+            self.status_vault.setText(f"{credential} • Vault: 🔓")
             self.status_deployments.setText(f"Deployments: {dep_count}")
             self.status_sessions.setText("Sessions: 0")  # reset at unlock
 
@@ -656,6 +658,7 @@ class PhoenixCockpit(QMainWindow):
 
     # in PhoenixCockpit._destroy_all_sessions
     def _destroy_all_sessions(self, **_):
+        self.status_vault.setText("Vault: 🔒")
         for sess in list(self.session_processes):
             try:
                 if sess["conn"]:
@@ -753,8 +756,6 @@ class PhoenixCockpit(QMainWindow):
                         continue  # return to selector
 
                     new_path = create_dlg.vault_path
-                    new_pw = create_dlg.vault_password
-
                     # Now force user to unlock it immediately
                     unlock_dlg = VaultUnlockDialog(self)
                     unlock_dlg.vault_path = new_path
@@ -763,8 +764,9 @@ class PhoenixCockpit(QMainWindow):
 
                     VaultService.initialize_runtime(
                         vault_data=unlock_dlg.vault_data,
-                        password=new_pw,
-                        path=new_path
+                        password=unlock_dlg.vault_password,
+                        path=new_path,
+                        auth_method=unlock_dlg.vault_auth_method,
                     )
                     return
 
@@ -777,7 +779,8 @@ class PhoenixCockpit(QMainWindow):
                     VaultService.initialize_runtime(
                         vault_data=unlock_dlg.vault_data,
                         password=unlock_dlg.vault_password,
-                        path=unlock_dlg.vault_path
+                        path=unlock_dlg.vault_path,
+                        auth_method=unlock_dlg.vault_auth_method,
                     )
                     return
 
