@@ -17,17 +17,17 @@ class Oracle(BaseEditor, ServiceRolesMixin):
         # API Key (not shown here by design — can be handled elsewhere)
         self.model = QComboBox()
         self.model.addItems([
+            "gpt-5.6-terra",
+            "gpt-5.6-sol",
+            "gpt-6-astra",
             "gpt-4o",
-            "gpt-4-turbo",
-            "gpt-3.5-turbo",
-            "gpt-sora-1"
         ])
-        self.model.setCurrentText(cfg.get("model", "gpt-3.5-turbo"))
+        self.model.setCurrentText(cfg.get("model", "gpt-5.6-terra"))
 
         self.temperature = QDoubleSpinBox()
         self.temperature.setRange(0.0, 2.0)
         self.temperature.setSingleStep(0.1)
-        self.temperature.setValue(float(cfg.get("temperature", 0.7)))
+        self.temperature.setValue(float(cfg.get("temperature", 0)))
 
         self.response_mode = QComboBox()
         self.response_mode.addItems(["terse", "verbose", "creative"])

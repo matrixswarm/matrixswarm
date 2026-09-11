@@ -13,10 +13,16 @@ import uuid
 from collections import OrderedDict
 
 from core.python_core.boot_agent import BootAgent
+from core.python_core.agent_factory.oracle.oracle_query_mixin import OracleQueryMixin
 from core.python_core.mixin.encrypted_state import EncryptedStateMixin
+from forensic_detective.oracle_investigation import (
+    build_oracle_messages,
+    parse_oracle_analysis,
+    render_oracle_alert,
+)
 
 
-class Agent(EncryptedStateMixin, BootAgent):
+class Agent(OracleQueryMixin, EncryptedStateMixin, BootAgent):
     def __init__(self):
         super().__init__()
         self.name = "ForensicDetective"
@@ -31,11 +37,17 @@ class Agent(EncryptedStateMixin, BootAgent):
         self.alert_role = config.get("alert_to_role", "hive.alert")
 
         # --- Oracle Integration Config ---
-        # This feature is off by default. To enable, add an "oracle_analysis"
-        # block to your directive's config.
+        # Per-directive control; Phoenix enables it in new Forensic Detective
+        # nodes, while older directives without the block remain compatible.
         oracle_config = config.get("oracle_analysis", {})
         self.enable_oracle_analysis = bool(oracle_config.get("enable_oracle", 0))
         self.oracle_role = oracle_config.get("role", "hive.oracle")
+        self.oracle_timeout = max(
+            10, min(600, int(oracle_config.get("timeout_sec", 90)))
+        )
+        self.oracle_max_context_events = max(
+            1, min(30, int(oracle_config.get("max_context_events", 12)))
+        )
 
         self.last_alerts = {}
         self.init_encrypted_state(namespace="forensic_journal")
@@ -104,7 +116,7 @@ class Agent(EncryptedStateMixin, BootAgent):
         if not self.alert_role:
             self.log("missing an alert_role self.alert_role", level="ERROR")
             return
-        endpoints = self.get_nodes_by_role("hive.alert")
+        endpoints = self.get_nodes_by_role(self.alert_role)
         if not endpoints:
             self.log(f"No alert-compatible agents found for '{self.alert_role}'.", level="ERROR")
             return
@@ -177,126 +189,178 @@ class Agent(EncryptedStateMixin, BootAgent):
                 full_forensic_report = "\n".join(forensic_findings_list)
                 concise_alert_summary = forensic_findings_list[0] if forensic_findings_list else "Forensic analysis could not be completed."
 
+                oracle_state = {
+                    "status": "pending" if self.enable_oracle_analysis else "disabled"
+                }
+                self.save_event_summary(
+                    incident_id,
+                    status_data,
+                    correlated_events,
+                    full_forensic_report,
+                    oracle_analysis=oracle_state,
+                )
+
                 # --- STAGE 1: Send Immediate Alert ---
                 self.send_simple_alert(concise_alert_summary, incident_id, status_data)
 
                 # --- STAGE 2: Request Oracle Analysis ---
                 if self.enable_oracle_analysis:
-                    self._request_oracle_analysis(incident_id, status_data, correlated_events)
-
-                self.save_event_summary(incident_id, status_data, correlated_events, full_forensic_report)
+                    self._request_oracle_analysis(
+                        incident_id,
+                        status_data,
+                        correlated_events,
+                        full_forensic_report,
+                    )
 
         except Exception as e:
             self.log(error=e, level="ERROR", block="main_try")
 
-    def _request_oracle_analysis(self, incident_id, critical_event, correlated_events):
-        """Requests deeper AI analysis from Oracle using NEW message format."""
-
-        endpoints = self.get_nodes_by_role(self.oracle_role, return_count=1)
-        if not endpoints:
-            self.log(f"Oracle analysis enabled, but no agent with role '{self.oracle_role}' found.", level="WARNING")
-            return
-
-        # --- Extract usable log info ---
-        details = critical_event.get('details')
-        if isinstance(details, dict):
-            critical_log = details.get('log_line', str(details))
-        elif isinstance(details, str):
-            critical_log = details
-        else:
-            critical_log = "No log details provided."
-
-        context_logs = []
-        for evt in correlated_events:
-            evt_details = evt.get("details")
-            if isinstance(evt_details, dict):
-                log_line = evt_details.get("log_line", str(evt_details))
-            elif isinstance(evt_details, str):
-                log_line = evt_details
-            else:
-                log_line = "N/A"
-
-            context_logs.append(f"- {evt.get('severity', 'INFO')}: {log_line}")
-
-        context_block = "\n".join(context_logs)
-
-        # --- Oracle Chat Messages ---
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are Oracle, an expert IT security analyst. "
-                    "Provide root cause analysis and remediation instructions. "
-                    "Always be concise and actionable."
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Critical Event:\n{critical_log}\n\n"
-                    f"Context Events:\n{context_block}\n\n"
-                    "Provide:\n"
-                    "1. Root Cause (1–2 sentences)\n"
-                    "2. Recommended Actions (numbered)\n"
-                )
-            }
-        ]
-
-        # --- Build packet for Oracle ---
-        pk = self.get_delivery_packet("standard.command.packet")
-        pk.set_data({
-            "handler": "cmd_msg_prompt",
-            "content": {
-                "messages": messages,  # NEW REQUIRED FIELD
-                "query_id": incident_id,
-                "session_id": self.command_line_args.get("universal_id"),
-                "token": incident_id,
-                "rpc_role": "hive.rpc",
-                "return_handler": "cmd_oracle_forensics_response",
-                "target_universal_id": self.command_line_args.get("universal_id"),
-            }
+    def _request_oracle_analysis(
+        self,
+        incident_id,
+        critical_event,
+        correlated_events,
+        forensic_report,
+    ):
+        """Send a redacted incident evidence bundle through the Oracle mixin."""
+        query = self.get_oracle_query_object()
+        query.oracle_role = self.oracle_role
+        query.response_handler = "_handle_oracle_forensics_result"
+        query.json_response = True
+        query.timeout_sec = self.oracle_timeout
+        query.messages = build_oracle_messages(
+            incident_id,
+            critical_event,
+            correlated_events,
+            forensic_report,
+            max_context_events=self.oracle_max_context_events,
+        )
+        query.save_data({
+            "incident_id": incident_id,
+            "critical_event": critical_event,
         })
 
-        # --- Send to Oracle ---
-        for ep in endpoints:
-            pk.set_payload_item("handler", ep.get_handler())
-            self.pass_packet(pk, ep.get_universal_id())
-
-        self.log(f"Requested NEW Oracle analysis for incident {incident_id}.")
-
-    def cmd_oracle_forensics_response(self, content, packet, identity=None):
-        """Handles the enriched analysis received from the Oracle."""
-        try:
-            incident_id = content.get("query_id")
-            ai_analysis = content.get("response")
-
-            if not incident_id or not ai_analysis:
-                self.log("Received an invalid forensics response from Oracle.", level="ERROR")
-                return
-
-            self.log(f"Received Oracle analysis for incident {incident_id}.")
-
-            # We need a 'critical_event' to properly format the alert.
-            # This is a limitation; we'll create a placeholder.
-            placeholder_event = {
-                "service_name": "AI Analysis",
-                "status": "Completed"
+        incident = self.load_encrypted_state(
+            incident_id,
+            default={},
+            directory="incidents",
+        )
+        if isinstance(incident, dict):
+            incident["oracle_analysis"] = {
+                "status": "pending",
+                "query_id": query.query_id,
+                "requested_at": time.strftime(
+                    '%Y-%m-%dT%H:%M:%SZ', time.gmtime()
+                ),
             }
+            self.save_encrypted_state(
+                incident_id,
+                incident,
+                directory="incidents",
+            )
 
-            # Send the AI's response as a new, enriched alert
-            self.send_simple_alert(ai_analysis, incident_id, placeholder_event, title_prefix="🤖 AI-Enhanced Analysis")
+        self.send_to_oracle(query)
 
-        except Exception as e:
-            self.log(error=e, level="ERROR", block="cmd_oracle_forensics_response")
+    def _handle_oracle_forensics_result(self, query, response, error=None):
+        """Persist Oracle's verdict and emit a concise follow-up alert."""
+        incident_id = query.data.get("incident_id")
+        if not incident_id:
+            self.log("[ORACLE] Result missing incident identity.", level="ERROR")
+            return
 
-    def save_event_summary(self, incident_id, critical_event, correlated_events, forensic_report):
+        incident = self.load_encrypted_state(
+            incident_id,
+            default={},
+            directory="incidents",
+        )
+        if not isinstance(incident, dict):
+            self.log(
+                f"[ORACLE] Incident journal missing for {incident_id}.",
+                level="ERROR",
+            )
+            return
+
+        completed_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        if error:
+            incident["oracle_analysis"] = {
+                "status": "failed",
+                "query_id": query.query_id,
+                "error": str(error)[:200],
+                "completed_at": completed_at,
+            }
+            self.save_encrypted_state(
+                incident_id,
+                incident,
+                directory="incidents",
+            )
+            self.log(
+                f"[ORACLE] Investigation {incident_id} failed: {error}",
+                level="WARNING",
+            )
+            return
+
+        try:
+            analysis = parse_oracle_analysis(response)
+        except ValueError as exc:
+            incident["oracle_analysis"] = {
+                "status": "failed",
+                "query_id": query.query_id,
+                "error": str(exc),
+                "completed_at": completed_at,
+            }
+            self.save_encrypted_state(
+                incident_id,
+                incident,
+                directory="incidents",
+            )
+            self.log(
+                f"[ORACLE] Invalid investigation for {incident_id}: {exc}",
+                level="ERROR",
+            )
+            return
+
+        incident["oracle_analysis"] = {
+            "status": "completed",
+            "query_id": query.query_id,
+            "completed_at": completed_at,
+            "result": analysis,
+        }
+        self.save_encrypted_state(
+            incident_id,
+            incident,
+            directory="incidents",
+        )
+        self.log(f"[ORACLE] Investigation completed for {incident_id}.")
+        critical_event = query.data.get("critical_event") or incident.get(
+            "critical_event", {}
+        )
+        self.send_simple_alert(
+            render_oracle_alert(analysis),
+            incident_id,
+            critical_event,
+            title_prefix="🔮 Oracle Hypothesis",
+        )
+
+    def worker(self, config=None, identity=None):
+        """Complete Oracle timeout paths while the agent is running."""
+        self.check_oracle_timeouts()
+
+    def save_event_summary(
+        self,
+        incident_id,
+        critical_event,
+        correlated_events,
+        forensic_report,
+        oracle_analysis=None,
+    ):
         """Saves all event data to a single JSON file for offline analysis."""
         summary_data = {
             "incident_id": incident_id,
             "incident_time": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             "critical_event": critical_event,
             "correlated_events": correlated_events,
-            "full_forensic_report": forensic_report
+            "full_forensic_report": forensic_report,
+            "oracle_analysis": oracle_analysis or {"status": "disabled"},
         }
         try:
             self.save_encrypted_state(
