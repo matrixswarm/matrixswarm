@@ -1305,10 +1305,16 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         """
         try:
 
-            self.log(f'content: {content}')
-
             service_role = content.get("service")
             payload = content.get("payload", {})
+
+            # Wallet addresses and watch definitions should not enter Matrix's
+            # ordinary service-request log or unrelated crypto instances.
+            crypto_request = isinstance(service_role, str) and service_role.startswith("hive.crypto_alert.")
+            if crypto_request:
+                self.log("[SERVICE-REQ] Crypto watch request (payload withheld).")
+            else:
+                self.log(f'content: {content}')
 
             if not service_role:
                 self.log("[SERVICE-REQ][ERROR] Missing 'service' field.")
@@ -1324,6 +1330,9 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
                 target_uid = ep.get_universal_id()
                 handler = ep.get_handler()
+
+                if crypto_request and target_uid != payload.get("target_universal_id"):
+                    continue
 
                 if not handler or not target_uid:
                     self.log(f"[SERVICE-REQ][WARN] Skipping endpoint {ep}")

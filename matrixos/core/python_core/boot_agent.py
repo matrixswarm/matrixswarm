@@ -487,7 +487,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.callback = None
             self.log("[CALLBACK][FATAL] Failed to initialize callback dispatcher", error=e)
 
-    def crypto_reply(self, response_handler: str, payload: dict, session_id=None, token=None, rpc_role=None):
+    def crypto_reply(self, response_handler: str, payload: dict, session_id=None, token=None, rpc_role=None, quiet=False):
         """
         Unified callback helper that signs and dispatches a secure response.
 
@@ -537,7 +537,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             if token:
                 ctx.set_token(token)
 
-            self.callback.dispatch(ctx, payload)
+            self.callback.dispatch(ctx, payload, quiet=quiet)
             return True
 
         except Exception as e:
