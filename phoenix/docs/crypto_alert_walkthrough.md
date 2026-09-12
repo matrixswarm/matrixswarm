@@ -1,111 +1,27 @@
-# 📡 MatrixSwarm V2 Crypto Alert Setup Walkthrough
+# Crypto Watches: quick start
 
-This guide explains how to set up real-time crypto alerts using **MatrixSwarm v0.2 “Stormcrow”** and the GUI-based **Command Bridge**. You'll learn how to trigger price alerts, update them, and route them through the swarm.
+1. Add `crypto_alert` to Swarm Workspace. Assign its `packet_signing` and
+   `persistent_state` constraints, and include an alert relay plus the normal
+   Phoenix RPC/WebSocket return path.
+2. In Config, leave the public Bitcoin Esplora API or enter your own HTTPS API.
+   Public explorers can see the Bitcoin addresses you query.
+3. Deploy the updated MatrixOS source, connect Phoenix, select the crypto agent,
+   and open **Crypto Watches**.
+4. Choose **Price / Pair Watch** for `BTC/USDT`, `BTC/ETH`, etc. Choose the
+   trigger and its threshold. A BTC/ETH value means ETH per BTC, derived from
+   the two Phemex USDT spot prices.
+5. Choose **Bitcoin Address** for a mainnet public address. The first lookup
+   establishes a baseline; later confirmed changes can notify your relay.
+6. Click **Save Changes** and wait for the saved revision acknowledgment.
+   Deleting cards is also a draft until saved; saving an empty list deletes all
+   watches for this agent.
+7. Use **Reload Saved** after reconnecting or if another panel changed the list.
+   Closing the panel does not stop remote watches.
 
----
+Each watch has its own worker and state. Editing a watch resets its baseline and
+hit count; unchanged watches retain theirs. A trigger limit of zero is unlimited.
+Percentage changes are measured since the armed baseline, not over a fixed time
+window. Cross-pair ratios are not executable trade quotes.
 
-## ✅ Step 1: Launch the Command Bridge
-
-Run this in your terminal:
-
-```bash
-python3 matrix_gui_2.py
-```
-
-Make sure:
-
-* `🟢 WS: Connected` (WebSocket)
-* `🟢 Matrix: Connected` (API)
-
-If both are green, you’re ready.
-
----
-
-## 🔥 Step 2: Open the Crypto Alert Panel
-
-Click the button:
-
-```
-📈 Crypto Alerts
-```
-
-This opens the **Crypto Alert Reflex Panel**, showing your active alerts at the top.
-
----
-
-## 🧠 Step 3: Create a New Alert
-
-Fill out these fields:
-
-| Field              | Description                                                         |
-| ------------------ | ------------------------------------------------------------------- |
-| **Pair**           | Format: `ETH/USDT`, `BTC/USD`, etc.                                 |
-| **Threshold**      | Price to trigger at. Ex: `2549.0`                                   |
-| **Cooldown (sec)** | Seconds to wait before alerting again (e.g., `300` for 5 minutes)   |
-| **Exchange**       | Source for price feed. Use: `coingecko`, `binance`, etc.            |
-| **Trigger Type**   | Choose: `price_above`, `price_below`, `%_change`, `absolute_change` |
-| **Trigger Limit**  | Optional: number of times alert can fire before auto-deactivation   |
-
-When ready, click:
-
-```
-✅ Create Alert
-```
-
----
-
-## 🛰️ Step 4: Monitor in Real-Time
-
-When triggered:
-
-* The alert appears in **red** under Active Crypto Alerts
-* You’ll see:
-
-  * Triggered pair
-  * Threshold vs current price
-  * Data source (e.g., Coingecko)
-* Siren/voice triggers (if configured) will activate
-* Full log appears in agent’s `/comm/{universal_id}/logs/`
-
----
-
-## 🛠 Optional: Modify or Delete Alerts
-
-* Click an alert from the list to edit it
-* Modify threshold, cooldown, or limit
-* Click `Update Selected`
-* Click `Delete Selected` to remove
-
----
-
-## 💡 Behind the Scenes
-
-* Alerts use `cmd_forward_command` routing packets
-* Packets are processed by crypto agents with reflex logic
-* Triggers propagate to GUI via WebSocket feed
-* Agents can forward alerts to Discord, Telegram, or CLI logs
-* Cooldowns are enforced by the alert agent directly
-
----
-
-## 🧪 Advanced Tips
-
-* Set up multiple alerts per asset for layered response
-* Use `%_change` trigger for volatile markets
-* Use `Trigger Limit` to set alert fatigue boundaries
-* Tune `Cooldown` to throttle noise during fast moves
-
----
-
-## 🔗 Resources
-
-* GitHub: [https://github.com/matrixswarm/matrixswarm](https://github.com/matrixswarm/matrixswarm)
-* Discord: [https://discord.com/invite/yPJyTYyq5F](https://discord.com/invite/yPJyTYyq5F)
-* Docs: `/docs/crypto_alert_walkthrough.md`
-
----
-
-This doc was forged by Commander Stormcrow + The General.
-Stormcrow doesn’t sleep. It watches. It screams first.
-
-🧠
+See the [full agent reference](agents/crypto_alert.md) for rule semantics,
+persistence, privacy, dependencies, migration limitations, and troubleshooting.

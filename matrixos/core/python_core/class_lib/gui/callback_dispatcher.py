@@ -1,4 +1,5 @@
 
+import os
 import time
 from core.python_core.utils.crypto_utils import encrypt_with_ephemeral_aes, sign_data
 
@@ -67,6 +68,11 @@ class CallbackCtx:
 class PhoenixCallbackDispatcher:
     """Handles encryption, signing, and delivery of callback responses."""
 
+    # Relay agents own their connected.flag leases and normally remove them
+    # immediately (WebSocket) or at the configured heartbeat timeout (email).
+    # This ceiling only protects against an abandoned flag after a relay crash.
+    DEFAULT_SESSION_FLAG_MAX_AGE = 900
+
     def __init__(self, agent):
         self.agent = agent
         self.ctx = None
@@ -89,7 +95,54 @@ class PhoenixCallbackDispatcher:
         c._token = getattr(base, "_token", None)
         return c
 
-    def dispatch(self, ctx: CallbackCtx = None, content: dict = None):
+    def _session_endpoints(self, endpoints, session_id):
+        """Return only RPC relays that currently own ``session_id``.
+
+        A role such as ``hive.rpc`` may be implemented by several transports.
+        Session-bound callbacks must not be broadcast to transports that do
+        not own that session; their connected flag is the transport-neutral
+        ownership lease.
+        """
+        if session_id is None:
+            return list(endpoints)
+
+        sid = str(session_id).strip()
+        if not sid or os.path.basename(sid) != sid or "/" in sid or "\\" in sid:
+            return []
+
+        paths = getattr(self.agent, "path_resolution", {}) or {}
+        comm_path = paths.get("comm_path")
+        if not comm_path:
+            return []
+
+        cfg = getattr(self.agent, "tree_node", {}).get("config", {}) or {}
+        try:
+            max_age = max(
+                1,
+                int(cfg.get("callback_session_flag_max_age", self.DEFAULT_SESSION_FLAG_MAX_AGE)),
+            )
+        except (TypeError, ValueError):
+            max_age = self.DEFAULT_SESSION_FLAG_MAX_AGE
+
+        now = time.time()
+        active = []
+        for endpoint in endpoints:
+            relay_uid = endpoint.get_universal_id()
+            flag = os.path.join(
+                comm_path,
+                relay_uid,
+                "broadcast",
+                f"connected.flag.{sid}",
+            )
+            try:
+                if os.path.isfile(flag) and now - os.path.getmtime(flag) <= max_age:
+                    active.append(endpoint)
+            except OSError:
+                # A relay can remove its flag while callbacks are being routed.
+                continue
+        return active
+
+    def dispatch(self, ctx: CallbackCtx = None, content: dict = None, quiet=False):
         """
         Dispatch a secure callback with validated context.
         """
@@ -124,12 +177,19 @@ class PhoenixCallbackDispatcher:
             if not endpoints:
                 self.agent.log(f"[CALLBACK] No endpoints found for rpc_role='{rpc_role}'.")
                 return
-            self.agent.log(f"[CALLBACK] Found {len(endpoints)} endpoints for rpc_role='{rpc_role}'")
+            endpoints = self._session_endpoints(endpoints, session_id)
+            if not endpoints:
+                if not quiet:
+                    self.agent.log(
+                        f"[CALLBACK] No active relay owns session '{session_id}' "
+                        f"for rpc_role='{rpc_role}'."
+                    )
+                return
+            if not quiet:
+                self.agent.log(f"[CALLBACK] Found {len(endpoints)} endpoints for rpc_role='{rpc_role}'")
 
             # === 3. Encrypt + Sign ===
             payload = {"handler": response_handler, "content": content}
-
-            self.agent.log(f"{payload}")
 
             sealed = encrypt_with_ephemeral_aes(payload, remote_pub_pem)
             wrapper = {
@@ -157,7 +217,8 @@ class PhoenixCallbackDispatcher:
             for ep in endpoints:
                 pk.set_payload_item("handler", ep.get_handler())
                 self.agent.pass_packet(pk, ep.get_universal_id())
-                self.agent.log(f"[CALLBACK] ✅ Callback dispatched to rpc handler (uid={ep.get_universal_id()}.{ep.get_handler()}) ")
+                if not quiet:
+                    self.agent.log(f"[CALLBACK] ✅ Callback dispatched to rpc handler (uid={ep.get_universal_id()}.{ep.get_handler()}) ")
 
         except Exception as e:
             self.agent.log(f"[CALLBACK][ERROR] Dispatch failed: {e}")

@@ -60,7 +60,12 @@ class Agent(BootAgent):
             cfg = self.tree_node.get("config", {})
 
             self.interval = int(cfg.get("interval", 2))     # seconds between polls
+            # Grace after a stream starts before a missing relay ends it.
             self.heartbeat_ttl = int(cfg.get("heartbeat_ttl", 30))
+            # Relay owners reap their own leases. This larger safety ceiling
+            # accommodates email heartbeat intervals while still rejecting a
+            # flag abandoned by a crashed relay.
+            self.session_flag_max_age = int(cfg.get("session_flag_max_age", 900))
             self.rate_limit = float(cfg.get("rate_limit", 2.0))  # seconds between sends
 
             self.active_streams = {}
@@ -90,7 +95,7 @@ class Agent(BootAgent):
         session must not tear down a stream that still has another live relay.
         """
         alert_role = self.tree_node.get("rpc_router_role", "hive.rpc")
-        freshness = self.heartbeat_ttl if threshold is None else int(threshold)
+        grace = self.heartbeat_ttl if threshold is None else int(threshold)
 
         while True:
             for sess in list(self.active_streams.keys()):
@@ -104,7 +109,7 @@ class Agent(BootAgent):
                 fresh_relays, relay_count = self._relay_status_for_session(
                     sess,
                     role=alert_role,
-                    threshold=freshness,
+                    threshold=self.session_flag_max_age,
                 )
 
                 if fresh_relays:
@@ -115,7 +120,7 @@ class Agent(BootAgent):
                     continue
 
                 age = time.time() - stream.get("created", time.time())
-                if age <= freshness:
+                if age <= grace:
                     continue
 
                 self.log(
@@ -249,7 +254,7 @@ class Agent(BootAgent):
                     fresh_relays, relay_count = self._relay_status_for_session(
                         sess,
                         role=self.rpc_role,
-                        threshold=self.heartbeat_ttl,
+                        threshold=self.session_flag_max_age,
                     )
                     if relay_count == 0:
                         self.log("No hive.rpc-compatible agents found for 'hive.rpc'.", level="ERROR")
@@ -312,7 +317,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(f"Error in stream loop", error=e)
 
-    def has_fresh_broadcast_flag(self, relay_uid: str, session_id: str, threshold: int = 30) -> bool:
+    def has_fresh_broadcast_flag(self, relay_uid: str, session_id: str, threshold: int = 900) -> bool:
         """
         Checks whether connected.flag.<session_id> exists and is fresh
         inside the relay agent's broadcast dir.
@@ -335,7 +340,7 @@ class Agent(BootAgent):
     ) -> tuple[list[str], int]:
         """Return fresh relay IDs and the number of compatible relays found."""
         relay_role = role or self.rpc_role
-        freshness = self.heartbeat_ttl if threshold is None else int(threshold)
+        freshness = self.session_flag_max_age if threshold is None else int(threshold)
         endpoints = list(self.get_nodes_by_role(relay_role))
         fresh_relays = []
 
@@ -376,7 +381,8 @@ class Agent(BootAgent):
                 payload=payload,
                 session_id=sess,
                 token=token,
-                rpc_role=self.rpc_role
+                rpc_role=self.rpc_role,
+                quiet=True,
             )
 
             if self.debug.is_enabled():

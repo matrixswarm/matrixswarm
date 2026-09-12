@@ -12,7 +12,7 @@ class FlowLayout(QtWidgets.QLayout):
     def count(self): return len(self.items)
     def itemAt(self, i): return self.items[i] if i < len(self.items) else None
     def takeAt(self, i): return self.items.pop(i) if i < len(self.items) else None
-    def expandingDirections(self): return Qt.Orientations(0)
+    def expandingDirections(self): return Qt.Orientation(0)
     def hasHeightForWidth(self): return True
     def heightForWidth(self, w): return self.doLayout(QtCore.QRect(0, 0, w, 0), True)
     def setGeometry(self, rect): super().setGeometry(rect); self.doLayout(rect, False)

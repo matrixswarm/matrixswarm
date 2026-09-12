@@ -88,6 +88,7 @@ class Agent(BootAgent):
 
             self.encrypt_outgoing = bool(email_cfg.get("encrypt_outgoing", False) or cfg.get("encrypt_outgoing", False))
             self._sessions = {}  # phoenix_session_id -> {last_seen, ...}
+            self._disposed_log_at = {}
 
             # Accept both old lane style and flatter connector-style config.
             payload_lane = email_cfg.get("payload_lane", {}) or {}
@@ -1072,7 +1073,8 @@ class Agent(BootAgent):
         Returns:
             bool: True if payload was successfully dispatched to at least one session.
         """
-        self.log(f"[EMAIL][ROUTE] target={session_id or 'broadcast'}")
+        if self.debug.is_enabled():
+            self.log(f"[EMAIL][ROUTE] target={session_id or 'broadcast'}")
         if session_id and session_id != "*":
             if self._is_email_session_active(session_id):
                 return self._send(payload, session_id)
@@ -1085,6 +1087,29 @@ class Agent(BootAgent):
                 sent = True
 
         return sent
+
+    def _log_disposed_session(self, session_id: str, sender: str):
+        """Rate-limit the defensive stale-session diagnostic.
+
+        Producers now route by relay ownership, but egress remains fail-closed
+        in case an old or nonconforming sender reaches it directly.
+        """
+        now = time.monotonic()
+        key = (str(session_id), str(sender))
+        last = self._disposed_log_at.get(key, 0.0)
+        if now - last < 60.0:
+            return
+        self._disposed_log_at[key] = now
+        if len(self._disposed_log_at) > 256:
+            cutoff = now - 300.0
+            self._disposed_log_at = {
+                item: seen for item, seen in self._disposed_log_at.items()
+                if seen >= cutoff
+            }
+        self.log(
+            f"[EMAIL][ROUTER][DISPOSED] Session '{session_id}' not found or "
+            f"inactive — disposing: Sender: {sender}"
+        )
 
     def cmd_send_alert_msg(self, content, packet, identity: IdentityObject = None):
         """
@@ -1153,8 +1178,7 @@ class Agent(BootAgent):
                     self.log(f"[EMAIL][ROUTER] Directing to session {session_id} : Sender: {sender}")
                 sent = self._route(content, session_id)
                 if not sent:
-                    self.log(
-                        f"[EMAIL][ROUTER][DISPOSED] Session '{session_id}' not found or inactive — disposing: Sender: {sender}")
+                    self._log_disposed_session(session_id, sender)
             else:
                 self.log(f"[EMAIL][ROUTER] No session_id — broadcasting to all: Sender: {sender}.")
                 self._route(content, "*")

@@ -9,9 +9,7 @@
             }
         },
         {
-            "symmetric_encryption": {
-                "type": "aes"
-            }
+            "persistent_state": null
         }
     ],
     "config": {
@@ -34,7 +32,9 @@
                 ]
             }
         ],
-        "poll_interval": 20,
-        "alert_role": "hive.swarm_feed.alert"
+        "exchange": "phemex",
+        "bitcoin_api_url": "https://blockstream.info/api",
+        "watch_list": [],
+        "alert_role": "hive.alert"
     }
 }

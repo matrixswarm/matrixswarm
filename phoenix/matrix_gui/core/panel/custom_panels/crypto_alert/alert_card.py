@@ -1,15 +1,19 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
 
+import math
+import re
 import time
+import uuid
 from typing import Dict
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QComboBox, QCheckBox
 )
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QFrame
 
 class AlertCard(QWidget):
+    changed = pyqtSignal()
     """
     Visual container for a single crypto alert, Commander Edition.
     Includes:
@@ -32,8 +36,18 @@ class AlertCard(QWidget):
 
         # boiler style
         self._boiler_style = "Clean Cockpit"
+        self.alert_id = uuid.uuid4().hex
+        self._live = {}
+        self._runtime = {}
+        self._draft = False
 
         self._build_ui()
+        for widget in self.findChildren(QLineEdit):
+            widget.textEdited.connect(self.changed.emit)
+        for widget in self.findChildren(QComboBox):
+            widget.currentTextChanged.connect(self.changed.emit)
+        for widget in self.findChildren(QCheckBox):
+            widget.toggled.connect(self.changed.emit)
 
     # -------------------------------------------------------------------
     # UI BUILD
@@ -101,6 +115,7 @@ class AlertCard(QWidget):
         # Header + delete button
         hdr = QHBoxLayout()
         self.header_label = QLabel("Alert")
+        self.header_label.setTextFormat(Qt.TextFormat.PlainText)
         hdr.addWidget(self.header_label)
         hdr.addStretch()
 
@@ -110,6 +125,10 @@ class AlertCard(QWidget):
         hdr.addWidget(self.delete_btn)
 
         root.addLayout(hdr)
+        self.label_edit = QLineEdit()
+        self.label_edit.setPlaceholderText("Watch name (optional)")
+        self.label_edit.setMaxLength(100)
+        root.addWidget(self.label_edit)
 
         # -------------------------------------------------------
         # Pair
@@ -134,26 +153,34 @@ class AlertCard(QWidget):
             "price_delta_above",
             "price_delta_below",
             "asset_conversion",
+            "wallet_change",
         ])
         trig_row.addWidget(self.trigger_combo)
         wrap = QWidget()
         wrap.setLayout(trig_row)
         root.addWidget(wrap)
 
+        self.rule_help = QLabel()
+        self.rule_help.setWordWrap(True)
+        root.addWidget(self.rule_help)
+
         # -------------------------------------------------------
         # Main threshold
         thresh_row = QHBoxLayout()
-        thresh_row.addWidget(QLabel("Threshold:"))
+        self.threshold_label = QLabel("Alert price:")
+        thresh_row.addWidget(self.threshold_label)
         self.threshold_edit = QLineEdit("0")
+        self.threshold_edit.setPlaceholderText("Enter the target price")
         thresh_row.addWidget(self.threshold_edit)
-        wrap = QWidget()
-        wrap.setLayout(thresh_row)
-        root.addWidget(wrap)
+        self.threshold_wrap = QWidget()
+        self.threshold_wrap.setLayout(thresh_row)
+        root.addWidget(self.threshold_wrap)
 
         # -------------------------------------------------------
         # Percent change
         pct_row = QHBoxLayout()
-        pct_row.addWidget(QLabel("Percent Change:"))
+        self.pct_label = QLabel("Move (%):")
+        pct_row.addWidget(self.pct_label)
         self.pct_edit = QLineEdit("")
         pct_row.addWidget(self.pct_edit)
         self.pct_wrap = QWidget()
@@ -163,7 +190,8 @@ class AlertCard(QWidget):
         # -------------------------------------------------------
         # Absolute delta
         delta_row = QHBoxLayout()
-        delta_row.addWidget(QLabel("Delta ($):"))
+        self.delta_label = QLabel("Move (quote units):")
+        delta_row.addWidget(self.delta_label)
         self.delta_edit = QLineEdit("")
         delta_row.addWidget(self.delta_edit)
         self.delta_wrap = QWidget()
@@ -190,12 +218,23 @@ class AlertCard(QWidget):
         conv_layout.addLayout(r)
 
         r = QHBoxLayout()
-        r.addWidget(QLabel("Amount:"))
+        self.from_amount_label = QLabel("Source amount:")
+        r.addWidget(self.from_amount_label)
         self.from_amount_edit = QLineEdit("0.1")
         r.addWidget(self.from_amount_edit)
         conv_layout.addLayout(r)
 
         root.addWidget(self.conv_wrap)
+        self.wallet_wrap = QWidget()
+        wallet_layout = QVBoxLayout(self.wallet_wrap)
+        wallet_layout.addWidget(QLabel("Bitcoin mainnet public address:"))
+        self.address_edit = QLineEdit()
+        self.address_edit.setPlaceholderText("bc1… / 1… / 3…")
+        wallet_layout.addWidget(self.address_edit)
+        wallet_layout.addWidget(QLabel("Check interval (seconds, minimum 30):"))
+        self.poll_edit = QLineEdit("60")
+        wallet_layout.addWidget(self.poll_edit)
+        root.addWidget(self.wallet_wrap)
 
         # -------------------------------------------------------
         # Per-alert toggles (NEW)
@@ -220,12 +259,17 @@ class AlertCard(QWidget):
         # -------------------------------------------------------
         # Trigger limit
         tlim_row = QHBoxLayout()
-        tlim_row.addWidget(QLabel("Trigger Limit:"))
-        self.trigger_limit_edit = QLineEdit("9999999")
+        tlim_row.addWidget(QLabel("Trigger Limit (0 = unlimited):"))
+        self.trigger_limit_edit = QLineEdit("0")
         tlim_row.addWidget(self.trigger_limit_edit)
         wrap = QWidget()
         wrap.setLayout(tlim_row)
         root.addWidget(wrap)
+        cooldown_row = QHBoxLayout()
+        cooldown_row.addWidget(QLabel("Cooldown (seconds):"))
+        self.cooldown_edit = QLineEdit("60")
+        cooldown_row.addWidget(self.cooldown_edit)
+        root.addLayout(cooldown_row)
 
         # -------------------------------------------------------
         # Boiler display (unchanged)
@@ -235,6 +279,7 @@ class AlertCard(QWidget):
         b.setSpacing(2)
 
         self.boiler_label = QLabel("")
+        self.boiler_label.setTextFormat(Qt.TextFormat.PlainText)
         self.boiler_label.setObjectName("boilerLabel")
         self.boiler_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.boiler_label.setWordWrap(True)
@@ -246,11 +291,12 @@ class AlertCard(QWidget):
         self._update_field_visibility()
 
         # clicking outside inputs toggles Active
-        self.installEventFilter(self)
+        # Only explicit controls change whether a watch is active.
 
         # Force stable minimum size so cards never collapse or flicker
         self.setMinimumHeight(360)
         self.setMinimumWidth(350)
+        self.setMaximumWidth(460)
         self.setAutoFillBackground(True)
 
 
@@ -258,22 +304,44 @@ class AlertCard(QWidget):
     # -------------------------------------------------------------------
     # FIELD VISIBILITY
     # -------------------------------------------------------------------
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.MouseButtonPress:
-            # Only toggle active state if click is on empty card background
-            child = self.childAt(event.pos())
-            if child is None:
-                self.active_chk.toggle()
-                return True
-        return False
-
     def _update_field_visibility(self):
         t = self.trigger_combo.currentText()
         self.pct_wrap.setVisible("price_change" in t)
         self.delta_wrap.setVisible("price_delta" in t)
         self.conv_wrap.setVisible("asset_conversion" in t)
+        self.wallet_wrap.setVisible(t == "wallet_change")
+        self.pair_edit.setEnabled(t not in ("wallet_change", "asset_conversion"))
+        self.threshold_wrap.setVisible(t in ("price_above", "price_below", "asset_conversion"))
+        pair = self.pair_edit.text().strip().upper()
+        parts = pair.split("/", 1)
+        base, quote = (parts[0], parts[1]) if len(parts) == 2 else ("asset", "quote")
+        if t == "asset_conversion":
+            source = self.from_asset_edit.text().strip().upper() or "source asset"
+            target = self.to_asset_edit.text().strip().upper() or "target asset"
+            self.from_amount_label.setText(f"Amount of {source}:")
+            self.threshold_label.setText(f"Alert when conversion reaches ({target}):")
+            self.threshold_edit.setPlaceholderText(f"Target amount in {target}")
+        elif quote == "USDT":
+            self.threshold_label.setText("Alert price (USDT):")
+            self.threshold_edit.setPlaceholderText("Example: 78000")
+        else:
+            self.threshold_label.setText(f"Alert ratio ({quote} per {base}):")
+            self.threshold_edit.setPlaceholderText(f"Example: 30 {quote} per {base}")
+        self.pct_label.setText(f"Move from baseline (%):")
+        self.delta_label.setText(f"Move from baseline ({quote}):")
+        hints = {
+            "wallet_change": "Alerts on confirmed balance or transaction-count changes. First lookup sets the baseline.",
+            "asset_conversion": "Alert when the source amount is worth at least the threshold in the target asset.",
+            "price_above": "Alert at or above the threshold; rearm after falling below it.",
+            "price_below": "Alert at or below the threshold; rearm after rising above it.",
+        }
+        self.rule_help.setText(hints.get(t, "Change since this watch was armed; the baseline resets after each alert."))
 
         pair = self.pair_edit.text().strip()
+        if t == "asset_conversion":
+            source = self.from_asset_edit.text().strip().upper() or "Source"
+            target = self.to_asset_edit.text().strip().upper() or "Target"
+            pair = f"{source}/{target}"
         self.header_label.setText(f"{pair or 'Pair'} · {t}")
 
 
@@ -286,33 +354,93 @@ class AlertCard(QWidget):
         t = self.trigger_combo.currentText()
 
         d = {
+            "id": self.alert_id,
+            "label": self.label_edit.text().strip(),
             "pair": self.pair_edit.text().strip(),
             "trigger_type": t,
-            "threshold": self._safe_float(self.threshold_edit.text()),
+            "threshold": self.threshold_edit.text().strip(),
             "active": self.active_chk.isChecked(),
             "alert_enabled": self.alert_enabled_chk.isChecked(),
             "stream_enabled": self.stream_enabled_chk.isChecked(),
-            "trigger_limit": int(self._safe_float(self.trigger_limit_edit.text(), 9999999)),
+            "trigger_limit": self.trigger_limit_edit.text().strip(),
+            "cooldown_sec": self.cooldown_edit.text().strip(),
         }
 
         # percent change
         if "price_change" in t:
-            d["change_percent"] = self._safe_float(self.pct_edit.text())
+            d["change_percent"] = self.pct_edit.text().strip()
 
         # absolute delta
         if "price_delta" in t:
-            d["change_absolute"] = self._safe_float(self.delta_edit.text())
+            d["change_absolute"] = self.delta_edit.text().strip()
 
         # conversion
         if t == "asset_conversion":
             d["from_asset"] = self.from_asset_edit.text().strip()
             d["to_asset"] = self.to_asset_edit.text().strip()
-            d["from_amount"] = self._safe_float(self.from_amount_edit.text())
+            d["from_amount"] = self.from_amount_edit.text().strip()
+        if t == "wallet_change":
+            d["address"] = self.address_edit.text().strip()
+            d["poll_interval"] = self.poll_edit.text().strip()
 
         return d
 
+    @staticmethod
+    def _valid_number(widget, label, minimum=0.0, maximum=1e18, whole=False):
+        text = widget.text().strip()
+        if not text:
+            return f"{label} is required.", widget
+        try:
+            value = float(text)
+        except (TypeError, ValueError, OverflowError):
+            return f"{label} must be a number.", widget
+        if not math.isfinite(value) or not minimum <= value <= maximum:
+            return f"{label} must be between {minimum:g} and {maximum:g}.", widget
+        if whole and not value.is_integer():
+            return f"{label} must be a whole number.", widget
+        return None
+
+    def validation_error(self):
+        """Return a concise local validation error and its input widget."""
+        trigger = self.trigger_combo.currentText()
+        common = (
+            self._valid_number(self.trigger_limit_edit, "Trigger limit", 0, 9_999_999, whole=True)
+            or self._valid_number(self.cooldown_edit, "Cooldown", 0, 86_400)
+        )
+        if common:
+            return common
+
+        if trigger == "wallet_change":
+            address = self.address_edit.text().strip()
+            if not re.fullmatch(r"(?:[13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[ac-hj-np-z02-9]{11,87})", address):
+                return "Enter a Bitcoin mainnet public address (1…, 3…, or bc1…).", self.address_edit
+            return self._valid_number(self.poll_edit, "Check interval", 30, 3600)
+
+        if trigger == "asset_conversion":
+            for label, widget in (("From asset", self.from_asset_edit),
+                                  ("To asset", self.to_asset_edit)):
+                if not re.fullmatch(r"[A-Za-z0-9]{2,16}", widget.text().strip()):
+                    return f"{label} must be a symbol such as BTC or ETH.", widget
+            return (
+                self._valid_number(self.from_amount_edit, "Source amount", 1e-12)
+                or self._valid_number(self.threshold_edit, "Conversion target", 1e-12)
+            )
+
+        if not re.fullmatch(r"[A-Za-z0-9]{2,16}/[A-Za-z0-9]{2,16}", self.pair_edit.text().strip()):
+            return "Use a pair such as BTC/USDT or BTC/ETH.", self.pair_edit
+        if trigger.startswith("price_change"):
+            return self._valid_number(self.pct_edit, "Percent move", 1e-12)
+        if trigger.startswith("price_delta"):
+            return self._valid_number(self.delta_edit, "Price move", 1e-12)
+        return self._valid_number(self.threshold_edit, "Alert price", 1e-12)
+
     def from_dict(self, alert: Dict):
         """Populate card fields from backend config."""
+        self.alert_id = alert.get("id") or uuid.uuid4().hex
+        self.label_edit.setText(alert.get("label", ""))
+        self.address_edit.setText(alert.get("address", ""))
+        self.poll_edit.setText(str(alert.get("poll_interval", 60)))
+        self.cooldown_edit.setText(str(alert.get("cooldown_sec", 60)))
         self.pair_edit.setText(alert.get("pair", "BTC/USDT"))
 
         ttype = alert.get("trigger_type", "price_above")
@@ -323,13 +451,13 @@ class AlertCard(QWidget):
         self.alert_enabled_chk.setChecked(alert.get("alert_enabled", True))
         self.stream_enabled_chk.setChecked(alert.get("stream_enabled", True))
 
-        self.trigger_limit_edit.setText(str(alert.get("trigger_limit", 9999999)))
+        self.trigger_limit_edit.setText(str(alert.get("trigger_limit", 0)))
 
         self.pct_edit.setText(str(alert.get("change_percent", "")))
         self.delta_edit.setText(str(alert.get("change_absolute", "")))
         self.from_asset_edit.setText(alert.get("from_asset", "BTC"))
         self.to_asset_edit.setText(alert.get("to_asset", "ETH"))
-        self.from_amount_edit.setText(str(alert.get("from_amount", "")))
+        self.from_amount_edit.setText(str(alert.get("from_amount", 0.1)))
 
         self._update_field_visibility()
 
@@ -363,12 +491,25 @@ class AlertCard(QWidget):
         self._conv_from_price = from_price
         self._conv_to_price = to_price
 
+    def set_snapshot(self, live, runtime):
+        self._live = live
+        self._runtime = runtime
+        self.set_live_price(live.get("price"), live.get("price_ts"))
+        self.render_boiler()
+
     def render_boiler(self):
         """
         Rendering logic unchanged; compatible with Commander Edition stream.
         """
+        if self._draft:
+            self.boiler_label.setText("Unsaved draft — Save Changes to apply this rule.\nThe agent continues using its last saved configuration.")
+            return
         t = self.trigger_combo.currentText()
         pair = self.pair_edit.text().strip()
+        if t == "asset_conversion":
+            source = self.from_asset_edit.text().strip().upper() or "Source"
+            target = self.to_asset_edit.text().strip().upper() or "Target"
+            pair = f"{source}/{target}"
         now = time.time()
         price = self._last_price
         ts = self._last_ts
@@ -380,14 +521,39 @@ class AlertCard(QWidget):
         if price is None:
             price_str = "Price: —"
         else:
-            price_str = f"Price: {price:,.4f}"
+            price_str = f"Price: {price:.8g}"
 
         age_str = "Updated: —"
         if age is not None:
             age_str = "Updated: just now" if age < 1 else f"Updated: {int(age)}s ago"
+            if age > 15:
+                age_str += " · STALE"
 
         conv_lines = []
-        if t == "asset_conversion":
+        if t in ("price_above", "price_below"):
+            target = self._safe_float(self.threshold_edit.text(), None)
+            if target is not None:
+                quote = pair.split("/", 1)[1] if "/" in pair else "quote units"
+                symbol = "≥" if t == "price_above" else "≤"
+                conv_lines.append(f"Alert target: {symbol} {target:.8g} {quote}")
+        conv_lines.append(self._live.get("status", "Paused" if not self.active_chk.isChecked() else "Waiting for feed"))
+        conv_lines.append(f"Hits: {self._runtime.get('hits', 0)} · delivery: {self._runtime.get('delivery', '—')}")
+        if self._live.get("derived"):
+            conv_lines.append("Derived ratio from Phemex USDT spot prices")
+        if t.startswith(("price_change", "price_delta")):
+            conv_lines.append(f"Armed baseline: {self._runtime.get('baseline', 'waiting')}")
+        if t == "wallet_change":
+            if "confirmed_sats" in self._live:
+                conv_lines.append(f"Confirmed: {self._live['confirmed_sats'] / 1e8:.8f} BTC")
+                conv_lines.append(f"Pending net: {self._live['pending_sats'] / 1e8:+.8f} BTC")
+                conv_lines.append(f"Confirmed transactions: {self._live['confirmed_tx_count']}")
+                if "value_usdt" in self._live:
+                    conv_lines.append(f"Value: {self._live['value_usdt']:,.2f} USDT")
+            else:
+                conv_lines.append("Awaiting Bitcoin address statistics")
+        if "conversion_value" in self._live:
+            conv_lines.append(f"Conversion: {self._live['conversion_value']:.8g} {self.to_asset_edit.text()}")
+        if t == "asset_conversion" and "conversion_value" not in self._live:
             from_asset = self.from_asset_edit.text().strip() or "BTC"
             to_asset = self.to_asset_edit.text().strip() or "ETH"
             from_amount = self._safe_float(self.from_amount_edit.text(), 0.0)
