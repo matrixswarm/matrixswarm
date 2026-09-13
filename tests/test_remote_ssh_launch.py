@@ -51,6 +51,55 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         "phoenix/matrix_gui/swarm_workspace/cls_lib/deployment/dialog/railgun.py",
     )
 
+    def test_ssh_selector_labels_disambiguate_duplicate_profiles(self):
+        helper_source = source(
+            "phoenix/matrix_gui/modules/railgun/ssh_support.py"
+        )
+        tree = ast.parse(helper_source, filename="ssh_support.py")
+        selected = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "format_ssh_profile_label"
+        ]
+        namespace = {
+            "clean_secret": lambda value: (
+                str(value).strip() if value is not None else None
+            )
+        }
+        exec(
+            compile(
+                ast.Module(body=selected, type_ignores=[]),
+                "ssh_support.py",
+                "exec",
+            ),
+            namespace,
+        )
+        profile = {
+            "label": "production",
+            "host": "203.0.113.10",
+            "port": 2222,
+            "username": "matrix",
+            "trusted_host_fingerprint": "SHA256:abcdefghijklmnop",
+        }
+        label = namespace["format_ssh_profile_label"](
+            "1234567890abcdef",
+            profile,
+        )
+        self.assertIn("production", label)
+        self.assertIn("matrix@203.0.113.10:2222", label)
+        self.assertIn("id:90abcdef", label)
+        self.assertIn("fp:…ghijklmnop", label)
+
+        for path in (
+            "phoenix/matrix_gui/modules/railgun/railgun_install_dialog.py",
+            "phoenix/matrix_gui/modules/railgun/railgun_check_dialog.py",
+            "phoenix/matrix_gui/modules/directive/deploy_options_dialog.py",
+            "phoenix/matrix_gui/modules/directive/deploy_dialog.py",
+        ):
+            with self.subTest(path=path):
+                self.assertIn("format_ssh_profile_label", source(path))
+
     def test_background_launchers_do_not_allocate_a_pty(self):
         for path in self.launcher_paths:
             with self.subTest(path=path):

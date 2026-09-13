@@ -1,6 +1,9 @@
 # Authored by Daniel F MacDonald & ChatGPT-5 aka The Generals
 from PyQt6 import QtWidgets, QtCore
-from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
+from matrix_gui.modules.railgun.ssh_support import (
+    connect_ssh_profile,
+    format_ssh_profile_label,
+)
 from matrix_gui.modules.railgun.remote_shell import (
     build_remote_matrixd_command,
     default_linux_user,
@@ -38,9 +41,7 @@ class DeployDialog(QtWidgets.QDialog):
 
         self.ssh_selector = QtWidgets.QComboBox()
         for sid, meta in ssh_map.items():
-            name = meta.get("label", sid)
-            host = meta.get("host", "?")
-            display = f"{name} ({host})"
+            display = format_ssh_profile_label(sid, meta)
             self.ssh_selector.addItem(display, meta)
 
             # auto-select based on stored serial

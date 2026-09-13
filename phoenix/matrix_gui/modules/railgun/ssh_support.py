@@ -119,6 +119,27 @@ def load_registry_ssh_profiles():
     return profiles
 
 
+def format_ssh_profile_label(serial, profile):
+    """Render enough pinned identity to distinguish look-alike SSH records."""
+    profile = profile if isinstance(profile, dict) else {}
+    serial_text = str(serial or profile.get("serial") or "unknown")
+    label = clean_secret(profile.get("label")) or "SSH"
+    host = clean_secret(profile.get("host")) or "?"
+    username = clean_secret(profile.get("username")) or "?"
+    try:
+        port = int(profile.get("port", 22))
+    except (TypeError, ValueError):
+        port = profile.get("port") or "?"
+
+    fingerprint = clean_secret(profile.get("trusted_host_fingerprint"))
+    fingerprint_tail = fingerprint[-10:] if fingerprint else "missing"
+    serial_tail = serial_text[-8:]
+    return (
+        f"{label} · {username}@{host}:{port} · "
+        f"id:{serial_tail} · fp:…{fingerprint_tail}"
+    )
+
+
 def connect_ssh_profile(ssh_cfg, timeout=15):
     """Connect with explicit auth and a required pinned host fingerprint."""
     host = clean_secret(ssh_cfg.get("host"))

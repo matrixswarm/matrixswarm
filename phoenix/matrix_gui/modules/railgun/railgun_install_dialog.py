@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from matrix_gui.modules.railgun.ssh_support import (
     clean_secret,
     connect_ssh_profile,
+    format_ssh_profile_label,
     load_registry_ssh_profiles,
 )
 
@@ -124,7 +125,6 @@ class RailgunInstallDialog(QDialog):
             return
 
         for sid, meta in ssh_mgr.items():
-            label = meta.get("label", sid)
             host = meta.get("host")
             user = meta.get("username", "root")
             try:
@@ -135,7 +135,10 @@ class RailgunInstallDialog(QDialog):
                 meta.get("auth_type", "private_key")
             ).strip().lower()
 
-            self.ssh_selector.addItem(f"{label} ({host})", sid)
+            self.ssh_selector.addItem(
+                format_ssh_profile_label(sid, meta),
+                sid,
+            )
             self.ssh_map[sid] = {
                 "host": host,
                 "username": user,
@@ -256,16 +259,25 @@ class RailgunInstallDialog(QDialog):
             channel.exec_command(cmd)
 
             while True:
-                if channel.recv_ready():
+                received_output = False
+                while channel.recv_ready():
                     chunk = channel.recv(4096).decode(errors="ignore")
                     self.output_box.append(chunk)
-                    QtWidgets.QApplication.processEvents()
-                if channel.recv_stderr_ready():
+                    received_output = True
+                while channel.recv_stderr_ready():
                     err = channel.recv_stderr(4096).decode(errors="ignore")
                     self.output_box.append(f"[ERROR] {err}")
-                    QtWidgets.QApplication.processEvents()
-                if channel.exit_status_ready():
+                    received_output = True
+
+                QtWidgets.QApplication.processEvents()
+                if (
+                    channel.exit_status_ready()
+                    and not channel.recv_ready()
+                    and not channel.recv_stderr_ready()
+                ):
                     break
+                if not received_output:
+                    time.sleep(0.05)
 
             exit_code = channel.recv_exit_status()
             self.output_box.append(
@@ -401,17 +413,6 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 77
 fi
 
-PYTHON_BIN="$(command -v python3.12 || true)"
-if [ -z "$PYTHON_BIN" ]; then
-    echo "[Installer][ERROR] Python 3.12 is required; refusing the system python fallback."
-    exit 65
-fi
-if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
-    echo "[Installer][ERROR] $PYTHON_BIN is not Python 3.12."
-    exit 65
-fi
-echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"
-
 install_os_packages() {{
     if command -v dnf >/dev/null 2>&1; then
         dnf install -y "$@"
@@ -423,6 +424,28 @@ install_os_packages() {{
         exit 69
     fi
 }}
+
+PYTHON_BIN="$(command -v python3.12 || true)"
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Installer] Python 3.12 not found; provisioning it from the OS package manager..."
+    if command -v dnf >/dev/null 2>&1; then
+        dnf install -y python3.12 python3.12-pip
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            python3.12 python3.12-venv
+    fi
+    PYTHON_BIN="$(command -v python3.12 || true)"
+fi
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Installer][ERROR] Python 3.12 is required; refusing the system python fallback."
+    exit 65
+fi
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
+    echo "[Installer][ERROR] $PYTHON_BIN is not Python 3.12."
+    exit 65
+fi
+echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"
 
 if ! command -v rsync >/dev/null 2>&1 || \
    ! command -v sudo >/dev/null 2>&1 || \
@@ -547,17 +570,6 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 77
 fi
 
-PYTHON_BIN="$(command -v python3.12 || true)"
-if [ -z "$PYTHON_BIN" ]; then
-    echo "[Installer][ERROR] Python 3.12 is required; refusing the system python fallback."
-    exit 65
-fi
-if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
-    echo "[Installer][ERROR] $PYTHON_BIN is not Python 3.12."
-    exit 65
-fi
-echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"
-
 install_os_packages() {{
     if command -v dnf >/dev/null 2>&1; then
         dnf install -y "$@"
@@ -569,6 +581,28 @@ install_os_packages() {{
         exit 69
     fi
 }}
+
+PYTHON_BIN="$(command -v python3.12 || true)"
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Installer] Python 3.12 not found; provisioning it from the OS package manager..."
+    if command -v dnf >/dev/null 2>&1; then
+        dnf install -y python3.12 python3.12-pip
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            python3.12 python3.12-venv
+    fi
+    PYTHON_BIN="$(command -v python3.12 || true)"
+fi
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Installer][ERROR] Python 3.12 is required; refusing the system python fallback."
+    exit 65
+fi
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
+    echo "[Installer][ERROR] $PYTHON_BIN is not Python 3.12."
+    exit 65
+fi
+echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"
 
 if ! command -v git >/dev/null 2>&1 || \
    ! command -v rsync >/dev/null 2>&1 || \

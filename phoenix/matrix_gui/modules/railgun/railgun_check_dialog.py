@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from matrix_gui.modules.railgun.ssh_support import (
     connect_ssh_profile,
+    format_ssh_profile_label,
     load_registry_ssh_profiles,
 )
 from matrix_gui.modules.railgun.clock_validation import validate_remote_clock
@@ -384,9 +385,8 @@ class RailgunCheckDialog(QDialog):
             return
 
         for serial, meta in ssh_map.items():
-            label = meta.get("label", serial)
             self.ssh_selector.addItem(
-                f"{label} ({meta.get('host')})",
+                format_ssh_profile_label(serial, meta),
                 meta,
             )
             item_index = self.ssh_selector.count() - 1

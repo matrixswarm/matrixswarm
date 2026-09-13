@@ -25,6 +25,7 @@ from matrix_gui.modules.railgun.remote_shell import (
     validate_linux_user,
     validate_remote_token,
 )
+from matrix_gui.modules.railgun.ssh_support import format_ssh_profile_label
 
 class DeployOptionsDialog(QDialog):
     def __init__(self, ssh_map:dict, label:str, parent=None):
@@ -122,8 +123,10 @@ class DeployOptionsDialog(QDialog):
                 ssh_map={}
 
             for sid, meta in ssh_map.items():
-                label = meta.get("label", sid)
-                self.ssh_selector.addItem(f"{label} ({meta.get('host', '?')})", meta)
+                self.ssh_selector.addItem(
+                    format_ssh_profile_label(sid, meta),
+                    meta,
+                )
 
             # === Boot Flags ===
 
