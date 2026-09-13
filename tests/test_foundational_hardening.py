@@ -140,7 +140,9 @@ class FoundationalHardeningTests(unittest.TestCase):
         installer = source(
             "phoenix/matrix_gui/modules/railgun/railgun_install_dialog.py"
         )
-        self.assertEqual(installer.count("command -v python3.12"), 2)
+        # Each installer probes once, then probes again after optional package
+        # provisioning before it permits the isolated environment to exist.
+        self.assertEqual(installer.count("command -v python3.12"), 4)
         self.assertEqual(
             installer.count('"$PYTHON_BIN" -m venv "$VENV_DIR"'), 2
         )
@@ -149,14 +151,28 @@ class FoundationalHardeningTests(unittest.TestCase):
         )
         self.assertNotIn("python3 -m venv \"$VENV_DIR\"", installer)
         self.assertIn("refusing the system python fallback", installer)
+        self.assertEqual(
+            installer.count(
+                "Python 3.12 not found; provisioning it from the OS package manager"
+            ),
+            2,
+        )
+        self.assertEqual(
+            installer.count("dnf install -y python3.12 python3.12-pip"),
+            2,
+        )
+        self.assertEqual(
+            installer.count("python3.12 python3.12-venv"),
+            2,
+        )
 
     def test_railgun_installs_dependencies_on_rocky_and_debian(self):
         installer = source(
             "phoenix/matrix_gui/modules/railgun/railgun_install_dialog.py"
         )
         self.assertEqual(installer.count("install_os_packages()"), 2)
-        self.assertEqual(installer.count("command -v dnf"), 2)
-        self.assertEqual(installer.count("command -v apt-get"), 2)
+        self.assertEqual(installer.count("command -v dnf"), 4)
+        self.assertEqual(installer.count("command -v apt-get"), 4)
         self.assertEqual(installer.count("command -v setfacl"), 2)
         self.assertIn("install_os_packages rsync sudo acl", installer)
         self.assertIn(
@@ -167,6 +183,24 @@ class FoundationalHardeningTests(unittest.TestCase):
             installer.count("sed -i 's/\\\\r$//' \"$MCP_LAUNCHER\""),
             2,
         )
+
+    def test_railgun_drains_final_installer_diagnostics(self):
+        installer = source(
+            "phoenix/matrix_gui/modules/railgun/railgun_install_dialog.py"
+        )
+        exit_check = installer.index("channel.exit_status_ready()")
+        stdout_drain = installer.rindex(
+            "while channel.recv_ready():",
+            0,
+            exit_check,
+        )
+        stderr_drain = installer.rindex(
+            "while channel.recv_stderr_ready():",
+            0,
+            exit_check,
+        )
+        self.assertLess(stdout_drain, exit_check)
+        self.assertLess(stderr_drain, exit_check)
 
     def test_railgun_remote_check_does_not_block_or_switch_targets(self):
         checker = source(
