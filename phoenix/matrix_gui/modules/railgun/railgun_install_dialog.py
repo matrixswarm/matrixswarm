@@ -452,6 +452,19 @@ if ! command -v rsync >/dev/null 2>&1 || \
    ! command -v setfacl >/dev/null 2>&1; then
     install_os_packages rsync sudo acl
 fi
+if ! command -v ssh >/dev/null 2>&1 || \
+   ! command -v ssh-keyscan >/dev/null 2>&1 || \
+   ! command -v ssh-keygen >/dev/null 2>&1; then
+    if [ -x /usr/bin/dnf ]; then
+        dnf install -y openssh-clients
+    else
+        apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client
+    fi
+fi
+if ! command -v sshpass >/dev/null 2>&1; then
+    install_os_packages sshpass
+fi
 
 TARGET="/matrix"
 SRC_DIR="{remote_staging}"
@@ -610,6 +623,19 @@ if ! command -v git >/dev/null 2>&1 || \
    ! command -v sudo >/dev/null 2>&1 || \
    ! command -v setfacl >/dev/null 2>&1; then
     install_os_packages git rsync util-linux sudo acl
+fi
+if ! command -v ssh >/dev/null 2>&1 || \
+   ! command -v ssh-keyscan >/dev/null 2>&1 || \
+   ! command -v ssh-keygen >/dev/null 2>&1; then
+    if [ -x /usr/bin/dnf ]; then
+        dnf install -y openssh-clients
+    else
+        apt-get update -y
+        DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client
+    fi
+fi
+if ! command -v sshpass >/dev/null 2>&1; then
+    install_os_packages sshpass
 fi
 
 LOCK_FILE="/tmp/matrixswarm-railgun-install.lock"

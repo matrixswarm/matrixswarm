@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 )
 from .base_editor import BaseEditor
 from matrix_gui.modules.railgun.ssh_support import (
+    clean_secret,
     connect_ssh_profile,
     load_private_key,
     normalize_fingerprint,
@@ -22,6 +23,7 @@ class SSH(BaseEditor):
 
     def __init__(self, parent=None, new_conn=False, default_channel_options=None):
         super().__init__(parent, new_conn)
+        self._loaded_key_passphrase = None
 
         # Identity
         self.label = QLineEdit(self.generate_default_label())
@@ -64,6 +66,8 @@ class SSH(BaseEditor):
 
         self.passphrase = QLineEdit()
         self.passphrase.setEchoMode(QLineEdit.EchoMode.Password)
+        self.apply_passphrase_btn = QPushButton("🔐 Apply Passphrase to Existing Key")
+        self.apply_passphrase_btn.clicked.connect(self._apply_key_passphrase)
 
         # Security
         self.fingerprint = QLineEdit()
@@ -85,6 +89,7 @@ class SSH(BaseEditor):
         layout.addRow("Password", self.password)
         layout.addRow("Private Key", self.private_key)
         layout.addRow("Passphrase", self.passphrase)
+        layout.addRow(self.apply_passphrase_btn)
 
         # === Security ===
         layout.addRow("Trusted Fingerprint", self.fingerprint)
@@ -185,7 +190,9 @@ class SSH(BaseEditor):
 
         self.password.setText(str(data.get("password", "")))
         self.private_key.setText(str(data.get("private_key", "")))
-        self.passphrase.setText(str(data.get("private_key_passphrase", "")))
+        loaded_passphrase = clean_secret(data.get("private_key_passphrase"))
+        self._loaded_key_passphrase = loaded_passphrase
+        self.passphrase.setText(loaded_passphrase or "")
 
         self.fingerprint.setText(str(data.get("trusted_host_fingerprint", "")))
 
@@ -247,8 +254,10 @@ class SSH(BaseEditor):
 
             # --- Export private key (PEM) ---
             private_io = io.StringIO()
-            key.write_private_key(private_io)
+            passphrase = clean_secret(self.passphrase.text())
+            key.write_private_key(private_io, password=passphrase)
             private_key_text = private_io.getvalue()
+            self._loaded_key_passphrase = passphrase
 
             # --- Export public key (authorized_keys format) ---
             public_key_text = f"{key.get_name()} {key.get_base64()} generated@phoenix"
@@ -260,12 +269,12 @@ class SSH(BaseEditor):
 
             # --- Autofill fields ---
             self.private_key.setPlainText(private_key_text)
-            self.fingerprint.setText(fp_str)
-
             QMessageBox.information(
                 self,
                 "Key Generated",
-                f"New {key_type} key pair created.\n\nFingerprint:\n{fp_str}\n\n"
+                f"New {key_type} key pair created "
+                f"({'with passphrase protection' if passphrase else 'without a passphrase'})."
+                f"\n\nClient-key fingerprint:\n{fp_str}\n\n"
                 f"Public key:\n{public_key_text[:80]}..."
             )
 
@@ -273,6 +282,48 @@ class SSH(BaseEditor):
 
         except Exception as e:
             QMessageBox.critical(self, "Key Generation Error", str(e))
+
+    def _apply_key_passphrase(self):
+        """Encrypt the current private key without changing its key pair."""
+        key_text = self.private_key.toPlainText().strip()
+        new_passphrase = clean_secret(self.passphrase.text())
+        if not key_text:
+            QMessageBox.warning(self, "Missing Key", "Private Key is required.")
+            return
+        if not new_passphrase:
+            QMessageBox.warning(
+                self,
+                "Missing Passphrase",
+                "Enter a new passphrase before applying it to the private key.",
+            )
+            return
+
+        try:
+            try:
+                key = load_private_key(key_text, self._loaded_key_passphrase)
+            except ValueError:
+                # Profiles created by the old editor may contain an arbitrary
+                # passphrase beside a key that was never encrypted.
+                key = load_private_key(key_text, None)
+
+            protected = io.StringIO()
+            key.write_private_key(protected, password=new_passphrase)
+            protected_text = protected.getvalue()
+            load_private_key(protected_text, new_passphrase)
+
+            self.private_key.setPlainText(protected_text)
+            self._loaded_key_passphrase = new_passphrase
+            self.public_key.setPlainText(
+                f"{key.get_name()} {key.get_base64()} protected@phoenix"
+            )
+            QMessageBox.information(
+                self,
+                "Passphrase Applied",
+                "The existing private key is now encrypted. Its public key "
+                "and the server's authorized_keys entry did not change.",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Passphrase Error", str(exc))
 
     # --------------------------
     def is_validated(self):

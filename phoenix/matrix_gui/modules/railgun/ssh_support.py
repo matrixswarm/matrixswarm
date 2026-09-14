@@ -94,10 +94,24 @@ def load_private_key(key_pem, passphrase=None):
         paramiko.ECDSAKey,
     ):
         try:
-            return key_type.from_private_key(
+            key = key_type.from_private_key(
                 io.StringIO(key_text),
                 password=password,
             )
+            if password:
+                try:
+                    key_type.from_private_key(
+                        io.StringIO(key_text),
+                        password=None,
+                    )
+                except (paramiko.SSHException, ValueError):
+                    pass
+                else:
+                    raise ValueError(
+                        "A passphrase was supplied, but this private key is "
+                        "not encrypted"
+                    )
+            return key
         except (paramiko.SSHException, ValueError) as exc:
             errors.append(f"{key_type.__name__}: {exc}")
 

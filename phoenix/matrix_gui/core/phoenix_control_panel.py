@@ -12,6 +12,7 @@ from matrix_gui.registry.registry_manager import RegistryManagerDialog
 
 from matrix_gui.modules.railgun.railgun_check_dialog import RailgunCheckDialog
 from matrix_gui.modules.railgun.railgun_install_dialog import RailgunInstallDialog
+from matrix_gui.modules.swarms.swarms_dialog import SwarmsDialog
 #from matrix_gui.modules.railgun.railgun_reinstall_dialog import RailgunReinstallDialog
 
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
@@ -56,6 +57,14 @@ class PhoenixControlPanel(QWidget):
             self.conn_btn.setObjectName("connMgr")
             self.conn_btn.clicked.connect(self.launch_registry_manager)
             self.layout.addWidget(self.conn_btn)
+
+            self.swarms_btn = QPushButton("🌌 Swarms")
+            self.swarms_btn.setObjectName("swarms")
+            self.swarms_btn.setToolTip(
+                "List and stop active MatrixOS universes on Registry SSH servers."
+            )
+            self.swarms_btn.clicked.connect(self.open_swarms)
+            self.layout.addWidget(self.swarms_btn)
 
             self.directives_btn = QPushButton("🚀 Deploy")
             self.directives_btn.setObjectName("document")
@@ -131,6 +140,13 @@ class PhoenixControlPanel(QWidget):
             dlg.exec()
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.open_railgun_installer", e)
+
+    def open_swarms(self):
+        try:
+            dialog = SwarmsDialog(parent=self)
+            dialog.exec()
+        except Exception as e:
+            emit_gui_exception_log("PhoenixControlPanel.open_swarms", e)
 
     def open_railgun_check(self):
         """
