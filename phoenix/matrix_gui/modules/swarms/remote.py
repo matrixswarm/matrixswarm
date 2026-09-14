@@ -5,9 +5,6 @@ from __future__ import annotations
 import json
 import re
 
-from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
-
-
 MATRIXD = "/matrix/.venv/bin/python3 /matrix/scripts/matrixd"
 LIST_COMMAND = (
     'if [ "$(id -u)" -eq 0 ]; then '
@@ -18,6 +15,15 @@ LIST_COMMAND = (
 )
 MAX_OUTPUT_BYTES = 1024 * 1024
 _UNIVERSE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def connect_ssh_profile(profile: dict, timeout: int = 15):
+    """Load the optional SSH runtime only when a remote operation begins."""
+    from matrix_gui.modules.railgun.ssh_support import (
+        connect_ssh_profile as _connect_ssh_profile,
+    )
+
+    return _connect_ssh_profile(profile, timeout=timeout)
 
 
 def parse_snapshot(payload: str) -> list[dict]:
