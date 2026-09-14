@@ -45,6 +45,7 @@ class ThreadLauncher:
         context: dict | None = None,
         persist: bool = False,
         check_interval: int = 30,
+        on_complete=None,
     ) -> str:
         """
         Launch a class as a managed thread.
@@ -58,6 +59,10 @@ class ThreadLauncher:
 
         context:
             dict passed to worker
+
+        on_complete:
+            optional callback invoked once with a credential-free completion
+            record before the thread is removed from the launcher registry
         """
 
         thread_id = uuid.uuid4().hex
@@ -102,9 +107,13 @@ class ThreadLauncher:
 
                     instance.run()
 
+                    shared.setdefault("result", "ok")
+
                     self.log(f"Thread {thread_id} completed normally")
 
                 except Exception as e:
+                    shared.setdefault("result", "error")
+                    shared.setdefault("error", str(e))
                     self.log(
                         error=e,
                         block="thread_runner",
@@ -117,6 +126,22 @@ class ThreadLauncher:
                     )
 
                 finally:
+                    shared.setdefault("finished_at", time.time())
+                    if callable(on_complete):
+                        completion = {
+                            "thread_id": thread_id,
+                            "class_path": class_path,
+                            "result": shared.get("result"),
+                            "finished_at": shared.get("finished_at"),
+                        }
+                        try:
+                            on_complete(completion)
+                        except Exception as callback_error:
+                            self.log(
+                                error=callback_error,
+                                block="thread_completion_callback",
+                                level="ERROR",
+                            )
                     self._cleanup(thread_id)
 
             t = threading.Thread(

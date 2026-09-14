@@ -1308,11 +1308,13 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             service_role = content.get("service")
             payload = content.get("payload", {})
 
-            # Wallet addresses and watch definitions should not enter Matrix's
-            # ordinary service-request log or unrelated crypto instances.
-            crypto_request = isinstance(service_role, str) and service_role.startswith("hive.crypto_alert.")
-            if crypto_request:
-                self.log("[SERVICE-REQ] Crypto watch request (payload withheld).")
+            # Private panel configuration should not enter Matrix's ordinary
+            # service-request log or fan out to unrelated agent instances.
+            private_targeted_request = isinstance(service_role, str) and service_role.startswith(
+                ("hive.crypto_alert.", "hive.rsync_boy.")
+            )
+            if private_targeted_request:
+                self.log("[SERVICE-REQ] Targeted panel request (payload withheld).")
             else:
                 self.log(f'content: {content}')
 
@@ -1331,7 +1333,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 target_uid = ep.get_universal_id()
                 handler = ep.get_handler()
 
-                if crypto_request and target_uid != payload.get("target_universal_id"):
+                if private_targeted_request and target_uid != payload.get("target_universal_id"):
                     continue
 
                 if not handler or not target_uid:

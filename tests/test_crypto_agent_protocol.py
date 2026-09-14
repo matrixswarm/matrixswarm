@@ -232,6 +232,18 @@ class ProtocolTests(unittest.TestCase):
         matrix.pass_packet.assert_called_once()
         self.assertEqual(matrix.pass_packet.call_args.args[1], "crypto-one")
         self.assertNotIn("private-watch-address-fixture", str(matrix.log.call_args_list))
+        # RsyncBoy job paths receive the same exact-target and quiet treatment.
+        matrix.pass_packet.reset_mock()
+        rsync_payload = dict(self.content, target_universal_id="crypto-two",
+                             source_path="/private/server/path")
+        namespace["_cmd_service_request"](
+            matrix,
+            {"service": "hive.rsync_boy.update_jobs", "payload": rsync_payload},
+            None,
+        )
+        matrix.pass_packet.assert_called_once()
+        self.assertEqual(matrix.pass_packet.call_args.args[1], "crypto-two")
+        self.assertNotIn("/private/server/path", str(matrix.log.call_args_list))
         # Other service routing retains its existing fan-out behavior.
         matrix.pass_packet.reset_mock()
         namespace["_cmd_service_request"](matrix, {"service": "hive.example", "payload": {}}, None)

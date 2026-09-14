@@ -42,9 +42,15 @@ class MYSQL(BaseEditor):
         layout.addRow("Serial", self.serial)
 
     def get_directory_path(self):
-        if self.label.text().lower().strip() == "mysql":
-            return ["config", "mysql_bk"]
-        return ["config","mysql"]
+        # The deployment target is selected explicitly by the operator. Do
+        # not change it based on the display label: an entry named "mysql"
+        # previously landed in config/mysql_bk while consumers read
+        # config/mysql, leaving stale credentials active.
+        return [
+            part
+            for part in self.path_selector.currentText().strip().split("/")
+            if part
+        ]
 
     def deploy_fields(self):  # :contentReference[oaicite:1]{index=1}
         return {

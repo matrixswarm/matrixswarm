@@ -9,6 +9,9 @@
             }
         },
         {
+            "persistent_state": null
+        },
+        {
             "ssh": null
         },
         {
@@ -16,6 +19,8 @@
         }
     ],
     "config": {
+        "launch_stagger_sec": 5,
+        "retry_interval_sec": 900,
         "ui": {
             "agent_tree": {
                 "emoji": "\ud83d\udcbe"
@@ -27,8 +32,9 @@
         "service-manager": [
             {
                 "role": [
-                    "hive.rsync_boy.push_local@cmd_push_local",
-                    "hive.rsync_boy.push_remote@cmd_push_remote"
+                    "hive.rsync_boy.get_jobs@cmd_retrieve_jobs",
+                    "hive.rsync_boy.update_jobs@cmd_update_jobs",
+                    "hive.rsync_boy.execute_job@cmd_execute_job"
                 ],
                 "scope": [
                     "parent",

@@ -179,6 +179,9 @@ class FoundationalHardeningTests(unittest.TestCase):
             "install_os_packages git rsync util-linux sudo acl",
             installer,
         )
+        self.assertEqual(installer.count("dnf install -y openssh-clients"), 2)
+        self.assertEqual(installer.count("apt-get install -y openssh-client"), 2)
+        self.assertEqual(installer.count("install_os_packages sshpass"), 2)
         self.assertEqual(
             installer.count("sed -i 's/\\\\r$//' \"$MCP_LAUNCHER\""),
             2,
