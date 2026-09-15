@@ -13,6 +13,32 @@ from PyQt6.QtWidgets import (
     QListWidget, QPushButton, QFormLayout, QHBoxLayout, QVBoxLayout,
     QApplication, QDialog, QMessageBox
 )
+from matrix_gui.modules.railgun.ssh_support import (
+    format_ssh_profile_label,
+    load_registry_ssh_profiles,
+)
+
+
+def _profile_choices(profiles=None):
+    """Return detached, display-safe profile choices keyed by Registry serial."""
+    if profiles is None:
+        try:
+            profiles = load_registry_ssh_profiles()
+        except Exception:
+            profiles = {}
+    if isinstance(profiles, list):
+        profiles = {
+            str(item.get("serial", "")): item
+            for item in profiles
+            if isinstance(item, dict) and item.get("serial")
+        }
+    if not isinstance(profiles, dict):
+        return {}
+    return {
+        str(serial): dict(profile)
+        for serial, profile in profiles.items()
+        if serial and isinstance(profile, dict)
+    }
 
 
 class RsyncBoy(BaseEditor):
@@ -80,8 +106,10 @@ class RsyncBoy(BaseEditor):
     def _refresh_jobs_list(self):
         self.jobs_list.clear()
         for job in self.jobs:
+            profile = job.get("ssh_profile")
+            source = f" | SSH:{str(profile)[-8:]}" if profile else " | SSH:primary"
             self.jobs_list.addItem(
-                f"{job.get('id', '')} | {job.get('factory', '')}"
+                f"{job.get('id', '')} | {job.get('factory', '')}{source}"
             )
 
     def _add_job(self):
@@ -89,7 +117,7 @@ class RsyncBoy(BaseEditor):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             job = dlg.get_job()
             self.jobs.append(job)
-            self.jobs_list.addItem(f"{job['id']} | {job.get('factory','')}")
+            self._refresh_jobs_list()
 
     def _edit_job(self):
         row = self.jobs_list.currentRow()
@@ -98,7 +126,8 @@ class RsyncBoy(BaseEditor):
         dlg = JobEditorDialog(self, self.jobs[row])
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.jobs[row] = dlg.get_job()
-            self.jobs_list.item(row).setText(f"{self.jobs[row]['id']} | {self.jobs[row].get('factory','')}")
+            self._refresh_jobs_list()
+            self.jobs_list.setCurrentRow(row)
 
     def _delete_job(self):
         row = self.jobs_list.currentRow()
@@ -159,7 +188,7 @@ class RsyncBoy(BaseEditor):
 class JobEditorDialog(QDialog):
     """Clean RsyncBoy job editor with explicit fields."""
 
-    def __init__(self, parent=None, job=None):
+    def __init__(self, parent=None, job=None, ssh_profiles=None):
         super().__init__(parent)
         self.setWindowTitle("Edit RsyncBoy Job")
         self.resize(680, 640)
@@ -194,12 +223,37 @@ class JobEditorDialog(QDialog):
         self.run_on_boot = QCheckBox()
         self.run_on_boot.setChecked(bool(self.job.get("schedule", {}).get("run_on_boot", False)))
 
+        self.ssh_profiles = _profile_choices(ssh_profiles)
+        self.ssh_profile = QComboBox()
+        self.ssh_profile.addItem("Primary SSH profile (legacy/default)", "")
+        for serial, profile in sorted(
+            self.ssh_profiles.items(),
+            key=lambda item: format_ssh_profile_label(item[0], item[1]).lower(),
+        ):
+            self.ssh_profile.addItem(format_ssh_profile_label(serial, profile), serial)
+        configured_profile = str(self.job.get("ssh_profile", "") or "").strip()
+        selected_profile = self.ssh_profile.findData(configured_profile)
+        if selected_profile < 0 and configured_profile:
+            self.ssh_profile.addItem(
+                f"Unavailable in this deployment · id:{configured_profile[-8:]}",
+                configured_profile,
+            )
+            selected_profile = self.ssh_profile.count() - 1
+        self.ssh_profile.setCurrentIndex(max(0, selected_profile))
+        self.ssh_profile_hint = QLabel(
+            "The job stores only this Registry ID. Phoenix seals its pinned "
+            "credentials into the encrypted deployment."
+        )
+        self.ssh_profile_hint.setWordWrap(True)
+
         layout.addRow("Job ID", self.job_id)
         layout.addRow("Enabled", self.enabled)
         layout.addRow("Job Type", self.job_type)
         layout.addRow("Factory", self.factory)
         layout.addRow("Interval (sec)", self.interval)
         layout.addRow("Run on Boot", self.run_on_boot)
+        layout.addRow("SSH Profile", self.ssh_profile)
+        layout.addRow(self.ssh_profile_hint)
 
         # ───────── JOB-SPECIFIC CONFIG ─────────
         cfg = self.job.get("config", {})
@@ -382,7 +436,7 @@ class JobEditorDialog(QDialog):
                 "remote_prune": {"keep_days": int(self.keep_days.value())}
             }
 
-        return {
+        result = {
             "id": self.job_id.text().strip(),
             "enabled": self.enabled.isChecked(),
             "factory": factory,
@@ -392,3 +446,7 @@ class JobEditorDialog(QDialog):
             },
             "config": config,
         }
+        ssh_profile = str(self.ssh_profile.currentData() or "").strip()
+        if ssh_profile:
+            result["ssh_profile"] = ssh_profile
+        return result

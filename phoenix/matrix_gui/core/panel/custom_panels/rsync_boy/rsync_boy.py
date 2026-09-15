@@ -40,6 +40,7 @@ class RsyncBoy(PhoenixPanelInterface):
         self.agent_uid = (node or {}).get("universal_id")
         self.token = uuid.uuid4().hex
         self.jobs = []
+        self.ssh_profiles = []
         self.runtime = {}
         self.revision = None
         self.dirty = False
@@ -79,9 +80,9 @@ class RsyncBoy(PhoenixPanelInterface):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["Job", "Type", "Schedule", "Last success", "State", "Actions"]
+            ["Job", "Type", "SSH Source", "Schedule", "Last success", "State", "Actions"]
         )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -92,7 +93,7 @@ class RsyncBoy(PhoenixPanelInterface):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table, 1)
 
         controls = QHBoxLayout()
@@ -127,6 +128,11 @@ class RsyncBoy(PhoenixPanelInterface):
             return "Unknown"
 
     def _render(self):
+        profile_labels = {
+            str(profile.get("serial")): str(profile.get("label") or "SSH")
+            for profile in self.ssh_profiles
+            if isinstance(profile, dict) and profile.get("serial")
+        }
         self.table.setRowCount(len(self.jobs))
         for row, job in enumerate(self.jobs):
             job_id = job.get("id", "")
@@ -138,16 +144,22 @@ class RsyncBoy(PhoenixPanelInterface):
             state = "RUNNING" if status.get("running") else (
                 "Enabled" if job.get("enabled") else "Disabled"
             )
+            profile_id = str(job.get("ssh_profile", "") or "")
+            profile_label = (
+                profile_labels.get(profile_id, f"Missing · {profile_id[-8:]}")
+                if profile_id else "Primary/default"
+            )
             values = (
                 job_id,
                 self._factory_label(job.get("factory")),
+                profile_label,
                 schedule,
                 self._time_label(status.get("last_success")),
                 state,
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
-                if column == 4 and status.get("running"):
+                if column == 5 and status.get("running"):
                     item.setForeground(Qt.GlobalColor.green)
                 self.table.setItem(row, column, item)
 
@@ -173,7 +185,7 @@ class RsyncBoy(PhoenixPanelInterface):
             actions.addStretch()
             action_host = QWidget()
             action_host.setLayout(actions)
-            self.table.setCellWidget(row, 5, action_host)
+            self.table.setCellWidget(row, 6, action_host)
         self.table.resizeRowsToContents()
 
     def _set_busy(self, busy):
@@ -195,7 +207,7 @@ class RsyncBoy(PhoenixPanelInterface):
         self._set_busy(False)
 
     def _new_job(self):
-        dialog = JobEditorDialog(self)
+        dialog = JobEditorDialog(self, ssh_profiles=self.ssh_profiles)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             candidate = dialog.get_job()
             if any(job.get("id") == candidate["id"] for job in self.jobs):
@@ -208,7 +220,11 @@ class RsyncBoy(PhoenixPanelInterface):
         index = next((i for i, job in enumerate(self.jobs) if job.get("id") == job_id), -1)
         if index < 0:
             return
-        dialog = JobEditorDialog(self, deepcopy(self.jobs[index]))
+        dialog = JobEditorDialog(
+            self,
+            deepcopy(self.jobs[index]),
+            ssh_profiles=self.ssh_profiles,
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             candidate = dialog.get_job()
             if any(
@@ -332,12 +348,19 @@ class RsyncBoy(PhoenixPanelInterface):
         jobs = content.get("jobs")
         revision = content.get("revision")
         runtime = content.get("runtime", {})
-        if not isinstance(jobs, list) or type(revision) is not int or not isinstance(runtime, dict):
+        ssh_profiles = content.get("ssh_profiles", [])
+        if (
+            not isinstance(jobs, list)
+            or type(revision) is not int
+            or not isinstance(runtime, dict)
+            or not isinstance(ssh_profiles, list)
+        ):
             self._set_busy(False)
             self.status_label.setText("Invalid agent response. Reload to confirm server state.")
             return
         self.jobs = deepcopy(jobs)
         self.runtime = runtime
+        self.ssh_profiles = deepcopy(ssh_profiles)
         self.revision = revision
         self.poll_interval.blockSignals(True)
         self.poll_interval.setValue(int(content.get("poll_interval", 60)))
