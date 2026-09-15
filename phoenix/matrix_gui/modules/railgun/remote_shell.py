@@ -567,6 +567,31 @@ def build_remote_matrixd_command(
         "{ echo '[MATRIX][ERROR] runuser is required.' >&2; exit 69; }",
         f"SWARM_USER={q_user}",
         f"UNIVERSE={q_universe}",
+        # Never execute MatrixOS as root until the shared code boundary has
+        # been proven root-owned and immutable to service accounts.  Symlinks
+        # inside a root-owned venv are expected, so the recursive audit checks
+        # regular files and directories only.
+        "[ -d /matrix ] && [ ! -L /matrix ] || "
+        "{ echo '[MATRIX][ERROR] /matrix must be a real directory.' >&2; exit 77; }",
+        "BAD_SOURCE=$(find /matrix -maxdepth 0 "
+        "\\( ! -user root -o -perm /022 \\) -print -quit)",
+        "[ -z \"$BAD_SOURCE\" ] || "
+        "{ echo '[MATRIX][ERROR] /matrix is not root-locked.' >&2; exit 77; }",
+        "BAD_SOURCE=$(find /matrix -maxdepth 1 -type f "
+        "\\( ! -user root -o -perm /022 \\) -print -quit)",
+        "[ -z \"$BAD_SOURCE\" ] || "
+        "{ echo \"[MATRIX][ERROR] Shared source is not root-locked: $BAD_SOURCE\" >&2; exit 77; }",
+        "for SOURCE_ROOT in /matrix/agents /matrix/ai /matrix/core /matrix/docs "
+        "/matrix/scripts /matrix/sounds /matrix/teams /matrix/.venv /matrix/mcp/.venv; do",
+        "  [ -e \"$SOURCE_ROOT\" ] || continue",
+        "  [ ! -L \"$SOURCE_ROOT\" ] || "
+        "{ echo \"[MATRIX][ERROR] Shared source root is a symlink: $SOURCE_ROOT\" >&2; exit 77; }",
+        "  BAD_SOURCE=$(find \"$SOURCE_ROOT\" -xdev "
+        "\\( -type f -o -type d \\) "
+        "\\( ! -user root -o -perm /022 \\) -print -quit)",
+        "  [ -z \"$BAD_SOURCE\" ] || "
+        "{ echo \"[MATRIX][ERROR] Shared source is not root-locked: $BAD_SOURCE\" >&2; exit 77; }",
+        "done",
     ]
 
     if action == "stop":
@@ -587,18 +612,56 @@ def build_remote_matrixd_command(
             if restart_requested
             else []
         ),
-        "if id -u \"$SWARM_USER\" >/dev/null 2>&1; then "
-        "ACCOUNT_SHELL=$(getent passwd \"$SWARM_USER\" | cut -d: -f7); "
-        "case \"$ACCOUNT_SHELL\" in /usr/sbin/nologin|/sbin/nologin|/bin/false) ;; "
-        "*) echo '[MATRIX][ERROR] Refusing an existing login-capable account.' >&2; exit 78 ;; esac; "
-        "else useradd --system --no-create-home --home-dir /nonexistent "
-        "--shell /usr/sbin/nologin \"$SWARM_USER\"; fi",
-        "SWARM_GROUP=$(id -gn \"$SWARM_USER\")",
-        "install -d -o \"$SWARM_USER\" -g \"$SWARM_GROUP\" -m 0700 "
-        "\"/matrix/universes/runtime/$UNIVERSE\" "
+        # A service account's primary group is also its universe capability.
+        # Refuse pre-existing shared groups, including users that share the
+        # same numeric primary GID, rather than silently weakening isolation.
+        "provision_isolated_account() {",
+        "  PRIVATE_USER=$1",
+        "  if ! getent group \"$PRIVATE_USER\" >/dev/null 2>&1; then "
+        "groupadd --system \"$PRIVATE_USER\"; fi",
+        "  PRIVATE_GID=$(getent group \"$PRIVATE_USER\" | cut -d: -f3)",
+        "  CONFLICTING_PRIMARY=$(getent passwd | awk -F: "
+        "-v gid=\"$PRIVATE_GID\" -v user=\"$PRIVATE_USER\" "
+        "'$4 == gid && $1 != user { print $1; exit }')",
+        "  [ -z \"$CONFLICTING_PRIMARY\" ] || "
+        "{ echo \"[MATRIX][ERROR] Private group $PRIVATE_USER is shared by $CONFLICTING_PRIMARY.\" >&2; return 78; }",
+        "  GROUP_MEMBERS=$(getent group \"$PRIVATE_USER\" | cut -d: -f4)",
+        "  CONFLICTING_MEMBER=$(printf '%s\\n' \"$GROUP_MEMBERS\" | tr ',' '\\n' | "
+        "awk -v user=\"$PRIVATE_USER\" 'NF && $0 != user { print; exit }')",
+        "  [ -z \"$CONFLICTING_MEMBER\" ] || "
+        "{ echo \"[MATRIX][ERROR] Private group $PRIVATE_USER includes $CONFLICTING_MEMBER.\" >&2; return 78; }",
+        "  if id -u \"$PRIVATE_USER\" >/dev/null 2>&1; then",
+        "    ACCOUNT_SHELL=$(getent passwd \"$PRIVATE_USER\" | cut -d: -f7)",
+        "    case \"$ACCOUNT_SHELL\" in /usr/sbin/nologin|/sbin/nologin|/bin/false) ;; "
+        "*) echo '[MATRIX][ERROR] Refusing an existing login-capable account.' >&2; return 78 ;; esac",
+        "    usermod -g \"$PRIVATE_USER\" \"$PRIVATE_USER\" >/dev/null",
+        "  else",
+        "    useradd --system --no-create-home --home-dir /nonexistent "
+        "--shell /usr/sbin/nologin --gid \"$PRIVATE_USER\" \"$PRIVATE_USER\"",
+        "  fi",
+        "}",
+        "provision_isolated_account \"$SWARM_USER\"",
+        "SWARM_GROUP=$SWARM_USER",
+        "for BOUNDARY_PATH in /matrix/universes /matrix/universes/runtime "
+        "/matrix/universes/static \"/matrix/universes/runtime/$UNIVERSE\" "
+        "\"/matrix/universes/static/$UNIVERSE\"; do",
+        "  [ ! -L \"$BOUNDARY_PATH\" ] || "
+        "{ echo \"[MATRIX][ERROR] Refusing symlinked universe boundary: $BOUNDARY_PATH\" >&2; exit 77; }",
+        "done",
+        "install -d /matrix/universes /matrix/universes/runtime /matrix/universes/static",
+        "chown root:root /matrix/universes /matrix/universes/runtime /matrix/universes/static",
+        "chmod 0711 /matrix/universes /matrix/universes/runtime /matrix/universes/static",
+        "install -d \"/matrix/universes/runtime/$UNIVERSE\" "
         "\"/matrix/universes/static/$UNIVERSE\"",
+        "if command -v setfacl >/dev/null 2>&1; then "
+        "setfacl -R -P -b -- \"/matrix/universes/runtime/$UNIVERSE\" "
+        "\"/matrix/universes/static/$UNIVERSE\"; fi",
         "chown -hR \"$SWARM_USER:$SWARM_GROUP\" "
         "\"/matrix/universes/runtime/$UNIVERSE\" "
+        "\"/matrix/universes/static/$UNIVERSE\"",
+        "chown root:\"$SWARM_GROUP\" \"/matrix/universes/runtime/$UNIVERSE\" "
+        "\"/matrix/universes/static/$UNIVERSE\"",
+        "chmod 0770 \"/matrix/universes/runtime/$UNIVERSE\" "
         "\"/matrix/universes/static/$UNIVERSE\"",
     ])
 
@@ -820,15 +883,22 @@ def build_remote_matrixd_command(
             "test -x /matrix/mcp/.venv/bin/python3",
             "test -f /matrix/agents/python_core/mcp_reflex/worker/mcp_stdio_worker.py",
             f"MCP_USER={q_worker_user}",
-            "if id -u \"$MCP_USER\" >/dev/null 2>&1; then "
-            "ACCOUNT_SHELL=$(getent passwd \"$MCP_USER\" | cut -d: -f7); "
-            "case \"$ACCOUNT_SHELL\" in /usr/sbin/nologin|/sbin/nologin|/bin/false) ;; "
-            "*) echo '[MCP][ERROR] Refusing an existing login-capable account.' >&2; exit 78 ;; esac; "
-            "else useradd --system --no-create-home --home-dir /nonexistent "
-            "--shell /usr/sbin/nologin \"$MCP_USER\"; fi",
-            "MCP_GROUP=$(id -gn \"$MCP_USER\")",
+            "provision_isolated_account \"$MCP_USER\"",
+            "MCP_GROUP=$MCP_USER",
             "MCP_WORK_DIR=\"/matrix/mcp/workers/$UNIVERSE\"",
-            "install -d -o \"$MCP_USER\" -g \"$MCP_GROUP\" -m 0700 \"$MCP_WORK_DIR\"",
+            "for BOUNDARY_PATH in /matrix/mcp /matrix/mcp/workers \"$MCP_WORK_DIR\"; do",
+            "  [ ! -L \"$BOUNDARY_PATH\" ] || "
+            "{ echo \"[MCP][ERROR] Refusing symlinked worker boundary: $BOUNDARY_PATH\" >&2; exit 77; }",
+            "done",
+            "install -d /matrix/mcp/workers",
+            "chown root:root /matrix/mcp/workers",
+            "chmod 0711 /matrix/mcp/workers",
+            "install -d \"$MCP_WORK_DIR\"",
+            "if command -v setfacl >/dev/null 2>&1; then "
+            "setfacl -R -P -b -- \"$MCP_WORK_DIR\"; fi",
+            "chown -hR \"$MCP_USER:$MCP_GROUP\" \"$MCP_WORK_DIR\"",
+            "chown root:\"$MCP_GROUP\" \"$MCP_WORK_DIR\"",
+            "chmod 0770 \"$MCP_WORK_DIR\"",
             "install -d -o root -g root -m 0700 /etc/matrixswarm/mcp-launchers",
             "WORKER_SCRIPT=/matrix/agents/python_core/mcp_reflex/worker/mcp_stdio_worker.py",
             "WORKER_HASH=$(sha256sum \"$WORKER_SCRIPT\" | awk '{print $1}')",

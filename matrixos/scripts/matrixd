@@ -651,7 +651,9 @@ def _prune_old_boots(root):
     boots = sorted(
         (
             child for child in root.iterdir()
-            if child.name != "latest" and child.is_dir() and not child.is_symlink()
+            if child.name not in {"latest", "persistent"}
+            and child.is_dir()
+            and not child.is_symlink()
         ),
         key=lambda path: path.name,
     )

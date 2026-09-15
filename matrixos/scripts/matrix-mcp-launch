@@ -155,12 +155,16 @@ def main() -> None:
         fail("working_directory is missing")
     work = Path(working_directory).resolve(strict=True)
     work_info = work.stat()
+    work_mode = stat.S_IMODE(work_info.st_mode)
     if (
         (work != MCP_WORK_ROOT and MCP_WORK_ROOT not in work.parents)
         or not work.is_dir()
-        or work_info.st_uid != account.pw_uid
+        or work_info.st_uid != 0
+        or work_info.st_gid != account.pw_gid
+        or (work_mode & 0o007)
+        or (work_mode & 0o070) != 0o070
     ):
-        fail("working_directory is not owned by the worker account")
+        fail("working_directory is not a root-owned private worker boundary")
 
     apply_limits()
     set_no_new_privileges()

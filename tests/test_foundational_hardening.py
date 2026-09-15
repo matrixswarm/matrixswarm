@@ -187,6 +187,51 @@ class FoundationalHardeningTests(unittest.TestCase):
             2,
         )
 
+    def test_railgun_root_locks_shared_source_and_universe_parents(self):
+        installer = source(
+            "phoenix/matrix_gui/modules/railgun/railgun_install_dialog.py"
+        )
+        self.assertEqual(installer.count("harden_matrix_install() {{"), 2)
+        self.assertEqual(
+            installer.count('chown -hR root:root "$SOURCE_PATH"'),
+            2,
+        )
+        self.assertEqual(
+            installer.count('setfacl -R -P -b -- "$SOURCE_PATH"'),
+            2,
+        )
+        self.assertEqual(
+            installer.count(
+                'find "$SOURCE_PATH" -xdev -type f '
+                '-exec chmod a+r,go-w {{}} +'
+            ),
+            2,
+        )
+        self.assertEqual(
+            installer.count(
+                'chmod 0711 "$TARGET/universes" "$TARGET/universes/runtime"'
+            ),
+            2,
+        )
+        self.assertEqual(
+            installer.count(
+                '"$TARGET/teams" "$TARGET/.venv" "$TARGET/mcp/.venv"'
+            ),
+            2,
+        )
+        self.assertEqual(
+            installer.count(
+                'install -d -o root -g root -m 0711 "$TARGET/mcp/workers"'
+            ),
+            2,
+        )
+        # Runtime data remains mutable and is protected by its outer boundary;
+        # it must never be recursively converted into root-owned source.
+        self.assertNotIn(
+            'chown -hR root:root "$TARGET/universes"',
+            installer,
+        )
+
     def test_railgun_drains_final_installer_diagnostics(self):
         installer = source(
             "phoenix/matrix_gui/modules/railgun/railgun_install_dialog.py"

@@ -216,6 +216,78 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     helper.validate_linux_user(unsafe)
 
+    def test_universe_boundaries_are_root_owned_and_group_is_unique(self):
+        helper = load_module(self.shell_helper_path, "universe_dac_boundary")
+        root_shell = helper._root_shell
+        helper._root_shell = lambda script: script
+        try:
+            command = helper.build_remote_matrixd_command(
+                action="start",
+                universe="phoenix",
+                linux_user="matrix-phoenix",
+                runtime_capabilities={"mcp_worker": True},
+            )
+        finally:
+            helper._root_shell = root_shell
+
+        self.assertIn("provision_isolated_account()", command)
+        self.assertIn(
+            'provision_isolated_account "$SWARM_USER"',
+            command,
+        )
+        self.assertIn("SWARM_GROUP=$SWARM_USER", command)
+        self.assertNotIn("SWARM_GROUP=$(provision_isolated_account", command)
+        self.assertIn("CONFLICTING_PRIMARY", command)
+        self.assertIn("CONFLICTING_MEMBER", command)
+        self.assertIn(
+            "chmod 0711 /matrix/universes /matrix/universes/runtime "
+            "/matrix/universes/static",
+            command,
+        )
+        self.assertIn(
+            'chown root:"$SWARM_GROUP" "/matrix/universes/runtime/$UNIVERSE"',
+            command,
+        )
+        self.assertIn(
+            'chmod 0770 "/matrix/universes/runtime/$UNIVERSE"',
+            command,
+        )
+        self.assertIn(
+            'setfacl -R -P -b -- "/matrix/universes/runtime/$UNIVERSE"',
+            command,
+        )
+        self.assertNotIn(
+            'install -d -o "$SWARM_USER" -g "$SWARM_GROUP" -m 0700',
+            command,
+        )
+
+        self.assertIn(
+            'provision_isolated_account "$MCP_USER"',
+            command,
+        )
+        self.assertIn("MCP_GROUP=$MCP_USER", command)
+        self.assertNotIn("MCP_GROUP=$(provision_isolated_account", command)
+        self.assertIn("chmod 0711 /matrix/mcp/workers", command)
+        self.assertIn('chown root:"$MCP_GROUP" "$MCP_WORK_DIR"', command)
+        self.assertIn('chmod 0770 "$MCP_WORK_DIR"', command)
+
+        # Root refuses to execute MatrixOS if an account has made any shared
+        # source file or directory writable or non-root-owned.
+        audit_index = command.index("BAD_SOURCE=$(find /matrix")
+        matrixd_index = command.index("matrixd boot --universe phoenix")
+        self.assertLess(audit_index, matrixd_index)
+        self.assertIn("! -user root -o -perm /022", command)
+        self.assertIn("/matrix/mcp/.venv", command)
+
+        mcp_launcher = source("matrixos/scripts/matrix-mcp-launch")
+        self.assertIn("work_info.st_uid != 0", mcp_launcher)
+        self.assertIn("work_info.st_gid != account.pw_gid", mcp_launcher)
+        self.assertIn("work_mode & 0o007", mcp_launcher)
+        self.assertIn(
+            "working_directory is not a root-owned private worker boundary",
+            mcp_launcher,
+        )
+
     def test_directive_capabilities_are_narrow_and_validated(self):
         helper = load_module(self.shell_helper_path, "remote_capabilities")
         tree = {
@@ -736,6 +808,41 @@ class RemoteSSHLaunchTests(unittest.TestCase):
 
         matrix_source = source("matrixos/agents/python_core/matrix/matrix.py")
         self.assertIn('cmd = [sudo, "-n"] + cmd', matrix_source)
+
+    def test_boot_pruning_never_treats_persistent_state_as_a_boot(self):
+        matrixd_source = source("matrixos/scripts/matrixd")
+        tree = ast.parse(matrixd_source, filename="matrixos/scripts/matrixd")
+        selected = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_prune_old_boots"
+        ]
+        namespace = {"shutil": shutil}
+        exec(
+            compile(
+                ast.Module(body=selected, type_ignores=[]),
+                "matrixd",
+                "exec",
+            ),
+            namespace,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_boot = root / "20260914_010000"
+            new_boot = root / "20260915_010000"
+            persistent = root / "persistent"
+            latest = root / "latest"
+            for path in (old_boot, new_boot, persistent, latest):
+                path.mkdir()
+                (path / "marker").write_text(path.name, encoding="utf-8")
+
+            self.assertTrue(namespace["_prune_old_boots"](root))
+            self.assertFalse(old_boot.exists())
+            self.assertTrue(new_boot.is_dir())
+            self.assertTrue(persistent.is_dir())
+            self.assertTrue((persistent / "marker").is_file())
+            self.assertTrue(latest.is_dir())
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux prctl test")
     def test_memory_bootstrap_remains_nondumpable_while_agent_runs(self):

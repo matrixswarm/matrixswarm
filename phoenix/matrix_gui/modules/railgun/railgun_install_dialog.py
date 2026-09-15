@@ -470,7 +470,54 @@ TARGET="/matrix"
 SRC_DIR="{remote_staging}"
 VENV_DIR="$TARGET/.venv"
 
-mkdir -p "$TARGET"
+harden_matrix_install() {{
+    echo "[Installer] Hardening shared MatrixOS source..."
+    install -d "$TARGET"
+    if [ -L "$TARGET" ]; then
+        echo "[Installer][ERROR] Refusing a symlinked MatrixOS root: $TARGET"
+        exit 77
+    fi
+    setfacl -b -- "$TARGET"
+    chown root:root "$TARGET"
+    chmod 0755 "$TARGET"
+
+    for SOURCE_PATH in \
+        "$TARGET/agents" "$TARGET/ai" "$TARGET/core" \
+        "$TARGET/docs" "$TARGET/scripts" "$TARGET/sounds" \
+        "$TARGET/teams" "$TARGET/.venv" "$TARGET/mcp/.venv"; do
+        [ -e "$SOURCE_PATH" ] || continue
+        if [ -L "$SOURCE_PATH" ]; then
+            echo "[Installer][ERROR] Refusing a symlinked source root: $SOURCE_PATH"
+            exit 77
+        fi
+        setfacl -R -P -b -- "$SOURCE_PATH"
+        chown -hR root:root "$SOURCE_PATH"
+        find "$SOURCE_PATH" -xdev -type d -exec chmod a+rx,go-w {{}} +
+        find "$SOURCE_PATH" -xdev -type f -exec chmod a+r,go-w {{}} +
+    done
+
+    find "$TARGET" -maxdepth 1 -type f -exec setfacl -b -- {{}} +
+    find "$TARGET" -maxdepth 1 -type f -exec chown root:root -- {{}} +
+    find "$TARGET" -maxdepth 1 -type f -exec chmod a+r,go-w -- {{}} +
+
+    for BOUNDARY_PATH in "$TARGET/universes" "$TARGET/universes/runtime" \
+        "$TARGET/universes/static" "$TARGET/mcp" "$TARGET/mcp/workers"; do
+        if [ -L "$BOUNDARY_PATH" ]; then
+            echo "[Installer][ERROR] Refusing a symlinked mutable boundary: $BOUNDARY_PATH"
+            exit 77
+        fi
+    done
+    install -d "$TARGET/universes" "$TARGET/universes/runtime" \
+        "$TARGET/universes/static" "$TARGET/mcp" "$TARGET/mcp/workers"
+    chown root:root "$TARGET/universes" "$TARGET/universes/runtime" \
+        "$TARGET/universes/static" "$TARGET/mcp" "$TARGET/mcp/workers"
+    chmod 0711 "$TARGET/universes" "$TARGET/universes/runtime" \
+        "$TARGET/universes/static" "$TARGET/mcp" "$TARGET/mcp/workers"
+}}
+
+# Close any permissions left by an older installation before replacement, then
+# repeat after package installation to cover every newly written source file.
+harden_matrix_install
 
 echo "[Installer] Replacing runtime code while preserving operator data..."
 for runtime_dir in agents core scripts; do
@@ -532,7 +579,7 @@ if [ -f "$MCP_REQUIREMENTS" ]; then
         -exec sed -i 's/\\r$//' {{}} +
     sed -i 's/\\r$//' "$MCP_LAUNCHER"
     MCP_VENV="$TARGET/mcp/.venv"
-    install -d -o root -g root -m 0755 "$TARGET/mcp/workers"
+    install -d -o root -g root -m 0711 "$TARGET/mcp/workers"
     rm -rf "$MCP_VENV"
     "$PYTHON_BIN" -m venv "$MCP_VENV"
     "$MCP_VENV/bin/python3" -m pip install --upgrade pip wheel
@@ -567,6 +614,8 @@ printf '%s\n' \
     'exec /matrix/.venv/bin/python3 /matrix/scripts/matrixd "$@"' \
     > /usr/local/bin/matrixd
 chmod 0755 /usr/local/bin/matrixd
+
+harden_matrix_install
 
 echo "[Installer] Local MatrixOS installation complete."
 exit 0
@@ -663,7 +712,54 @@ TARGET="/matrix"
 SRC_DIR="$CLONE_DIR/matrixos"
 VENV_DIR="$TARGET/.venv"
 
-mkdir -p "$TARGET"
+harden_matrix_install() {{
+    echo "[Installer] Hardening shared MatrixOS source..."
+    install -d "$TARGET"
+    if [ -L "$TARGET" ]; then
+        echo "[Installer][ERROR] Refusing a symlinked MatrixOS root: $TARGET"
+        exit 77
+    fi
+    setfacl -b -- "$TARGET"
+    chown root:root "$TARGET"
+    chmod 0755 "$TARGET"
+
+    for SOURCE_PATH in \
+        "$TARGET/agents" "$TARGET/ai" "$TARGET/core" \
+        "$TARGET/docs" "$TARGET/scripts" "$TARGET/sounds" \
+        "$TARGET/teams" "$TARGET/.venv" "$TARGET/mcp/.venv"; do
+        [ -e "$SOURCE_PATH" ] || continue
+        if [ -L "$SOURCE_PATH" ]; then
+            echo "[Installer][ERROR] Refusing a symlinked source root: $SOURCE_PATH"
+            exit 77
+        fi
+        setfacl -R -P -b -- "$SOURCE_PATH"
+        chown -hR root:root "$SOURCE_PATH"
+        find "$SOURCE_PATH" -xdev -type d -exec chmod a+rx,go-w {{}} +
+        find "$SOURCE_PATH" -xdev -type f -exec chmod a+r,go-w {{}} +
+    done
+
+    find "$TARGET" -maxdepth 1 -type f -exec setfacl -b -- {{}} +
+    find "$TARGET" -maxdepth 1 -type f -exec chown root:root -- {{}} +
+    find "$TARGET" -maxdepth 1 -type f -exec chmod a+r,go-w -- {{}} +
+
+    for BOUNDARY_PATH in "$TARGET/universes" "$TARGET/universes/runtime" \
+        "$TARGET/universes/static" "$TARGET/mcp" "$TARGET/mcp/workers"; do
+        if [ -L "$BOUNDARY_PATH" ]; then
+            echo "[Installer][ERROR] Refusing a symlinked mutable boundary: $BOUNDARY_PATH"
+            exit 77
+        fi
+    done
+    install -d "$TARGET/universes" "$TARGET/universes/runtime" \
+        "$TARGET/universes/static" "$TARGET/mcp" "$TARGET/mcp/workers"
+    chown root:root "$TARGET/universes" "$TARGET/universes/runtime" \
+        "$TARGET/universes/static" "$TARGET/mcp" "$TARGET/mcp/workers"
+    chmod 0711 "$TARGET/universes" "$TARGET/universes/runtime" \
+        "$TARGET/universes/static" "$TARGET/mcp" "$TARGET/mcp/workers"
+}}
+
+# Close any permissions left by an older installation before replacement, then
+# repeat after package installation to cover every newly written source file.
+harden_matrix_install
 
 echo "[Installer] Replacing runtime code while preserving operator data..."
 for runtime_dir in agents ai core docs scripts sounds teams; do
@@ -724,7 +820,7 @@ if [ -f "$MCP_REQUIREMENTS" ]; then
         -exec sed -i 's/\\r$//' {{}} +
     sed -i 's/\\r$//' "$MCP_LAUNCHER"
     MCP_VENV="$TARGET/mcp/.venv"
-    install -d -o root -g root -m 0755 "$TARGET/mcp/workers"
+    install -d -o root -g root -m 0711 "$TARGET/mcp/workers"
     rm -rf "$MCP_VENV"
     "$PYTHON_BIN" -m venv "$MCP_VENV"
     "$MCP_VENV/bin/python3" -m pip install --upgrade pip wheel
@@ -759,6 +855,8 @@ printf '%s\n' \
     'exec /matrix/.venv/bin/python3 /matrix/scripts/matrixd "$@"' \
     > /usr/local/bin/matrixd
 chmod 0755 /usr/local/bin/matrixd
+
+harden_matrix_install
 
 echo "[Installer] MatrixOS GitHub installation complete."
 exit 0
