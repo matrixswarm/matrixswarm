@@ -12,6 +12,7 @@ MAX_JOBS = 256
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SAFE_PREFIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SAFE_PROFILE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def _string(mapping, key, default="", *, max_length=4096):
@@ -120,7 +121,10 @@ def normalize_job(job):
         raise ValueError(f"invalid schedule or config for job '{job_id}'")
     if "ssh" in config or "mysql" in config:
         raise ValueError("job definitions cannot contain credentials")
-    return {
+    ssh_profile = _string(job, "ssh_profile", "", max_length=128)
+    if ssh_profile and not _SAFE_PROFILE_ID.fullmatch(ssh_profile):
+        raise ValueError("ssh_profile contains unsafe characters")
+    normalized = {
         "id": job_id,
         "enabled": _boolean(job, "enabled", True),
         "factory": factory,
@@ -136,6 +140,9 @@ def normalize_job(job):
             else _normalize_mysql(config)
         ),
     }
+    if ssh_profile:
+        normalized["ssh_profile"] = ssh_profile
+    return normalized
 
 
 def normalize_jobs(jobs):

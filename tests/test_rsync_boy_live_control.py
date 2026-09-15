@@ -94,6 +94,7 @@ def live_agent():
     agent._scheduler_state = {"version": 1, "jobs": {}}
     agent._last_attempt = {}
     agent._running = {}
+    agent._ssh_profiles = {}
     agent.tree_node = {"config": {}}
     agent.save_encrypted_state = Mock()
     agent.log = Mock()
@@ -148,6 +149,26 @@ class JobSchemaTests(unittest.TestCase):
             },
         }
         self.assertEqual(normalize_jobs([mysql])[0]["id"], "mysql-full")
+
+    def test_profile_reference_is_preserved_without_credentials(self):
+        candidate = sample_job()
+        candidate["ssh_profile"] = "cdn-assets-01"
+        normalized = normalize_jobs([candidate])[0]
+        self.assertEqual(normalized["ssh_profile"], "cdn-assets-01")
+        self.assertNotIn("ssh", normalized["config"])
+        candidate["ssh_profile"] = "../unsafe"
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            normalize_jobs([candidate])
+
+    def test_profile_change_changes_schedule_definition(self):
+        cls = load_agent_class()
+        primary = sample_job()
+        cdn = sample_job()
+        cdn["ssh_profile"] = "cdn-assets-01"
+        self.assertNotEqual(
+            cls._job_definition_hash(primary),
+            cls._job_definition_hash(cdn),
+        )
 
 
 class AgentProtocolTests(unittest.TestCase):
@@ -215,6 +236,38 @@ class AgentProtocolTests(unittest.TestCase):
         self.agent.cmd_execute_job(request(job_id="deleted"), None, self.identity)
         self.assertFalse(self._reply_payload()["ok"])
         self.assertIn("no longer exists", self._reply_payload()["error"])
+
+    def test_selected_profile_is_injected_only_into_ephemeral_context(self):
+        self.agent._ssh_profiles = {
+            "cdn-assets-01": {
+                "label": "CDN assets",
+                "host": "push.example.test",
+                "username": "backup",
+                "password": "runtime-only-secret",
+            }
+        }
+        selected = sample_job()
+        selected["ssh_profile"] = "cdn-assets-01"
+        self.agent.jobs = normalize_jobs([selected])
+
+        self.agent.cmd_execute_job(request(job_id="sites"), None, self.identity)
+
+        self.assertTrue(self._reply_payload()["ok"])
+        context = self.agent.thread_launcher.launch.call_args.kwargs["context"]
+        self.assertEqual(context["config"]["ssh"]["host"], "push.example.test")
+        self.assertNotIn("runtime-only-secret", repr(self.agent.jobs))
+        self.assertNotIn("password", repr(self._reply_payload()["ssh_profiles"]))
+        self.assertNotIn("private_key", repr(self._reply_payload()["ssh_profiles"]))
+
+    def test_missing_selected_profile_fails_closed(self):
+        selected = sample_job()
+        selected["ssh_profile"] = "not-in-this-deployment"
+        self.agent.jobs = normalize_jobs([selected])
+
+        self.agent.cmd_execute_job(request(job_id="sites"), None, self.identity)
+
+        self.assertFalse(self._reply_payload()["ok"])
+        self.agent.thread_launcher.launch.assert_not_called()
 
 
 class PanelContractTests(unittest.TestCase):

@@ -1,4 +1,5 @@
 import json, uuid, hashlib, time
+from copy import deepcopy
 from datetime import datetime
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit
 from .exceptions.manual_constraint_failure import ManualConstraintFailure
@@ -10,6 +11,10 @@ from .deploy import Deploy
 from .agent_ir import AgentIR
 from .deployment_compiler import DeploymentCompiler
 from .directive_compiler import DirectiveCompiler
+from .rsync_boy_profiles import (
+    RsyncBoyProfileError,
+    inject_rsync_boy_ssh_profiles,
+)
 
 # -------------------------------------------------------------
 # Deployment Container
@@ -71,13 +76,29 @@ class DeploymentSession:
             # Resolve all constraints directly on the live nodes
             try:
                 resolved_constraints = self._resolve_constraints_parallel(self.tree)
+                # Profile credentials belong only to the directive staging copy.
+                # Never attach them to the live/editable workspace tree.
+                compilation_tree = deepcopy(self.tree)
+                registry = self.resolver.vcs.get_store("registry")
+                profile_count = inject_rsync_boy_ssh_profiles(
+                    compilation_tree,
+                    registry.get_namespace("ssh") or {},
+                )
+                if profile_count:
+                    print(
+                        f"[DEPLOY][RSYNC_BOY] Sealed {profile_count} referenced "
+                        "SSH profile(s) into directive staging."
+                    )
             except ManualConstraintFailure as e:
                 print(str(e))
+                return None
+            except RsyncBoyProfileError as e:
+                print(f"[DEPLOY BLOCKED] {e}")
                 return None
 
             # Build IR map
             ir_map = {}
-            for gid, node in self.tree.items():
+            for gid, node in compilation_tree.items():
                 rdict = resolved_constraints.get(gid, {})  # already a dict of Constraint objs
                 node['serial'] = str(hashlib.sha256(f"{uuid.uuid4()}-{time.time()}".encode()).hexdigest())
                 ir_map[gid] = AgentIR(
