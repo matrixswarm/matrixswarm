@@ -17,6 +17,7 @@ SUPPORTED_FACTORIES = {MYSQL_FACTORY, FILESYSTEM_FACTORY}
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SAFE_PREFIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SAFE_PROFILE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class JobClipboardError(ValueError):
@@ -134,7 +135,10 @@ def normalize_job(job):
         if factory == FILESYSTEM_FACTORY
         else _normalize_mysql_config(config)
     )
-    return {
+    ssh_profile = _string(job, "ssh_profile", "", max_length=128)
+    if ssh_profile and not _SAFE_PROFILE_ID.fullmatch(ssh_profile):
+        raise JobClipboardError("ssh_profile contains unsafe characters")
+    normalized = {
         "id": job_id,
         "enabled": _boolean(job, "enabled", True),
         "factory": factory,
@@ -146,6 +150,9 @@ def normalize_job(job):
         },
         "config": normalized_config,
     }
+    if ssh_profile:
+        normalized["ssh_profile"] = ssh_profile
+    return normalized
 
 
 def normalize_jobs(jobs):

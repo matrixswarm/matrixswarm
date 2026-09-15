@@ -62,6 +62,7 @@ def mysql_job():
 class RsyncBoyClipboardTests(unittest.TestCase):
     def test_round_trip_preserves_all_supported_job_details(self):
         jobs = [mysql_job(), filesystem_job()]
+        jobs[1]["ssh_profile"] = "cdn-assets-01"
         payload = encode_jobs(jobs)
         self.assertEqual(decode_jobs(payload), jobs)
         self.assertEqual(json.loads(payload)["format"], CLIPBOARD_FORMAT)
@@ -80,6 +81,16 @@ class RsyncBoyClipboardTests(unittest.TestCase):
         self.assertNotIn("private-key-secret", payload)
         self.assertNotIn("database-secret", payload)
         self.assertNotIn("future_field", payload)
+
+    def test_profile_selector_is_portable_but_profile_secrets_are_not(self):
+        candidate = filesystem_job()
+        candidate["ssh_profile"] = "cdn-assets-01"
+        candidate["ssh_profiles"] = {
+            "cdn-assets-01": {"password": "never-export-this"}
+        }
+        payload = encode_jobs([candidate])
+        self.assertEqual(decode_jobs(payload)[0]["ssh_profile"], "cdn-assets-01")
+        self.assertNotIn("never-export-this", payload)
 
     def test_invalid_bundle_is_rejected_before_import(self):
         valid = json.loads(encode_jobs([filesystem_job()]))

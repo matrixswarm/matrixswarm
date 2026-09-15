@@ -30,10 +30,11 @@ class Agent(EncryptedStateMixin, BootAgent):
 
     def __init__(self):
         super().__init__()
-        self.AGENT_VERSION = "2.3.0"
+        self.AGENT_VERSION = "2.4.0"
 
         cfg = self.tree_node.get("config", {}) or {}
         self._rpc_role = cfg.get("rpc_router_role", "hive.rpc")
+        self._ssh_profiles = self._load_ssh_profiles(cfg.get("ssh_profiles", {}))
         self.init_encrypted_state(namespace="rsync_boy_scheduler")
         self._scheduler_lock = threading.RLock()
         job_config = self._load_job_config(cfg)
@@ -62,8 +63,61 @@ class Agent(EncryptedStateMixin, BootAgent):
         self.log(
             f"[RSYNC_BOY] Loaded {len(self.jobs)} jobs; "
             f"restored {completed} successful schedule entries; "
-            f"launch stagger {self.launch_stagger_sec:g}s"
+            f"launch stagger {self.launch_stagger_sec:g}s; "
+            f"{len(self._ssh_profiles)} additional SSH profile(s) sealed"
         )
+
+    # --------------------------------------------------
+    @staticmethod
+    def _load_ssh_profiles(value) -> dict:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("ssh_profiles must be an object")
+        profiles = {}
+        for serial, profile in value.items():
+            serial = str(serial).strip()
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", serial):
+                raise ValueError("ssh_profiles contains an invalid profile id")
+            if not isinstance(profile, dict):
+                raise ValueError(f"SSH profile '{serial}' must be an object")
+            profiles[serial] = dict(profile)
+        return profiles
+
+    # --------------------------------------------------
+    def _ssh_profile_summaries(self) -> list:
+        summaries = []
+        for serial, profile in sorted(self._ssh_profiles.items()):
+            summaries.append(
+                {
+                    "serial": serial,
+                    "label": str(profile.get("label") or "SSH"),
+                    "host": str(profile.get("host") or "?"),
+                    "port": profile.get("port", 22),
+                    "username": str(profile.get("username") or "?"),
+                    "trusted_host_fingerprint": str(
+                        profile.get("trusted_host_fingerprint") or ""
+                    ),
+                }
+            )
+        return summaries
+
+    # --------------------------------------------------
+    def _validate_job_profiles(self, jobs):
+        missing = sorted(
+            {
+                job.get("ssh_profile")
+                for job in jobs
+                if job.get("ssh_profile")
+                and job.get("ssh_profile") not in self._ssh_profiles
+            }
+        )
+        if missing:
+            raise ValueError(
+                "SSH profile is not sealed into this deployment: "
+                + ", ".join(missing)
+                + ". Add it in Phoenix and redeploy RsyncBoy."
+            )
 
     # --------------------------------------------------
     def _load_job_config(self, initial: dict) -> dict:
@@ -144,6 +198,7 @@ class Agent(EncryptedStateMixin, BootAgent):
     def _job_definition_hash(job: dict) -> str:
         definition = {
             "factory": job.get("factory"),
+            "ssh_profile": job.get("ssh_profile", ""),
             "config": job.get("config", {}),
         }
         encoded = json.dumps(
@@ -252,6 +307,7 @@ class Agent(EncryptedStateMixin, BootAgent):
                 "poll_interval": self.poll_interval,
                 "jobs": jobs,
                 "runtime": runtime,
+                "ssh_profiles": self._ssh_profile_summaries(),
             }
 
     # --------------------------------------------------
@@ -306,6 +362,7 @@ class Agent(EncryptedStateMixin, BootAgent):
         self._callback_fields(content)
         try:
             jobs = normalize_jobs(content.get("jobs"))
+            self._validate_job_profiles(jobs)
             poll_interval = normalize_poll_interval(content.get("poll_interval"))
             with self._scheduler_lock:
                 revision = content.get("revision")
@@ -407,11 +464,22 @@ class Agent(EncryptedStateMixin, BootAgent):
             # into the ephemeral thread context. They never enter schedule state.
             cfg = job.get("config", {}).copy()
             top_cfg = self.tree_node.get("config", {})
-            if "ssh" in top_cfg:
+            ssh_profile = str(job.get("ssh_profile", "") or "").strip()
+            if ssh_profile:
+                selected = self._ssh_profiles.get(ssh_profile)
+                if selected is None:
+                    raise ValueError(
+                        f"SSH profile '{ssh_profile}' is not available in this deployment"
+                    )
+                cfg["ssh"] = dict(selected)
+                self.log(
+                    f"[RSYNC_BOY][_LAUNCH_JOB] Selected SSH profile "
+                    f"'{selected.get('label') or ssh_profile}'."
+                )
+            elif "ssh" in top_cfg:
                 cfg["ssh"] = top_cfg["ssh"]
                 self.log(
-                    "[RSYNC_BOY][_LAUNCH_JOB] Injected SSH creds from "
-                    "top-level config."
+                    "[RSYNC_BOY][_LAUNCH_JOB] Selected primary SSH profile."
                 )
             if "mysql" in top_cfg:
                 cfg["mysql"] = top_cfg["mysql"]
