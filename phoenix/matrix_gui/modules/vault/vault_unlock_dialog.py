@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton,
-    QMessageBox, QFileDialog
+    QMessageBox, QFileDialog, QCheckBox
 )
 from PyQt6.QtCore import Qt
 from .vault_service import VaultService
@@ -35,6 +35,37 @@ class VaultUnlockDialog(QDialog):
         self.pass_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         layout.addWidget(self.pass_input)
 
+        capability_label = QLabel("Optional capabilities for this session:")
+        capability_label.setStyleSheet("color: #8fd; margin-top: 8px;")
+        layout.addWidget(capability_label)
+
+        self.allow_secret_viewing_checkbox = QCheckBox(
+            "Allow viewing Swarm Keys and Vault details"
+        )
+        self.allow_secret_viewing_checkbox.setChecked(False)
+        self.allow_secret_viewing_checkbox.setToolTip(
+            "Off by default. When off, Phoenix hides and blocks secret-viewing actions."
+        )
+        layout.addWidget(self.allow_secret_viewing_checkbox)
+
+        self.debug_output_checkbox = QCheckBox(
+            "Enable Phoenix debug console output"
+        )
+        self.debug_output_checkbox.setChecked(False)
+        self.debug_output_checkbox.setToolTip(
+            "Off by default. Applies to the cockpit and session windows opened after sign-in."
+        )
+        layout.addWidget(self.debug_output_checkbox)
+
+        self.close_on_minimize_or_sleep_checkbox = QCheckBox(
+            "Close Phoenix on minimize or system sleep"
+        )
+        self.close_on_minimize_or_sleep_checkbox.setChecked(False)
+        self.close_on_minimize_or_sleep_checkbox.setToolTip(
+            "Off by default. When enabled, either event terminates Phoenix and all sessions."
+        )
+        layout.addWidget(self.close_on_minimize_or_sleep_checkbox)
+
         self.unlock_btn = QPushButton("🔓 Unlock Vault")
         self.unlock_btn.clicked.connect(self._unlock)
         self.unlock_btn.setDefault(True)
@@ -67,6 +98,18 @@ class VaultUnlockDialog(QDialog):
         self.selected_file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.selected_file_label.setText(f"🔒 Selected:")
         layout.addWidget(self.selected_file_label)
+
+    @property
+    def allow_secret_viewing(self):
+        return self.allow_secret_viewing_checkbox.isChecked()
+
+    @property
+    def debug_output(self):
+        return self.debug_output_checkbox.isChecked()
+
+    @property
+    def close_on_minimize_or_sleep(self):
+        return self.close_on_minimize_or_sleep_checkbox.isChecked()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -175,6 +218,9 @@ class VaultUnlockDialog(QDialog):
         self.unlock_btn.setEnabled(not busy)
         self.yubikey_btn.setEnabled(not busy)
         self.pass_input.setEnabled(not busy)
+        self.allow_secret_viewing_checkbox.setEnabled(not busy)
+        self.debug_output_checkbox.setEnabled(not busy)
+        self.close_on_minimize_or_sleep_checkbox.setEnabled(not busy)
         self.yubikey_status.setText(status)
 
     def reject(self):

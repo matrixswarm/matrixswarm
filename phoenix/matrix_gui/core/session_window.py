@@ -33,16 +33,21 @@ from matrix_gui.core.panel.universe_teardown_dialog import UniverseTeardownDialo
 from matrix_gui.core.panel.control_bar import ControlBar
 from matrix_gui.modules.vault.services.vault_connection_singleton import VaultConnectionSingleton
 from matrix_gui.modules.directive.deploy_dialog import DeployDialog
+from matrix_gui.core.startup_policy import configure_debug_output, install_print_gate
 
-def run_session(session_id, conn):
+def run_session(session_id, conn, debug_output=False):
     """
     Executes a session, initializing its configurations, inter-process communication, and monitoring tools.
 
     @param str session_id: Unique identifier for the session.
     @param multiprocessing.Connection conn: IPC connection for communication with the parent process.
+    @param bool debug_output: Whether this child may emit console print output.
 
     @return None
     """
+
+    install_print_gate()
+    configure_debug_output(debug_output)
 
     app = QApplication.instance() or QApplication(sys.argv)
 
