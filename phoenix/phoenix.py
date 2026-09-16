@@ -21,6 +21,17 @@ Attributes:
 """
 import sys, time, builtins, inspect, json, pprint
 
+from matrix_gui.core.startup_policy import (
+    close_on_minimize_or_sleep_enabled,
+    configure_startup_policy,
+    debug_output_enabled,
+    install_print_gate,
+    reset_startup_policy,
+)
+
+
+install_print_gate()
+
 from matrix_gui.core.utils.linux_gui_preflight import require_linux_gui_runtime
 
 
@@ -36,7 +47,13 @@ except Exception as e:
 import sys, multiprocessing
 from PyQt6.QtGui import QWindow
 from PyQt6.QtWidgets import QVBoxLayout, QMainWindow,  QWidget, QHBoxLayout, QPushButton, QApplication,QGraphicsDropShadowEffect, QMessageBox, QStackedWidget, QTabBar, QStatusBar, QLabel, QDialog, QTabWidget
-from PyQt6.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import (
+    QEvent,
+    QTimer,
+    Qt,
+    QPropertyAnimation,
+    QEasingCurve,
+)
 from PyQt6.QtGui import QColor, QIcon
 from matrix_gui.core.session_window import run_session
 
@@ -84,9 +101,37 @@ def d(*variables, pretty=False, width=100):
 # make it global
 builtins.d = d
 
+
+def _power_clock_sample():
+    """Return total uptime and awake-only uptime without installing callbacks."""
+    if sys.platform != "win32":
+        now = time.monotonic()
+        return now, now
+
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetTickCount64.restype = ctypes.c_ulonglong
+        total_uptime = kernel32.GetTickCount64() / 1000.0
+
+        awake_ticks = ctypes.c_ulonglong()
+        if not kernel32.QueryUnbiasedInterruptTime(ctypes.byref(awake_ticks)):
+            raise OSError(ctypes.get_last_error(), "QueryUnbiasedInterruptTime failed")
+        awake_uptime = awake_ticks.value / 10_000_000.0
+        return total_uptime, awake_uptime
+    except Exception as error:
+        print(f"[SECURITY][SLEEP] Power clock check unavailable: {error}")
+        now = time.monotonic()
+        return now, now
+
+
 class PhoenixCockpit(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self._security_shutdown_pending = False
+        self._security_power_clock = _power_clock_sample()
 
         self.setWindowTitle("MatrixSwarm :: PHOENIX COCKPIT")
         self.setGeometry(100, 100, 1200, 800)
@@ -232,13 +277,26 @@ class PhoenixCockpit(QMainWindow):
 
         self._start_pipe_monitor()
 
+        self.security_sleep_timer = QTimer(self)
+        self.security_sleep_timer.timeout.connect(self._check_for_system_sleep)
+        self.security_sleep_timer.start(1000)
+
+        app = QApplication.instance()
+        if app is not None:
+            app.applicationStateChanged.connect(
+                self._on_application_state_changed
+            )
+
         self.show()
 
     def launch_session(self, session_id: str, deployment: dict, vault_data: dict = None):
         try:
             from multiprocessing import Process, Pipe
             parent_conn, child_conn = Pipe()
-            p = Process(target=run_session, args=(session_id, child_conn))
+            p = Process(
+                target=run_session,
+                args=(session_id, child_conn, debug_output_enabled()),
+            )
             p.start()
 
             # --- Immediately send the deployment to the child (no handshake waiting) ---
@@ -653,11 +711,49 @@ class PhoenixCockpit(QMainWindow):
         except Exception as e:
             emit_gui_exception_log("PhoenixCockpit.closeEvent", e)
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if (
+            event.type() == QEvent.Type.WindowStateChange
+            and self.isMinimized()
+        ):
+            self._request_security_shutdown("cockpit minimized")
+
+    def _on_application_state_changed(self, state):
+        if state == Qt.ApplicationState.ApplicationSuspended:
+            self._request_security_shutdown("application suspended")
+
+    def _check_for_system_sleep(self):
+        previous_total, previous_awake = self._security_power_clock
+        current_total, current_awake = _power_clock_sample()
+        self._security_power_clock = current_total, current_awake
+
+        total_elapsed = max(0.0, current_total - previous_total)
+        awake_elapsed = max(0.0, current_awake - previous_awake)
+        suspended_elapsed = total_elapsed - awake_elapsed
+        if suspended_elapsed >= 2.0:
+            self._request_security_shutdown("system sleep detected after resume")
+
+    def _request_security_shutdown(self, reason):
+        if (
+            not close_on_minimize_or_sleep_enabled()
+            or self._security_shutdown_pending
+        ):
+            return
+
+        self._security_shutdown_pending = True
+        print(f"[SECURITY] {reason}; closing Phoenix and all sessions.")
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(0, app.quit)
+
     def _handle_vault_reload(self):
         EventBus.emit("vault.reopen.requested", save=False)
 
     # in PhoenixCockpit._destroy_all_sessions
     def _destroy_all_sessions(self, **_):
+        reset_startup_policy()
         self.status_vault.setText("Vault: 🔒")
         for sess in list(self.session_processes):
             try:
@@ -741,6 +837,7 @@ class PhoenixCockpit(QMainWindow):
             3. Initialize the vault runtime cleanly via VaultService
             4. UI flip triggered by vault.unlocked event
         """
+        reset_startup_policy()
         try:
             while True:
                 selector = VaultSelectorDialog(self)
@@ -762,6 +859,13 @@ class PhoenixCockpit(QMainWindow):
                     if unlock_dlg.exec() != QDialog.DialogCode.Accepted:
                         continue  # return to selector
 
+                    configure_startup_policy(
+                        allow_secret_viewing=unlock_dlg.allow_secret_viewing,
+                        debug_output=unlock_dlg.debug_output,
+                        close_on_minimize_or_sleep=(
+                            unlock_dlg.close_on_minimize_or_sleep
+                        ),
+                    )
                     VaultService.initialize_runtime(
                         vault_data=unlock_dlg.vault_data,
                         password=unlock_dlg.vault_password,
@@ -776,6 +880,13 @@ class PhoenixCockpit(QMainWindow):
                     if unlock_dlg.exec() != QDialog.DialogCode.Accepted:
                         continue  # return to selector
 
+                    configure_startup_policy(
+                        allow_secret_viewing=unlock_dlg.allow_secret_viewing,
+                        debug_output=unlock_dlg.debug_output,
+                        close_on_minimize_or_sleep=(
+                            unlock_dlg.close_on_minimize_or_sleep
+                        ),
+                    )
                     VaultService.initialize_runtime(
                         vault_data=unlock_dlg.vault_data,
                         password=unlock_dlg.vault_password,
@@ -802,6 +913,7 @@ class PhoenixCockpit(QMainWindow):
                     return
 
         except Exception as e:
+            reset_startup_policy()
             emit_gui_exception_log("PhoenixCockpit.unlock_vault", e)
 
     def _on_tab_close_requested(self, index: int):

@@ -11,6 +11,7 @@ from pathlib import Path
 from runpy import run_path
 from matrix_gui.core.event_bus import EventBus
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
+from matrix_gui.core.startup_policy import secret_viewing_enabled
 from PyQt6.QtWidgets import QInputDialog, QListWidget, QPushButton, QTextEdit, QLabel, QSplitter
 from matrix_gui.modules.vault.ui.dump_vault_popup import DumpVaultPopup
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
@@ -84,6 +85,7 @@ class DirectiveManagerDialog(QDialog):
 
         self.view_swarmkey_btn = QPushButton("View Swarm Key")
         self.view_swarmkey_btn.clicked.connect(self._show_swarm_key)
+        self.view_swarmkey_btn.setVisible(secret_viewing_enabled())
 
         btn_row.addWidget(self.view_swarmkey_btn)
 
@@ -94,6 +96,7 @@ class DirectiveManagerDialog(QDialog):
 
         self.dump_vault_btn = QPushButton("Dump Vault")
         self.dump_vault_btn.clicked.connect(self._dump_vault)
+        self.dump_vault_btn.setVisible(secret_viewing_enabled())
         btn_row.addWidget(self.dump_vault_btn)
 
         self.delete_deployed_btn.clicked.connect(self._on_delete_deployed)
@@ -129,6 +132,14 @@ class DirectiveManagerDialog(QDialog):
             emit_gui_exception_log("DirectiveManagerDialog._on_workspace_opened", e)
 
     def _show_swarm_key(self):
+
+        if not secret_viewing_enabled():
+            QMessageBox.warning(
+                self,
+                "Secret Viewing Locked",
+                "Swarm Key viewing was not authorized at sign-in.",
+            )
+            return
 
         try:
             # Ensure a deployment is selected
@@ -181,6 +192,14 @@ class DirectiveManagerDialog(QDialog):
         """
         Save the entire self.vault_data to a pretty-printed JSON file for debugging.
         """
+        if not secret_viewing_enabled():
+            QMessageBox.warning(
+                self,
+                "Secret Viewing Locked",
+                "Vault detail viewing was not authorized at sign-in.",
+            )
+            return
+
         try:
             vcs = VaultCoreSingleton.get()  # get the active authoritative instance
             vault_data = vcs.read()  # deep copy of the FULL vault
