@@ -2,6 +2,7 @@ import unittest
 import threading
 import time
 import json
+import inspect
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.error import HTTPError
@@ -11,7 +12,10 @@ from phoenix_terminal.bridge.server import BridgeServer
 from phoenix_terminal.bridge_client import call_bridge
 from phoenix_terminal.bridge.phoenix_backend import PhoenixBackend
 from phoenix_terminal.bridge.sanitize import public_agent, public_agent_tree, redact_log_line, redact_value
-from phoenix_terminal.bridge.session_shim import SerializedConnection
+from phoenix_terminal.bridge.session_shim import (
+    SerializedConnection,
+    bridged_run_session,
+)
 
 
 class FakeEventBus:
@@ -227,6 +231,14 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(raw.max_active_writers, 1)
         self.assertEqual(len(raw.messages), 12)
+
+    def test_session_shim_accepts_phoenix_debug_flag(self):
+        parameters = inspect.signature(bridged_run_session).parameters
+        self.assertEqual(
+            list(parameters),
+            ["session_id", "conn", "debug_output"],
+        )
+        self.assertIs(parameters["debug_output"].default, False)
 
     def test_loopback_server_requires_token_and_removes_connection_file(self):
         with TemporaryDirectory() as temporary_directory:

@@ -3,6 +3,7 @@
 import re
 
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QHBoxLayout,
@@ -40,6 +41,9 @@ class HarvesterAssignment(BaseEditor):
             "Contact only (resurrection deferred)", "contact_only"
         )
         self.note = QLineEdit()
+        self.confirm_healthy_once = QCheckBox(
+            "Send one confirmation when monitoring is established"
+        )
         self.minimum_agents = self._spin(1, 1, 10_000)
         self.failure_threshold = self._spin(3, 1, 20)
         self.recovery_threshold = self._spin(3, 1, 20)
@@ -60,6 +64,7 @@ class HarvesterAssignment(BaseEditor):
         layout.addRow("Hive ↔ SSH", pairing)
         layout.addRow("Authority", self.capability)
         layout.addRow("Note", self.note)
+        layout.addRow("Healthy Confirmation", self.confirm_healthy_once)
         layout.addRow("Minimum Agents", self.minimum_agents)
         layout.addRow("Failure Threshold", self.failure_threshold)
         layout.addRow("Recovery Threshold", self.recovery_threshold)
@@ -166,6 +171,9 @@ class HarvesterAssignment(BaseEditor):
             if capability_index >= 0:
                 self.capability.setCurrentIndex(capability_index)
             self.note.setText(str(data.get("note", "")))
+            self.confirm_healthy_once.setChecked(
+                data.get("confirm_healthy_once") is True
+            )
             self.minimum_agents.setValue(int(data.get("minimum_agents", 1)))
             self.failure_threshold.setValue(int(data.get("failure_threshold", 3)))
             self.recovery_threshold.setValue(int(data.get("recovery_threshold", 3)))
@@ -194,6 +202,7 @@ class HarvesterAssignment(BaseEditor):
             "ssh_label": self.ssh.currentText(),
             "capability": self.capability.currentData(),
             "note": self.note.text().strip(),
+            "confirm_healthy_once": self.confirm_healthy_once.isChecked(),
             "minimum_agents": self.minimum_agents.value(),
             "failure_threshold": self.failure_threshold.value(),
             "recovery_threshold": self.recovery_threshold.value(),
@@ -224,6 +233,7 @@ class HarvesterAssignment(BaseEditor):
             "deployment_id": deployment_id,
             "universe": universe,
             "note": self.note.text().strip(),
+            "confirm_healthy_once": self.confirm_healthy_once.isChecked(),
             "minimum_agents": self.minimum_agents.value(),
             "failure_threshold": self.failure_threshold.value(),
             "recovery_threshold": self.recovery_threshold.value(),

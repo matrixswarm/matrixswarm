@@ -33,6 +33,7 @@ def normalize_target(value: Any) -> dict[str, Any]:
         "id": target_id,
         "universe": universe,
         "note": note.strip(),
+        "confirm_healthy_once": value.get("confirm_healthy_once") is True,
         "minimum_agents": _bounded_int(value, "minimum_agents", 1, 1, 10_000),
         "failure_threshold": _bounded_int(value, "failure_threshold", 3, 1, 20),
         "recovery_threshold": _bounded_int(value, "recovery_threshold", 3, 1, 20),
@@ -142,6 +143,8 @@ def evaluate_observation(
                 return next_state, "RECOVERY"
         else:
             next_state.update(status="up", recovery_hits=0)
+            if current == "unknown" and target["confirm_healthy_once"]:
+                return next_state, "HEALTHY"
         return next_state, None
 
     next_state["recovery_hits"] = 0

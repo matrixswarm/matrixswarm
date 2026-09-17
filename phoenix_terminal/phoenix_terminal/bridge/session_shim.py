@@ -33,7 +33,11 @@ class SerializedConnection:
         return getattr(self._connection, name)
 
 
-def bridged_run_session(session_id: str, conn: object) -> None:
+def bridged_run_session(
+    session_id: str,
+    conn: object,
+    debug_output: bool = False,
+) -> None:
     """Run the original Phoenix session with a narrow bridge pipe extension.
 
     This is a multiprocessing target and must remain importable at module scope.
@@ -162,4 +166,8 @@ def bridged_run_session(session_id: str, conn: object) -> None:
                 super().closeEvent(event)
 
     session_module.SessionWindow = BridgeSessionWindow
-    session_module.run_session(session_id, SerializedConnection(conn))
+    session_module.run_session(
+        session_id,
+        SerializedConnection(conn),
+        debug_output,
+    )

@@ -149,6 +149,28 @@ class HarvesterPolicyTests(unittest.TestCase):
         )
         self.assertEqual(event, "RECOVERY")
 
+    def test_optional_healthy_confirmation_is_emitted_only_once(self):
+        policy = target(confirm_healthy_once=True)
+        state = POLICY.initial_state()
+        state, event = POLICY.evaluate_observation(
+            state, success=True, observed_at=10, target=policy
+        )
+        self.assertEqual(event, "HEALTHY")
+        state, event = POLICY.evaluate_observation(
+            state, success=True, observed_at=11, target=policy
+        )
+        self.assertIsNone(event)
+
+        silent_policy = target()
+        self.assertIs(silent_policy["confirm_healthy_once"], False)
+        _state, event = POLICY.evaluate_observation(
+            POLICY.initial_state(),
+            success=True,
+            observed_at=12,
+            target=silent_policy,
+        )
+        self.assertIsNone(event)
+
     def test_resurrection_is_explicit_double_gated_and_bounded(self):
         policy = target(
             recovery_mode="automatic",
@@ -318,6 +340,7 @@ class HarvesterPolicyTests(unittest.TestCase):
         self.assertIn('"Contact only (resurrection deferred)", "contact_only"', assignment_source)
         self.assertNotIn("Contact + resurrect", assignment_source)
         self.assertIn('"ssh": ssh_fields', assignment_source)
+        self.assertIn('"confirm_healthy_once"', assignment_source)
         self.assertIn('"automatic_recovery_enabled": False', assignment_source)
         harvester_source = AGENT_PATH.read_text(encoding="utf-8")
         self.assertIn("self.automatic_recovery_enabled = False", harvester_source)
