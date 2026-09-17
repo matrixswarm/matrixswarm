@@ -28,7 +28,7 @@ class AgentLogSeverityTests(unittest.TestCase):
     def test_harvester_down_events_are_logged_as_critical(self):
         source = HARVESTER_PATH.read_text(encoding="utf-8")
         self.assertIn(
-            'level="INFO" if event == "RECOVERY" else "CRITICAL"',
+            'if event in {"HEALTHY", "RECOVERY"}',
             source,
         )
 

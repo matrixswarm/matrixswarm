@@ -197,13 +197,24 @@ class Agent(BootAgent):
             )
             return
         alert = self.get_delivery_packet("notify.alert.general", new=True)
+        healthy_suffix = (
+            "; monitoring established. Further notices will be sent only "
+            "if health changes"
+            if event == "HEALTHY"
+            else ""
+        )
         alert.set_data(
             {
                 "msg": (
                     f"Harvester {event}: {target['id']} "
                     f"({status}; universe={target['universe']})"
+                    f"{healthy_suffix}"
                 ),
-                "level": "success" if event == "RECOVERY" else "critical",
+                "level": (
+                    "success"
+                    if event in {"HEALTHY", "RECOVERY"}
+                    else "critical"
+                ),
                 "origin": self.command_line_args.get(
                     "universal_id", "harvester"
                 ),
@@ -218,7 +229,11 @@ class Agent(BootAgent):
             self.pass_packet(packet, endpoint.get_universal_id())
         self.log(
             f"[HARVESTER][ALERT] event={event} target={target['id']}",
-            level="INFO" if event == "RECOVERY" else "CRITICAL",
+            level=(
+                "INFO"
+                if event in {"HEALTHY", "RECOVERY"}
+                else "CRITICAL"
+            ),
         )
 
     def _attempt_recovery(self, target) -> None:
