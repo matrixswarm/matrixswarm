@@ -100,19 +100,52 @@ class FeedTests(unittest.TestCase):
 
 
 class RuleTests(unittest.TestCase):
-    def test_crossing_latch_rearms_and_hit_limit(self):
-        alert = rule(trigger_limit=2)
+    def test_crossing_latch_rearms_outside_reset_band_and_honors_hit_limit(self):
+        alert = rule(trigger_limit=2, reset_band_percent=.5)
         state, message = step(alert, {})
         self.assertIsNotNone(message)
         state, message = step(alert, state, price=101)
         self.assertIsNone(message)
-        state, _ = step(alert, state, price=90)
+        state, _ = step(alert, state, price=99.6)
+        state, message = step(alert, state, price=100)
+        self.assertIsNone(message)
+        state, _ = step(alert, state, price=99.5)
         state, message = step(alert, state, price=100)
         self.assertIsNotNone(message)
         state, _ = step(alert, state, price=90)
         state, message = step(alert, state, price=110)
         self.assertIsNone(message)
         self.assertEqual(state["hits"], 2)
+
+    def test_below_reset_band_and_one_shot(self):
+        below = rule(trigger_type="price_below", reset_band_percent=1)
+        state, message = step(below, {}, price=100)
+        self.assertIsNotNone(message)
+        state, _ = step(below, state, price=100.9)
+        state, message = step(below, state, price=99)
+        self.assertIsNone(message)
+        state, _ = step(below, state, price=101)
+        state, message = step(below, state, price=100)
+        self.assertIsNotNone(message)
+
+        one_shot = rule(one_shot=True, reset_band_percent=.5)
+        state, message = step(one_shot, {}, price=100)
+        self.assertIsNotNone(message)
+        state, _ = step(one_shot, state, price=90)
+        state, message = step(one_shot, state, price=110)
+        self.assertIsNone(message)
+        self.assertTrue(state["latched"])
+        self.assertEqual(state["hits"], 1)
+
+    def test_zero_reset_band_keeps_crossing_semantics_at_exact_threshold(self):
+        alert = rule(reset_band_percent=0)
+        state, message = step(alert, {}, price=100)
+        self.assertIsNotNone(message)
+        state, message = step(alert, state, price=100)
+        self.assertIsNone(message)
+        state, _ = step(alert, state, price=99.99)
+        state, message = step(alert, state, price=100)
+        self.assertIsNotNone(message)
 
     def test_independent_baselines_percent_delta_and_cooldown(self):
         alert = rule(trigger_type="price_change_above", change_percent=10, cooldown_sec=60)
@@ -156,10 +189,13 @@ class RuleTests(unittest.TestCase):
     def test_validation_rejects_invalid_without_silent_defaults(self):
         for data in ({"threshold": "abc"}, {"threshold": "nan"}, {"threshold": -1},
                      {"pair": "../BTC"}, {"trigger_limit": 1.1}, {"active": "false"},
+                     {"one_shot": "false"}, {"reset_band_percent": 101},
                      {"trigger_type": "wallet_change", "address": "private-key"}):
             with self.assertRaises(ValueError):
                 rule(**data)
         self.assertEqual(rule(pair="btc/eth")["pair"], "BTC/ETH")
+        self.assertEqual(rule()["reset_band_percent"], .5)
+        self.assertFalse(rule()["one_shot"])
 
 
 class WalletTests(unittest.TestCase):
@@ -213,6 +249,22 @@ class EngineTests(unittest.TestCase):
         saved = self.saved[-1]
         restored = self.make_engine(saved=saved, initial=[rule()])
         self.assertEqual(restored.snapshot()["watch_list"], [])
+
+    def test_legacy_saved_watch_gets_safe_policy_defaults_without_losing_runtime(self):
+        legacy = {
+            "version": 1,
+            "revision": 4,
+            "alerts": [{"id": "watch-a", "trigger_type": "price_above",
+                        "pair": "BTC/USDT", "threshold": 100}],
+            "runtime": {"watch-a": {"hits": 7, "latched": True}},
+        }
+        engine = self.make_engine(saved=legacy)
+        snapshot = engine.snapshot()
+        self.assertEqual(snapshot["watch_list"][0]["reset_band_percent"], .5)
+        self.assertFalse(snapshot["watch_list"][0]["one_shot"])
+        self.assertEqual(snapshot["runtime"]["watch-a"]["hits"], 7)
+        engine.evaluate_once("watch-a")
+        self.assertEqual(self.messages, [])
 
     def test_storage_failure_does_not_accept_edit_or_trigger(self):
         engine = self.make_engine(initial=[rule()])
