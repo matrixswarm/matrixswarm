@@ -8,7 +8,7 @@ from matrix_gui.core.connector_bus import ConnectorBus
 from matrix_gui.modules.net.connector.interfaces.connector_spec import ConnectorSpec, ConnectorPolicy
 
 # Supported connector types for outbound/inbound agent protocols
-SUPPORTED_PROTOS = {"https", "wss", "smtp"}
+SUPPORTED_PROTOS = {"https", "wss", "smtp", "ssh"}
 PERSISTENT_PROTOS = {"wss", "imap"}   # loop connectors
 EPHEMERAL_PROTOS  = {"https", "smtp"} # one-shot connectors (adjust if smtp becomes loop)
 
@@ -17,6 +17,7 @@ CONNECTOR_MAP = {
     "https": "matrix_gui.modules.net.connector.egress.https.https.HTTPSConnector",
     "wss": "matrix_gui.modules.net.connector.ingress.wss.wss.WSSConnector",
     "smtp": "matrix_gui.modules.net.connector.egress.smtp.smtp.SMTPConnector",
+    "ssh": "matrix_gui.modules.net.connector.egress.ssh.SSHConnector",
     "imap": "matrix_gui.modules.net.connector.ingress.imap.imap.IMAPIngressConnector",
     # Future connector types (examples):
     # "discord": connect_discord,
@@ -24,6 +25,18 @@ CONNECTOR_MAP = {
     # "slack": connect_slack,
     # "sms": connect_sms,
 }
+
+
+def _transport_policy(proto, connection):
+    """Return (persistent, requires_packet) for one connector record."""
+    if proto == "ssh":
+        mode = str((connection or {}).get("ssh_mode") or "one_shot").strip().lower()
+        if mode not in {"one_shot", "persistent"}:
+            raise ValueError("SSH delivery mode must be one_shot or persistent")
+        persistent = mode == "persistent"
+        return persistent, not persistent
+    persistent = proto in PERSISTENT_PROTOS
+    return persistent, proto in EPHEMERAL_PROTOS
 
 def _connect_single(deployment, session_id, dep_id):
     """
@@ -140,11 +153,12 @@ def _connect_single(deployment, session_id, dep_id):
             is_primary_ingress = (uid == primary_ingress_uid)
 
 
-            should_monitor = proto in PERSISTENT_PROTOS
+            persistent, requires_packet = _transport_policy(proto, conn)
+            should_monitor = persistent
 
             # ingress: only keep the chosen one alive
             if is_ingress:
-                should_monitor = (proto in PERSISTENT_PROTOS) and is_primary_ingress
+                should_monitor = persistent and is_primary_ingress
 
             # Context passed into connector instance via shared state
             context = {
@@ -156,7 +170,6 @@ def _connect_single(deployment, session_id, dep_id):
             }
 
             # --- policy: monitor/autostart/packet gating ---
-            requires_packet = (proto in EPHEMERAL_PROTOS)  # https/smtp one-shot
             monitor = should_monitor  # only loop connectors we want alive
             auto_start = (is_ingress and is_primary_ingress and monitor) or (is_egress and monitor)
 

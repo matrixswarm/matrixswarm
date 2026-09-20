@@ -32,6 +32,10 @@ class SSH(BaseEditor):
         default_channel_options = default_channel_options or ["ssh"]
         self.default_channel.addItems(default_channel_options)
 
+        self.ssh_mode = QComboBox()
+        self.ssh_mode.addItem("One-shot (new SSH connection per message)", "one_shot")
+        self.ssh_mode.addItem("Persistent (keep SSH connected)", "persistent")
+
         self.path_selector = QComboBox()
         # node directive path - add as you see fit
         self.path_selector.addItems([
@@ -78,6 +82,7 @@ class SSH(BaseEditor):
         # === Identity / Channel ===
         layout.addRow("Label", self.label)
         layout.addRow("Channel", self.default_channel)
+        layout.addRow("Matrix SSH Delivery", self.ssh_mode)
 
         # === SSH Connection ===
         layout.addRow("Host", self.host)
@@ -141,6 +146,9 @@ class SSH(BaseEditor):
 
     def deploy_fields(self):
         out = {
+            "proto": "ssh",
+            "channel": self.default_channel.currentText(),
+            "ssh_mode": self.ssh_mode.currentData() or "one_shot",
             "host": self.host.text().strip(),
             "port": int(self.port.text() or 22),
             "username": self.username.text().strip(),
@@ -197,6 +205,8 @@ class SSH(BaseEditor):
         self.fingerprint.setText(str(data.get("trusted_host_fingerprint", "")))
 
         self.default_channel.setCurrentText(data.get("channel", ""))
+        mode_index = self.ssh_mode.findData(data.get("ssh_mode", "one_shot"))
+        self.ssh_mode.setCurrentIndex(max(0, mode_index))
 
         self._render_auth_mode(mode)
 
@@ -209,6 +219,7 @@ class SSH(BaseEditor):
             "serial": self.serial.text().strip(),
             "label": self.label.text().strip(),
             "channel": self.default_channel.currentText(),
+            "ssh_mode": self.ssh_mode.currentData() or "one_shot",
             "host": self.host.text().strip(),
             "port": int(self.port.text() or 22),
             "username": self.username.text().strip(),

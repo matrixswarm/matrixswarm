@@ -1,0 +1,45 @@
+{
+    "name": "matrix_ssh",
+    "universal_id": "matrix-ssh",
+    "connection": {
+        "channel": "outgoing.command"
+    },
+    "constraints": [
+        {
+            "ssh": {
+                "inject_in_connection": 1,
+                "deployment_only": 1
+            }
+        },
+        {
+            "packet_signing": {
+                "in": true,
+                "out": true
+            }
+        }
+    ],
+    "config": {
+        "poll_interval": 1,
+        "batch_limit": 32,
+        "lockdown_state": false,
+        "lockdown_time": 0,
+        "ui": {
+            "agent_tree": {
+                "emoji": "🛡️"
+            }
+        },
+        "service-manager": [
+            {
+                "role": [
+                    "matrix_ssh.toggle_perimeter@cmd_toggle_perimeter",
+                    "hive.toggle_perimeter@cmd_toggle_perimeter",
+                    "matrix_ssh.status@cmd_status"
+                ],
+                "scope": [
+                    "parent",
+                    "any"
+                ]
+            }
+        ]
+    }
+}

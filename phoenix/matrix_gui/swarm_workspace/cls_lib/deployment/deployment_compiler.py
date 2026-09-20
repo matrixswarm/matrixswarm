@@ -51,6 +51,8 @@ class DeploymentCompiler:
                     #a connection to be injected into the deployment, e.g. matrix_email;
                     elif con.inject_into_connection():
                         node["connection"].update(con.get_fields())
+                        if con.is_deployment_only():
+                            continue
 
                 except Exception as e:
                     print(f"{con.get_constraint_name()} has no handler {e}")
@@ -65,6 +67,18 @@ class DeploymentCompiler:
 
             except Exception as e:
                 print(f"[DEPLOY][WARN] Connection/cert injection error for {agent_ir.name}: {e}")
+
+        # Agent metadata owns the Phoenix routing role. Apply it after the
+        # reusable Registry profile so an SSH profile used for other purposes
+        # cannot accidentally turn a transport agent into a non-connector.
+        declared_connection = agent_ir.node.get("meta", {}).get("connection", {})
+        declared_channel = declared_connection.get("channel")
+        if declared_channel:
+            if declared_channel not in ("outgoing.command", "payload.reception"):
+                raise ValueError(
+                    f"Unsupported metadata connection channel: {declared_channel!r}"
+                )
+            node["connection"]["channel"] = declared_channel
 
         for child_gid in agent_ir.children:
             node["children"].append(self._build_private_tree(child_gid))
