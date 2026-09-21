@@ -42,6 +42,7 @@ class RsyncBoy(PhoenixPanelInterface):
         self.jobs = []
         self.ssh_profiles = []
         self.runtime = {}
+        self.storage = {}
         self.revision = None
         self.dirty = False
         self.pending = None
@@ -59,6 +60,9 @@ class RsyncBoy(PhoenixPanelInterface):
         layout = QVBoxLayout()
         heading = QHBoxLayout()
         heading.addWidget(QLabel("💾 RsyncBoy Jobs · Live MatrixOS"))
+        self.storage_label = QLabel("Backup storage: calculating…")
+        self.storage_label.setTextFormat(Qt.TextFormat.PlainText)
+        heading.addWidget(self.storage_label)
         heading.addStretch()
         heading.addWidget(QLabel("Scheduler poll (seconds):"))
         self.poll_interval = QSpinBox()
@@ -80,9 +84,18 @@ class RsyncBoy(PhoenixPanelInterface):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
-            ["Job", "Type", "SSH Source", "Schedule", "Last success", "State", "Actions"]
+            [
+                "Job",
+                "Type",
+                "SSH Source",
+                "Backup Size",
+                "Schedule",
+                "Last success",
+                "State",
+                "Actions",
+            ]
         )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -93,7 +106,8 @@ class RsyncBoy(PhoenixPanelInterface):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table, 1)
 
         controls = QHBoxLayout()
@@ -127,7 +141,63 @@ class RsyncBoy(PhoenixPanelInterface):
         except (OSError, OverflowError, ValueError):
             return "Unknown"
 
+    @staticmethod
+    def _bytes_label(value):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or value < 0
+        ):
+            return "—"
+        size = float(value)
+        units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+        for unit in units:
+            if size < 1024 or unit == units[-1]:
+                if unit == "B":
+                    return f"{int(size):,} {unit}"
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return "—"
+
+    def _storage_label_for_job(self, job_id):
+        item = (self.storage.get("jobs") or {}).get(job_id, {})
+        if not isinstance(item, dict):
+            return "—", "Storage result was not understood"
+        state = item.get("state")
+        if state == "remote":
+            return "Remote", str(item.get("detail") or "Stored on the SSH server")
+        if state == "error":
+            return "Unavailable", str(item.get("detail") or "Storage scan failed")
+        if not item and self.storage.get("scanning"):
+            return "Calculating…", "RsyncBoy is measuring this backup tree"
+        label = self._bytes_label(item.get("bytes"))
+        if state == "partial":
+            label += " *"
+        return label, str(item.get("detail") or "")
+
+    def _render_storage_total(self):
+        total = self._bytes_label(self.storage.get("total_bytes"))
+        if total == "—" and self.storage.get("scanning"):
+            total = "calculating…"
+        suffixes = []
+        if self.storage.get("scanning"):
+            completed = self.storage.get("completed_jobs", 0)
+            job_count = self.storage.get("job_count", len(self.jobs))
+            if type(completed) is int and type(job_count) is int and job_count > 0:
+                suffixes.append(f"measuring {completed}/{job_count} jobs")
+            elif total != "calculating…":
+                suffixes.append("refreshing")
+        if self.storage.get("partial"):
+            suffixes.append("partial")
+        suffix = f" · {' · '.join(suffixes)}" if suffixes else ""
+        self.storage_label.setText(f"Backup storage on disk: {total}{suffix}")
+        self.storage_label.setToolTip(
+            "Unique allocated bytes on this backup server. Hard-linked "
+            "incremental snapshots are counted once."
+        )
+
     def _render(self):
+        self._render_storage_total()
         profile_labels = {
             str(profile.get("serial")): str(profile.get("label") or "SSH")
             for profile in self.ssh_profiles
@@ -149,17 +219,21 @@ class RsyncBoy(PhoenixPanelInterface):
                 profile_labels.get(profile_id, f"Missing · {profile_id[-8:]}")
                 if profile_id else "Primary/default"
             )
+            storage_label, storage_detail = self._storage_label_for_job(job_id)
             values = (
                 job_id,
                 self._factory_label(job.get("factory")),
                 profile_label,
+                storage_label,
                 schedule,
                 self._time_label(status.get("last_success")),
                 state,
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
-                if column == 5 and status.get("running"):
+                if column == 3 and storage_detail:
+                    item.setToolTip(storage_detail)
+                if column == 6 and status.get("running"):
                     item.setForeground(Qt.GlobalColor.green)
                 self.table.setItem(row, column, item)
 
@@ -185,7 +259,7 @@ class RsyncBoy(PhoenixPanelInterface):
             actions.addStretch()
             action_host = QWidget()
             action_host.setLayout(actions)
-            self.table.setCellWidget(row, 6, action_host)
+            self.table.setCellWidget(row, 7, action_host)
         self.table.resizeRowsToContents()
 
     def _set_busy(self, busy):
@@ -349,11 +423,14 @@ class RsyncBoy(PhoenixPanelInterface):
         revision = content.get("revision")
         runtime = content.get("runtime", {})
         ssh_profiles = content.get("ssh_profiles", [])
+        storage = content.get("storage", {})
         if (
             not isinstance(jobs, list)
             or type(revision) is not int
             or not isinstance(runtime, dict)
             or not isinstance(ssh_profiles, list)
+            or not isinstance(storage, dict)
+            or not isinstance(storage.get("jobs", {}), dict)
         ):
             self._set_busy(False)
             self.status_label.setText("Invalid agent response. Reload to confirm server state.")
@@ -361,6 +438,7 @@ class RsyncBoy(PhoenixPanelInterface):
         self.jobs = deepcopy(jobs)
         self.runtime = runtime
         self.ssh_profiles = deepcopy(ssh_profiles)
+        self.storage = deepcopy(storage)
         self.revision = revision
         self.poll_interval.blockSignals(True)
         self.poll_interval.setValue(int(content.get("poll_interval", 60)))
@@ -380,7 +458,10 @@ class RsyncBoy(PhoenixPanelInterface):
             self.revision is not None
             and not self.pending
             and not self.dirty
-            and any(item.get("running") for item in self.runtime.values())
+            and (
+                any(item.get("running") for item in self.runtime.values())
+                or self.storage.get("scanning")
+            )
         ):
             self._request("get_jobs")
 

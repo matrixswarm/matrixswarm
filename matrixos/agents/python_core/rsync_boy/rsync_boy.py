@@ -16,6 +16,7 @@ from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.class_lib.processes.thread_launcher import ThreadLauncher
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from rsync_boy.job_config import normalize_jobs, normalize_poll_interval
+from rsync_boy.storage_usage import measure_backup_storage
 
 
 class Agent(EncryptedStateMixin, BootAgent):
@@ -30,7 +31,7 @@ class Agent(EncryptedStateMixin, BootAgent):
 
     def __init__(self):
         super().__init__()
-        self.AGENT_VERSION = "2.4.0"
+        self.AGENT_VERSION = "2.5.0"
 
         cfg = self.tree_node.get("config", {}) or {}
         self._rpc_role = cfg.get("rpc_router_role", "hive.rpc")
@@ -51,6 +52,7 @@ class Agent(EncryptedStateMixin, BootAgent):
         self._scheduler_state = self._load_scheduler_state()
         self._last_attempt = {}
         self._running = {}
+        self._ensure_storage_state()
         self.thread_launcher = ThreadLauncher(self)
 
         self._emit_beacon = self.check_for_thread_poke(
@@ -210,6 +212,141 @@ class Agent(EncryptedStateMixin, BootAgent):
         return hashlib.sha256(encoded).hexdigest()
 
     # --------------------------------------------------
+    @staticmethod
+    def _storage_fingerprint(jobs: list) -> str:
+        encoded = json.dumps(
+            jobs,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    # --------------------------------------------------
+    def _ensure_storage_state(self):
+        if not hasattr(self, "_storage_lock"):
+            self._storage_lock = threading.RLock()
+            self._storage_thread = None
+            self._storage_cache = {
+                "fingerprint": None,
+                "scanning": False,
+                "measured_at": None,
+                "total_bytes": None,
+                "partial": False,
+                "jobs": {},
+                "completed_jobs": 0,
+                "job_count": 0,
+            }
+
+    # --------------------------------------------------
+    def _invalidate_storage_usage(self):
+        self._ensure_storage_state()
+        with self._storage_lock:
+            self._storage_cache["fingerprint"] = None
+            self._storage_cache["measured_at"] = None
+            self._storage_cache["scanning"] = bool(
+                self._storage_thread and self._storage_thread.is_alive()
+            )
+
+    # --------------------------------------------------
+    def _measure_storage_worker(self, jobs: list, fingerprint: str):
+        def publish_progress(
+            job_id,
+            result,
+            total_bytes,
+            partial,
+            completed_jobs,
+            job_count,
+        ):
+            with self._storage_lock:
+                if self._storage_cache.get("fingerprint") != fingerprint:
+                    return
+                self._storage_cache["jobs"][job_id] = result
+                self._storage_cache["total_bytes"] = total_bytes
+                self._storage_cache["partial"] = partial
+                self._storage_cache["completed_jobs"] = completed_jobs
+                self._storage_cache["job_count"] = job_count
+
+        try:
+            report = measure_backup_storage(jobs, progress=publish_progress)
+        except Exception as exc:
+            self.log(
+                f"[RSYNC_BOY][STORAGE] Usage scan failed: {type(exc).__name__}",
+                level="WARN",
+            )
+            report = {
+                "total_bytes": None,
+                "partial": True,
+                "jobs": {},
+                "completed_jobs": 0,
+                "job_count": len(jobs),
+            }
+
+        self._ensure_storage_state()
+        with self._storage_lock:
+            if self._storage_cache.get("fingerprint") == fingerprint:
+                self._storage_cache.update(
+                    report,
+                    scanning=False,
+                    measured_at=time.time(),
+                )
+            else:
+                # The job definitions or backup contents changed while this
+                # snapshot was being measured. Let the next panel poll start a
+                # fresh scan rather than publishing a stale result.
+                self._storage_cache["scanning"] = False
+
+    # --------------------------------------------------
+    def _storage_snapshot(self, jobs: list) -> dict:
+        self._ensure_storage_state()
+        fingerprint = self._storage_fingerprint(jobs)
+        now = time.time()
+        with self._storage_lock:
+            measured_at = self._storage_cache.get("measured_at")
+            stale = self._storage_cache.get("fingerprint") != fingerprint
+            expired = not isinstance(measured_at, (int, float)) or (
+                now - measured_at >= 300
+            )
+            thread_alive = bool(
+                self._storage_thread and self._storage_thread.is_alive()
+            )
+
+            if stale:
+                self._storage_cache.update(
+                    fingerprint=fingerprint,
+                    scanning=True,
+                    measured_at=None,
+                    total_bytes=None,
+                    partial=False,
+                    jobs={},
+                    completed_jobs=0,
+                    job_count=len(jobs),
+                )
+
+            if (stale or expired) and not thread_alive:
+                self._storage_cache["scanning"] = True
+                self._storage_thread = threading.Thread(
+                    target=self._measure_storage_worker,
+                    args=(json.loads(json.dumps(jobs)), fingerprint),
+                    name="rsync-boy-storage-usage",
+                    daemon=True,
+                )
+                self._storage_thread.start()
+
+            return {
+                key: json.loads(json.dumps(self._storage_cache.get(key)))
+                for key in (
+                    "scanning",
+                    "measured_at",
+                    "total_bytes",
+                    "partial",
+                    "jobs",
+                    "completed_jobs",
+                    "job_count",
+                )
+            }
+
+    # --------------------------------------------------
     def _job_due(self, job, now: float) -> bool:
         job_id = job.get("id")
         sched = job.get("schedule", {}) or {}
@@ -285,6 +422,7 @@ class Agent(EncryptedStateMixin, BootAgent):
         self.log(
             f"[RSYNC_BOY] Job '{job_id}' completed; encrypted schedule state saved"
         )
+        self._invalidate_storage_usage()
 
     # --------------------------------------------------
     def _jobs_snapshot(self) -> dict:
@@ -302,13 +440,17 @@ class Agent(EncryptedStateMixin, BootAgent):
                     "last_attempt": self._last_attempt.get(job_id),
                     "last_success": last_success,
                 }
-            return {
-                "revision": self._job_config_revision,
-                "poll_interval": self.poll_interval,
-                "jobs": jobs,
-                "runtime": runtime,
-                "ssh_profiles": self._ssh_profile_summaries(),
-            }
+            revision = self._job_config_revision
+            poll_interval = self.poll_interval
+            ssh_profiles = self._ssh_profile_summaries()
+        return {
+            "revision": revision,
+            "poll_interval": poll_interval,
+            "jobs": jobs,
+            "runtime": runtime,
+            "ssh_profiles": ssh_profiles,
+            "storage": self._storage_snapshot(jobs),
+        }
 
     # --------------------------------------------------
     def _authorized(self, content, identity):
