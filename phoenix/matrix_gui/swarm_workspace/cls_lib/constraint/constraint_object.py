@@ -15,6 +15,7 @@ class Constraint:
         self.required = self.meta.get("required", True)
         self.serial = self.meta.get("serial")
         self.inject_in_connection = self.meta.get("raw", {}).get("inject_in_connection", False)
+        self.deployment_only = self.meta.get("raw", {}).get("deployment_only", False)
         self.path = []
         self.fields = {}
 
@@ -29,6 +30,9 @@ class Constraint:
         return self.meta
     def inject_into_connection(self):
         return bool(self.inject_in_connection)
+
+    def is_deployment_only(self):
+        return bool(self.deployment_only)
 
     def resolve(self):
         if self.is_autogen:

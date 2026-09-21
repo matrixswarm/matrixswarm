@@ -26,6 +26,8 @@ class DirectiveCompiler:
 
         # inject editor public data
         for cname, con in agent_ir.resolved.items():
+            if con.is_deployment_only():
+                continue
             editor = getattr(con, "handler", None)
             if not editor:
                 continue

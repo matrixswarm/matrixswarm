@@ -54,6 +54,7 @@ class CryptoAlert(PhoenixPanelInterface):
         help_text = QLabel(
             "Pairs: BTC/USDT, BTC/ETH, etc. Cross-pairs are derived from USDT spot prices.\n"
             "Bitcoin watches use public addresses only; the configured explorer sees address queries.\n"
+            "One Shot notifies once. Reset Band prevents recurring threshold alerts from chattering near the boundary.\n"
             "Save commits edits and deletions to encrypted agent state. Editing a watch resets its baseline and hit count."
         )
         help_text.setWordWrap(True)
@@ -113,7 +114,7 @@ class CryptoAlert(PhoenixPanelInterface):
             "trigger_type": "wallet_change" if wallet else "price_above",
             "threshold": "", "from_amount": 0.1, "cooldown_sec": 60,
             "trigger_limit": 0, "active": True, "alert_enabled": True,
-            "stream_enabled": True,
+            "stream_enabled": True, "one_shot": False, "reset_band_percent": 0.5,
         }
         card = AlertCard(self.card_container)
         card.from_dict(alert)

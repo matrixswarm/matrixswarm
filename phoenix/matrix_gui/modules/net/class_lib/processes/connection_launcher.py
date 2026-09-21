@@ -124,6 +124,14 @@ class ConnectionLauncher:
                 # Persistent connectors are singletons per launcher/UID. The
                 # reservation closes the constructor/start publication race.
                 if persistent and existing_thread and existing_thread.is_alive():
+                    if packet is not None:
+                        existing_instance = self._instances.get(existing_tid)
+                        submit = getattr(existing_instance, "submit", None)
+                        if not callable(submit) or not submit(packet):
+                            print(f"[LAUNCH][ERROR] {uid}: persistent packet queue rejected payload")
+                            return None
+                        print(f"[LAUNCH][QUEUE] {uid}: packet queued on persistent connector")
+                        return existing_thread
                     print(
                         f"[LAUNCH][SKIP] {uid}: already active "
                         f"thread={existing_tid}"

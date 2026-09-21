@@ -247,10 +247,16 @@ class AlertCard(QWidget):
         self.stream_enabled_chk = QCheckBox("Stream Enabled")
         self.stream_enabled_chk.setChecked(True)
 
+        self.one_shot_chk = QCheckBox("One Shot")
+        self.one_shot_chk.setToolTip(
+            "Notify once, then remain complete until this watch is edited and saved."
+        )
+
         toggles = QHBoxLayout()
         toggles.addWidget(self.active_chk)
         toggles.addWidget(self.alert_enabled_chk)
         toggles.addWidget(self.stream_enabled_chk)
+        toggles.addWidget(self.one_shot_chk)
 
         toggle_wrap = QWidget()
         toggle_wrap.setLayout(toggles)
@@ -271,6 +277,18 @@ class AlertCard(QWidget):
         cooldown_row.addWidget(self.cooldown_edit)
         root.addLayout(cooldown_row)
 
+        reset_row = QHBoxLayout()
+        self.reset_band_label = QLabel("Reset Band (%):")
+        reset_row.addWidget(self.reset_band_label)
+        self.reset_band_edit = QLineEdit("0.5")
+        self.reset_band_edit.setToolTip(
+            "After firing, price must retreat this far beyond the threshold before rearming."
+        )
+        reset_row.addWidget(self.reset_band_edit)
+        self.reset_band_wrap = QWidget()
+        self.reset_band_wrap.setLayout(reset_row)
+        root.addWidget(self.reset_band_wrap)
+
         # -------------------------------------------------------
         # Boiler display (unchanged)
         self.boiler_frame = QWidget()
@@ -288,6 +306,7 @@ class AlertCard(QWidget):
 
         # Hide/show dynamic fields
         self.trigger_combo.currentTextChanged.connect(self._update_field_visibility)
+        self.one_shot_chk.toggled.connect(self._update_field_visibility)
         self._update_field_visibility()
 
         # clicking outside inputs toggles Active
@@ -312,6 +331,9 @@ class AlertCard(QWidget):
         self.wallet_wrap.setVisible(t == "wallet_change")
         self.pair_edit.setEnabled(t not in ("wallet_change", "asset_conversion"))
         self.threshold_wrap.setVisible(t in ("price_above", "price_below", "asset_conversion"))
+        crossing = t in ("price_above", "price_below", "asset_conversion")
+        self.reset_band_wrap.setVisible(crossing)
+        self.reset_band_edit.setEnabled(not self.one_shot_chk.isChecked())
         pair = self.pair_edit.text().strip().upper()
         parts = pair.split("/", 1)
         base, quote = (parts[0], parts[1]) if len(parts) == 2 else ("asset", "quote")
@@ -331,9 +353,9 @@ class AlertCard(QWidget):
         self.delta_label.setText(f"Move from baseline ({quote}):")
         hints = {
             "wallet_change": "Alerts on confirmed balance or transaction-count changes. First lookup sets the baseline.",
-            "asset_conversion": "Alert when the source amount is worth at least the threshold in the target asset.",
-            "price_above": "Alert at or above the threshold; rearm after falling below it.",
-            "price_below": "Alert at or below the threshold; rearm after rising above it.",
+            "asset_conversion": "Alert at the target conversion. Reset Band prevents repeated alerts near the boundary.",
+            "price_above": "Alert at or above the threshold; Reset Band controls how far it must fall before rearming.",
+            "price_below": "Alert at or below the threshold; Reset Band controls how far it must rise before rearming.",
         }
         self.rule_help.setText(hints.get(t, "Change since this watch was armed; the baseline resets after each alert."))
 
@@ -364,6 +386,8 @@ class AlertCard(QWidget):
             "stream_enabled": self.stream_enabled_chk.isChecked(),
             "trigger_limit": self.trigger_limit_edit.text().strip(),
             "cooldown_sec": self.cooldown_edit.text().strip(),
+            "one_shot": self.one_shot_chk.isChecked(),
+            "reset_band_percent": self.reset_band_edit.text().strip(),
         }
 
         # percent change
@@ -406,6 +430,7 @@ class AlertCard(QWidget):
         common = (
             self._valid_number(self.trigger_limit_edit, "Trigger limit", 0, 9_999_999, whole=True)
             or self._valid_number(self.cooldown_edit, "Cooldown", 0, 86_400)
+            or self._valid_number(self.reset_band_edit, "Reset band", 0, 100)
         )
         if common:
             return common
@@ -441,6 +466,8 @@ class AlertCard(QWidget):
         self.address_edit.setText(alert.get("address", ""))
         self.poll_edit.setText(str(alert.get("poll_interval", 60)))
         self.cooldown_edit.setText(str(alert.get("cooldown_sec", 60)))
+        self.one_shot_chk.setChecked(alert.get("one_shot", False))
+        self.reset_band_edit.setText(str(alert.get("reset_band_percent", 0.5)))
         self.pair_edit.setText(alert.get("pair", "BTC/USDT"))
 
         ttype = alert.get("trigger_type", "price_above")
@@ -536,6 +563,16 @@ class AlertCard(QWidget):
                 quote = pair.split("/", 1)[1] if "/" in pair else "quote units"
                 symbol = "≥" if t == "price_above" else "≤"
                 conv_lines.append(f"Alert target: {symbol} {target:.8g} {quote}")
+        if self.one_shot_chk.isChecked():
+            conv_lines.append("Policy: One Shot · edit and save to re-arm")
+        elif t in ("price_above", "price_below", "asset_conversion"):
+            target = self._safe_float(self.threshold_edit.text(), None)
+            band = self._safe_float(self.reset_band_edit.text(), None)
+            if target is not None and band is not None:
+                below = t != "price_below"
+                reset_at = target * (1 - band / 100 if below else 1 + band / 100)
+                symbol = "≤" if below else "≥"
+                conv_lines.append(f"Reset band: {band:g}% · re-arm at {symbol} {reset_at:.8g}")
         conv_lines.append(self._live.get("status", "Paused" if not self.active_chk.isChecked() else "Waiting for feed"))
         conv_lines.append(f"Hits: {self._runtime.get('hits', 0)} · delivery: {self._runtime.get('delivery', '—')}")
         if self._live.get("derived"):

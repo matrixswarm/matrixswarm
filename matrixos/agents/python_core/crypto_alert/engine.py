@@ -51,6 +51,13 @@ def normalize_alert(raw):
         raise ValueError("Trigger limit must be a whole number (0 means unlimited)")
     alert["trigger_limit"] = int(limit)
     alert["cooldown_sec"] = number(raw.get("cooldown_sec", 60), "Cooldown", 0, 86400)
+    one_shot = raw.get("one_shot", False)
+    if type(one_shot) not in (bool, int) or one_shot not in (True, False, 0, 1):
+        raise ValueError("one_shot must be on or off")
+    alert["one_shot"] = bool(one_shot)
+    alert["reset_band_percent"] = number(
+        raw.get("reset_band_percent", 0.5), "Reset band", 0, 100
+    )
     if trigger == "wallet_change":
         alert["address"] = validate_address(raw.get("address", ""))
         alert["poll_interval"] = number(raw.get("poll_interval", 60), "Wallet interval", 30, 3600)
@@ -224,7 +231,9 @@ class AlertEngine:
                 document["runtime"][uid] = next_state
                 self.persist(document)
                 self._document["runtime"][uid] = next_state
-            if alert["trigger_limit"] and next_state.get("hits", 0) >= alert["trigger_limit"]:
+            if alert["one_shot"] and next_state.get("hits", 0) >= 1:
+                live["status"] = "one shot complete"
+            elif alert["trigger_limit"] and next_state.get("hits", 0) >= alert["trigger_limit"]:
                 live["status"] = "trigger limit reached"
             elif not alert["alert_enabled"]:
                 live["status"] = "watching (notifications off)"
@@ -249,6 +258,7 @@ def evaluate_rule(alert, state, quote, wallet, other, now):
     state = deepcopy(state)
     trigger = alert["trigger_type"]
     condition, detail = False, ""
+    crossing_value = None
     if trigger == "wallet_change":
         previous = state.get("wallet")
         # Pending transactions are shown but only confirmations trigger notices.
@@ -269,6 +279,7 @@ def evaluate_rule(alert, state, quote, wallet, other, now):
         baseline = state.setdefault("baseline", price)
         if trigger == "asset_conversion":
             value = alert["from_amount"] * price / other["price"]
+            crossing_value = value
             condition = value >= alert["threshold"]
             detail = f"{alert['from_amount']:g} {alert['from_asset']} = {value:.8g} {alert['to_asset']}"
         elif trigger.startswith("price_change") or trigger.startswith("price_delta"):
@@ -279,14 +290,24 @@ def evaluate_rule(alert, state, quote, wallet, other, now):
             unit = "%" if trigger.startswith("price_change") else f" {currency}"
             detail = f"{alert['pair']} moved {value:+.6g}{unit} since armed baseline {baseline:.8g}; now {price:.8g} {currency}"
         else:
+            crossing_value = price
             condition = price >= alert["threshold"] if trigger == "price_above" else price <= alert["threshold"]
             detail = f"{alert['pair']} reached {price:.8g} {currency} ({trigger}, threshold {alert['threshold']:.8g})"
         if quote.get("derived"):
             detail += " (derived from Phemex USDT spot prices)"
-        if not condition:
-            state["latched"] = False
-    limited = alert["trigger_limit"] and state.get("hits", 0) >= alert["trigger_limit"]
     crossing = trigger in ("price_above", "price_below", "asset_conversion")
+    if crossing and state.get("latched") and not alert["one_shot"]:
+        band = alert["reset_band_percent"] / 100
+        if trigger == "price_below":
+            reset_at = alert["threshold"] * (1 + band)
+            rearmed = crossing_value >= reset_at if band else crossing_value > reset_at
+        else:
+            reset_at = alert["threshold"] * (1 - band)
+            rearmed = crossing_value <= reset_at if band else crossing_value < reset_at
+        if rearmed:
+            state["latched"] = False
+    limited = ((alert["one_shot"] and state.get("hits", 0) >= 1)
+               or (alert["trigger_limit"] and state.get("hits", 0) >= alert["trigger_limit"]))
     allowed = (condition and alert["alert_enabled"] and not limited
                and (not crossing or not state.get("latched", False))
                and now - state.get("last_trigger", 0) >= alert["cooldown_sec"])

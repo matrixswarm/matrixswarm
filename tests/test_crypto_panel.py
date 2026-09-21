@@ -66,12 +66,17 @@ class PanelTests(unittest.TestCase):
         card._update_field_visibility()
         self.assertEqual(card.threshold_label.text(), "Alert ratio (ETH per BTC):")
         card.threshold_edit.setText("20")
+        card.one_shot_chk.setChecked(True)
+        self.assertFalse(card.reset_band_edit.isEnabled())
+        card.reset_band_edit.setText("0.75")
         self.panel.btn_save.click()
         request = self.bus.sent[-1]
         self.assertEqual(request["handler"], "cmd_service_request")
         self.assertEqual(request["content"]["service"], "hive.crypto_alert.update_config")
         payload = request["content"]["payload"]
         self.assertEqual(payload["target_universal_id"], "crypto-a")
+        self.assertTrue(payload["watch_list"][0]["one_shot"])
+        self.assertEqual(payload["watch_list"][0]["reset_band_percent"], "0.75")
         self.assertTrue(self.panel.dirty)
         self.assertFalse(self.panel.btn_save.isEnabled())
         self.reply(revision=1, watch_list=payload["watch_list"])

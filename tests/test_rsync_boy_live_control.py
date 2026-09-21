@@ -4,23 +4,32 @@ import ast
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENT_PATH = ROOT / "matrixos/agents/python_core/rsync_boy"
+PYTHON_CORE = AGENT_PATH.parent
 
 import sys
+sys.path.insert(0, str(PYTHON_CORE))
 sys.path.insert(0, str(AGENT_PATH))
 from job_config import (  # noqa: E402
     FILESYSTEM_FACTORY,
     MYSQL_FACTORY,
     normalize_jobs,
+)
+from storage_usage import (  # noqa: E402
+    _allocated_bytes,
+    _inode_key,
+    measure_backup_storage,
 )
 
 
@@ -71,6 +80,7 @@ def load_agent_class():
         "hashlib": hashlib,
         "time": time,
         "threading": threading,
+        "measure_backup_storage": measure_backup_storage,
     }
     exec(
         compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])), str(path), "exec"),
@@ -101,6 +111,13 @@ def live_agent():
     agent.crypto_reply = Mock()
     agent.thread_launcher = Mock()
     agent.thread_launcher.launch.return_value = "thread-one"
+    agent._storage_snapshot = lambda _jobs: {
+        "scanning": False,
+        "measured_at": time.time(),
+        "total_bytes": 0,
+        "partial": False,
+        "jobs": {"sites": {"bytes": 0, "state": "missing", "detail": ""}},
+    }
     return agent
 
 
@@ -171,6 +188,109 @@ class JobSchemaTests(unittest.TestCase):
         )
 
 
+class StorageUsageTests(unittest.TestCase):
+    @staticmethod
+    def _unique_allocated_bytes(root):
+        sizes = {}
+        stack = [str(root)]
+        while stack:
+            current = stack.pop()
+            stat_result = os.stat(current, follow_symlinks=False)
+            sizes.setdefault(
+                _inode_key(stat_result, current), _allocated_bytes(stat_result)
+            )
+            if os.path.isdir(current) and not os.path.islink(current):
+                with os.scandir(current) as entries:
+                    stack.extend(entry.path for entry in entries)
+        return sum(sizes.values())
+
+    def test_incremental_hard_links_and_overlapping_roots_are_counted_once(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "snapshots"
+            first = root / "sites_20260920_010101"
+            second = root / "sites_20260921_010101"
+            first.mkdir(parents=True)
+            second.mkdir()
+            source = first / "asset.bin"
+            source.write_bytes(b"x" * 16384)
+            os.link(source, second / "asset.bin")
+
+            whole_tree = sample_job("sites")
+            whole_tree["config"]["remote_path"] = str(root)
+            overlapping = sample_job("latest-sites")
+            overlapping["config"]["remote_path"] = str(second)
+
+            report = measure_backup_storage([whole_tree, overlapping])
+
+            self.assertFalse(report["partial"])
+            self.assertEqual(
+                report["jobs"]["sites"]["bytes"],
+                self._unique_allocated_bytes(root),
+            )
+            self.assertEqual(report["total_bytes"], self._unique_allocated_bytes(root))
+            self.assertLess(
+                report["total_bytes"],
+                report["jobs"]["sites"]["bytes"]
+                + report["jobs"]["latest-sites"]["bytes"],
+            )
+
+    def test_mysql_counts_only_retained_files_for_its_prefix(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            dump = root / "dragoart_20260921_010101.sql.gz"
+            manifest = root / "dragoart_20260921_010101.sql.gz.manifest.json"
+            unrelated = root / "another_20260921_010101.sql.gz"
+            dump.write_bytes(b"database")
+            manifest.write_text("{}", encoding="utf-8")
+            unrelated.write_bytes(b"ignore me")
+            job = {
+                "id": "mysql-full",
+                "factory": MYSQL_FACTORY,
+                "config": {
+                    "local_tmp": str(root),
+                    "filename_prefix": "dragoart",
+                },
+            }
+
+            report = measure_backup_storage([job])
+            expected = sum(
+                _allocated_bytes(path.stat()) for path in (dump, manifest)
+            )
+            self.assertEqual(report["jobs"]["mysql-full"]["bytes"], expected)
+            self.assertEqual(report["total_bytes"], expected)
+
+    def test_push_only_job_is_reported_as_remote(self):
+        job = sample_job()
+        job["config"]["source_via_ssh"] = False
+        report = measure_backup_storage([job])
+        self.assertEqual(report["jobs"]["sites"]["state"], "remote")
+        self.assertIsNone(report["jobs"]["sites"]["bytes"])
+        self.assertEqual(report["total_bytes"], 0)
+
+    @patch("storage_usage.shutil.which", return_value="/usr/bin/du")
+    @patch("storage_usage.subprocess.run")
+    def test_large_filesystem_tree_uses_native_disk_usage(self, run, _which):
+        run.return_value = Mock(returncode=0, stdout="734003200\t/backup/sites\n", stderr="")
+        with tempfile.TemporaryDirectory() as temp:
+            job = sample_job()
+            job["config"]["remote_path"] = temp
+            progress = []
+
+            report = measure_backup_storage(
+                [job], progress=lambda *values: progress.append(values)
+            )
+
+            self.assertEqual(report["jobs"]["sites"]["bytes"], 734003200)
+            self.assertEqual(report["total_bytes"], 734003200)
+            self.assertEqual(progress[0][4:], (1, 1))
+            run.assert_called_once_with(
+                ["du", "-s", "-B1", "--", temp],
+                capture_output=True,
+                text=True,
+                timeout=900,
+            )
+
+
 class AgentProtocolTests(unittest.TestCase):
     def setUp(self):
         self.agent = live_agent()
@@ -178,6 +298,24 @@ class AgentProtocolTests(unittest.TestCase):
 
     def _reply_payload(self):
         return self.agent.crypto_reply.call_args.kwargs["payload"]
+
+    def test_storage_scan_runs_off_thread_and_is_cached(self):
+        del self.agent._storage_snapshot
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "snapshots"
+            snapshot = root / "sites_20260921_010101"
+            snapshot.mkdir(parents=True)
+            (snapshot / "asset.bin").write_bytes(b"x" * 4096)
+            self.agent.jobs[0]["config"]["remote_path"] = str(root)
+
+            first = self.agent._storage_snapshot(self.agent.jobs)
+            self.assertTrue(first["scanning"])
+            self.agent._storage_thread.join(timeout=5)
+            second = self.agent._storage_snapshot(self.agent.jobs)
+
+            self.assertFalse(second["scanning"])
+            self.assertGreater(second["total_bytes"], 0)
+            self.assertEqual(second["jobs"]["sites"]["state"], "ready")
 
     def test_exact_target_and_verified_matrix_identity_are_required(self):
         for identity in (None, Identity(False), Identity(True, "someone-else")):
@@ -189,6 +327,7 @@ class AgentProtocolTests(unittest.TestCase):
         self.agent.cmd_retrieve_jobs(request(), None, self.identity)
         self.assertTrue(self._reply_payload()["ok"])
         self.assertEqual(self._reply_payload()["agent_uid"], "rsync-one")
+        self.assertIn("storage", self._reply_payload())
         self.assertTrue(self.agent.crypto_reply.call_args.kwargs["quiet"])
 
     def test_update_is_revision_checked_and_disk_failure_is_atomic(self):
@@ -282,6 +421,8 @@ class PanelContractTests(unittest.TestCase):
             "Execute Now",
             "hive.rsync_boy.",
             "inbound.verified.rsync_boy.jobs",
+            "Backup storage on disk",
+            "Backup Size",
         ):
             self.assertIn(text, source)
         meta = json.loads((ROOT / "phoenix/agents_meta/rsync_boy.json").read_text())

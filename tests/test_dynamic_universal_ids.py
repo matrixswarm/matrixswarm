@@ -75,6 +75,7 @@ class DynamicUniversalIdTests(unittest.TestCase):
         address_files = (
             "matrixos/agents/python_core/matrix_https/matrix_https.py",
             "matrixos/agents/python_core/matrix_email/matrix_email.py",
+            "matrixos/agents/python_core/matrix_ssh/matrix_ssh.py",
             "matrixos/agents/python_core/reaper/reaper.py",
             "matrixos/agents/python_core/scavenger/scavenger.py",
             "matrixos/agents/python_core/crypto_alert/crypto_alert.py",
