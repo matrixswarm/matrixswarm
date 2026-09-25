@@ -206,6 +206,33 @@ class MatrixSSHTransportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy("ssh", {"ssh_mode": "forever"})
 
+    def test_delivery_mode_is_agent_owned_not_registry_owned(self):
+        registry_editor = (
+            ROOT / "phoenix/matrix_gui/registry/object_classes/editors/ssh.py"
+        ).read_text(encoding="utf-8")
+        registry_provider = (
+            ROOT / "phoenix/matrix_gui/registry/object_classes/providers/ssh.py"
+        ).read_text(encoding="utf-8")
+        legacy_editor = (
+            ROOT
+            / "phoenix/matrix_gui/modules/net/connection_types/editors/ssh_editor.py"
+        ).read_text(encoding="utf-8")
+
+        for source in (registry_editor, registry_provider, legacy_editor):
+            self.assertNotIn("Matrix SSH Delivery", source)
+            self.assertNotIn('data.get("ssh_mode"', source)
+        self.assertNotIn('"ssh_mode": self.ssh_mode', registry_editor)
+
+        matrix_editor = CONFIG_EDITOR.read_text(encoding="utf-8")
+        self.assertIn("SSH Delivery Mode:", matrix_editor)
+        self.assertIn('cfg.get("ssh_mode", "one_shot")', matrix_editor)
+        self.assertIn('"ssh_mode": self.ssh_mode.currentData()', matrix_editor)
+
+        import json
+
+        meta = json.loads(META.read_text(encoding="utf-8"))
+        self.assertEqual("one_shot", meta["config"]["ssh_mode"])
+
     def test_active_persistent_launcher_submits_instead_of_restarting(self):
         text = LAUNCHER.read_text(encoding="utf-8")
         self.assertIn('submit = getattr(existing_instance, "submit", None)', text)
@@ -281,6 +308,7 @@ class MatrixSSHTransportTests(unittest.TestCase):
                 name="matrix_ssh",
                 node={
                     "serial": "serial",
+                    "config": {"ssh_mode": "persistent"},
                     "meta": {
                         "connection": {"channel": "outgoing.command"},
                     },
@@ -302,6 +330,10 @@ class MatrixSSHTransportTests(unittest.TestCase):
         self.assertEqual(
             "outgoing.command",
             private["agents"]["connection"]["channel"],
+        )
+        self.assertEqual(
+            "persistent",
+            private["agents"]["connection"]["ssh_mode"],
         )
         self.assertEqual({}, private["certs"])
 

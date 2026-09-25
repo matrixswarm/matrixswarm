@@ -19,6 +19,7 @@
         }
     ],
     "config": {
+        "ssh_mode": "one_shot",
         "poll_interval": 1,
         "batch_limit": 32,
         "lockdown_state": false,
@@ -26,7 +27,10 @@
         "ui": {
             "agent_tree": {
                 "emoji": "🛡️"
-            }
+            },
+            "panel": [
+                "matrix_ssh.matrix_ssh"
+            ]
         },
         "service-manager": [
             {

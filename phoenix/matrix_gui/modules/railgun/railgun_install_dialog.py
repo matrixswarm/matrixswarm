@@ -2,11 +2,13 @@
 # Commander Edition — Railgun MatrixOS Installer (Operational Core)
 import os
 import time
-from PyQt6 import QtWidgets
-from PyQt6.QtCore import QThread, pyqtSignal
+from pathlib import Path
+from uuid import uuid4
+from PyQt6.QtCore import QThread, QTimer, Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QFileDialog, QTextEdit, QLineEdit, QGroupBox
+    QComboBox, QFileDialog, QTextEdit, QLineEdit, QGroupBox, QProgressBar
 )
 from matrix_gui.modules.railgun.ssh_support import (
     clean_secret,
@@ -24,9 +26,14 @@ class RailgunInstallDialog(QDialog):
             "Install from GitHub",
             "Local Full Install",
         ]
-        self.tail_thread = None
+        self.install_thread = None
         self._install_running = False
+        self._stage = "Ready"
+        self._started_at = None
         self._build_ui()
+        self.elapsed_timer = QTimer(self)
+        self.elapsed_timer.setInterval(1000)
+        self.elapsed_timer.timeout.connect(self._refresh_status)
         self._extract_ssh_targets()
 
     def _build_ui(self):
@@ -61,10 +68,10 @@ class RailgunInstallDialog(QDialog):
         local_layout = QHBoxLayout(local_box)
         self.local_path = QLineEdit()
         self.local_path.setPlaceholderText("Select MatrixOS root folder…")
-        browse_btn = QPushButton("Browse")
-        browse_btn.clicked.connect(self._browse_local)
+        self.browse_btn = QPushButton("Browse")
+        self.browse_btn.clicked.connect(self._browse_local)
         local_layout.addWidget(self.local_path)
-        local_layout.addWidget(browse_btn)
+        local_layout.addWidget(self.browse_btn)
         layout.addWidget(local_box)
 
         # SSH TARGET
@@ -82,15 +89,29 @@ class RailgunInstallDialog(QDialog):
         btn_layout.addWidget(self.btn_install)
         layout.addLayout(btn_layout)
 
+        self.status_label = QLabel("Ready")
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1000)
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+        self.upload_label = QLabel()
+        self.upload_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.upload_label.setWordWrap(True)
+        layout.addWidget(self.upload_label)
+
         # OUTPUT TERMINAL
         self.output_box = QTextEdit()
         self.output_box.setReadOnly(True)
+        self.output_box.document().setMaximumBlockCount(5000)
         self.output_box.setStyleSheet(
             "background:#000; color:#0f0; font-family:Consolas,monospace; font-size:12px;"
         )
         layout.addWidget(self.output_box)
 
-        self.output_box.append("[Railgun] Installer UI ready.")
+        self._append_output("[Railgun] Installer UI ready.")
 
     def _browse_local(self):
         folder = QFileDialog.getExistingDirectory(self, "Select MatrixOS Root Folder")
@@ -109,7 +130,7 @@ class RailgunInstallDialog(QDialog):
                 "Unable to load SSH Registry",
                 None,
             )
-            self.output_box.append(
+            self._append_output(
                 f"[Railgun] Unable to load SSH Registry: {exc}"
             )
             return
@@ -119,7 +140,7 @@ class RailgunInstallDialog(QDialog):
                 "No SSH profiles in Registry",
                 None,
             )
-            self.output_box.append(
+            self._append_output(
                 "[Railgun] No SSH profiles found in Registry."
             )
             return
@@ -159,7 +180,7 @@ class RailgunInstallDialog(QDialog):
             if selected_index >= 0:
                 self.ssh_selector.setCurrentIndex(selected_index)
 
-        self.output_box.append(
+        self._append_output(
             f"[Railgun] Loaded {len(self.ssh_map)} SSH profiles "
             "from Registry."
         )
@@ -172,235 +193,331 @@ class RailgunInstallDialog(QDialog):
 
     def run_installer(self):
         if self._install_running:
-            self.output_box.append("[Railgun] Installation already in progress.")
+            self._append_output("[Railgun] Installation already in progress.")
             return
 
+        selected_sid = self.ssh_selector.currentData()
+        if not selected_sid:
+            self._append_output("[Railgun] No SSH target selected.")
+            return
+
+        # Vault access stays on its owning GUI thread. Only a detached profile
+        # snapshot and immutable options cross into the install worker.
+        self._extract_ssh_targets()
+        selected_index = self.ssh_selector.findData(selected_sid)
+        if selected_index < 0:
+            self._append_output("[Railgun] Selected SSH target is no longer available.")
+            return
+        self.ssh_selector.setCurrentIndex(selected_index)
+        mode = self.mode_selector.currentText()
+        local_src = self.local_path.text().strip()
+        if mode == "Local Full Install" and not local_src:
+            self._append_output("[Railgun] No local source selected.")
+            return
+
+        pyflag = "create" if self.python_mode.currentText() == "Create new venv" else "skip"
+        worker = RailgunInstallWorker(self._get_selected_ssh(), mode, local_src, pyflag, self)
+        worker.output.connect(self._append_output)
+        worker.stage.connect(self._set_stage)
+        worker.upload_progress.connect(self._show_upload_progress)
+        worker.finished.connect(self._installation_finished)
+        self.install_thread = worker
         self._install_running = True
-        self.btn_install.setEnabled(False)
-        client = None
+        self._started_at = time.monotonic()
+        self.upload_label.clear()
+        self._set_controls_enabled(False)
+        self._set_stage("Preparing installation")
+        self._append_output("[Railgun] Starting installation…")
+        self.elapsed_timer.start()
         try:
+            worker.start()
+        except Exception as exc:
+            worker.error = str(exc)
+            self._append_output(f"[Railgun ERROR] {exc}")
+            self._installation_finished()
 
-            selected_sid = self.ssh_selector.currentData()
-            if not selected_sid:
-                self.output_box.append("[Railgun] No SSH target selected.")
-                return
+    def _set_controls_enabled(self, enabled):
+        for widget in (self.mode_selector, self.python_mode, self.local_path,
+                       self.browse_btn, self.ssh_selector, self.btn_install):
+            widget.setEnabled(enabled)
 
-            self._extract_ssh_targets()  # refresh while preserving operator selection
+    @pyqtSlot(str)
+    def _append_output(self, text):
+        # Server output and file names are plain text, never Qt rich text.
+        cursor = self.output_box.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(text + "\n")
+        self.output_box.setTextCursor(cursor)
+        self.output_box.ensureCursorVisible()
 
-            selected_index = self.ssh_selector.findData(selected_sid)
-            if selected_index < 0:
-                self.output_box.append(
-                    "[Railgun] Selected SSH target is no longer available."
-                )
-                return
+    @pyqtSlot(str)
+    def _set_stage(self, stage):
+        self._stage = stage
+        self.progress_bar.setRange(0, 0)
+        self._refresh_status()
 
-            self.ssh_selector.setCurrentIndex(selected_index)
-            self.output_box.append("[Railgun] Starting installation…")
-            ssh_cfg = self._get_selected_ssh()
-            if not ssh_cfg:
-                raise RuntimeError("Selected SSH profile could not be loaded")
+    def _refresh_status(self):
+        elapsed = int(time.monotonic() - self._started_at) if self._started_at else 0
+        self.status_label.setText(f"{self._stage} · elapsed {elapsed // 60:02d}:{elapsed % 60:02d}")
 
-            host = ssh_cfg.get("host")
-            user = ssh_cfg.get("username")
+    @pyqtSlot(object)
+    def _show_upload_progress(self, progress):
+        done, total, sent, size, path = progress
+        self.progress_bar.setRange(0, 1000)
+        # Reserve 100% until every put has completed its server-side size check.
+        ratio = sent / size if size else (done / total if total else 1)
+        value = 1000 if done == total else min(999, int(ratio * 1000))
+        self.progress_bar.setValue(value)
+        self.upload_label.setText(
+            f"Upload: {done:,}/{total:,} files · {_format_bytes(sent)} / {_format_bytes(size)}"
+            + (f"\n{path}" if path else "")
+        )
+
+    @pyqtSlot()
+    def _installation_finished(self):
+        worker = self.install_thread
+        if worker is None:
+            return
+        self.elapsed_timer.stop()
+        self._install_running = False
+        self._stage = "Installation complete" if worker.success else "Installation failed — see log"
+        self._refresh_status()
+        self.progress_bar.setRange(0, 1000)
+        self.progress_bar.setValue(1000 if worker.success else 0)
+        self._set_controls_enabled(True)
+        self.install_thread = None
+        worker.deleteLater()
+
+    def _can_close(self):
+        if self._install_running:
+            self._append_output("[Railgun] Installation is still running. Keep this window open until it finishes.")
+            return False
+        return True
+
+    def done(self, result):
+        if self._can_close():
+            super().done(result)
+
+    def reject(self):
+        if self._can_close():
+            super().reject()
+
+    def closeEvent(self, event):
+        if self._can_close():
+            super().closeEvent(event)
+        else:
+            event.ignore()
+
+
+def _format_bytes(size):
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+
+
+class RailgunInstallWorker(QThread):
+    """Own all filesystem/network work; never access GUI widgets from run()."""
+
+    output = pyqtSignal(str)
+    stage = pyqtSignal(str)
+    upload_progress = pyqtSignal(object)  # Python ints retain large byte counts.
+    IO_TIMEOUT = 30
+
+    def __init__(self, ssh_cfg, mode, local_src, pyflag, parent=None):
+        super().__init__(parent)
+        self.ssh_cfg = dict(ssh_cfg or {})
+        self.mode = mode
+        self.local_src = local_src
+        self.pyflag = pyflag
+        self.success = False
+        self.error = None
+
+    def _phase(self, message):
+        self.stage.emit(message)
+        self.output.emit(f"[Railgun] {message}")
+
+    def run(self):
+        client = channel = None
+        installer_started = False
+        try:
+            host = self.ssh_cfg.get("host")
+            user = self.ssh_cfg.get("username")
             if not host or not user:
-                raise RuntimeError(
-                    "SSH profile is missing host or username"
-                )
+                raise ValueError("SSH profile is missing host or username")
+            if self.mode not in ("Local Full Install", "Install from GitHub"):
+                raise ValueError("Unsupported install mode")
+            if self.pyflag not in ("create", "skip"):
+                raise ValueError("Unsupported Python mode")
 
-            client = self._connect_ssh(ssh_cfg)
-            if not client:
-                raise RuntimeError("SSH connection failed")
+            plan = None
+            if self.mode == "Local Full Install":
+                self._phase("Scanning local MatrixOS files")
+                plan = self._build_upload_plan()
 
+            self._phase(f"Connecting to {user}@{host} — verifying pinned host key")
+            client, actual_fingerprint = connect_ssh_profile(self.ssh_cfg)
+            self.output.emit(f"[SSH] Connected to {host} ({actual_fingerprint})")
+            client.get_transport().set_keepalive(15)
+            self._phase("Creating remote staging directory")
             remote_staging = self._create_remote_staging(client)
 
-            mode = self.mode_selector.currentText()
-
-            # ----------------------
-            # GITHUB INSTALL MODE
-            # ----------------------
-            if mode == "Install from GitHub":
-                self.output_box.append("[Railgun] GitHub mode selected — skipping local upload.")
+            if plan is not None:
+                self._phase("Uploading MatrixOS files")
+                with client.open_sftp() as sftp:
+                    sftp.get_channel().settimeout(self.IO_TIMEOUT)
+                    self._upload_plan(sftp, plan, remote_staging)
             else:
-                # Must have a local path for Local Full Install
-                local_src = self.local_path.text().strip()
-                if not local_src:
-                    self.output_box.append("[Railgun] No local source selected.")
-                    return
+                self.output.emit("[Railgun] GitHub mode selected — skipping local upload.")
 
-                if not os.path.isdir(local_src):
-                    self.output_box.append(f"[Railgun] Local path is not a directory: {local_src}")
-                    return
-
-                sftp = client.open_sftp()
-                self._upload_directory(sftp, local_src, remote_staging)
-                sftp.close()
-
-            mode = self.mode_selector.currentText()
-            python_mode = self.python_mode.currentText()
-            pyflag = "create" if python_mode == "Create new venv" else "skip"
-
-            if mode == "Install from GitHub":
-                installer_script = self._generate_github_installer(pyflag)
+            self._phase("Uploading installer script")
+            if self.mode == "Install from GitHub":
+                installer_script = self._generate_github_installer(self.pyflag)
             else:
-                installer_script = self._generate_installer(remote_staging, mode, pyflag)
+                installer_script = self._generate_installer(remote_staging, self.mode, self.pyflag)
 
             remote_script = f"{remote_staging}/install_matrixos.sh"
-            sftp = client.open_sftp()
-            with sftp.file(remote_script, "w") as f:
-                f.write(installer_script)
-            sftp.chmod(remote_script, 0o755)
-            sftp.close()
-            self.output_box.append(f"[Railgun] Installer uploaded: {remote_script}")
+            with client.open_sftp() as sftp:
+                sftp.get_channel().settimeout(self.IO_TIMEOUT)
+                with sftp.file(remote_script, "w") as f:
+                    f.write(installer_script)
+                sftp.chmod(remote_script, 0o755)
+            self.output.emit(f"[Railgun] Installer uploaded: {remote_script}")
 
-            cmd = f"PYTHON_MODE={pyflag} bash {remote_script}"
+            self._phase("Starting remote installer")
+            cmd = f"PYTHON_MODE={self.pyflag} bash {remote_script}"
             transport = client.get_transport()
-            channel = transport.open_session()
+            channel = transport.open_session(timeout=self.IO_TIMEOUT)
+            channel.settimeout(self.IO_TIMEOUT)
             channel.get_pty()
+            installer_started = True
             channel.exec_command(cmd)
-
-            while True:
-                received_output = False
-                while channel.recv_ready():
-                    chunk = channel.recv(4096).decode(errors="ignore")
-                    self.output_box.append(chunk)
-                    received_output = True
-                while channel.recv_stderr_ready():
-                    err = channel.recv_stderr(4096).decode(errors="ignore")
-                    self.output_box.append(f"[ERROR] {err}")
-                    received_output = True
-
-                QtWidgets.QApplication.processEvents()
-                if (
-                    channel.exit_status_ready()
-                    and not channel.recv_ready()
-                    and not channel.recv_stderr_ready()
-                ):
-                    break
-                if not received_output:
-                    time.sleep(0.05)
-
-            exit_code = channel.recv_exit_status()
-            self.output_box.append(
-                f"[Railgun] Installer exited (code={exit_code})"
-            )
+            self._phase("Running remote installer")
+            exit_code = self._drain_channel(channel, transport)
+            self.output.emit(f"[Railgun] Installer exited (code={exit_code})")
             if exit_code != 0:
-                raise RuntimeError(
-                    f"Remote installer failed with exit code {exit_code}"
-                )
-
-
-        except Exception as e:
-            self.output_box.append(f"[Railgun ERROR] {e}")
+                raise RuntimeError(f"Remote installer failed with exit code {exit_code}")
+            self.success = True
+        except Exception as exc:
+            self.error = str(exc)
+            self.output.emit(f"[Railgun ERROR] {exc}")
+            if installer_started:
+                self.output.emit("[Railgun] The server may have partial changes. Check the log before retrying; no rollback was performed.")
         finally:
+            if channel is not None:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
             if client is not None:
                 try:
                     client.close()
                 except Exception:
                     pass
-            self._install_running = False
-            self.btn_install.setEnabled(True)
+            self.ssh_cfg.clear()
 
-    def _connect_ssh(self, ssh_cfg):
-        try:
-            client, actual_fingerprint = connect_ssh_profile(ssh_cfg)
-            self.output_box.append(
-                f"[SSH] Connected to {ssh_cfg['host']} "
-                f"({actual_fingerprint})"
-            )
-            return client
-        except Exception as exc:
-            self.output_box.append(f"[SSH ERROR] {exc}")
-            return None
+    def _drain_channel(self, channel, transport, timeout=None):
+        started = last_output = time.monotonic()
+        waiting = False
+        while True:
+            received_output = False
+            while channel.recv_ready():
+                self.output.emit(channel.recv(4096).decode(errors="replace"))
+                received_output = True
+            while channel.recv_stderr_ready():
+                self.output.emit("[ERROR] " + channel.recv_stderr(4096).decode(errors="replace"))
+                received_output = True
+            if (channel.exit_status_ready()
+                    and not channel.recv_ready() and not channel.recv_stderr_ready()):
+                return channel.recv_exit_status()
+            now = time.monotonic()
+            if not transport.is_active() or channel.closed:
+                raise ConnectionError("SSH connection closed before command completion")
+            if timeout is not None and now - started >= timeout:
+                raise TimeoutError("Remote staging command timed out")
+            if timeout is None:
+                if received_output:
+                    last_output = now
+                    if waiting:
+                        self.stage.emit("Running remote installer")
+                    waiting = False
+                elif not waiting and now - last_output >= 15:
+                    self.stage.emit("Waiting for installer output — remote command has not exited")
+                    waiting = True
+            time.sleep(0.05)
 
     def _create_remote_staging(self, client):
         ts = time.strftime("%Y%m%d_%H%M%S")
-        remote = f"/tmp/matrix_staging_{ts}"
+        remote = f"/tmp/matrix_staging_{ts}_{uuid4().hex[:8]}"
         command = f"mkdir -p {remote} && test -d {remote}"
-        stdin, stdout, stderr = client.exec_command(command)
-        error = stderr.read().decode(errors="replace").strip()
-        exit_code = stdout.channel.recv_exit_status()
-
+        channel = client.get_transport().open_session(timeout=self.IO_TIMEOUT)
+        try:
+            channel.settimeout(self.IO_TIMEOUT)
+            channel.exec_command(command)
+            exit_code = self._drain_channel(channel, client.get_transport(), self.IO_TIMEOUT)
+        finally:
+            channel.close()
         if exit_code != 0:
-            raise RuntimeError(
-                f"Failed to create remote staging at {remote}: {error}"
-            )
-
-        self.output_box.append(
-            f"[Railgun] Remote staging created: {remote}"
-        )
+            raise RuntimeError(f"Failed to create remote staging at {remote} (code={exit_code})")
+        self.output.emit(f"[Railgun] Remote staging created: {remote}")
         return remote
 
-    def _upload_directory(self, sftp, local_dir, remote_dir):
-        """
-        Recursively upload only the MatrixOS runtime directories and files.
+    def _build_upload_plan(self):
+        root = Path(self.local_src)
+        if not self.local_src or not root.is_dir():
+            raise ValueError("Local source must be a MatrixOS directory")
+        allowed_dirs = {"agents", "core", "scripts", "boot_directives", "maxmind"}
+        allowed_exts = (".py", ".txt", ".json", ".env", ".md", ".sh", ".cfg", ".conf")
+        directories, files = [], []
 
-        Keeps structure identical to local source:
-            agents/, core/, scripts/, boot_directives/, maxmind/
-        Includes file types: .py, .txt, .json, .env, .md, .sh, .cfg, .conf
-        """
-        ALLOWED_DIRS = {"agents", "core", "scripts", "boot_directives", "maxmind"}
-        ALLOWED_FILE_EXTS = (".py", ".txt", ".json", ".env", ".md", ".sh", ".cfg", ".conf")
-
-        # Make sure base remote directory exists
-        try:
-            sftp.listdir(remote_dir)
-        except IOError:
-            sftp.mkdir(remote_dir)
-
-        for entry in os.listdir(local_dir):
-            local_path = os.path.join(local_dir, entry)
-            remote_path = f"{remote_dir}/{entry}"
-
-            # ---- DIRECTORY ----
-            if os.path.isdir(local_path):
-
-                # skip unwanted directories
-                if os.path.abspath(local_dir) == os.path.abspath(self.local_path.text().strip()) and entry not in ALLOWED_DIRS:
+        def scan(directory, flat=False):
+            for path in sorted(directory.iterdir()):
+                if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
+                    self.output.emit(f"[Upload] Skipping linked path: {path.relative_to(root)}")
                     continue
+                relative = path.relative_to(root).as_posix()
+                if path.is_dir():
+                    if flat or (directory == root and path.name not in allowed_dirs):
+                        continue
+                    directories.append(relative)
+                    scan(path, flat=path.name in ("scripts", "boot_directives"))
+                elif path.is_file() and (flat or path.name.lower().endswith(allowed_exts)):
+                    files.append((str(path), relative, path.stat().st_size))
 
-                # scripts: flat copy (no recursion)
-                if entry == "scripts":
-                    try:
-                        sftp.listdir(remote_path)
-                    except IOError:
-                        sftp.mkdir(remote_path)
+        scan(root)
+        if not files:
+            raise ValueError("No eligible MatrixOS files found in the selected directory")
+        self.output.emit(f"[Upload] Prepared {len(files):,} files ({_format_bytes(sum(f[2] for f in files))})")
+        return directories, files
 
-                    for fname in os.listdir(local_path):
-                        fp = os.path.join(local_path, fname)
-                        rp = f"{remote_path}/{fname}"
-                        if os.path.isfile(fp):
-                            sftp.put(fp, rp)
-                    continue
+    def _upload_plan(self, sftp, plan, remote_dir):
+        directories, files = plan
+        total_bytes = sum(f[2] for f in files)
+        sent = done = 0
+        last_progress = 0.0
 
-                # boot_directives: copy only top-level files, not children
-                if entry == "boot_directives":
-                    try:
-                        sftp.listdir(remote_path)
-                    except IOError:
-                        sftp.mkdir(remote_path)
+        def report(current=0, path="", force=False):
+            nonlocal last_progress
+            now = time.monotonic()
+            if force or now - last_progress >= 0.1:
+                self.upload_progress.emit((done, len(files), sent + current, total_bytes, path))
+                last_progress = now
 
-                    for fname in os.listdir(local_path):
-                        fp = os.path.join(local_path, fname)
-                        rp = f"{remote_path}/{fname}"
-                        if os.path.isfile(fp):
-                            sftp.put(fp, rp)
-                    continue
-
-                # all other dirs recurse normally
-                try:
-                    sftp.listdir(remote_path)
-                except IOError:
-                    sftp.mkdir(remote_path)
-
-                # Recurse deeper
-                self._upload_directory(sftp, local_path, remote_path)
-                continue
-
-            # ---- FILE ----
-            if entry.lower().endswith(ALLOWED_FILE_EXTS):
-                sftp.put(local_path, remote_path)
-
-        self.output_box.append(f"[Upload] Synced MatrixOS core to {remote_dir}")
+        report(force=True)
+        for relative in directories:
+            sftp.mkdir(f"{remote_dir}/{relative}")
+        for local_path, relative, size in files:
+            if os.path.getsize(local_path) != size:
+                raise RuntimeError(f"Source changed during upload: {relative}; retry with a stable source tree")
+            report(path=relative, force=done == 0)
+            sftp.put(local_path, f"{remote_dir}/{relative}",
+                     callback=lambda current, total: report(min(current, size), relative))
+            done += 1
+            sent += size
+            report(path=relative)
+        report(force=True)
+        self.output.emit(f"[Upload] Complete: {done:,} files ({_format_bytes(sent)})")
 
     def _generate_installer(self, remote_staging, mode, pyflag):
         return f"""#!/bin/bash
@@ -861,45 +978,3 @@ harden_matrix_install
 echo "[Installer] MatrixOS GitHub installation complete."
 exit 0
 """
-
-
-class RemoteTailWorker(QThread):
-    new_line = pyqtSignal(str)
-    finished = pyqtSignal()
-
-    def __init__(self, client, log_path):
-        super().__init__()
-        self.client = client
-        self.log_path = log_path
-        self._running = True
-
-    def run(self):
-        import time
-        sftp = self.client.open_sftp()
-
-        try:
-            while self._running:
-                print("running install...")
-                try:
-                    sftp.stat(self.log_path)
-                    break
-                except FileNotFoundError:
-                    time.sleep(1)
-
-            remote_file = sftp.open(self.log_path, "r")
-            remote_file.seek(0, os.SEEK_END)
-
-            while self._running:
-                line = remote_file.readline()
-                if not line:
-                    time.sleep(0.5)
-                    continue
-                self.new_line.emit(line.rstrip())
-        except Exception as e:
-            self.new_line.emit(f"[TAIL ERROR] {e}")
-        finally:
-            sftp.close()
-            self.finished.emit()
-
-    def stop(self):
-        self._running = False

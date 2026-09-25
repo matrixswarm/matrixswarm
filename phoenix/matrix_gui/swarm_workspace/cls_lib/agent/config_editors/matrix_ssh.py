@@ -1,6 +1,13 @@
 """Typed Phoenix configuration editor for the Matrix SSH ingress agent."""
 
-from PyQt6.QtWidgets import QCheckBox, QFormLayout, QLabel, QSpinBox, QWidget
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFormLayout,
+    QLabel,
+    QSpinBox,
+    QWidget,
+)
 
 from .base_editor import BaseEditor
 from .mixin.service_roles_mixin import ServiceRolesMixin
@@ -19,6 +26,17 @@ class MatrixSsh(BaseEditor, ServiceRolesMixin):
         form = QFormLayout(general_box)
         form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(4)
+
+        self.ssh_mode = QComboBox()
+        self.ssh_mode.addItem(
+            "One-shot (new SSH connection per message)", "one_shot"
+        )
+        self.ssh_mode.addItem(
+            "Persistent (keep SSH connected)", "persistent"
+        )
+        mode_index = self.ssh_mode.findData(cfg.get("ssh_mode", "one_shot"))
+        self.ssh_mode.setCurrentIndex(max(0, mode_index))
+        form.addRow("SSH Delivery Mode:", self.ssh_mode)
 
         self.poll_interval = QSpinBox()
         self.poll_interval.setRange(1, 3600)
@@ -51,6 +69,7 @@ class MatrixSsh(BaseEditor, ServiceRolesMixin):
     def _save(self):
         self.node.config.update(
             {
+                "ssh_mode": self.ssh_mode.currentData() or "one_shot",
                 "poll_interval": int(self.poll_interval.value()),
                 "batch_limit": int(self.batch_limit.value()),
                 "lockdown_state": self.lockdown_checkbox.isChecked(),
