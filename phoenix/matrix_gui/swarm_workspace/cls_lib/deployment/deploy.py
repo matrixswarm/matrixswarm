@@ -49,42 +49,7 @@ class Deploy():
                 directive_staging.get("agents", {})
             )
 
-            # --- Agent source embedding (Clown Car) ---
-            """
-            Handles the "Clown Car" step in the deployment process by verifying and managing the agent source directory
-            used in the directive staging process. Supports caching and verifying agent paths, loading or validating from 
-            the vault, and ensuring necessary files are available for deployment.
-    
-            Steps:
-            1. **Check 'Clown Car' Option:**
-               - Determines if the "Clown Car" mode is enabled based on the `opts["clown_car"]` flag.
-               - Affects how the directive is processed and staged.
-    
-            2. **Verify Agent Path:**
-               - If the "Clown Car" mode is enabled, attempts to load the last cached agent path from the vault.
-               - Verifies if the cached path exists and contains all required sources for the directive.
-    
-            3. **Cache Validation:**
-               - If the cached path is invalid or missing necessary files, opens a verification dialog (`AgentRootCheckDialog`) 
-                 for the user to select and verify the correct agent source directory.
-               - Caches the newly verified path in `self.vault_data` for future deployments.
-    
-            4. **Generate Encrypted Directive:**
-               - Calls `generate_swarm_encrypted_directive` to bundle the directive data along with encryption, 
-                 integrating the verified agent path if applicable.
-        
-            Functions/Methods:
-                AgentRootSelector.resolve_agents_root(agent_path): Resolves the root directory of the agent sources.
-                AgentRootSelector.verify_all_sources(directive_staging, agents_root): Verifies all required agent sources 
-                    exist for the directive staging at the specified root.
-                generate_swarm_encrypted_directive(directive_staging, clown_car, hashbang, base_path): Generates an encrypted 
-                    directive based on the provided staging data and configuration.
-    
-            Classes/Dialogs:
-                AgentRootCheckDialog: Handles user interaction for verifying and selecting the agent root directory, 
-                if no valid cached path exists.
-    
-            """
+            # Resolve saved source directories first, then collect missing agents.
             clown_car = bool(opts.get("clown_car", False))
             hashbang = clown_car
 
@@ -99,7 +64,11 @@ class Deploy():
                     if p not in cached_paths:
                         cached_paths.append(p)
 
-                validator = AgentRootValidator(directive_staging, cached_paths)
+                # Validate the same tree that is embedded, not its outer wrapper.
+                # The validator attaches each verified source path to its node.
+                validator = AgentRootValidator(
+                    directive_staging["agents"], cached_paths, parent=parent_dialog,
+                )
                 verified_path = validator.run()
 
                 if not verified_path:
