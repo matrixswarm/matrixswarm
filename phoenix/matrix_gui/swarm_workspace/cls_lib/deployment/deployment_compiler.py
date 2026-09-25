@@ -80,6 +80,18 @@ class DeploymentCompiler:
                 )
             node["connection"]["channel"] = declared_channel
 
+        # Connector lifecycle is owned by the matrix_ssh agent, not by the
+        # reusable SSH credential record assigned to it.
+        if agent_ir.name == "matrix_ssh":
+            ssh_mode = str(
+                agent_ir.node.get("config", {}).get("ssh_mode", "one_shot")
+            ).strip().lower()
+            if ssh_mode not in {"one_shot", "persistent"}:
+                raise ValueError(
+                    "matrix_ssh config ssh_mode must be one_shot or persistent"
+                )
+            node["connection"]["ssh_mode"] = ssh_mode
+
         for child_gid in agent_ir.children:
             node["children"].append(self._build_private_tree(child_gid))
 

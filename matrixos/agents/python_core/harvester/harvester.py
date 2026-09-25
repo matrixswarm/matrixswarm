@@ -24,7 +24,8 @@ from harvester.policy import (
     record_recovery_attempt,
     recovery_due,
 )
-from harvester.ssh_transport import run_matrixd_boot, run_matrixd_list
+from harvester.ssh_transport import run_matrixd_boot
+from harvester.ssh_check import SSHCheckCancelled, SSHCheckError, SSHCheckRunner
 
 
 class Agent(BootAgent):
@@ -52,8 +53,13 @@ class Agent(BootAgent):
         self.automatic_recovery_enabled = False
         self.targets = self._load_targets(self.config.get("targets", []))
         self._states = {target["id"]: initial_state() for target in self.targets}
+        self._pending_alerts: dict[str, dict[str, Any]] = {}
+        self._alert_retry_log_at: dict[str, float] = {}
+        self._first_checks_logged: set[str] = set()
+        self._ssh_checker = SSHCheckRunner()
         self._emit_beacon = self.check_for_thread_poke(
-            "worker", timeout=self.interval * 6, emit_to_file_interval=10
+            "worker", timeout=max(60, self.interval * 6, self.timeout + self.interval + 30),
+            emit_to_file_interval=10,
         )
 
     def pre_boot(self) -> None:
@@ -89,14 +95,26 @@ class Agent(BootAgent):
             self.log(
                 f"[HARVESTER] Watching target={self.targets[0]['id']} via "
                 f"{self.mode} matrixd; automatic_recovery="
-                f"{self.automatic_recovery_enabled}."
+                f"{self.automatic_recovery_enabled}; check_timeout={self.timeout}s."
             )
 
     def worker(self, config: dict | None = None, identity=None) -> None:
+        self._emit_beacon()
         if self._ready():
             self._run_cycle()
         self._emit_beacon()
         interruptible_sleep(self, self.interval)
+
+    def worker_post(self):
+        self._ssh_checker.close()
+
+    def shutdown_now(self, reason="normal"):
+        try:
+            self._ssh_checker.close()
+        except SSHCheckError as exc:
+            self.log(f"[HARVESTER][CHECK] Shutdown: {exc.code}", level="ERROR")
+        finally:
+            super().shutdown_now(reason)
 
     def _ready(self) -> bool:
         return (
@@ -114,9 +132,14 @@ class Agent(BootAgent):
         try:
             universes = parse_matrixd_snapshot(self._matrixd_list())
             collection_error = None
+        except SSHCheckCancelled:
+            return
         except Exception as exc:
             universes = {}
-            collection_error = type(exc).__name__[:64]
+            collection_error = (
+                exc.code if isinstance(exc, SSHCheckError)
+                else type(exc).__name__[:64]
+            )
             self.log(
                 f"[HARVESTER][CHECK] mode={self.mode} matrixd list failed: "
                 f"{collection_error}",
@@ -130,6 +153,15 @@ class Agent(BootAgent):
                 else observation_for_target(target, universes)
             )
             target_id = target["id"]
+            if target_id not in self._first_checks_logged:
+                self._first_checks_logged.add(target_id)
+                self.log(
+                    f"[HARVESTER][CHECK] Initial observation target={target_id} "
+                    f"universe={target['universe']} mode={self.mode} "
+                    f"result={'healthy' if success else 'unhealthy'} "
+                    f"status={status}; checks continue every {self.interval}s.",
+                    level="INFO" if success else "WARN",
+                )
             try:
                 state, event = evaluate_observation(
                     self._states[target_id],
@@ -145,7 +177,8 @@ class Agent(BootAgent):
                 )
                 continue
             if event is not None:
-                self._emit_alert(target, event, status, observed_at)
+                self._queue_alert(target, event)
+            self._retry_alert(target, success, status, observed_at)
             if recovery_due(
                 state,
                 target,
@@ -160,7 +193,10 @@ class Agent(BootAgent):
 
     def _matrixd_list(self) -> str:
         if self.mode == "ssh":
-            return run_matrixd_list(dict(self.config["ssh"]), self.timeout)
+            return self._ssh_checker.run(
+                dict(self.config["ssh"]), self.timeout,
+                pulse=self._emit_beacon, cancelled=lambda: not self.running,
+            )
 
         command = [
             sys.executable,
@@ -188,14 +224,67 @@ class Agent(BootAgent):
             raise RuntimeError("local matrixd list output exceeded limit")
         return completed.stdout
 
-    def _emit_alert(self, target, event, status, observed_at) -> None:
-        endpoints = self.get_nodes_by_role(self.alert_role)
-        if not endpoints:
+    def _queue_alert(self, target, event) -> None:
+        target_id = target["id"]
+        pending = self._pending_alerts.get(target_id)
+        # One current notification per target, not an unbounded outage history.
+        # Reminders must not reset partial delivery and spam successful relays.
+        if event == "DOWN_REMINDER" and pending is not None:
+            if pending["event"] in {"DOWN", "DOWN_REMINDER"}:
+                return
+        self._pending_alerts[target_id] = {"event": event, "delivered_to": set()}
+
+    def _retry_alert(self, target, success, status, observed_at) -> None:
+        target_id = target["id"]
+        pending = self._pending_alerts.get(target_id)
+        if pending is None:
+            return
+        # Never send a queued healthy message after a failed check, nor a down
+        # notice during recovery debounce. The next transition supersedes it.
+        healthy_event = pending["event"] in {"HEALTHY", "RECOVERY"}
+        if healthy_event != success:
+            return
+        try:
+            dispatched = self._emit_alert(
+                target, pending["event"], status, observed_at,
+                delivered_to=pending["delivered_to"],
+            )
+        except Exception as exc:
+            self._warn_alert_pending(target_id, type(exc).__name__[:64])
+            return
+        if dispatched:
+            del self._pending_alerts[target_id]
+            self._alert_retry_log_at.pop(target_id, None)
+            # Cooldown starts on dispatch, not when discovery was unavailable.
+            if not healthy_event:
+                self._states[target_id]["last_alert_at"] = observed_at
+
+    def _warn_alert_pending(self, target_id, reason) -> None:
+        now = time.monotonic()
+        previous = self._alert_retry_log_at.get(target_id)
+        if previous is None or now - previous >= 60:
+            self._alert_retry_log_at[target_id] = now
             self.log(
-                f"[HARVESTER][ALERT] No endpoint for role={self.alert_role}",
+                f"[HARVESTER][ALERT] Pending target={target_id}: {reason}; "
+                "will retry on the next check. Health monitoring continues.",
                 level="WARN",
             )
-            return
+
+    def _emit_alert(
+        self, target, event, status, observed_at, *, delivered_to
+    ) -> bool:
+        endpoints = self.get_nodes_by_role(self.alert_role)
+        if not endpoints:
+            self._warn_alert_pending(
+                target["id"], f"No endpoint for role={self.alert_role}"
+            )
+            return False
+        recipients = {
+            (endpoint.get_universal_id(), endpoint.get_handler())
+            for endpoint in endpoints
+        }
+        # Bound retry bookkeeping to the current catalog as services change.
+        delivered_to.intersection_update(recipients)
         alert = self.get_delivery_packet("notify.alert.general", new=True)
         healthy_suffix = (
             "; monitoring established. Further notices will be sent only "
@@ -218,23 +307,38 @@ class Agent(BootAgent):
                 "origin": self.command_line_args.get(
                     "universal_id", "harvester"
                 ),
+                "universal_id": self.command_line_args.get(
+                    "universal_id", "harvester"
+                ),
                 "cause": f"Harvester {event}",
-                "observed_at": observed_at,
             }
         )
-        packet = self.get_delivery_packet("standard.command.packet", new=True)
-        packet.set_packet(alert, "content")
-        for endpoint in endpoints:
-            packet.set_payload_item("handler", endpoint.get_handler())
-            self.pass_packet(packet, endpoint.get_universal_id())
+        alert.set_payload_item("observed_at", observed_at)
+        for uid, handler in sorted(recipients - delivered_to):
+            try:
+                packet = self.get_delivery_packet("standard.command.packet", new=True)
+                packet.set_data({"handler": handler})
+                # The alert is already populated. Default nested auto-fill
+                # would reload it from the command's empty content and invalidate
+                # the shared alert, leaving later recipients without a message.
+                packet.set_auto_fill_sub_packet(False)
+                packet.set_packet(alert, "content")
+                if self.pass_packet(packet, uid):
+                    delivered_to.add((uid, handler))
+            except Exception as exc:
+                self._warn_alert_pending(target["id"], type(exc).__name__[:64])
+        if delivered_to != recipients:
+            self._warn_alert_pending(target["id"], "Packet dispatch incomplete")
+            return False
         self.log(
-            f"[HARVESTER][ALERT] event={event} target={target['id']}",
+            f"[HARVESTER][ALERT] Dispatched event={event} target={target['id']}",
             level=(
                 "INFO"
                 if event in {"HEALTHY", "RECOVERY"}
                 else "CRITICAL"
             ),
         )
+        return True
 
     def _attempt_recovery(self, target) -> None:
         try:

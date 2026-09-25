@@ -1,86 +1,68 @@
-# Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-"""
-Module: Agent Root Check Dialog
+"""Keep collecting Clown Car sources until every agent is found or the user cancels."""
 
-This module provides a standalone `AgentRootCheckDialog` class for verifying whether all required agent source files
-exist in a specified directory. The dialog is designed for use within a PyQt6 application and provides an interactive UI
-for selecting and validating the agent root directory.
-
-Classes:
-    - AgentRootCheckDialog: A dialog that allows users to check and verify the existence of agent source files.
-
-Dependencies:
-    - PyQt6.QtWidgets: Provides the UI components like QDialog, QVBoxLayout, QLabel, QPushButton, QTextEdit, QFileDialog, and QMessageBox.
-    - pathlib.Path: Handles file system paths for directory selection.
-    - AgentRootSelector: Provides methods for verifying all agent source files in a specified directory.
-
----
-
-class AgentRootCheckDialog(QDialog):
-"""
 from pathlib import Path
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QPushButton, QTextEdit, QFileDialog, QMessageBox
+    QDialog, QVBoxLayout, QLabel, QPushButton, QTextEdit, QFileDialog, QMessageBox,
 )
-from matrix_gui.core.class_lib.paths.agent_root_selector import AgentRootSelector
+from matrix_gui.core.class_lib.paths.agent_root_selector import AgentSourceSelection
+
 
 class AgentRootCheckDialog(QDialog):
-    """
-    Standalone dialog for verifying that all agent sources exist in a chosen directory.
-    """
-
-    def __init__(self, directive_tree, parent=None):
+    def __init__(self, directive_tree, parent=None, *, selection=None, initial_path=None):
         super().__init__(parent)
-        self.setWindowTitle("Agent Root Verification")
-        self.resize(700, 500)
-        self.directive_tree = directive_tree
+        self.setWindowTitle("Clown Car — Locate Agent Sources")
+        self.resize(760, 520)
+        self.selection = selection if selection is not None else AgentSourceSelection(directive_tree)
         self.selected_path = None
-        self.missing = []
+        self.browse_path = str(initial_path or Path.cwd())
         self.editor = QTextEdit()
         self.editor.setReadOnly(True)
-        self._build_ui()
-
-    def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Select your /agents directory to verify embedded sources:"))
+        instructions = QLabel(
+            "Select your MatrixSwarm, MatrixOS, or agents folder. If agents are missing, "
+            "select their individual folders next. Sources already found are retained."
+        )
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
         layout.addWidget(self.editor)
+        self.pick_button = QPushButton("Choose Source Directory…")
+        self.pick_button.clicked.connect(self._select_dir)
+        cancel = QPushButton("Cancel Deployment")
+        cancel.clicked.connect(self.reject)
+        layout.addWidget(self.pick_button)
+        layout.addWidget(cancel)
+        self._show_status()
 
-        btn_pick = QPushButton("📁 Choose Directory")
-        btn_pick.clicked.connect(self._select_dir)
-        btn_close = QPushButton("Close")
-        btn_close.clicked.connect(self.reject)
-        layout.addWidget(btn_pick)
-        layout.addWidget(btn_close)
+    def _show_status(self):
+        missing = self.selection.missing_agents
+        lines = [f"Located {len(self.selection.sources)} of {len(self.selection.required)} agent sources."]
+        if missing:
+            lines += ["", "Still needed:", *[f"  • {name}" for name in missing]]
+        if self.selection.sources:
+            lines += ["", "Located:"]
+            lines += [f"  {name} ({lang}): {path}" for (name, lang), path in self.selection.sources.items()]
+        if self.selection.errors:
+            lines += ["", "Source problems:", *self.selection.errors.values()]
+        self.editor.setPlainText("\n".join(lines))
 
     def _select_dir(self):
-        base_dir = QFileDialog.getExistingDirectory(self, "Select Root Agent Directory", str(Path.cwd()))
-        if not base_dir:
+        missing = self.selection.missing_agents
+        title = f"Locate {missing[0]} (or select a shared agents folder)" if missing else "Select Agent Sources"
+        directory = QFileDialog.getExistingDirectory(self, title, self.browse_path)
+        if not directory:
             return
-
+        self.browse_path = directory
         try:
-            missing = AgentRootSelector.verify_all_sources(self.directive_tree, base_dir)
-            if missing:
-                msg = (
-                    f"The following agents are missing source files under:\n{base_dir}\n\n"
-                    + "\n".join(missing)
-                )
-                self.editor.setPlainText(msg)
-                QMessageBox.warning(self, "Missing Sources", msg)
-                self.missing = missing
-                self.selected_path = None
-            else:
-                self.editor.setPlainText(f"✅ All agent sources verified under:\n{base_dir}")
-                self.selected_path = base_dir
-                QMessageBox.information(self, "Verified", "All agent sources found and validated.")
-                self.accept()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Verification failed:\n{e}")
-            self.selected_path = None
+            complete = self.selection.add_directory(directory)
+        except (OSError, ValueError) as exc:
+            self._show_status()
+            QMessageBox.warning(self, "Source Directory Not Usable", str(exc))
+            return
+        self._show_status()
+        if complete:
+            self.selected_path = directory
+            self.accept()
 
     def exec_check(self):
-        """
-        Run the dialog until a valid path is chosen.
-        Returns the verified base path, or None on cancel.
-        """
         result = self.exec()
         return self.selected_path if result == QDialog.DialogCode.Accepted else None

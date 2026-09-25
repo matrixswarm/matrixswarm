@@ -15,6 +15,7 @@ HARVESTER = ROOT / "matrixos" / "agents" / "python_core" / "harvester"
 POLICY_PATH = HARVESTER / "policy.py"
 AGENT_PATH = HARVESTER / "harvester.py"
 SSH_PATH = HARVESTER / "ssh_transport.py"
+CHECK_PATH = HARVESTER / "ssh_check.py"
 META_PATH = ROOT / "phoenix" / "agents_meta" / "harvester.json"
 EDITOR_PATH = (
     ROOT
@@ -58,6 +59,10 @@ SPEC = importlib.util.spec_from_file_location("harvester_policy", POLICY_PATH)
 assert SPEC and SPEC.loader
 POLICY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(POLICY)
+CHECK_SPEC = importlib.util.spec_from_file_location("harvester_ssh_check", CHECK_PATH)
+assert CHECK_SPEC and CHECK_SPEC.loader
+CHECK = importlib.util.module_from_spec(CHECK_SPEC)
+CHECK_SPEC.loader.exec_module(CHECK)
 try:
     SSH_SPEC = importlib.util.spec_from_file_location("harvester_ssh", SSH_PATH)
     assert SSH_SPEC and SSH_SPEC.loader

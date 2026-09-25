@@ -12,6 +12,10 @@ from typing import Any
 import paramiko
 
 
+class HostKeyMismatch(paramiko.SSHException):
+    """The remote host did not match the pinned identity."""
+
+
 _MATRIXD_LIST_EXEC = (
     "/matrix/.venv/bin/python3 /matrix/scripts/matrixd list --json"
 )
@@ -63,7 +67,7 @@ def connect_pinned(profile: dict[str, Any], timeout: int):
             raise paramiko.SSHException("SSH transport did not become active")
         actual = _fingerprint(transport.get_remote_server_key())
         if not hmac.compare_digest(fingerprint, _normalize_fingerprint(actual)):
-            raise paramiko.SSHException("SSH host key changed during connection")
+            raise HostKeyMismatch("SSH host key changed during connection")
         return client
     except Exception:
         client.close()
@@ -161,7 +165,7 @@ class _PinnedPolicy(paramiko.MissingHostKeyPolicy):
     def missing_host_key(self, client, hostname, key):
         actual = _normalize_fingerprint(_fingerprint(key))
         if not hmac.compare_digest(self.expected, actual):
-            raise paramiko.SSHException(
+            raise HostKeyMismatch(
                 f"SSH host-key fingerprint mismatch for {hostname}"
             )
 

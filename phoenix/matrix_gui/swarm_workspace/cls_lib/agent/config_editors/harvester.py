@@ -28,6 +28,11 @@ class Harvester(BaseEditor):
         self.timeout = QSpinBox()
         self.timeout.setRange(2, 300)
         self.timeout.setValue(int(cfg.get("matrixd_timeout_sec", 60)))
+        self.timeout.setToolTip(
+            "SSH checks run in a supervised process. This is the total deadline "
+            "for startup, connection, authentication and the matrixd command; "
+            "an expired checker is stopped before retry."
+        )
         self.alert_role = QLineEdit(cfg.get("alert_to_role", "hive.alert"))
 
         layout.addRow(self.enabled)

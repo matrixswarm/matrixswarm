@@ -3,11 +3,11 @@ from .base_provider import ConnectionProvider
 class SSH(ConnectionProvider):
 
     def get_columns(self):
-        return ["Label", "Host", "Port", "User", "Auth", "Fingerprint", "Default Channel", "Delivery", "Serial"]
+        return ["Label", "Host", "Port", "User", "Auth", "Fingerprint", "Serial"]
 
     def get_default_channel_options(self):
-        # Agents usually use SSH for outgoing ops
-        return ["ssh.command", "ssh.copy", "alerts", "outgoing.command"]
+        # Runtime routing belongs to the consuming agent, not this credential.
+        return []
 
     def get_row(self, data):
         return [
@@ -17,8 +17,6 @@ class SSH(ConnectionProvider):
             data.get("username", ""),
             data.get("auth_type", ""),                   # password / private_key / agent
             data.get("trusted_host_fingerprint", ""),    # SHA256:xxxx
-            data.get("channel", data.get("default_channel", "")),
-            data.get("ssh_mode", "one_shot"),
             data.get("serial", ""),
         ]
 

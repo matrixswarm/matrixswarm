@@ -3,7 +3,7 @@ from .base_provider import ConnectionProviderInterface
 class SSH(ConnectionProviderInterface):
 
     def get_columns(self):
-        return ["Label", "Host", "Port", "User", "Auth", "Fingerprint", "Default Channel", "Delivery", "Serial"]
+        return ["Label", "Host", "Port", "User", "Auth", "Fingerprint", "Default Channel", "Serial"]
 
     def get_default_channel_options(self):
         # Agents usually use SSH for outgoing ops
@@ -18,7 +18,6 @@ class SSH(ConnectionProviderInterface):
             data.get("auth_type", ""),                   # password / private_key / agent
             data.get("trusted_host_fingerprint", ""),    # SHA256:xxxx
             data.get("default_channel", data.get("channel", "")),
-            data.get("ssh_mode", "one_shot"),
             data.get("serial", ""),
         ]
 

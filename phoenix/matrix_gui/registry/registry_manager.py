@@ -87,9 +87,11 @@ class RegistryManagerDialog(QDialog):
         self.add_btn = QPushButton("Add")
         self.edit_btn = QPushButton("Edit")
         self.del_btn = QPushButton("Delete")
+        self.install_ssh_btn = QPushButton("Install SSH Key…")
         button_row.addWidget(self.add_btn)
         button_row.addWidget(self.edit_btn)
         button_row.addWidget(self.del_btn)
+        button_row.addWidget(self.install_ssh_btn)
         button_row.addStretch()
 
         self.assign_btn = None
@@ -106,6 +108,7 @@ class RegistryManagerDialog(QDialog):
         self.add_btn.clicked.connect(self._add)
         self.edit_btn.clicked.connect(self._edit)
         self.del_btn.clicked.connect(self._delete)
+        self.install_ssh_btn.clicked.connect(self._install_ssh_key)
         self.class_combo.currentTextChanged.connect(self._on_class_changed)
 
     def get_live_constraint_classes(self):
@@ -134,6 +137,7 @@ class RegistryManagerDialog(QDialog):
     def _populate_tabs(self):
         self.tabs.clear()
         class_name = self._active_class()
+        self.install_ssh_btn.setVisible(class_name == "ssh")
         if not class_name:
             return
 
@@ -281,6 +285,20 @@ class RegistryManagerDialog(QDialog):
         namespace.pop(serial, None)
         self.registry_store.commit()
         self._populate_tabs()
+
+    def _install_ssh_key(self):
+        """Open the dedicated Vault-backed installer for the SSH category."""
+        if self._active_class() != "ssh":
+            return
+        _class_name, serial = self._current_selection()
+        from matrix_gui.registry.ssh_key_install_dialog import (
+            VaultSSHKeyInstallDialog,
+        )
+
+        dialog = VaultSSHKeyInstallDialog(self, selected_serial=serial)
+        dialog.exec()
+        if dialog.updated_profile:
+            self._populate_tabs()
 
     # ---------------------------------------------------------
     # Constraint assignment
