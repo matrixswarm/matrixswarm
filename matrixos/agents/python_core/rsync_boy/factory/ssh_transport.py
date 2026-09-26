@@ -44,7 +44,7 @@ def _validate_private_key_passphrase(key_text: str, passphrase: str):
                     raise ValueError(
                         "A passphrase was supplied, but this private key is not encrypted"
                     )
-            return
+            return bool(passphrase)
         except (paramiko.SSHException, ValueError) as exc:
             errors.append(str(exc))
     raise ValueError("Invalid private key or passphrase: " + "; ".join(errors))
@@ -113,6 +113,7 @@ class SSHTransport:
         self._tmp_dir = None
         self._known_hosts = None
         self._key_path = None
+        self._key_encrypted = False
 
     def __enter__(self):
         self._require_binary("ssh")
@@ -123,16 +124,16 @@ class SSHTransport:
         ):
             self._require_binary("sshpass")
 
+        if self.profile.auth_type == "private_key":
+            self._key_encrypted = _validate_private_key_passphrase(
+                self.profile.private_key, self.profile.private_key_passphrase)
+
         self._tmp_dir = tempfile.mkdtemp(prefix="rsync_boy_ssh_")
         os.chmod(self._tmp_dir, 0o700)
         self._known_hosts = os.path.join(self._tmp_dir, "known_hosts")
         self._pin_host_key()
 
         if self.profile.auth_type == "private_key":
-            _validate_private_key_passphrase(
-                self.profile.private_key,
-                self.profile.private_key_passphrase,
-            )
             self._key_path = os.path.join(self._tmp_dir, "identity")
             with open(self._key_path, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(self.profile.private_key.rstrip() + "\n")
@@ -199,7 +200,10 @@ class SSHTransport:
         ]
         if self.profile.auth_type == "private_key":
             argv += ["-i", self._key_path, "-o", "IdentitiesOnly=yes"]
-        argv += ["-o", f"BatchMode={'no' if self.profile.auth_type == 'password' else 'yes'}"]
+            argv += ["-o", "IdentityAgent=none", "-o", "PreferredAuthentications=publickey",
+                     "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no"]
+        prompt_allowed = self.profile.auth_type == "password" or self._key_encrypted
+        argv += ["-o", f"BatchMode={'no' if prompt_allowed else 'yes'}"]
         return argv
 
     def _auth_prefix_and_env(self):
@@ -208,7 +212,7 @@ class SSHTransport:
         if self.profile.auth_type == "password":
             env["SSHPASS"] = self.profile.password
             prefix = ["sshpass", "-e"]
-        elif self.profile.auth_type == "private_key" and self.profile.private_key_passphrase:
+        elif self.profile.auth_type == "private_key" and self._key_encrypted:
             env["SSHPASS"] = self.profile.private_key_passphrase
             prefix = ["sshpass", "-P", "Enter passphrase for key", "-e"]
         return prefix, env

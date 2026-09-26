@@ -1,5 +1,6 @@
 from pathlib import Path
 import ast
+import copy
 import json
 from types import SimpleNamespace
 import unittest
@@ -164,7 +165,7 @@ class WorkspaceManagerRefreshTests(unittest.TestCase):
             WORKSPACE_MANAGER,
             "WorkspaceManagerDialog",
             "_persist",
-            {"VaultCoreSingleton": singleton},
+            {"VaultCoreSingleton": singleton, "copy": copy},
         )
         dialog = SimpleNamespace(
             vault_data={"workspaces": {}},
@@ -195,7 +196,7 @@ class WorkspaceManagerRefreshTests(unittest.TestCase):
             WORKSPACE_MANAGER,
             "WorkspaceManagerDialog",
             "_persist",
-            {"VaultCoreSingleton": singleton},
+            {"VaultCoreSingleton": singleton, "copy": copy},
         )
         candidate = {"candidate": {"uuid": "candidate"}}
         dialog = SimpleNamespace(vault_data={}, workspaces={})

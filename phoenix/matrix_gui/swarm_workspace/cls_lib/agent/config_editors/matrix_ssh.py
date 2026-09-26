@@ -74,7 +74,7 @@ class MatrixSsh(BaseEditor, ServiceRolesMixin):
                 "batch_limit": int(self.batch_limit.value()),
                 "lockdown_state": self.lockdown_checkbox.isChecked(),
                 "lockdown_time": int(self.lockdown_time.value()),
-                "service-manager": [{"role": self._collect_roles()}],
+                "service-manager": self._service_manager_with_roles(self._collect_roles()),
             }
         )
         self.node.mark_dirty()

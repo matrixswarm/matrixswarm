@@ -17,7 +17,7 @@ class DeployOptionsDialog(QDialog):
 """
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QDialogButtonBox, QCheckBox, QToolButton, QGroupBox, QLabel, QComboBox, QLineEdit, QMessageBox
+    QDialog, QVBoxLayout, QDialogButtonBox, QCheckBox, QToolButton, QGroupBox, QLabel, QComboBox, QLineEdit, QMessageBox, QPushButton, QFileDialog
 )
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.modules.railgun.remote_shell import (
@@ -28,7 +28,7 @@ from matrix_gui.modules.railgun.remote_shell import (
 from matrix_gui.modules.railgun.ssh_support import format_ssh_profile_label
 
 class DeployOptionsDialog(QDialog):
-    def __init__(self, ssh_map:dict, label:str, parent=None):
+    def __init__(self, ssh_map:dict, label:str, parent=None, cached_source_path=""):
         super().__init__(parent)
 
         try:
@@ -65,6 +65,21 @@ class DeployOptionsDialog(QDialog):
             rg_box = QGroupBox("Clown Car")
             rg_lay = QVBoxLayout()
             rg_lay.addWidget(self.clown_car_cb)
+            self.source_path = QLineEdit()
+            self.source_path.setPlaceholderText("Leave blank to use verified cached locations")
+            self.source_path.setToolTip("Select MatrixOS, its agents directory, or a monorepo root. An explicit selection replaces cached source locations.")
+            self._cached_source_path = cached_source_path or ""
+            cached_label = QLabel(f"Last source location: {self._cached_source_path or '(not set)'}")
+            cached_label.setWordWrap(True)
+            self.source_browse = QPushButton("Reselect MatrixOS Source…")
+            self.source_browse.clicked.connect(self._select_source)
+            rg_lay.addWidget(cached_label)
+            rg_lay.addWidget(self.source_path)
+            rg_lay.addWidget(self.source_browse)
+            self.source_path.setEnabled(False)
+            self.source_browse.setEnabled(False)
+            self.clown_car_cb.toggled.connect(self.source_path.setEnabled)
+            self.clown_car_cb.toggled.connect(self.source_browse.setEnabled)
             #layout.addWidget(self.hashbang_cb)
             rg_box.setLayout(rg_lay)
             layout.addWidget(rg_box)
@@ -162,6 +177,11 @@ class DeployOptionsDialog(QDialog):
             self.flag_clean.setToolTip("Purge all runtime directories before booting.")
             rg_lay.addWidget(self.flag_clean)
 
+            self.remove_previous = QCheckBox("Remove previous deployment records after success (same universe and target IP)")
+            self.remove_previous.setChecked(True)
+            self.remove_previous.setToolTip("Removes matching older records from this vault only, not server files. Unverified legacy targets are retained. Different SSH ports are kept separate.")
+            rg_lay.addWidget(self.remove_previous)
+
             self.flag_reboot_new = QCheckBox("--reboot-new  (Create fresh reboot UUID)")
             self.flag_reboot_new.setToolTip("Force creation of a new reboot UUID (fresh timestamp).")
             rg_lay.addWidget(self.flag_reboot_new)
@@ -187,6 +207,14 @@ class DeployOptionsDialog(QDialog):
             self._manage_conn_cb()
         if callable(self._refresh_hosts_cb):
             hosts = list(dict.fromkeys(self._refresh_hosts_cb() or []))  # de-dupe, keep order
+
+    def _select_source(self):
+        selected = QFileDialog.getExistingDirectory(
+            self, "Select MatrixOS or agent source directory",
+            self.source_path.text().strip() or self._cached_source_path,
+        )
+        if selected:
+            self.source_path.setText(selected)
 
     def _accept_if_valid(self):
         if self.ssh_selector.currentData() is None:
@@ -234,6 +262,7 @@ class DeployOptionsDialog(QDialog):
         return {
 
             "clown_car": self.clown_car_cb.isChecked(),
+            "agent_source_root": self.source_path.text().strip() if self.clown_car_cb.isChecked() else "",
             "preview": self.preview_cb.isChecked(),
             "railgun_target": self.ssh_selector.currentData(),
             "reboot": self.flag_reboot.isChecked(),
@@ -242,6 +271,7 @@ class DeployOptionsDialog(QDialog):
             "rug_pull": self.flag_rugpull.isChecked(),
             "protect_memory": self.flag_protect_memory.isChecked(),
             "clean": self.flag_clean.isChecked(),
+            "remove_previous_deployments": self.remove_previous.isChecked(),
             "reboot_new": self.flag_reboot_new.isChecked(),
             "reboot_id": self.flag_reboot_id.text().strip() or None,
             "universe": self.validate_and_get_universe_name() ,

@@ -25,7 +25,23 @@ class RegistryStore(VaultStore):
         return data.setdefault(key, {})
 
     def set_namespace(self, ns, obj_dict):
-        # Must write into LIVE vault dict
+        """Commit a staged namespace, restoring live state on rejection/error.
+
+        Callers must pass an edited copy, not mutate get_namespace() first.
+        This handles store rejection; it does not turn the event-driven vault
+        writer into a synchronous durable transaction.
+        """
         data = self.get_data()
+        previous = deepcopy(data)
         data[ns] = deepcopy(obj_dict)
-        return self.commit()
+        accepted = False
+        try:
+            accepted = self.commit()
+            return accepted
+        finally:
+            if not accepted:
+                # root.patch may replace the section when validation fails.
+                live = self.get_data()
+                live.clear()
+                live.update(previous)
+            self._buffer = self.get_data()

@@ -6,7 +6,7 @@
     },
     "constraints": [
         {
-            "ssh": {
+            "matrix_ssh": {
                 "inject_in_connection": 1,
                 "deployment_only": 1
             }

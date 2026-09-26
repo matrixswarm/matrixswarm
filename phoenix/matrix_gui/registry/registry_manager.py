@@ -2,6 +2,7 @@
 """Unified Phoenix registry explorer and constraint assignment dialog."""
 
 from datetime import datetime
+from copy import deepcopy
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
@@ -40,11 +41,12 @@ class RegistryManagerDialog(QDialog):
     Double-click always opens the selected object's editor in either mode.
     """
 
-    def __init__(self, parent=None, class_lock=None, assign_callback=None):
+    def __init__(self, parent=None, class_lock=None, assign_callback=None, selected_serial=None):
         super().__init__(parent)
 
         self.class_lock = str(class_lock).strip() if class_lock else None
         self.assign_callback = assign_callback
+        self.selected_serial = selected_serial
 
         self.setWindowFlag(Qt.WindowType.Tool, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
@@ -168,6 +170,9 @@ class RegistryManagerDialog(QDialog):
             item = QListWidgetItem("   |   ".join(str(value) for value in row))
             item.setData(Qt.ItemDataRole.UserRole, (class_name, serial))
             list_widget.addItem(item)
+            if self.class_lock == class_name and serial == self.selected_serial:
+                list_widget.setCurrentItem(item)
+                list_widget.scrollToItem(item)
 
     def _on_class_changed(self, _class_name):
         if not self.class_lock:
@@ -226,9 +231,10 @@ class RegistryManagerDialog(QDialog):
             data["path"] = editor.get_directory_path()
             self._stamp_record(data, class_name, serial, created=True)
 
-            namespace = self.registry_store.get_namespace(class_name)
+            namespace = deepcopy(self.registry_store.get_namespace(class_name))
             namespace[serial] = data
-            self.registry_store.commit()
+            if not self._commit_namespace(class_name, namespace):
+                return
             self._populate_tabs()
         except Exception as error:
             emit_gui_exception_log("RegistryManagerDialog._add", error)
@@ -247,7 +253,7 @@ class RegistryManagerDialog(QDialog):
                 )
                 return
 
-            namespace = self.registry_store.get_namespace(class_name)
+            namespace = deepcopy(self.registry_store.get_namespace(class_name))
             current = namespace.get(serial)
             if not current:
                 return
@@ -263,7 +269,8 @@ class RegistryManagerDialog(QDialog):
             updated["meta"] = dict(current.get("meta", {}))
             self._stamp_record(updated, class_name, serial)
             namespace[serial] = updated
-            self.registry_store.commit()
+            if not self._commit_namespace(class_name, namespace):
+                return
             self._populate_tabs()
         except Exception as error:
             emit_gui_exception_log("RegistryManagerDialog._edit_existing", error)
@@ -281,10 +288,26 @@ class RegistryManagerDialog(QDialog):
         if confirmed != QMessageBox.StandardButton.Yes:
             return
 
-        namespace = self.registry_store.get_namespace(class_name)
+        namespace = deepcopy(self.registry_store.get_namespace(class_name))
         namespace.pop(serial, None)
-        self.registry_store.commit()
+        if not self._commit_namespace(class_name, namespace):
+            return
         self._populate_tabs()
+
+    def _commit_namespace(self, class_name, namespace):
+        """Do not display a successful CRUD operation after a rejected commit."""
+        try:
+            accepted = self.registry_store.set_namespace(class_name, namespace)
+        except Exception:
+            accepted = False
+        if not accepted:
+            QMessageBox.warning(
+                self, "Registry Save Failed",
+                "The registry change was not accepted. Your previous registry "
+                "state has been restored. Review the entry and try again.",
+            )
+            return False
+        return True
 
     def _install_ssh_key(self):
         """Open the dedicated Vault-backed installer for the SSH category."""

@@ -17,6 +17,7 @@ class VaultCreateDialog(QDialog):
         self.vault_password = None
         self.vault_auth_method = "password"
         self._yubikey_worker = None
+        self._cancelled = False
 
         layout = QVBoxLayout(self)
 
@@ -81,11 +82,15 @@ class VaultCreateDialog(QDialog):
         worker.start()
 
     def _on_yubikey_ready(self, password, serial):
+        if self._cancelled:
+            return
         self._set_yubikey_busy(False, "YubiKey response accepted.")
         self._yubikey_worker = None
         self._save_with_password(password, auth_method="yubikey")
 
     def _on_yubikey_failed(self, message):
+        if self._cancelled:
+            return
         self._set_yubikey_busy(False, "")
         self._yubikey_worker = None
         QMessageBox.warning(self, "YubiKey", message)
@@ -97,16 +102,21 @@ class VaultCreateDialog(QDialog):
         self.yubikey_status.setText(status)
 
     def _save_with_password(self, password, auth_method="password"):
-
-        vault_dir = resolve_matrixswarm_base() / "vaults"
-        vault_dir.mkdir(parents=True, exist_ok=True)
-
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save New Vault As",
-            str(vault_dir),
-            "Vault Files (*.json)"
-        )
+        if self._cancelled:
+            return
+        try:
+            vault_dir = resolve_matrixswarm_base() / "vaults"
+            vault_dir.mkdir(parents=True, exist_ok=True)
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save New Vault As", str(vault_dir), "Vault Files (*.json)"
+            )
+        except Exception as exc:
+            from matrix_gui.util.exception_diagnostics import log_exception_locations
+            log_exception_locations("Prepare new vault path", exc)
+            QMessageBox.critical(self, "Vault Location Error",
+                                 f"Could not prepare the vault location ({type(exc).__name__}). "
+                                 "Check folder access and retry. Diagnostic locations were logged.")
+            return
         if not path:
             return
 
@@ -132,6 +142,7 @@ class VaultCreateDialog(QDialog):
         self.accept()
 
     def reject(self):
+        self._cancelled = True
         if self._yubikey_worker and self._yubikey_worker.isRunning():
             self._yubikey_worker.cancel()
         super().reject()

@@ -114,7 +114,7 @@ class MetaBlast(BaseEditor, ServiceRolesMixin):
                 "timeout": int(self.oracle_timeout.value()),
             },
 
-            "service-manager": [{"role": roles}],
+            "service-manager": self._service_manager_with_roles(roles),
         })
 
         self.node.mark_dirty()

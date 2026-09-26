@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -24,6 +25,12 @@ SPEC.loader.exec_module(MODULE)
 
 
 class OperatorSystemStatusTests(unittest.TestCase):
+    def test_unavailable_platform_metrics_are_none(self):
+        with patch.object(MODULE, "os", spec=[]):
+            snapshot = MODULE.system_status()
+        self.assertIsNone(snapshot["load_average"])
+        self.assertIsNone(snapshot["root_filesystem"])
+
     def test_snapshot_is_bounded_and_contains_no_control_surface(self):
         snapshot = MODULE.system_status()
         self.assertEqual(

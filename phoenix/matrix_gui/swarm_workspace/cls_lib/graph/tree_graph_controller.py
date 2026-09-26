@@ -264,7 +264,7 @@ class TreeGraphController:
             self.inspector.on_agents_deleted(to_remove)
 
         # Refresh visuals
-        QTimer.singleShot(0, self._post_delete_redraw)
+        self._post_delete_redraw()
 
         # Update Inspector (clear or reload Matrix)
         try:
@@ -276,6 +276,10 @@ class TreeGraphController:
                 self.inspector.load(None)
         except Exception:
             pass
+
+        workspace = getattr(self.scene, "workspace", None)
+        if workspace is not None:
+            workspace.save()
 
     def _is_descendant(self, node, ancestor_gid):
         """
@@ -352,6 +356,9 @@ class TreeGraphController:
         if not self._valid_reparent(item, new_parent_item):
             return
 
+        if item.node.get_parent() == new_parent_item.node.get_graph_id():
+            return
+
         # just change the parent
         item.node.set_parent(new_parent_item.node.get_graph_id())
 
@@ -364,6 +371,12 @@ class TreeGraphController:
             self.inspector.load(item.node)
         except Exception:
             pass
+
+        # Both drag/drop and the context-menu action share this mutation path.
+        # Persist only after the parent and derived layout have been updated.
+        workspace = getattr(self.scene, "workspace", None)
+        if workspace is not None:
+            workspace.save()
 
     def normalize_orphans(self):
         """

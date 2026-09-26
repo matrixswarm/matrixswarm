@@ -20,6 +20,7 @@ class VaultUnlockDialog(QDialog):
         self.vault_password = None
         self.vault_auth_method = "password"
         self._yubikey_worker = None
+        self._cancelled = False
 
         layout = QVBoxLayout(self)
 
@@ -150,9 +151,11 @@ class VaultUnlockDialog(QDialog):
         self._attempt_unlock(pw)
 
     def _attempt_unlock(self, password, auth_method="password"):
+        if self._cancelled:
+            return
         try:
             data = VaultService.load_vault(self.vault_path, password)
-            if data is False:
+            if not isinstance(data, dict):
                 QMessageBox.warning(
                     self,
                     "Invalid Credential",
@@ -204,11 +207,15 @@ class VaultUnlockDialog(QDialog):
         worker.start()
 
     def _on_yubikey_ready(self, password, serial):
+        if self._cancelled:
+            return
         self._set_yubikey_busy(False, "YubiKey response accepted.")
         self._yubikey_worker = None
         self._attempt_unlock(password, auth_method="yubikey")
 
     def _on_yubikey_failed(self, message):
+        if self._cancelled:
+            return
         self._set_yubikey_busy(False, "")
         self._yubikey_worker = None
         QMessageBox.warning(self, "YubiKey", message)
@@ -224,6 +231,7 @@ class VaultUnlockDialog(QDialog):
         self.yubikey_status.setText(status)
 
     def reject(self):
+        self._cancelled = True
         if self._yubikey_worker and self._yubikey_worker.isRunning():
             self._yubikey_worker.cancel()
         super().reject()

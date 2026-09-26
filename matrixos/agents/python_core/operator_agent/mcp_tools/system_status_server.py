@@ -51,6 +51,8 @@ def _uptime_seconds() -> int | None:
 
 def _root_filesystem() -> dict[str, int] | None:
     try:
+        if not hasattr(os, "statvfs"):
+            return None  # Metric unavailable on this platform, not zero usage.
         status = os.statvfs("/")
         block_size = status.f_frsize or status.f_bsize
         total = status.f_blocks * block_size
@@ -67,7 +69,7 @@ def _root_filesystem() -> dict[str, int] | None:
 def system_status() -> dict[str, Any]:
     """Return a bounded, read-only snapshot of basic host health."""
     try:
-        load_average = [round(value, 2) for value in os.getloadavg()]
+        load_average = [round(value, 2) for value in os.getloadavg()] if hasattr(os, "getloadavg") else None
     except OSError:
         load_average = None
     return {

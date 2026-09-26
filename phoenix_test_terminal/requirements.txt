@@ -1,0 +1,9 @@
+# Offline lab dependencies only. No production vault or live bridge is required.
+PyQt6==6.10.0
+cryptography==45.0.4
+paramiko==4.0.0
+pycryptodome==3.23.0
+rsa==4.9.1
+requests==2.32.4
+websocket-client==1.8.0
+psutil==7.0.0

@@ -120,7 +120,7 @@ class UptimeSentinel(BaseEditor, ListEditorMixin, ServiceRolesMixin):
             "alert_enabled": self.alert_enabled.isChecked(),
             "only_log_state_changes": self.only_log_state_changes.isChecked(),
             "targets": clean_targets,
-            "service-manager": [{"role": roles}],
+            "service-manager": self._service_manager_with_roles(roles),
         })
 
         self.node.mark_dirty()

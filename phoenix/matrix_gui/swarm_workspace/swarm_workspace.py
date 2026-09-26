@@ -2,13 +2,15 @@
 # Main window for the graph editor
 import json
 import uuid
+from copy import deepcopy
+from PyQt6 import sip
 
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QWidget,
-    QGraphicsScene, QGraphicsView, QMessageBox, QSplitter, QDialog
+    QGraphicsScene, QGraphicsView, QMessageBox, QSplitter, QDialog, QLabel
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from .workspace_loader import load_workspace
 from .agent_palette import AgentPalette
@@ -26,7 +28,22 @@ class SwarmWorkspaceDialog(QDialog):
         try:
             self.setWindowTitle("Swarm Workspace")
             self.setMinimumSize(1200, 700)
-            self.workspace_data = workspace_data
+            self.workspace_data = deepcopy(workspace_data or {})
+            self._vault_core = VaultCoreSingleton.get()
+            self._saving = False
+            self._pending_entry = None
+            self._saved_entry = None
+            self._close_requested = False
+            self._allow_close = False
+            self._write_slow = False
+            self._ready_timer = QTimer(self)
+            self._ready_timer.setSingleShot(True)
+            self._ready_timer.setInterval(3000)
+            self._ready_timer.timeout.connect(self._show_ready)
+            self._slow_save_timer = QTimer(self)
+            self._slow_save_timer.setSingleShot(True)
+            self._slow_save_timer.setInterval(5000)
+            self._slow_save_timer.timeout.connect(self._save_is_slow)
             self.agents_root = agents_root
             self.default_parent = None
             self.workspace_id = None
@@ -99,7 +116,7 @@ class SwarmWorkspaceDialog(QDialog):
 
             # Load workspace AFTER controller is ready
             if workspace_data and workspace_data.get("data"):
-                load_workspace(self.scene, agents_root, workspace_data)
+                load_workspace(self.scene, agents_root, self.workspace_data)
             else:
                 print("[WORKSPACE] no saved agents to load")
 
@@ -116,6 +133,16 @@ class SwarmWorkspaceDialog(QDialog):
             layout = QVBoxLayout(self)
             layout.addLayout(top)
             layout.addWidget(splitter)
+            status_row = QHBoxLayout()
+            self.save_status = QLabel("Ready…")
+            self.save_status.setAccessibleName("Workspace save status")
+            self.retry_save_btn = QPushButton("Retry Save")
+            self.retry_save_btn.setAutoDefault(False)
+            self.retry_save_btn.hide()
+            self.retry_save_btn.clicked.connect(self.save)
+            status_row.addWidget(self.save_status, 1)
+            status_row.addWidget(self.retry_save_btn)
+            layout.addLayout(status_row)
 
             # drag/drop handlers
             self.view.setAcceptDrops(True)
@@ -174,34 +201,88 @@ class SwarmWorkspaceDialog(QDialog):
         else:
             QMessageBox.information(self, "Ok", "Workspace is valid!")
 
-    def save(self):
-        nodes = collect_scene_nodes(self.scene)
-
+    def _snapshot_entry(self):
         if not self.workspace_id:
-            # brand new workspace
             self.workspace_id = str(uuid.uuid4())
-            label = "New Workspace"
-        else:
-            label = self.workspace_data.get("label", "Unnamed Workspace")
+        return deepcopy({"uuid": self.workspace_id,
+                         "label": self.workspace_data.get("label", "New Workspace"),
+                         "data": collect_scene_nodes(self.scene)})
 
-        ws_uuid = self.workspace_id
+    def save(self):
+        """Accept an autosave request, not a claim that disk is already saved."""
+        try:
+            if self._vault_core is not VaultCoreSingleton.get() or self._vault_core._closed:
+                raise RuntimeError("Workspace belongs to an inactive vault; reopen it from the current vault")
+            entry = self._snapshot_entry()
+            self._pending_entry = entry
+            if self._saving:
+                if self._write_slow:
+                    self._save_is_slow()
+                else:
+                    self.save_status.setText("Trying to write to vault… newer updates pending")
+                return True
+            if entry == self._saved_entry:
+                self._pending_entry = None
+                return True
+            self._saving = True
+            self._ready_timer.stop()
+            self._write_slow = False
+            self._pending_entry = None
+            self.retry_save_btn.hide()
+            self.save_status.setText("Trying to write to vault…")
+            self._slow_save_timer.start()
+            self._vault_core.save_workspace_async(
+                entry, lambda success: self._save_completed(entry, success))
+            return True
+        except Exception as e:
+            emit_gui_exception_log("SwarmWorkspaceDialog.save", e)
+            self._save_failed()
+            return False
 
-        entry = {
-            "uuid": ws_uuid,
-            "label": label,
-            "data": nodes
-        }
+    def _save_failed(self):
+        self._ready_timer.stop()
+        self._slow_save_timer.stop()
+        self._saving = False
+        self._close_requested = False
+        self.save_status.setText("Save failed — changes retained in editor; retry before closing")
+        self.retry_save_btn.show()
 
-        # --- Live Vault Path ---
-        vcs = VaultCoreSingleton.get()
-        workspaces = vcs.data.setdefault("workspaces", {})
-        workspaces[self.workspace_id] = entry
+    def _save_is_slow(self):
+        if self._saving:
+            self._write_slow = True
+            self.save_status.setText("Still trying to write to vault — please pause edits until this clears")
 
+    def _show_ready(self):
+        if not self._saving and self._pending_entry is None:
+            self.save_status.setText("Ready…")
 
-        # persist to vault
-        vcs.patch("workspaces", workspaces)
-
-        #QMessageBox.information(self, "Saved", f"Workspace saved under {ws_uuid[:8]}")
+    def _save_completed(self, entry, success):
+        if sip.isdeleted(self):
+            return
+        if self._vault_core is not VaultCoreSingleton.get() or self._vault_core._closed:
+            self._save_failed()
+            self.save_status.setText("Vault closed or changed — reopen this workspace before saving")
+            return
+        self._slow_save_timer.stop()
+        self._saving = False
+        if not success:
+            self._save_failed()
+            return
+        self._saved_entry = deepcopy(entry)
+        # Never replace the live editor with an older completed snapshot.
+        try:
+            if self._snapshot_entry() != entry:
+                self.save()
+                return
+        except Exception:
+            self._save_failed()
+            return
+        self._pending_entry = None
+        self.save_status.setText("Saved to Vault ✓")
+        self._ready_timer.start()
+        if self._close_requested:
+            self._allow_close = True
+            self.close()
 
     def on_deploy_clicked(self):
         tree, root_uid = self.controller.export_agent_tree()
@@ -224,9 +305,25 @@ class SwarmWorkspaceDialog(QDialog):
 
 
     def closeEvent(self, event):
+        if self._allow_close:
+            event.accept()
+            return
         try:
-            self.save()
-        except Exception as e:
-            print(f"[WORKSPACE] Close save failed: {e}")
-        event.accept()
+            if not self._saving and self._snapshot_entry() == self._saved_entry:
+                event.accept()
+                return
+        except Exception:
+            self._save_failed()
+            event.ignore()
+            return
+        event.ignore()
+        self._close_requested = True
+        self.save()
+
+    def reject(self):
+        # Escape must obey the same persistence rule as the title-bar close.
+        if self._allow_close:
+            super().reject()
+        else:
+            self.close()
 

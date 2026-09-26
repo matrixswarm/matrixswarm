@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QSpinBox,
+    QMessageBox,
     QWidget,
 )
 
@@ -21,19 +22,20 @@ class Harvester(BaseEditor):
         layout = QFormLayout(general)
 
         self.enabled = QCheckBox("Enable matrixd checks")
-        self.enabled.setChecked(cfg.get("enabled") is True)
+        self._load_saved_bool(self.enabled, cfg.get("enabled", False))
         self.interval = QSpinBox()
         self.interval.setRange(5, 3_600)
-        self.interval.setValue(int(cfg.get("check_interval_sec", 30)))
+        self._load_saved_number(self.interval, cfg.get("check_interval_sec", 30))
         self.timeout = QSpinBox()
         self.timeout.setRange(2, 300)
-        self.timeout.setValue(int(cfg.get("matrixd_timeout_sec", 60)))
         self.timeout.setToolTip(
             "SSH checks run in a supervised process. This is the total deadline "
             "for startup, connection, authentication and the matrixd command; "
             "an expired checker is stopped before retry."
         )
-        self.alert_role = QLineEdit(cfg.get("alert_to_role", "hive.alert"))
+        self._load_saved_number(self.timeout, cfg.get("matrixd_timeout_sec", 60))
+        self.alert_role = QLineEdit()
+        self._load_saved_text(self.alert_role, cfg.get("alert_to_role", "hive.alert"))
 
         layout.addRow(self.enabled)
         layout.addRow("Check Interval (sec):", self.interval)
@@ -43,6 +45,14 @@ class Harvester(BaseEditor):
         self.layout.addRow(general)
 
     def _save(self):
+        try:
+            enabled = self._saved_bool(self.enabled, "Enable matrixd checks")
+            alert_role = self._saved_text(self.alert_role, "Alert role")
+            interval = self._saved_number(self.interval, "Check interval")
+            timeout = self._saved_number(self.timeout, "Matrixd timeout")
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Configuration", str(exc))
+            return
         for injected_key in (
             "mode",
             "ssh",
@@ -52,10 +62,10 @@ class Harvester(BaseEditor):
             self.node.config.pop(injected_key, None)
         self.node.config.update(
             {
-                "enabled": self.enabled.isChecked(),
-                "check_interval_sec": self.interval.value(),
-                "matrixd_timeout_sec": self.timeout.value(),
-                "alert_to_role": self.alert_role.text().strip(),
+                "enabled": enabled,
+                "check_interval_sec": interval,
+                "matrixd_timeout_sec": timeout,
+                "alert_to_role": alert_role.strip(),
             }
         )
         self.node.mark_dirty()

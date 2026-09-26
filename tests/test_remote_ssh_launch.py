@@ -132,8 +132,13 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             with self.subTest(path=path):
                 text = source(path)
                 self.assertNotIn("source /matrix/venv", text)
-                self.assertIn("while chan.recv_ready()", text)
-                self.assertIn("while chan.recv_stderr_ready()", text)
+                if path == self.launcher_paths[0]:
+                    self.assertIn("(chan.recv_ready, chan.recv)", text)
+                    self.assertIn("(chan.recv_stderr_ready, chan.recv_stderr)", text)
+                    self.assertIn("range(16)", text)
+                else:
+                    self.assertIn("while chan.recv_ready()", text)
+                    self.assertIn("while chan.recv_stderr_ready()", text)
                 self.assertIn("client.close()", text)
                 self.assertIn("build_remote_matrixd_command", text)
 
@@ -581,14 +586,14 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "MatrixOS update required"):
             helper.verify_remote_matrixd_stdin(legacy)
 
-        for path in self.launcher_paths:
+        for path in ("phoenix/matrix_gui/modules/railgun/control_worker.py", self.launcher_paths[1]):
             with self.subTest(path=path):
                 launcher_source = source(path)
                 probe_index = launcher_source.index(
                     "verify_remote_matrixd_stdin(client)"
                 )
                 send_index = launcher_source.index(
-                    "payload_size = send_boot_envelope("
+                    "send_boot_envelope("
                 )
                 self.assertLess(probe_index, send_index)
 

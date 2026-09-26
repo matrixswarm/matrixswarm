@@ -686,6 +686,28 @@ class PhoenixCockpit(QMainWindow):
 
     def closeEvent(self, ev):
         try:
+            # Ordinary Close must not tear down Qt before persistence callbacks.
+            # Explicit security shutdown retains its existing fail-closed policy.
+            if not self._security_shutdown_pending:
+                core = VaultCoreSingleton._instance
+                reason = None
+                if core is not None and (core._workspace_active is not None or core._workspace_queue):
+                    reason = "A vault save is still running. Wait for it to finish, then close Phoenix again."
+                else:
+                    from matrix_gui.swarm_workspace.swarm_workspace import SwarmWorkspaceDialog
+                    from PyQt6.QtCore import QThread
+                    for window in QApplication.topLevelWidgets():
+                        if isinstance(window, SwarmWorkspaceDialog) and window.isVisible():
+                            if window._saving or window._snapshot_entry() != window._saved_entry:
+                                reason = "A workspace has unsaved changes. Save or close that workspace successfully before exiting Phoenix."
+                                break
+                        if any(worker.isRunning() for worker in window.findChildren(QThread)):
+                            reason = "A background operation is still running. Finish or cancel it before closing Phoenix."
+                            break
+                if reason:
+                    ev.ignore()
+                    QMessageBox.warning(self, "Phoenix Still Busy", reason)
+                    return
 
             print("[MIRV] Cockpit closing, nuking all session processes...")
 
@@ -709,7 +731,9 @@ class PhoenixCockpit(QMainWindow):
             super().closeEvent(ev)
 
         except Exception as e:
+            ev.ignore()
             emit_gui_exception_log("PhoenixCockpit.closeEvent", e)
+            QMessageBox.critical(self, "Shutdown Failed", "Phoenix could not complete shutdown. See the diagnostic log and retry.")
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -915,6 +939,13 @@ class PhoenixCockpit(QMainWindow):
         except Exception as e:
             reset_startup_policy()
             emit_gui_exception_log("PhoenixCockpit.unlock_vault", e)
+            QMessageBox.critical(
+                self,
+                "Vault Could Not Be Opened",
+                f"Phoenix could not finish opening the vault ({type(e).__name__}).\n"
+                "See the diagnostic log for details. If saves are still pending, "
+                "wait for them to finish, then try again.",
+            )
 
     def _on_tab_close_requested(self, index: int):
         try:

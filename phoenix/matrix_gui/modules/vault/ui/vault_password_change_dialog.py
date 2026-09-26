@@ -1,6 +1,6 @@
 import os
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox
-from matrix_gui.modules.vault.crypto.vault_handler import load_vault_singlefile, save_vault_singlefile
+from matrix_gui.modules.vault.vault_service import VaultService
 
 class VaultPasswordChangeDialog(QDialog):
     def __init__(self, vault_path, parent=None):
@@ -56,11 +56,7 @@ class VaultPasswordChangeDialog(QDialog):
             return
 
         try:
-            # 1. Decrypt with old password
-            vault_data = load_vault_singlefile(old_pw, self.vault_path)
-
-            # 2. Re-encrypt with new password (atomic save)
-            save_vault_singlefile(vault_data, new_pw, self.vault_path)
+            VaultService.change_password(self.vault_path, old_pw, new_pw)
 
             self.new_password = new_pw
             QMessageBox.information(self, "Success", "Vault password changed successfully.")

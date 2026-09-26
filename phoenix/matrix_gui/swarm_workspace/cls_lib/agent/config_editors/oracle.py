@@ -1,5 +1,5 @@
 from .base_editor import BaseEditor
-from PyQt6.QtWidgets import ( QWidget, QLabel, QComboBox, QDoubleSpinBox, QFormLayout
+from PyQt6.QtWidgets import ( QWidget, QLabel, QComboBox, QDoubleSpinBox, QFormLayout, QMessageBox
 )
 from .mixin.service_roles_mixin import ServiceRolesMixin
 class Oracle(BaseEditor, ServiceRolesMixin):
@@ -22,16 +22,17 @@ class Oracle(BaseEditor, ServiceRolesMixin):
             "gpt-6-astra",
             "gpt-4o",
         ])
-        self.model.setCurrentText(cfg.get("model", "gpt-5.6-terra"))
+        self._select_saved_choice(self.model, cfg.get("model", "gpt-5.6-terra"))
 
         self.temperature = QDoubleSpinBox()
+        self.temperature.setDecimals(15)
         self.temperature.setRange(0.0, 2.0)
         self.temperature.setSingleStep(0.1)
-        self.temperature.setValue(float(cfg.get("temperature", 0)))
+        self._load_saved_number(self.temperature, cfg.get("temperature", 0))
 
         self.response_mode = QComboBox()
         self.response_mode.addItems(["terse", "verbose", "creative"])
-        self.response_mode.setCurrentText(cfg.get("response_mode", "terse"))
+        self._select_saved_choice(self.response_mode, cfg.get("response_mode", "terse"))
 
         openai_layout.addRow("Model:", self.model)
         openai_layout.addRow("Temperature:", self.temperature)
@@ -58,15 +59,21 @@ class Oracle(BaseEditor, ServiceRolesMixin):
     # SAVE LOGIC
     # =======================================================
     def _save(self):
-
+        try:
+            model = self._saved_choice(self.model, "Model")
+            response_mode = self._saved_choice(self.response_mode, "Response mode")
+            temperature = self._saved_number(self.temperature, "Temperature")
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Configuration", str(exc))
+            return
         roles = self._collect_roles()
 
         # Update config dict
         self.node.config.update({
-            "model": self.model.currentText(),
-            "temperature": float(self.temperature.value()),
-            "response_mode": self.response_mode.currentText(),
-            "service-manager": [{"role": roles}]
+            "model": model,
+            "temperature": temperature,
+            "response_mode": response_mode,
+            "service-manager": self._service_manager_with_roles(roles)
         })
 
         self.node.mark_dirty()

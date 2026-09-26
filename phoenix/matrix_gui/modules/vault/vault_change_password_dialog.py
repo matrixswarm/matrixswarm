@@ -2,7 +2,9 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPushButton, QLineEdit,
     QMessageBox, QFileDialog, QCheckBox
 )
-from .vault_service import VaultService
+from .vault_service import VaultService, VaultBusyError, VaultUnlockError
+import logging
+import traceback
 from .yubikey_worker import YubiKeyCredentialWorker
 from matrix_gui.util.resolve_matrixswarm_base import resolve_matrixswarm_base
 
@@ -123,6 +125,8 @@ class VaultChangePasswordDialog(QDialog):
         worker.start()
 
     def _on_yubikey_ready(self, password, serial):
+        if self._pending_credentials is None or not self._pending_factors:
+            return
         factor = self._pending_factors.pop(0)
         self._pending_credentials[factor] = password
         self._yubikey_worker = None
@@ -134,6 +138,8 @@ class VaultChangePasswordDialog(QDialog):
         self._finish_change()
 
     def _on_yubikey_failed(self, message):
+        if self._pending_credentials is None:
+            return
         self._pending_credentials = None
         self._pending_factors = []
         self._yubikey_worker = None
@@ -141,6 +147,8 @@ class VaultChangePasswordDialog(QDialog):
         QMessageBox.warning(self, "YubiKey", message)
 
     def _finish_change(self):
+        if self._pending_credentials is None:
+            return
         old_password = self._pending_credentials["old"]
         new_password = self._pending_credentials["new"]
         try:
@@ -149,12 +157,25 @@ class VaultChangePasswordDialog(QDialog):
                 old_password,
                 new_password,
             )
-        except Exception:
+        except VaultBusyError as exc:
+            QMessageBox.warning(self, "Vault Still Active", str(exc))
+            self._pending_credentials = None
+            return
+        except VaultUnlockError:
             QMessageBox.critical(
                 self,
                 "Error",
                 "The current password or YubiKey credential is incorrect.",
             )
+            self._pending_credentials = None
+            return
+        except Exception as exc:
+            locations = "\n".join(f"{frame.filename}:{frame.lineno} in {frame.name}"
+                                  for frame in traceback.extract_tb(exc.__traceback__))
+            logging.getLogger(__name__).error("Password rotation failed (%s)\n%s", type(exc).__name__, locations)
+            QMessageBox.critical(self, "Password Change Failed",
+                                 f"Vault operation failed ({type(exc).__name__}); password change was not confirmed. "
+                                 "Diagnostic stack locations were logged. Check file access and retry.")
             self._pending_credentials = None
             return
 
@@ -178,6 +199,8 @@ class VaultChangePasswordDialog(QDialog):
             self.yubikey_status.setText("")
 
     def reject(self):
+        self._pending_credentials = None
+        self._pending_factors = []
         if self._yubikey_worker and self._yubikey_worker.isRunning():
             self._yubikey_worker.cancel()
         super().reject()

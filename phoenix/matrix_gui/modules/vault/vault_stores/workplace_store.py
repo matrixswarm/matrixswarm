@@ -38,29 +38,45 @@ class WorkspaceStore(VaultStore):
     # -------------------------------------------------------------
     def get_workspace(self, uuid, default=None):
         """Return deep copy of a single workspace entry."""
-        data = self.root_vault.data.setdefault(self.section_key, {})
+        data = self.get_data()
         return deepcopy(data.get(uuid, default if default is not None else {}))
 
     def update_workspace(self, uuid, patch):
-        """Apply patch to live workspace entry and commit."""
-        data = self.root_vault.data.setdefault(self.section_key, {})
+        """Stage a patch and restore the section if its commit is rejected."""
+        data = deepcopy(self.get_data())
         ws = data.setdefault(uuid, {})
 
         for k, v in patch.items():
             if isinstance(ws.get(k), dict) and isinstance(v, dict):
-                ws[k].update(v)
+                ws[k].update(deepcopy(v))
             else:
                 ws[k] = deepcopy(v)
 
-        return self.commit()
+        return self._commit_workspaces(data)
 
     def delete_workspace(self, uuid):
-        data = self.root_vault.data.setdefault(self.section_key, {})
+        data = deepcopy(self.get_data())
         if uuid in data:
             del data[uuid]
-            return self.commit()
+            return self._commit_workspaces(data)
         return False
 
     def list_workspaces(self):
-        data = self.root_vault.data.setdefault(self.section_key, {})
+        data = self.get_data()
         return [(uid, cfg.get("label", "(unnamed)")) for uid, cfg in data.items()]
+
+    def _commit_workspaces(self, candidate):
+        previous = deepcopy(self.get_data())
+        live = self.get_data()
+        live.clear()
+        live.update(deepcopy(candidate))
+        accepted = False
+        try:
+            accepted = self.commit()
+            return accepted
+        finally:
+            if not accepted:
+                live = self.get_data()
+                live.clear()
+                live.update(previous)
+            self._buffer = self.get_data()

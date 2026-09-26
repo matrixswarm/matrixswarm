@@ -1,7 +1,8 @@
 import json, uuid, hashlib, time
 from copy import deepcopy
 from datetime import datetime
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QMessageBox
+from matrix_gui.util.exception_diagnostics import log_exception_locations
 from .exceptions.manual_constraint_failure import ManualConstraintFailure
 from matrix_gui.swarm_workspace.cls_lib.constraint.constraint_validator import ConstraintValidator
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
@@ -67,18 +68,19 @@ class DeploymentSession:
         (uses live workspace tree, no reconstruction).
         """
         r = False
+        self.dual = DualBuilder()
         try:
             root_gid = self.root_uid
             if not root_gid:
                 print("[DEPLOY][FATAL] No root agent found")
-                return self.dual
+                return False
 
             # Resolve all constraints directly on the live nodes
             try:
-                resolved_constraints = self._resolve_constraints_parallel(self.tree)
+                compilation_tree = deepcopy(self.tree)
+                resolved_constraints = self._resolve_constraints_parallel(compilation_tree)
                 # Profile credentials belong only to the directive staging copy.
                 # Never attach them to the live/editable workspace tree.
-                compilation_tree = deepcopy(self.tree)
                 registry = self.resolver.vcs.get_store("registry")
                 profile_count = inject_rsync_boy_ssh_profiles(
                     compilation_tree,
@@ -90,9 +92,12 @@ class DeploymentSession:
                         "SSH profile(s) into directive staging."
                     )
             except ManualConstraintFailure as e:
+                self.dual = DualBuilder()
                 print(str(e))
-                return None
+                QMessageBox.critical(self.workspace, "Deployment Blocked", str(e))
+                return False
             except RsyncBoyProfileError as e:
+                self.dual = DualBuilder()
                 print(f"[DEPLOY BLOCKED] {e}")
                 return None
 
@@ -127,12 +132,16 @@ class DeploymentSession:
             self.dual.deployment["certs"] = self._normalize_certs(self.dual.deployment.get("certs", {}))
 
             deploy = Deploy()
-            deploy.deploy_directive(self.workspace, directive_data, self.dual, workspace_id)
-
-            r = True
+            r = deploy.deploy_directive(
+                self.workspace, directive_data, self.dual, workspace_id
+            ) is True
 
         except Exception as e:
-            emit_gui_exception_log("DeploymentSession.run", e)
+            self.dual = DualBuilder()
+            log_exception_locations("DeploymentSession.run", e)
+            QMessageBox.critical(self.workspace, "Deployment Failed",
+                f"Deployment preparation failed ({type(e).__name__}). "
+                "Review the diagnostic log before retrying.")
 
         return r
 
@@ -154,8 +163,7 @@ class DeploymentSession:
         try:
             path_parts = editor.get_deployment_path(self.tree[agent_uid]["universal_id"])
             if not path_parts or len(path_parts) < 3:
-                print(f"[DEPLOY][WARN] {cname} returned invalid deployment path.")
-                return
+                raise ValueError("Invalid generated bundle destination")
 
             # Example: ["certs", universal_id, "signing"]
             root, agent_id, leaf = path_parts
@@ -165,7 +173,10 @@ class DeploymentSession:
             print(f"[DEBUG][INJECT] {cname} → {path_parts} | bundle keys: {list(bundle.keys())}")
 
         except Exception as e:
-            print(f"[DEPLOY][ERROR] inject_autogen_bundle {cname}: {e}")
+            log_exception_locations("Generated bundle injection", e)
+            raise ManualConstraintFailure(
+                f"Generated bundle '{cname}' could not be placed in the deployment "
+                f"({type(e).__name__}).") from None
 
     def _extract_crypto_from_constraints(self, resolved):
         """
@@ -224,7 +235,7 @@ class DeploymentSession:
                 cname = c["class"]
                 editor_cls = self.resolver.get(cname)
                 if not editor_cls:
-                    if not c.get("auto") and c.get("required"):
+                    if c.get("required", True):
                         raise ManualConstraintFailure(
                             f"[DEPLOY BLOCKED] '{agent['name']}' requires '{cname}', but no editor was found."
                         )
@@ -240,7 +251,10 @@ class DeploymentSession:
                     if not is_auto and c.get("serial"):
                         ok, msg = validator.validate(c)
                         if not ok:
-                            print(f"[VALIDATE][{agent['name']}:{cname}] ❌ {msg}")
+                            if c.get("required", True):
+                                raise ManualConstraintFailure(
+                                    f"Required constraint '{cname}' for '{agent['name']}' failed validation. "
+                                    "Review its registry assignment.")
                             valid_agent = False
                             continue
                         print(f"[VALIDATE][{agent['name']}:{cname}] ✅ {msg}")
@@ -259,14 +273,19 @@ class DeploymentSession:
                             editor._load_data(obj)
                             result = editor.deploy_fields()
                         except Exception as e:
-                            print(f"[RESOLVE][WARN] Registry fetch failed for {cname}: {e}")
-                            result = {}
+                            log_exception_locations("Deployment registry resolution", e)
+                            raise ManualConstraintFailure(
+                                f"Could not resolve constraint '{cname}' for '{agent['name']}' "
+                                f"({type(e).__name__}). Review the registry and diagnostic log.") from None
                     else:
                         raise ValueError(
                             f"[VALIDATE][{agent['name']}:{cname}] Unresolved: Constraint is missing both 'serial' and 'autogen'."
                         )
 
                     if not result:
+                        if c.get("required", True):
+                            raise ManualConstraintFailure(
+                                f"Required constraint '{cname}' for '{agent['name']}' returned no fields.")
                         print(f"[RESOLVE][WARN] Empty result from {cname}")
                         continue
 
@@ -277,11 +296,13 @@ class DeploymentSession:
                     entries[cname] = con
                     print(f"[RESOLVE][OK] {agent['name']}:{cname} ✓")
 
+                except ManualConstraintFailure:
+                    raise
                 except Exception as e:
-                    print(f"[RESOLVE][ERROR] {agent['name']}:{cname} → {e}")
-                    raise ValueError(
-                        f"[VALIDATE][{agent['name']}:{cname}] {e}."
-                    )
+                    log_exception_locations("Deployment constraint resolution", e)
+                    raise ManualConstraintFailure(
+                        f"Constraint '{cname}' for '{agent['name']}' failed "
+                        f"({type(e).__name__}). Review the diagnostic log.") from None
 
             # --- Inject connection fields ---
             agent_conn = {}
@@ -292,7 +313,9 @@ class DeploymentSession:
                     if ed and hasattr(ed, "is_connection") and ed.is_connection():
                         agent_conn.update(con.fields)
                 except Exception as e:
-                    print(f"[CONNECTION][WARN] {agent['name']}:{cname} → {e}")
+                    log_exception_locations("Deployment connection resolution", e)
+                    raise ManualConstraintFailure(
+                        f"Connection constraint '{cname}' failed ({type(e).__name__}).") from None
 
             if agent_conn:
                 agent["connection"] = agent_conn

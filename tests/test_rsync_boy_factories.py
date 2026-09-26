@@ -211,6 +211,48 @@ class MySQLDumpJobTests(unittest.TestCase):
 
 
 class SSHProfileTests(unittest.TestCase):
+    def test_private_key_encryption_selects_prompt_mode(self):
+        import io
+        import paramiko
+        key = paramiko.RSAKey.generate(2048)
+        for passphrase in (None, "test-key-passphrase"):
+            with self.subTest(encrypted=bool(passphrase)):
+                pem = io.StringIO()
+                key.write_private_key(pem, password=passphrase)
+                config = _ssh_config()
+                config["ssh"].update(auth_type="private_key", private_key=pem.getvalue(),
+                                     private_key_passphrase=passphrase)
+                transport = SSHTransport(parse_ssh_profile(config))
+                with mock.patch.object(transport, "_require_binary"), mock.patch.object(transport, "_pin_host_key"):
+                    with transport:
+                        argv = transport._ssh_argv()
+                        self.assertIn("BatchMode=no" if passphrase else "BatchMode=yes", argv)
+                        for option in ("StrictHostKeyChecking=yes", "IdentityAgent=none", "IdentitiesOnly=yes",
+                                       "PreferredAuthentications=publickey", "PasswordAuthentication=no", "KbdInteractiveAuthentication=no"):
+                            self.assertIn(option, argv)
+                        prefix, env = transport._auth_prefix_and_env()
+                        self.assertEqual(prefix, ["sshpass", "-P", "Enter passphrase for key", "-e"] if passphrase else [])
+                        if passphrase:
+                            self.assertEqual(env["SSHPASS"], passphrase)
+                            self.assertNotIn(passphrase, " ".join(argv + prefix))
+
+    def test_wrong_or_missing_key_passphrase_fails_before_connection(self):
+        import io
+        import paramiko
+        key = paramiko.RSAKey.generate(2048)
+        for encryption, supplied in (("correct", "wrong"), ("correct", ""), (None, "unexpected")):
+            with self.subTest(encryption=bool(encryption), supplied=supplied):
+                pem = io.StringIO()
+                key.write_private_key(pem, password=encryption)
+                config = _ssh_config()
+                config["ssh"].update(auth_type="private_key", private_key=pem.getvalue(), private_key_passphrase=supplied)
+                transport = SSHTransport(parse_ssh_profile(config))
+                with mock.patch.object(transport, "_require_binary"), mock.patch.object(transport, "_pin_host_key") as pin:
+                    with self.assertRaises(ValueError):
+                        transport.__enter__()
+                    pin.assert_not_called()
+                    self.assertIsNone(transport._tmp_dir)
+
     def test_password_and_fingerprint_are_retained(self):
         profile = parse_ssh_profile(_ssh_config())
         self.assertEqual("secret", profile.password)
