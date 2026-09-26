@@ -29,6 +29,16 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q matrixos phoenix phoenix_terminal
 
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libegl1 libgl1 libopengl0
+
+      - name: Verify offscreen Qt runtime
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -c "from PyQt6.QtWidgets import QApplication; app = QApplication([]); print('Offscreen Qt runtime ready')"
+
       - name: Run public-release security invariants
         env:
           QT_QPA_PLATFORM: offscreen
