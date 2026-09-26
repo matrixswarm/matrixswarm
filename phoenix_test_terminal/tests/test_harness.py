@@ -146,6 +146,31 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual("failed", result["status"])
         self.assertIn("deadline", result["errors"][0]["detail"])
 
+    def test_worker_preserves_application_exit_diagnostics(self):
+        from phoenix_test_terminal import worker
+
+        def preflight_exit(*args):
+            print("[PHOENIX][PREFLIGHT] missing libxcb-cursor.so.0", file=sys.stderr)
+            raise SystemExit(exit_code)
+
+        for exit_code in (78, 0):
+            with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory() as temporary:
+                sandbox = Path(temporary).resolve()
+                (sandbox / ".phoenix-test-only").touch()
+                output = io.StringIO()
+                with patch.object(sys, "argv", ["worker", "--root", str(REPO), "--sandbox", str(sandbox), "--cockpit-stage", "create"]), \
+                     patch.object(sys, "path", list(sys.path)), \
+                     patch.object(sys, "dont_write_bytecode", True), \
+                     patch("pathlib.Path.cwd", return_value=sandbox), \
+                     patch("phoenix_test_terminal.safety.install_guards"), \
+                     patch("phoenix_test_terminal.cockpit_scenario.run", side_effect=preflight_exit), \
+                     contextlib.redirect_stdout(output):
+                    self.assertEqual(1, worker.main())
+                result = json.loads(output.getvalue())
+                self.assertEqual("failed", result["status"])
+                self.assertIn("missing libxcb-cursor.so.0", result["log"])
+                self.assertIn(f"SystemExit: {exit_code}", result["errors"][0]["detail"])
+
     def test_actual_hanging_worker_is_terminated(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

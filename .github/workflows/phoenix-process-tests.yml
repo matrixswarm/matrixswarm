@@ -30,7 +30,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libegl1 libgl1 libopengl0
+          sudo apt-get install --no-install-recommends -y libegl1 libgl1 libopengl0 libxcb-cursor0
       - name: Verify offscreen Qt runtime
         env:
           QT_QPA_PLATFORM: offscreen

@@ -85,6 +85,12 @@ def main():
                 # Missing dependencies/skips/zero-test suites are never green.
                 if outcome.wasSuccessful() and outcome.testsRun > 0 and not outcome.skipped and not outcome.expectedFailures and not outcome.unexpectedSuccesses:
                     result["status"] = "passed"
+        except SystemExit as exc:
+            # Application preflight can exit deliberately. Preserve its captured
+            # diagnostic instead of leaving the parent with an empty JSON stream.
+            # Even exit(0) is not evidence that a scenario completed its checks.
+            result["status"] = "failed"
+            result["errors"].append({"detail": f"Scenario exited before completion (SystemExit: {exc.code!r})\n{traceback.format_exc()}"})
         except Exception as exc:
             if hasattr(exc, "checks"):
                 result["checks"] = exc.checks
