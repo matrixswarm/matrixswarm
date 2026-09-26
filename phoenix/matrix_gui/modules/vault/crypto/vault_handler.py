@@ -28,6 +28,7 @@ def save_vault_singlefile(data: dict, password: str, data_path: str):
       - Backup existing vault.
       - Atomic write using temp file + rename.
     """
+    tmp_path = None
     # --- 1. Sanitize vault ---
     try:
         deployments = data.get("deployments", {})
@@ -72,7 +73,7 @@ def save_vault_singlefile(data: dict, password: str, data_path: str):
         print(f"[VAULT] ✅ Saved safely to {normalize_path(data_path)}")
     except Exception as e:
         print(f"[VAULT_HANDLER_ERROR] Failed to save vault: {e}")
-        if os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
         raise
 

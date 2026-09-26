@@ -103,7 +103,7 @@ class StormCrow(BaseEditor, ServiceRolesMixin):
             "weather_latitude": self.latitude.text().strip(),
             "weather_longitude": self.longitude.text().strip(),
             "alert_endpoint": self.alert_endpoint.text().strip(),
-            "service-manager": [{"role": roles}],
+            "service-manager": self._service_manager_with_roles(roles),
         })
 
         self.node.mark_dirty()

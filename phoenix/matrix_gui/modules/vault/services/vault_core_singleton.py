@@ -1,6 +1,9 @@
 # Commander Edition – Unified, Protected, Single-Authority Vault System
 import json
 import threading
+import logging
+import traceback
+from collections import deque
 from pathlib import Path
 from copy import deepcopy
 from matrix_gui.core.event_bus import EventBus
@@ -13,7 +16,13 @@ class VaultCoreSingleton:
 
     @classmethod
     def initialize(cls, vault_data, password, vault_path):
+        if cls._instance is not None:
+            if cls._instance._workspace_active is not None or cls._instance._workspace_queue:
+                raise RuntimeError("Wait for pending workspace writes before opening another vault")
+            cls._instance._closed = True
+            EventBus.off("vault.closed", cls._instance._on_closed)
         cls._instance = cls(vault_data, password, vault_path)
+        EventBus.on("vault.closed", cls._instance._on_closed)
         print("[VAULT-CORE] Initialized central vault authority.")
         EventBus.emit("vault.core.ready")
         return cls._instance
@@ -37,11 +46,18 @@ class VaultCoreSingleton:
             self.store_core = StoreCore(self)
 
             self._listeners = set()
+            self._workspace_queue = deque()
+            self._workspace_active = None
+            self._workspace_writer = None
+            self._closed = False
 
         except Exception as e:
             print(f"{str(e)}")
 
     # -----------------------------
+    def _on_closed(self, **kwargs):
+        self._closed = True
+
     def get_store(self, name):
         return self.store_core.get_store(name)
 
@@ -70,32 +86,111 @@ class VaultCoreSingleton:
             EventBus.emit(evt, vcs=self)
 
     # -----------------------------
+    def transform_section(self, key, transform):
+        """Recheck and replace one section under the same lock as persistence.
+
+        The callback receives a detached snapshot; it must not perform I/O.
+        Closed/busy vaults reject before the callback, just like patch().
+        """
+        with self._lock:
+            if self._closed or self._workspace_active is not None or self._workspace_queue:
+                return False
+            candidate = transform(deepcopy(self.data.get(key, {})))
+            if candidate == self.data.get(key, {}):
+                return True
+            return self.patch(key, candidate)
+
     def patch(self, key, value):
         """Single choke point — all mutations flow through here."""
         with self._lock:
+            if self._closed:
+                return False
+
+            # Legacy synchronous callers must not overwrite a snapshot which
+            # is still being saved. They retain their existing rejection path.
+            if self._workspace_active is not None or self._workspace_queue:
+                return False
 
             if value is None:
                 print(f"[VAULT][PROTECT] Refusing to remove section {key}.")
                 return False
 
-            self.data[key] = deepcopy(value)
-
-            raw = json.dumps(self.data)
+            candidate = deepcopy(self.data)
+            candidate[key] = deepcopy(value)
+            raw = json.dumps(candidate)
             if len(raw) < 200:
                 print("[VAULT][PROTECT] Refusing to shrink vault unnaturally.")
                 self.data = deepcopy(self.last_good)
                 return False
 
-            self.last_good = deepcopy(self.data)
-
+            # EventBus swallows listener exceptions, so require an explicit
+            # acknowledgement from the synchronous writer before publishing.
+            receipt = {"saved": False}
             EventBus.emit("vault.update",
-                          data=self.data,
+                          data=candidate,
                           password=self.password,
-                          vault_path=str(self.vault_path))
+                          vault_path=str(self.vault_path),
+                          receipt=receipt)
+            if not receipt["saved"]:
+                return False
+            self.data[key] = deepcopy(candidate[key])
+            self.last_good = deepcopy(self.data)
 
             EventBus.emit("vault.core.update")
 
             return True
+
+    def save_workspace_async(self, entry, callback):
+        """Queue one detached workspace edit; callback runs on the Qt thread."""
+        from PyQt6.QtCore import QCoreApplication, QThread
+        app = QCoreApplication.instance()
+        if app is None or QThread.currentThread() != app.thread():
+            raise RuntimeError("Workspace saves must be requested on the GUI thread")
+        if self._closed:
+            raise RuntimeError("The workspace vault is closed")
+        if not isinstance(entry, dict) or not isinstance(entry.get("uuid"), str) or not entry["uuid"].strip():
+            raise ValueError("Workspace save requires a nonempty string identity")
+        if not callable(callback):
+            raise TypeError("Workspace save requires a completion callback")
+        if not isinstance(self.data.get("workspaces", {}), dict):
+            raise ValueError("Vault workspaces section is malformed; save refused")
+        from .workspace_writer import WorkspaceWriter
+        if self._workspace_writer is None:
+            self._workspace_writer = WorkspaceWriter(self._workspace_written)
+        self._workspace_queue.append((deepcopy(entry), callback))
+        self._start_workspace_write()
+
+    def _start_workspace_write(self):
+        if self._workspace_active is not None or not self._workspace_queue:
+            return
+        entry, callback = self._workspace_queue.popleft()
+        snapshot = deepcopy(self.data)
+        snapshot.setdefault("workspaces", {})[entry["uuid"]] = entry
+        self._workspace_active = (entry, callback)
+        try:
+            self._workspace_writer.submit(snapshot, self.password, str(self.vault_path))
+        except Exception as exc:
+            self._workspace_written(exc)
+
+    def _workspace_written(self, error):
+        entry, callback = self._workspace_active
+        self._workspace_active = None
+        if error is None:
+            self.data.setdefault("workspaces", {})[entry["uuid"]] = deepcopy(entry)
+            self.last_good = deepcopy(self.data)
+            if not self._closed:
+                EventBus.emit("vault.core.update")
+        try:
+            callback(error is None)
+        except Exception as exc:
+            # The write result remains authoritative even if its UI consumer fails.
+            frames = traceback.extract_tb(exc.__traceback__)
+            locations = "\n".join(f"{frame.filename}:{frame.lineno} in {frame.name}" for frame in frames)
+            logging.getLogger(__name__).error(
+                "Workspace completion callback failed (%s); disk write success=%s\n%s",
+                type(exc).__name__, error is None, locations)
+        finally:
+            self._start_workspace_write()
 
     def batch(self, *stores):
         """

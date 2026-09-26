@@ -1,9 +1,10 @@
 # Authored by Daniel F MacDonald and ChatGPT-5.1 aka The Generals
 import importlib
+from copy import deepcopy
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QGraphicsItem, QGraphicsRectItem, QGraphicsDropShadowEffect
+from PyQt6.QtWidgets import QGraphicsItem, QGraphicsRectItem, QGraphicsDropShadowEffect, QMessageBox
 from PyQt6.QtGui import QColor, QPen, QPainter, QKeyEvent, QFont
-from .cls_lib.agent.config_editors.base_editor import BaseEditor
+from .cls_lib.agent.config_editors.base_editor import BaseEditor, log_editor_failure
 from .cls_lib.color.color_manager import ColorManager
 from .cls_lib.agent.agent_node import AgentNode
 
@@ -64,7 +65,6 @@ class AgentItem(QGraphicsRectItem):
         ws = getattr(scene, "workspace", None)
         if ws and hasattr(ws, "controller"):
             ws.controller.delete_node(self)
-            ws.save()
         else:
             # Fallback if no controller is wired (shouldn't happen)
             scene.removeItem(self)
@@ -75,18 +75,36 @@ class AgentItem(QGraphicsRectItem):
             return
 
         name = self.node.get_name().lower()
+        workspace = getattr(self.scene(), "workspace", None)
+        before = deepcopy(self.node.config)
+        dirty = self.node._dirty
         try:
-            print(f"config editor loading .... matrix_gui.swarm_workspace.cls_lib.agent.config_editors.{name}")
-            mod = importlib.import_module(f"matrix_gui.swarm_workspace.cls_lib.agent.config_editors.{name}")
-            # Convert snake_case to CamelCase for class lookup
-            class_name = "".join(part.capitalize() for part in name.split("_"))
-            Editor = getattr(mod, class_name)
-        except (ImportError, AttributeError):
-            Editor = BaseEditor
-
-        dlg = Editor(self.node, parent=getattr(self.scene(), "workspace", None))
-        if dlg.exec():
-            self.scene().workspace.save()  # save workspace immediately
+            module_name = f"matrix_gui.swarm_workspace.cls_lib.agent.config_editors.{name}"
+            try:
+                mod = importlib.import_module(module_name)
+            except ModuleNotFoundError as exc:
+                if exc.name != module_name:
+                    raise
+                Editor = BaseEditor
+            else:
+                class_name = "".join(part.capitalize() for part in name.split("_"))
+                Editor = getattr(mod, class_name)
+            dlg = Editor(self.node, parent=workspace)
+            accepted = dlg.exec()
+        except Exception as exc:
+            log_editor_failure("open", exc)
+            if isinstance(self.node.config, dict) and isinstance(before, dict):
+                self.node.config.clear()
+                self.node.config.update(before)
+            else:
+                self.node.config = before
+            self.node._dirty = dirty
+            QMessageBox.critical(workspace, "Configuration Editor Failed",
+                                 f"Unable to use the {name} editor ({type(exc).__name__}). "
+                                 "Configuration was restored; no save was requested. Diagnostic stack locations were logged.")
+            return
+        if accepted and workspace:
+            workspace.save()
 
     # ---------------------------------------------------------
     def mousePressEvent(self, event):
@@ -116,10 +134,15 @@ class AgentItem(QGraphicsRectItem):
 
         # text
         name = self.node.universal_id
-        emoji = (
-                self.node.config.get("ui", {}).get("agent_tree", {}).get("emoji", "")
-                or self.meta.get("ui", {}).get("agent_tree", {}).get("emoji", "")
-        )
+        def configured_emoji(config):
+            if not isinstance(config, dict):
+                return ""
+            ui = config.get("ui")
+            tree = ui.get("agent_tree") if isinstance(ui, dict) else None
+            value = tree.get("emoji") if isinstance(tree, dict) else None
+            return value if isinstance(value, str) else ""
+
+        emoji = configured_emoji(self.node.config) or configured_emoji(self.meta)
 
         # --- Fix corrupted emoji encoding ---
         if isinstance(emoji, str) and "ð" in emoji:

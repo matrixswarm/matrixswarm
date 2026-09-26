@@ -33,10 +33,8 @@ class DirectiveCompiler:
                 continue
 
             # --- autogen editors: strip private keys ---
-            if editor.directive_fields():
-                fields = editor.directive_fields()
-            else:
-                fields = con.fields
+            public_fields = editor.directive_fields()
+            fields = deepcopy(public_fields if public_fields else con.fields)
 
             path = editor.get_directory_path()
             if path:

@@ -134,7 +134,7 @@ class TripwireLite(BaseEditor, ServiceRolesMixin, ListEditorMixin):
             "allowed_extensions": allowed_extensions,
             "suspicious_extensions": suspicious_extensions,
             "alert_to_role": self.alert_to_role.text().strip(),
-            "service-manager": [{"role": roles}],
+            "service-manager": self._service_manager_with_roles(roles),
         })
 
         self.node.mark_dirty()

@@ -123,10 +123,29 @@ def encode_boot_envelope(encrypted_bundle, swarm_key_b64):
     return payload
 
 
-def send_boot_envelope(channel, encrypted_bundle, swarm_key_b64):
+def send_boot_envelope(channel, encrypted_bundle, swarm_key_b64, *, check_cancel=None):
     """Send a boot envelope once, then close only the SSH write direction."""
     payload = encode_boot_envelope(encrypted_bundle, swarm_key_b64)
-    channel.sendall(payload)
+    if check_cancel is None:
+        channel.sendall(payload)
+    else:
+        import time
+        import socket
+        deadline = time.monotonic() + 60
+        channel.settimeout(0.5)
+        offset = 0
+        while offset < len(payload):
+            check_cancel()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Boot envelope upload timed out")
+            try:
+                sent = channel.send(payload[offset:offset + 32768])
+            except socket.timeout:
+                continue
+            if sent <= 0:
+                raise ConnectionError("SSH channel closed during boot upload")
+            offset += sent
+        check_cancel()
     channel.shutdown_write()
     return len(payload)
 
@@ -520,6 +539,7 @@ def build_remote_matrixd_command(
     boot_flags=(),
     reboot_id=None,
     runtime_capabilities=None,
+    request_id=None,
 ):
     """Build the shared Railgun/DeployDialog least-privilege command.
 
@@ -593,6 +613,7 @@ def build_remote_matrixd_command(
         "{ echo \"[MATRIX][ERROR] Shared source is not root-locked: $BAD_SOURCE\" >&2; exit 77; }",
         "done",
     ]
+    request_preflight = list(lines)
 
     if action == "stop":
         lines.extend([
@@ -933,4 +954,15 @@ def build_remote_matrixd_command(
         boot_command += f" {q_flags}"
 
     lines.append(boot_command)
+    if request_id is not None:
+        if not isinstance(request_id, str) or not re.fullmatch(r"[a-f0-9]{32,64}", request_id):
+            raise ValueError("Invalid Railgun request ID")
+        encoded_command = base64.b64encode("\n".join(lines).encode()).decode("ascii")
+        wrapper = "/matrix/scripts/matrix-railgun-request"
+        request_preflight.extend([
+            f"test -f {wrapper} || {{ echo '[RAILGUN][ERROR] Update MatrixOS: durable request wrapper missing.' >&2; exit 69; }}",
+            f"exec /matrix/.venv/bin/python3 {wrapper} --universe {q_universe} "
+            f"--request-id {shlex.quote(request_id)} --command-b64 {shlex.quote(encoded_command)}",
+        ])
+        return _root_shell("\n".join(request_preflight))
     return _root_shell("\n".join(lines))

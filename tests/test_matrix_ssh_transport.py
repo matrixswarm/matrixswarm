@@ -242,7 +242,7 @@ class MatrixSSHTransportTests(unittest.TestCase):
         import json
 
         meta = json.loads(META.read_text(encoding="utf-8"))
-        ssh = next(item["ssh"] for item in meta["constraints"] if "ssh" in item)
+        ssh = next(item["matrix_ssh"] for item in meta["constraints"] if "matrix_ssh" in item)
         self.assertEqual(1, ssh["inject_in_connection"])
         self.assertEqual(1, ssh["deployment_only"])
         self.assertEqual("outgoing.command", meta["connection"]["channel"])

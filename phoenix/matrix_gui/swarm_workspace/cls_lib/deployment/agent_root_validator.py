@@ -8,11 +8,12 @@ from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSing
 
 
 class AgentRootValidator:
-    def __init__(self, directive_staging, cached_paths=None, parent=None):
+    def __init__(self, directive_staging, cached_paths=None, parent=None, replace_cached_paths=False):
         self.directive_staging = directive_staging
         self.vcs = VaultCoreSingleton.get()
         self.cached_paths = [p for p in (cached_paths or []) if isinstance(p, str) and p]
         self.parent = parent
+        self.replace_cached_paths = replace_cached_paths
 
     def run(self):
         """Return a source root only after every node has a verified src; None means abort."""
@@ -48,7 +49,7 @@ class AgentRootValidator:
     def _cache(self, verified_roots):
         """Persist only contributing directories after the entire selection succeeds."""
         roots = list(verified_roots)
-        for path in self.vcs.data.get("agent_roots", []):
+        for path in ([] if self.replace_cached_paths else self.vcs.data.get("agent_roots", [])):
             if isinstance(path, str) and path and path not in roots:
                 roots.append(path)
         self.vcs.patch("last_agent_path", verified_roots[0])

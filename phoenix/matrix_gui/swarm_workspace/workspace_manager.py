@@ -69,11 +69,19 @@ class WorkspaceManagerDialog(QDialog):
         """Persist workspace list to vault through VaultCore."""
         vcs = VaultCoreSingleton.get()  # live vault authority
         updated_workspaces = self.workspaces if workspaces is None else workspaces
-        committed = vcs.patch("workspaces", updated_workspaces)
-        self.vault_data = vcs.data
-        self.workspaces = vcs.data["workspaces"]
-        if not committed:
-            raise RuntimeError("Vault rejected the workspace update.")
+        previous = copy.deepcopy(vcs.data["workspaces"])
+        committed = False
+        try:
+            committed = vcs.patch("workspaces", copy.deepcopy(updated_workspaces))
+            if not committed:
+                raise RuntimeError("Vault rejected the workspace update.")
+        finally:
+            if not committed:
+                live = vcs.data.setdefault("workspaces", {})
+                live.clear()
+                live.update(previous)
+            self.vault_data = vcs.data
+            self.workspaces = vcs.data["workspaces"]
         return True
 
     # ------------------------------------------------------------------
@@ -143,6 +151,7 @@ class WorkspaceManagerDialog(QDialog):
 
         except Exception as e:
             emit_gui_exception_log("WorkspaceManagerDialog._new_workspace", e)
+            QMessageBox.critical(self, "Create Error", f"Failed to create workspace: {e}")
 
     def _clone_workspace(self):
         """Creates a deep copy of the selected workspace with a new UUID."""
@@ -167,10 +176,11 @@ class WorkspaceManagerDialog(QDialog):
             new_ws["label"] = f"Copy of {original_ws.get('label', 'Untitled')}"
 
             # 3. Insert into the vault dictionary
-            self.workspaces[new_uuid] = new_ws
+            updated_workspaces = copy.deepcopy(self.workspaces)
+            updated_workspaces[new_uuid] = new_ws
 
             # 4. Persist and Refresh
-            self._persist()
+            self._persist(updated_workspaces)
             self._populate()
 
             # Select the new clone in the list
@@ -213,13 +223,9 @@ class WorkspaceManagerDialog(QDialog):
             if confirm != QMessageBox.StandardButton.Yes:
                 return
 
-            # 1. remove from live dict
-            if uuid_ in self.workspaces:
-                del self.workspaces[uuid_]
-
-            # 2. persist through VaultCore
-            vcs = VaultCoreSingleton.get()
-            vcs.patch("workspaces", self.workspaces)
+            updated_workspaces = copy.deepcopy(self.workspaces)
+            updated_workspaces.pop(uuid_, None)
+            self._persist(updated_workspaces)
 
             # 3. refresh UI
             self._populate()
@@ -230,16 +236,20 @@ class WorkspaceManagerDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _rename_workspace(self):
-        item = self.ws_list.currentItem()
-        if not item:
-            return
+        try:
+            item = self.ws_list.currentItem()
+            if not item:
+                return
 
-        uuid_ = item.data(Qt.ItemDataRole.UserRole)
-        current = self.workspaces[uuid_].get("label", "")
-
-        new_name, ok = QInputDialog.getText(self, "Rename Workspace", "New label:", text=current)
-
-        if ok and new_name.strip():
-            self.workspaces[uuid_]["label"] = new_name.strip()
-            self._persist()
-            self._populate()
+            uuid_ = item.data(Qt.ItemDataRole.UserRole)
+            current = self.workspaces[uuid_].get("label", "")
+            new_name, ok = QInputDialog.getText(self, "Rename Workspace", "New label:", text=current)
+            if ok and new_name.strip():
+                updated_workspaces = copy.deepcopy(self.workspaces)
+                updated_workspaces[uuid_]["label"] = new_name.strip()
+                self._persist(updated_workspaces)
+                self._populate()
+                self._select_workspace(uuid_)
+        except Exception as e:
+            emit_gui_exception_log("WorkspaceManagerDialog._rename_workspace", e)
+            QMessageBox.critical(self, "Rename Error", f"Failed to rename workspace: {e}")

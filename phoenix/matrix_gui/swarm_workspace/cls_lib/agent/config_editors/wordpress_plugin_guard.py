@@ -1,4 +1,5 @@
 from .base_editor import BaseEditor
+from copy import deepcopy
 from .mixin.service_roles_mixin import ServiceRolesMixin
 
 from PyQt6.QtWidgets import (
@@ -16,7 +17,7 @@ class WordpressPluginGuard(BaseEditor, ServiceRolesMixin):
     """
 
     def _build_form(self):
-        cfg = self.config
+        cfg = deepcopy(self.config)
 
         # =======================================================
         # General Settings
@@ -135,15 +136,7 @@ class WordpressPluginGuard(BaseEditor, ServiceRolesMixin):
             "rpc_router_role": self.rpc_router_role.text().strip() or "hive.rpc",
 
             # service-manager
-            "service-manager": [{
-                "role": roles,
-                "scope": ["parent", "any"],
-                "priority": {
-                    "hive.log.delivery": -1,
-                    "hive.proxy.route": 5,
-                    "default": 10
-                }
-            }],
+            "service-manager": self._service_manager_with_roles(roles),
         })
 
         self.node.mark_dirty()

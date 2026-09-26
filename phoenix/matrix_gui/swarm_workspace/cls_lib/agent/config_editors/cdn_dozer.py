@@ -77,7 +77,7 @@ class CdnDozer(BaseEditor, ServiceRolesMixin):
             "ssh_path": self.remote_path.text().strip(),
             "poll_interval": int(self.poll_interval.value()),
             "watch_path": self.watch_path.text().strip(),
-            "service-manager": [{"role": roles}],
+            "service-manager": self._service_manager_with_roles(roles),
         })
 
         self.node.mark_dirty()

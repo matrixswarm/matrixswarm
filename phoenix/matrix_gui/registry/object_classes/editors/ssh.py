@@ -567,8 +567,17 @@ class SSH(BaseEditor):
         if not self.host.text().strip():
             return False, "Host is required."
 
+        if not self.username.text().strip():
+            return False, "Username is required."
+
         if not self.port.text().isdigit():
             return False, "Port must be numeric."
+        try:
+            port = int(self.port.text())
+        except ValueError:
+            return False, "Port must be numeric."
+        if not 1 <= port <= 65535:
+            return False, "Port must be between 1 and 65535."
 
         method = self.auth_type.currentText()
         if method == "password" and not self.password.text().strip():
@@ -588,6 +597,15 @@ class SSH(BaseEditor):
 
         if not self.fingerprint.text().strip():
             return False, "Trusted SHA256 host fingerprint is required."
+        fingerprint = self.fingerprint.text().strip()
+        # Accept OpenSSH's unpadded SHA256 form and the padded form Phoenix
+        # generates, but require a canonical 32-byte digest (not just a prefix).
+        if not re.fullmatch(r"SHA256:[A-Za-z0-9+/]{43}=?", fingerprint):
+            return False, "Trusted fingerprint must be a SHA256 SSH host fingerprint."
+        encoded = fingerprint[7:].rstrip("=")
+        digest = base64.b64decode(encoded + "=", validate=True)
+        if len(digest) != 32 or base64.b64encode(digest).decode().rstrip("=") != encoded:
+            return False, "Trusted fingerprint must encode a valid SHA256 digest."
 
         return True, ""
 

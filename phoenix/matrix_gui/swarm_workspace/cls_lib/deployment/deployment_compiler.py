@@ -8,13 +8,22 @@ class DeploymentCompiler:
         self.certs = {}   # uid → signing/symmetric/connection_cert bundles
 
     def compile(self):
-        agents_section = self._build_private_tree(self.root)
+        # Every attempt owns its certificate map; never reuse or clear a map
+        # already returned to a caller by an earlier successful build.
+        self.certs = {}
+        try:
+            agents_section = self._build_private_tree(self.root)
+        except Exception:
+            self.certs = {}
+            raise
         return {
             "agents": agents_section,
             "certs": self.certs,
         }
 
     def _build_private_tree(self, gid):
+        from copy import deepcopy
+
         agent_ir = self.ir[gid]
         node = {
             "universal_id": agent_ir.universal_id,
@@ -29,14 +38,15 @@ class DeploymentCompiler:
         #    print(agent_ir.node)
 
         # Commander Edition – integrate autogen certs and preserve connections
-        node["connection"] = agent_ir.node.get("connection", {})  # keep what we already have
+        node["connection"] = deepcopy(agent_ir.node.get("connection", {}))
 
         for con in agent_ir.resolved.values():
             try:
 
                 if not isinstance(con, Constraint):
-                    print('not a constraint')
-                    continue
+                    raise TypeError("Invalid resolved constraint object")
+
+                fields = deepcopy(con.get_fields())
 
                 # Preserve existing connection block instead of overwriting
                 try:
@@ -44,29 +54,35 @@ class DeploymentCompiler:
                     #now we inject the connection details into the deployment
                     editor=con.get_editor()
                     if editor.is_connection():
-                        node["connection"].update(con.get_fields())
+                        node["connection"].update(fields)
                         continue
 
                     #this is a special case, that allows constraint that isn't
                     #a connection to be injected into the deployment, e.g. matrix_email;
                     elif con.inject_into_connection():
-                        node["connection"].update(con.get_fields())
+                        node["connection"].update(fields)
                         if con.is_deployment_only():
                             continue
 
                 except Exception as e:
-                    print(f"{con.get_constraint_name()} has no handler {e}")
-                    pass
+                    # Preserve the original traceback for the safe location-only
+                    # logger below; do not reinterpret credentials as certificates.
+                    raise
 
                 # Route certs & crypto bundles into certs section
                 base = self.certs.setdefault(agent_ir.universal_id, {})
                 if hasattr(con, "path") and con.path:
-                    AutoGenConstraint.set_nested(base, con.path, con.get_fields())
+                    AutoGenConstraint.set_nested(base, con.path, fields)
                 else:
-                    base.update(con.get_fields())
+                    base.update(fields)
 
             except Exception as e:
-                print(f"[DEPLOY][WARN] Connection/cert injection error for {agent_ir.name}: {e}")
+                from matrix_gui.util.exception_diagnostics import log_exception_locations
+                log_exception_locations("Deployment field injection", e)
+                raise ValueError(
+                    f"Deployment fields for '{agent_ir.name}' could not be compiled "
+                    f"({type(e).__name__}). Review the diagnostic log."
+                ) from None
 
         # Agent metadata owns the Phoenix routing role. Apply it after the
         # reusable Registry profile so an SSH profile used for other purposes

@@ -182,7 +182,7 @@ class AgentInspector(QWidget):
                 c,
                 edit_callback=self._edit_constraint,
                 remove_callback=self._remove_constraint,
-                change_callback=self._reload_constraints
+                change_callback=self._constraints_changed
             )
 
             # REQUIRED / AUTO CLEANUP
@@ -224,11 +224,12 @@ class AgentInspector(QWidget):
 
             constraint["serial"] = serial
             constraint["met"] = True
-            self._reload_constraints()
+            self._constraints_changed()
 
         dlg = RegistryManagerDialog(
             parent=self,
             class_lock=cls,
+            selected_serial=constraint.get("serial"),
             assign_callback=assign_callback
         )
         dlg.exec()
@@ -238,7 +239,12 @@ class AgentInspector(QWidget):
     # ------------------------------------------------------------
     def _edit_constraint(self, constraint):
         # Handled in row widget; this delegate required only for refresh
+        self._constraints_changed()
+
+    def _constraints_changed(self):
         self._reload_constraints()
+        if self.workspace:
+            self.workspace.save()
 
     def _edit_selected(self):
         row = self._get_selected_constraint()
@@ -256,7 +262,7 @@ class AgentInspector(QWidget):
             return
 
         self.node.constraints.remove(constraint)
-        self._reload_constraints()
+        self._constraints_changed()
 
     def _remove_selected(self):
         row = self._get_selected_constraint()
@@ -295,7 +301,7 @@ class AgentInspector(QWidget):
                 "required": False
             }
             self.node.constraints.append(new_constraint)
-            self._reload_constraints()
+            self._constraints_changed()
 
         dlg = RegistryManagerDialog(
             parent=self,

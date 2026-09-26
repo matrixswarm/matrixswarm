@@ -24,12 +24,24 @@ jobs:
 
       - name: Install security-test dependencies
         # Harvester's isolated SSH worker needs the real transport dependency.
-        run: python -m pip install cryptography==45.0.4 psutil==7.0.0 pycryptodome==3.23.0 requests==2.32.4 websocket-client==1.8.0 paramiko==4.0.0 -e "./phoenix_terminal[mcp]"
+        run: python -m pip install -r phoenix_test_terminal/requirements.txt -e "./phoenix_terminal[mcp]"
 
       - name: Compile Python sources
         run: python -m compileall -q matrixos phoenix phoenix_terminal
 
+      - name: Install Linux Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libegl1 libgl1 libopengl0 libxcb-cursor0
+
+      - name: Verify offscreen Qt runtime
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -c "from PyQt6.QtWidgets import QApplication; app = QApplication([]); print('Offscreen Qt runtime ready')"
+
       - name: Run public-release security invariants
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Run Phoenix Terminal bridge and MCP tests

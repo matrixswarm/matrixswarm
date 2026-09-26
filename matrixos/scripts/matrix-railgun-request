@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""Root-only, durable at-most-once wrapper for a Railgun boot operation.
+
+Receipts contain hashes/status only, never the envelope or command. A crash after
+claiming leaves an unknown outcome and a universe lock: operator reconciliation
+is required; never infer that it is safe to replay from a dead SSH connection.
+"""
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+LIMIT = 16 * 1024 * 1024
+TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+
+
+def sync_directory(path):
+    if os.name == "posix":
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
+def write_receipt(path, record):
+    fd, tmp = tempfile.mkstemp(prefix=".receipt-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(record, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+        sync_directory(path.parent)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def run_request(state, universe, request_id, command, payload, execute):
+    if not TOKEN.fullmatch(universe) or not re.fullmatch(r"[a-f0-9]{32,64}", request_id):
+        raise ValueError("Invalid request identity")
+    if not payload or len(payload) > LIMIT:
+        raise ValueError("Invalid boot envelope size")
+    envelope = json.loads(payload)
+    if not isinstance(envelope, dict) or envelope.get("version") != 1:
+        raise ValueError("Invalid boot envelope")
+    # No shell side effects until the complete envelope is received and parsed.
+    bundle = envelope.get("encrypted_bundle")
+    if not isinstance(bundle, dict) or set(bundle) != {"nonce", "tag", "ciphertext"}:
+        raise ValueError("Incomplete boot envelope")
+    for field in bundle.values():
+        if not isinstance(field, str) or not base64.b64decode(field, validate=True):
+            raise ValueError("Invalid encrypted bundle encoding")
+    key = base64.b64decode(envelope.get("swarm_key", ""), validate=True)
+    if not 16 <= len(key) <= 64:
+        raise ValueError("Invalid swarm key encoding")
+    fingerprint = hashlib.sha256(command.encode() + b"\0" + payload).hexdigest()
+    scope = hashlib.sha256(universe.encode()).hexdigest()
+    receipt = state / (scope + "." + request_id + ".json")
+    lock = state / (scope + ".active")
+    # Atomic directory creation serializes different requests for one universe.
+    try:
+        lock.mkdir(mode=0o700)
+    except FileExistsError:
+        raise RuntimeError("Universe has an active or interrupted request; inspect it before retrying") from None
+    sync_directory(state)
+    claimed = False
+    completed = False
+    try:
+        if receipt.exists():
+            record = json.loads(receipt.read_text(encoding="utf-8"))
+            if record.get("fingerprint") != fingerprint:
+                raise ValueError("Request ID was reused with different boot content or options")
+            if record.get("status") != "completed":
+                raise RuntimeError("Previous request outcome unknown; automatic replay refused")
+            code = record["exit_code"]
+            if type(code) is not int or not 0 <= code <= 255:
+                raise ValueError("Invalid request receipt")
+            print(f"[RAILGUN][REPLAY] Request already completed (exit={code}); no boot repeated. This is not a live health check.", flush=True)
+            return code
+        record = {"fingerprint": fingerprint, "status": "started"}
+        write_receipt(receipt, record)
+        claimed = True
+        code = execute(command, payload)
+        if type(code) is not int or not 0 <= code <= 255:
+            raise RuntimeError("Remote operation ended without a normal exit status")
+        write_receipt(receipt, {**record, "status": "completed", "exit_code": code})
+        completed = True
+        print(f"[RAILGUN][COMPLETED] request={request_id} exit={code}", flush=True)
+        return code
+    finally:
+        # Uncertain execution deliberately retains both receipt and lock.
+        if not claimed or completed:
+            lock.rmdir()
+            sync_directory(state)
+
+
+def secure_state_directory():
+    state = Path("/var/lib/matrixswarm-railgun")
+    state.mkdir(mode=0o700, exist_ok=True)
+    info = state.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise PermissionError("Railgun receipt directory must be root-owned mode 0700")
+    sync_directory(state.parent)
+    return state
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--protocol", action="store_true")
+    parser.add_argument("--universe")
+    parser.add_argument("--request-id")
+    parser.add_argument("--command-b64")
+    args = parser.parse_args()
+    if args.protocol:
+        print("railgun-request-v1")
+        return 0
+    if os.geteuid() != 0:
+        raise PermissionError("Railgun request wrapper requires root")
+    command = base64.b64decode(args.command_b64, validate=True).decode("utf-8")
+    if not command or len(command) > 256 * 1024:
+        raise ValueError("Invalid command size")
+    payload = sys.stdin.buffer.read(LIMIT + 1)
+    return run_request(secure_state_directory(), args.universe, args.request_id,
+        command, payload, lambda cmd, data: subprocess.run(
+            ["/bin/sh", "-c", cmd], input=data, check=False).returncode)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as error:
+        # Exception messages may originate in subprocess/filesystem internals.
+        print(f"[RAILGUN][BLOCKED] {type(error).__name__}: request not replayed; inspect server receipt state.", file=sys.stderr)
+        sys.exit(75)

@@ -51,7 +51,7 @@ class MatrixWebsocket(BaseEditor, ServiceRolesMixin):
         self.node.config.update({
             "lockdown_state": self.lockdown_checkbox.isChecked(),
             "lockdown_time": int(self.lockdown_time.value()),
-            "service-manager": [{"role": roles}],
+            "service-manager": self._service_manager_with_roles(roles),
         })
 
         self.node.mark_dirty()

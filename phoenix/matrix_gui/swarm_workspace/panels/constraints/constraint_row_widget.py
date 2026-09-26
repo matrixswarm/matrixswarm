@@ -32,7 +32,6 @@ class ConstraintRowWidget(QWidget):
 
     def __init__(self, constraint, edit_callback, remove_callback, change_callback=None):
         super().__init__()
-        super().__init__()
         self.constraint = constraint
         self.edit_callback = edit_callback
         self.remove_callback = remove_callback
@@ -188,6 +187,8 @@ class ConstraintRowWidget(QWidget):
         cls = self.constraint["class"]
 
         def assign_callback(class_name, serial):
+            if class_name != cls or not serial:
+                return
             # Write assignment directly back into the constraint
             self.constraint["serial"] = serial
             self.constraint["met"] = True
@@ -199,6 +200,7 @@ class ConstraintRowWidget(QWidget):
         dlg = RegistryManagerDialog(
             parent=self,
             class_lock=cls,
+            selected_serial=self.constraint.get("serial"),
             assign_callback=assign_callback
         )
         dlg.exec()

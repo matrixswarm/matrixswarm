@@ -347,9 +347,9 @@ class ClownCarGuiTests(SourceFixture):
         self.critical.assert_called_once()
         self.assertEqual([], self.vault.writes)
 
-    def deploy(self, directive, *, enabled=True):
+    def deploy(self, directive, *, enabled=True, source_root=""):
         module = importlib.import_module("matrix_gui.swarm_workspace.cls_lib.deployment.deploy")
-        opts = {"clown_car": enabled, "universe": "test", "linux_user": "matrix-test",
+        opts = {"clown_car": enabled, "agent_source_root": source_root, "universe": "test", "linux_user": "matrix-test",
                 "railgun_target": {"serial": "test-profile"}}
         mock.patch.object(module.QInputDialog, "getText", return_value=("test", True)).start()
         options = mock.patch.object(module, "DeployOptionsDialog").start()
@@ -366,6 +366,47 @@ class ClownCarGuiTests(SourceFixture):
             None, directive, SimpleNamespace(deployment={"agents": [], "certs": {}}), "workspace-test",
         )
         return SimpleNamespace(launch=launch, generate=generate, validator=validator, preview=preview)
+
+    def test_explicit_root_replaces_valid_old_sources(self):
+        self.source("old/matrix.py", b"old matrix")
+        self.source("old/worker.py", b"old worker")
+        self.source("new/matrix.py", b"new matrix")
+        self.source("new/worker.py", b"new worker")
+        self.vault.data.update(last_agent_path=str(self.root / "old"), agent_roots=[str(self.root / "old")])
+        result = self.deploy(tree(), source_root=str(self.root / "new"))
+        result.launch.assert_called_once()
+        record, = self.vault.data["deployments"].values()
+        decoded = decrypt_swarm_encrypted_directive(record["encrypted_bundle"], record["swarm_key"])
+        self.assertEqual(b"new matrix", base64.b64decode(decoded["src_embed"]))
+        self.assertEqual(b"new worker", base64.b64decode(decoded["children"][0]["src_embed"]))
+        self.assertEqual([str(self.root / "new")], self.vault.data["agent_roots"])
+
+    def test_incomplete_override_does_not_fall_back_to_old_checkout(self):
+        self.source("old/matrix.py", b"old matrix")
+        self.source("old/worker.py", b"old worker")
+        self.source("new/matrix.py", b"new matrix")
+        self.vault.data.update(last_agent_path=str(self.root / "old"), agent_roots=[str(self.root / "old")])
+        before = deepcopy(self.vault.data)
+        with mock.patch.object(self.validator_module, "AgentRootCheckDialog") as dialog:
+            dialog.return_value.exec_check.return_value = None
+            result = self.deploy(tree(), source_root=str(self.root / "new"))
+        dialog.assert_called_once()
+        result.launch.assert_not_called()
+        result.generate.assert_not_called()
+        self.assertEqual(before, self.vault.data)
+
+    def test_options_source_picker_cancel_preserves_selection(self):
+        module = importlib.import_module("matrix_gui.modules.directive.deploy_options_dialog")
+        dialog = module.DeployOptionsDialog({}, "test", cached_source_path=str(self.root))
+        self.addCleanup(dialog.deleteLater)
+        self.assertFalse(dialog.source_browse.isEnabled())
+        dialog.clown_car_cb.setChecked(True)
+        with mock.patch.object(module.QFileDialog, "getExistingDirectory", side_effect=[str(self.root / "new"), ""]):
+            dialog.source_browse.click()
+            dialog.source_browse.click()
+        self.assertEqual(str(self.root / "new"), dialog.get_options()["agent_source_root"])
+        dialog.clown_car_cb.setChecked(False)
+        self.assertEqual("", dialog.get_options()["agent_source_root"])
 
     def test_full_deployment_embeds_multiple_cached_roots_in_sealed_bundle(self):
         matrix = self.source("main/matrix.py", b"matrix bytes\n")

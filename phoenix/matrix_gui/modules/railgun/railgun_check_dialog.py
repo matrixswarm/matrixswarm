@@ -14,6 +14,7 @@ from matrix_gui.modules.railgun.ssh_support import (
     load_registry_ssh_profiles,
 )
 from matrix_gui.modules.railgun.clock_validation import validate_remote_clock
+from matrix_gui.util.exception_diagnostics import log_exception_locations
 
 
 class RailgunCheckWorker(QThread):
@@ -257,10 +258,25 @@ class RailgunCheckWorker(QThread):
                     )
                     return
             self.success = True
+        except Exception as exc:
+            self.success = False
+            log_exception_locations("Railgun remote check", exc)
+            self.output.emit(
+                f"[FAIL] Remote check failed unexpectedly ({type(exc).__name__}); "
+                "see diagnostic log for code locations."
+            )
         finally:
-            if self.client is not None:
-                self.client.close()
-                self.client = None
+            client, self.client = self.client, None
+            if client is not None:
+                try:
+                    client.close()
+                except Exception as exc:
+                    self.success = False
+                    log_exception_locations("Railgun SSH cleanup", exc)
+                    self.output.emit(
+                        f"[FAIL] SSH cleanup failed ({type(exc).__name__}); "
+                        "see diagnostic log for code locations."
+                    )
 
 
 class RailgunCheckDialog(QDialog):
@@ -481,14 +497,29 @@ class RailgunCheckDialog(QDialog):
             heading="\n⚡ <b>Running Full Recon...</b>\n",
         )
 
-    def closeEvent(self, event):
+    def _can_close(self):
         worker = self._worker
         if worker is not None and worker.isRunning():
-            worker.cancel()
-            if not worker.wait(3000):
-                self.output_box.append(
-                    "[Railgun] Waiting for the active SSH operation to stop…"
-                )
-                event.ignore()
-                return
-        event.accept()
+            # Do not wait or close the SSH transport on the GUI thread.
+            # The bounded worker will finish its operation and clean up.
+            worker.requestInterruption()
+            self.output_box.append(
+                "[Railgun] Cancellation requested. Waiting for the active SSH "
+                "operation to stop; close this window again when it finishes."
+            )
+            return False
+        return True
+
+    def done(self, result):
+        if self._can_close():
+            super().done(result)
+
+    def reject(self):
+        if self._can_close():
+            super().reject()
+
+    def closeEvent(self, event):
+        if self._can_close():
+            event.accept()
+        else:
+            event.ignore()

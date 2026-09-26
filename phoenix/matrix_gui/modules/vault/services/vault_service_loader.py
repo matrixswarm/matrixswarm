@@ -1,30 +1,5 @@
 from matrix_gui.core.event_bus import EventBus
 from matrix_gui.modules.vault.crypto.vault_handler import save_vault_singlefile
-from PyQt6.QtWidgets import QMessageBox
-import threading
-
-def run_with_timeout(func, timeout, *args, **kwargs):
-    """
-    Run a function with a timeout.
-    Returns (result, error). If timeout occurs, error is TimeoutError.
-    """
-    result = {"value": None, "error": None}
-
-    def target():
-        try:
-            result["value"] = func(*args, **kwargs)
-        except Exception as e:
-            result["error"] = e
-
-    t = threading.Thread(target=target)
-    t.start()
-    t.join(timeout)
-
-    if t.is_alive():
-        return None, TimeoutError("Vault save timed out")
-    if result["error"]:
-        return None, result["error"]
-    return result["value"], None
 
 
 class VaultEncryptionService:
@@ -75,33 +50,12 @@ def _on_vault_update(**kw):
 
         print(f"[VAULT] 💾 Attempting vault save → {path}")
 
-        # ---- TIMEOUT CALL HERE ----
-        _, error = run_with_timeout(
-            save_vault_singlefile,
-            timeout=5,
-            data=data,
-            password=password,
-            data_path=path
-        )
-
-        if error:
-            print(f"[VAULT][ERROR] SAVE TIMEOUT: {error}")
-
-            try:
-                QMessageBox.critical(
-                    None,
-                    "Vault Save Failed",
-                    f"The vault could not be saved due to timeout.\n\n"
-                    f"Path:\n{path}\n\n"
-                    f"Your previous vault backup is still safe."
-                )
-            except Exception as popup_err:
-                print(f"[VAULT][WARN] Could not show popup: {popup_err}")
-
-            EventBus.emit("vault.save_error", error=str(error))
-            return
-
+        # Do not abandon a writer after a timeout: it could overwrite a newer
+        # save later. VaultCore serializes these synchronous transactions.
+        save_vault_singlefile(data=data, password=password, data_path=path)
         print(f"[VAULT] saved → {path}")
+        if "receipt" in kw:
+            kw["receipt"]["saved"] = True
         EventBus.emit("vault.saved", vault_path=path)
 
     except Exception as e:

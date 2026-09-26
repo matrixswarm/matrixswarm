@@ -162,7 +162,7 @@ class TrendScout(BaseEditor, ServiceRolesMixin):
             "enable_title_semantics": True if self.enable_title.currentText() == "true" else False,
             "enable_tag_semantics": True if self.enable_tags.currentText() == "true" else False,
 
-            "service-manager": [{"role": roles}],
+            "service-manager": self._service_manager_with_roles(roles),
         })
 
         self.node.mark_dirty()
