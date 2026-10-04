@@ -6,27 +6,26 @@ import time
 import uuid
 from typing import Any
 
+from .actions import AssignmentActions
+from .investigations import Investigations
+from .deployment_view import agent_nodes, configured_agent
+from .permissions import CursorBuffer, config_surface, describe_operations, validate_call
 from .sanitize import public_agent, public_deployment, redact_log_line
 
 
-TOOLS = {
-    "bridge.status": "Report bridge, vault, and active-session state.",
-    "deployment.list": "List redacted deployments from the currently unlocked Phoenix vault.",
-    "deployment.launch": "Ask the human in Phoenix to open a deployment session.",
-    "session.list": "List active Phoenix deployment sessions.",
-    "agent.list": "List redacted agents in one vault deployment.",
-    "agent.tree": "Read the redacted live agent tree from one active Phoenix session.",
-    "agent.logs.start": "Request logs for one agent through the active Phoenix session.",
-    "agent.logs.read": "Read buffered, redacted lines from a log subscription.",
-}
-
-
-class PhoenixBackend:
+class PhoenixBackend(AssignmentActions, Investigations):
     def __init__(self, cockpit: object, event_bus: object, vault_core: object):
         self._cockpit = cockpit
         self._event_bus = event_bus
         self._vault_core = vault_core
         self._vault_unlocked = False
+        self._assignment_id = None
+        self._scope = {}
+        self._actions = {}
+        self._alerts = {}
+        self._alert_sources = {}
+        self._investigation_bindings = {}
+        self._review_receipts = {}
         self._subscriptions: dict[str, dict[str, Any]] = {}
         self._live_trees: dict[str, dict[str, Any]] = {}
         event_bus.on("vault.unlocked", self._on_vault_unlocked)
@@ -35,25 +34,86 @@ class PhoenixBackend:
     def close(self) -> None:
         self._event_bus.off("vault.unlocked", self._on_vault_unlocked)
         self._event_bus.off("vault.closed", self._on_vault_closed)
-        self._subscriptions.clear()
-        self._live_trees.clear()
+        self.disable_bridge()
 
     def disable_bridge(self) -> None:
         """Revoke all capabilities that were issued while the bridge was on."""
+        if self._assignment_id:
+            for session in self._cockpit.session_processes:
+                if str(session.get("deployment_id", session.get("session_id"))) in self._scope:
+                    try:
+                        session["conn"].send({"type": "bridge.revoke"})
+                    except (OSError, EOFError):
+                        pass
         self._subscriptions.clear()
         self._live_trees.clear()
+        self._alerts.clear()
+        self._alert_sources.clear()
+        self._investigation_bindings.clear()
+        self._review_receipts.clear()
+        self._actions.clear()
+        self._scope.clear()
+        self._assignment_id = None
 
     @property
     def vault_unlocked(self) -> bool:
         return self._vault_unlocked
 
     def _on_vault_unlocked(self, **_kwargs: object) -> None:
+        self.disable_bridge()
         self._vault_unlocked = True
 
     def _on_vault_closed(self, **_kwargs: object) -> None:
         self._vault_unlocked = False
-        self._subscriptions.clear()
-        self._live_trees.clear()
+        self.disable_bridge()
+
+    def available_assignments(self):
+        """Operator UI only: current vault deployment identities."""
+        return [public_deployment(str(key), value)
+                for key, value in self._vault().snapshot("deployments").items()
+                if isinstance(value, dict)]
+
+    def enable_assignment(self, deployment_ids):
+        """Operator UI only; freeze the selected deployment and agent inventory."""
+        deployments = self._vault().snapshot("deployments")
+        if not deployment_ids or any(key not in deployments for key in deployment_ids):
+            raise ValueError("Select at least one current vault deployment.")
+        scope = {}
+        for key in deployment_ids:
+            agents = agent_nodes(deployments[key].get("agents", []))
+            uids = [a.get("universal_id") for a in agents if isinstance(a, dict)]
+            if any(not isinstance(uid, str) or not uid for uid in uids) or len(set(uids)) != len(uids):
+                raise ValueError("Selected deployment has invalid or duplicate agent identities.")
+            scope[key] = frozenset(uids)
+        self.disable_bridge()
+        self._scope = scope
+        self._assignment_id = uuid.uuid4().hex
+
+    def _require_assignment(self):
+        if not self._vault_unlocked or not self._assignment_id:
+            raise PermissionError("No active assignment. Ask the operator to unlock a vault and enable terminal access.")
+
+    def _agent(self, deployment_id, agent_id):
+        dep_id, deployment = self._resolve_deployment(deployment_id)
+        if agent_id not in self._scope[dep_id]:
+            raise ValueError("Agent is outside this assignment.")
+        matches = [a for a in agent_nodes(deployment.get("agents", []))
+                   if isinstance(a, dict) and a.get("universal_id") == agent_id]
+        if len(matches) != 1:
+            raise ValueError("Assigned agent is unavailable or ambiguous.")
+        return matches[0]
+
+    def describe_agent(self, deployment_id, agent_id):
+        agent = self._agent(deployment_id, agent_id)
+        _, deployment = self._resolve_deployment(deployment_id)
+        if config_surface(agent)["fields"]:
+            surface = config_surface(configured_agent(deployment, agent_id))
+        else:
+            surface = config_surface(agent)
+        return {"agent": public_agent(agent), "configuration": surface,
+                "actions": ["agent.logs.start", "agent.restart", "agent.config.set"]
+                if surface["fields"] else ["agent.logs.start", "agent.restart"],
+                "hint": "Mutations require an operator decision. Credentials are managed by Phoenix."}
 
     def _vault(self) -> object:
         if not self._vault_unlocked:
@@ -61,12 +121,14 @@ class PhoenixBackend:
         return self._vault_core.get()
 
     def _resolve_deployment(self, deployment_ref: str) -> tuple[str, dict[str, Any]]:
+        self._require_assignment()
         if not deployment_ref:
             raise ValueError("deployment_id is required")
         deployments = self._vault().snapshot("deployments")
         if not isinstance(deployments, dict):
             deployments = {}
 
+        deployments = {k: v for k, v in deployments.items() if k in self._scope}
         exact = deployments.get(deployment_ref)
         if isinstance(exact, dict) and exact:
             return deployment_ref, exact
@@ -95,6 +157,7 @@ class PhoenixBackend:
         return self._resolve_deployment(deployment_ref)[1]
 
     def _session(self, session_ref: str) -> dict[str, Any]:
+        self._require_assignment()
         if not session_ref:
             raise ValueError("session_id is required")
 
@@ -104,6 +167,7 @@ class PhoenixBackend:
             None,
         )
         if session is not None:
+            self._resolve_deployment(str(session.get("deployment_id", session["session_id"])))
             return session
 
         # Human-facing commands may use the vault id, label, or name printed by
@@ -119,20 +183,34 @@ class PhoenixBackend:
             or str(item.get("deployment_label", "")).casefold() == session_ref.casefold()
         ]
         if len(matches) == 1:
+            self._resolve_deployment(str(matches[0].get("deployment_id", matches[0]["session_id"])))
             return matches[0]
         if len(matches) > 1:
             raise ValueError(f"more than one session matches '{session_ref}'; use the runtime session id")
         raise ValueError(f"session '{session_ref}' is not active in Phoenix")
 
     def handle(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        validate_call(method, params)
         if method == "tools.describe":
-            return {"tools": [{"name": name, "description": description} for name, description in TOOLS.items()]}
+            return {"tools": describe_operations()}
         if method == "bridge.status":
             return self.status()
+        self._require_assignment()
+        if method.startswith("investigation."):
+            return self.handle_investigation(method, params)
+        if method in {"deployment.launch", "agent.restart", "agent.config.set"}:
+            return self.request_action(method, {**params, "request_id": params.get("request_id") or uuid.uuid4().hex})
+        if method == "action.status":
+            return self.action_status(params["request_id"])
+        if method == "agent.describe":
+            return self.describe_agent(params["deployment_id"], params["agent_id"])
+        if method == "session.alerts":
+            session = self._session(params["session_id"])
+            result = self._alert_buffer(session).read(params.get("after", 0), params.get("limit", 100))
+            result["hint"] = "Alerts cover this assignment session only; gaps are explicit."
+            return result
         if method == "deployment.list":
             return self.list_deployments()
-        if method == "deployment.launch":
-            return self.launch_deployment(str(params.get("deployment_id", "")))
         if method == "session.list":
             return self.list_sessions()
         if method == "agent.list":
@@ -153,74 +231,54 @@ class PhoenixBackend:
             )
         raise ValueError(f"unknown or unavailable bridge method: {method}")
 
-    def status(self) -> dict[str, Any]:
-        return {
-            "bridge": "ready",
-            "vault": "unlocked" if self._vault_unlocked else "locked",
-            "active_sessions": len(self._cockpit.session_processes),
-            "capabilities": sorted(TOOLS),
-        }
+    def status(self):
+        enabled = bool(self._assignment_id and self._vault_unlocked)
+        return {"bridge": "ready" if enabled else "disabled",
+                "vault": "unlocked" if self._vault_unlocked else "locked",
+                "assignment_id": self._assignment_id,
+                "active_sessions": len(self.list_sessions()["sessions"]) if enabled else 0,
+                "capabilities": [op["name"] for op in describe_operations()],
+                "hint": "Run tools.describe, then deployment.list. Approval is available only in the operator's Phoenix window."}
 
-    def list_deployments(self) -> dict[str, Any]:
-        deployments = self._vault().snapshot("deployments")
-        public = [
-            public_deployment(deployment_id, deployment)
-            for deployment_id, deployment in sorted(deployments.items())
-            if isinstance(deployment, dict)
-        ]
-        return {"deployments": public}
+    def list_deployments(self):
+        self._require_assignment()
+        return {"deployments": [public_deployment(key, dep) for key, dep in
+                sorted(self._vault().snapshot("deployments").items())
+                if key in self._scope and isinstance(dep, dict)]}
 
-    def list_sessions(self) -> dict[str, Any]:
+    def list_sessions(self):
+        self._require_assignment()
+        current = self._vault().snapshot("deployments")
         sessions = []
         for item in self._cockpit.session_processes:
+            dep_id = str(item.get("deployment_id", item.get("session_id")))
+            if dep_id not in self._scope or dep_id not in current:
+                continue
             process = item.get("proc")
-            sessions.append({
-                "session_id": item.get("session_id"),
-                "deployment_id": item.get("deployment_id", item.get("session_id")),
-                "state": "running" if process is not None and process.is_alive() else "stopped",
-            })
+            sessions.append({"session_id": item.get("session_id"), "deployment_id": dep_id,
+                             "state": "running" if process is not None and process.is_alive() else "stopped"})
         return {"sessions": sessions}
 
-    def list_agents(self, deployment_id: str) -> dict[str, Any]:
-        deployment_id, deployment = self._resolve_deployment(deployment_id)
-        agents = deployment.get("agents") if isinstance(deployment.get("agents"), list) else []
-        return {
-            "deployment_id": deployment_id,
-            "agents": [public_agent(agent) for agent in agents if isinstance(agent, dict)],
-        }
+    def list_agents(self, deployment_id):
+        dep_id, deployment = self._resolve_deployment(deployment_id)
+        return {"deployment_id": dep_id, "agents": [
+            public_agent(a) for a in agent_nodes(deployment.get("agents", []))
+            if isinstance(a, dict) and a.get("universal_id") in self._scope[dep_id]]}
 
-    def launch_deployment(self, deployment_id: str) -> dict[str, Any]:
-        deployment_id, deployment = self._resolve_deployment(deployment_id)
-        existing = next(
-            (item for item in self._cockpit.session_processes if item.get("deployment_id", item.get("session_id")) == deployment_id),
-            None,
-        )
+    def _open_deployment(self, deployment_id, deployment):
+        """Called only after an exact operator-approved action is consumed."""
+        existing = next((s for s in self._cockpit.session_processes
+                         if s.get("deployment_id", s.get("session_id")) == deployment_id
+                         and s.get("proc") is not None and s["proc"].is_alive()), None)
         if existing is not None:
-            return {"state": "already_active", "session_id": existing.get("session_id"), "deployment_id": deployment_id}
-
-        from PyQt6.QtWidgets import QMessageBox
-
-        label = deployment.get("label", deployment_id)
-        answer = QMessageBox.question(
-            self._cockpit,
-            "LLM requested Phoenix connection",
-            f"Allow the local LLM bridge to open the Phoenix deployment session '{label}'?\n\n"
-            "Phoenix will retain control of credentials, signing, encryption, and connections.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return {"state": "denied", "deployment_id": deployment_id}
-
+            return {"state": "already_active", "session_id": existing["session_id"]}
         self._cockpit.launch_session(deployment_id, deployment, None)
-        active = next(
-            (item for item in self._cockpit.session_processes if item.get("session_id") == deployment_id),
-            None,
-        )
+        active = next((s for s in self._cockpit.session_processes
+                       if s.get("session_id") == deployment_id), None)
         if active is None:
-            return {"state": "failed", "deployment_id": deployment_id, "reason": "Phoenix session did not become active"}
+            return {"state": "uncertain", "hint": "Session did not become active. Inspect Phoenix before retrying."}
         active["deployment_id"] = deployment_id
-        return {"state": "active", "session_id": deployment_id, "deployment_id": deployment_id}
+        return {"state": "active", "session_id": active["session_id"]}
 
     def start_agent_logs(self, session_id: str, agent_id: str, follow: bool) -> dict[str, Any]:
         session = self._session(session_id)
@@ -230,6 +288,8 @@ class PhoenixBackend:
         if not any(agent.get("universal_id") == agent_id for agent in agents):
             raise ValueError(f"agent '{agent_id}' is not part of deployment '{deployment_id}'")
 
+        if len(self._subscriptions) >= 64:
+            raise ValueError("Log subscription limit reached. Reopen the assignment to release subscriptions.")
         subscription_id = uuid.uuid4().hex
         self._subscriptions[subscription_id] = {
             "session_id": runtime_session_id,
@@ -237,15 +297,20 @@ class PhoenixBackend:
             "agent_id": agent_id,
             "created_at": int(time.time()),
             "state": "starting",
-            "lines": [],
+            "buffer": CursorBuffer(),
         }
-        session["conn"].send({
-            "type": "bridge.fetch_logs",
-            "session_id": runtime_session_id,
-            "agent_id": agent_id,
-            "subscription_id": subscription_id,
-            "follow": follow,
-        })
+        try:
+            session["conn"].send({
+                "type": "bridge.fetch_logs",
+                "session_id": runtime_session_id,
+                "agent_id": agent_id,
+                "subscription_id": subscription_id,
+                "follow": follow,
+            })
+        except Exception:
+            self._subscriptions.pop(subscription_id, None)
+            raise
+
         return {
             "state": "starting",
             "subscription_id": subscription_id,
@@ -273,23 +338,50 @@ class PhoenixBackend:
         subscription = self._subscriptions.get(subscription_id)
         if subscription is None:
             raise ValueError("log subscription was not found or the vault was closed")
-        after = max(0, after)
-        limit = max(1, min(limit, 200))
-        lines = subscription["lines"][after:after + limit]
-        return {
-            "subscription_id": subscription_id,
-            "state": subscription["state"],
-            "agent_id": subscription["agent_id"],
-            "lines": lines,
-            "next_cursor": after + len(lines),
-            "buffered_lines": len(subscription["lines"]),
-        }
+        self._session(subscription["session_id"])
+        page = subscription["buffer"].read(after, limit)
+        return {"subscription_id": subscription_id, "state": subscription["state"],
+                "agent_id": subscription["agent_id"], "lines": page.pop("items"), **page}
+
+
+    def _alert_buffer(self, session):
+        session_id = session["session_id"]
+        source = self._alert_sources.get(session_id)
+        if (source is None or source[0] is not session or source[1] is not session.get("conn")
+                or source[2] is not session.get("proc")):
+            self._alerts[session_id] = CursorBuffer(500)
+            self._alert_sources[session_id] = (session, session.get("conn"), session.get("proc"))
+        return self._alerts[session_id]
 
     def handle_session_message(self, message: dict[str, Any]) -> bool:
         message_type = message.get("type")
+        if not self._assignment_id:
+            return isinstance(message_type, str) and message_type.startswith("bridge.")
+        if message_type == "swarm_feed":
+            event = message.get("event", {})
+            try:
+                session = self._session(str(event.get("session_id", "")))
+                self._alert_buffer(session).append([redact_log_line(event.get("payload", {}))])
+            except (ValueError, PermissionError):
+                pass
+            return False
+        if message_type == "bridge.action":
+            action = self._actions.get(message.get("request_id"))
+            if action and action["state"] == "dispatched":
+                expected = action.get("runtime_session_id")
+                if message.get("session_id") == expected:
+                    action["result"] = {"session_dispatch": message.get("state") if message.get("state") in {"sent", "failed"} else "unknown",
+                                        "hint": "Check agent status/logs for remote completion."}
+            return True
         if message_type == "bridge.agent_tree":
             session_id = str(message.get("session_id", ""))
+            try:
+                session = self._session(session_id)
+            except (ValueError, PermissionError):
+                return True
+            dep_id = str(session.get("deployment_id", session_id))
             agents = message.get("agents") if isinstance(message.get("agents"), list) else []
+            agents = [a for a in agents if isinstance(a, dict) and a.get("universal_id") in self._scope[dep_id]]
             self._live_trees[session_id] = {
                 "updated_at": int(time.time()),
                 "agents": [public_agent(agent) for agent in agents if isinstance(agent, dict)],
@@ -299,17 +391,15 @@ class PhoenixBackend:
             return False
         subscription_id = message.get("subscription_id")
         subscription = self._subscriptions.get(subscription_id)
-        if subscription is None:
+        if subscription is None or message.get("session_id") != subscription["session_id"]:
             return True
         if message_type == "bridge.log.started":
             subscription["state"] = "following" if message.get("follow") else "waiting"
         elif message_type == "bridge.log.error":
             subscription["state"] = "error"
-            subscription["lines"].append(redact_log_line(f"[bridge] {message.get('error', 'log request failed')}"))
+            subscription["buffer"].append([redact_log_line(f"[bridge] {message.get('error', 'log request failed')}")])
         else:
             new_lines = message.get("lines") if isinstance(message.get("lines"), list) else []
-            subscription["lines"].extend(redact_log_line(line) for line in new_lines[:500])
-            if len(subscription["lines"]) > 2000:
-                subscription["lines"] = subscription["lines"][-2000:]
+            subscription["buffer"].append([redact_log_line(line) for line in new_lines[:500]])
             subscription["state"] = "following" if message.get("follow", True) else "complete"
         return True

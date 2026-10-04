@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QEvent
 from PyQt6.QtGui import QFont
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 
@@ -48,12 +48,12 @@ class ControlBar(QWidget):
                     border-radius: 7px;
                 }
                 QLabel#ControlTargetBadge {
-                    color: #9cf7e2;
-                    background: #102927;
-                    border: 1px solid #1abda8;
+                    color: #b8fff1;
+                    background: #18242b;
+                    border: 1px solid #286c6d;
                     border-radius: 5px;
-                    font-family: "Segoe UI Semibold";
-                    padding: 6px 10px;
+                    margin: 0;
+                    padding: 6px 8px;
                 }
                 QLabel#ControlContextLabel {
                     color: #9099aa;
@@ -137,6 +137,12 @@ class ControlBar(QWidget):
     # -----------------------------------
     # Button + layout helpers
     # -----------------------------------
+    def eventFilter(self, watched, event):
+        if watched is getattr(self, "restart_btn", None) and event.type() == QEvent.Type.Resize:
+            # A display label must not stretch to the tallest control in the row.
+            self.target_badge.setFixedHeight(event.size().height())
+        return super().eventFilter(watched, event)
+
     def _make_button(self, icon, text, handler, tooltip=None, checkable=False):
         try:
             btn = QToolButton()
@@ -234,7 +240,7 @@ class ControlBar(QWidget):
 
             self._selected_uid = uid
             self._selected_label = str(label)
-            badge_text = f"TARGET  ·  {self._selected_label}"
+            badge_text = f"TARGET- {self._selected_label}"
             if status:
                 badge_text += f"  ·  {str(status).upper()}"
             self.target_badge.setText(badge_text)
@@ -313,13 +319,13 @@ class ControlBar(QWidget):
     # -----------------------------------
     def _build_default_buttons(self):
         try:
-            self.target_badge = QLabel("TARGET  ·  Select an agent")
+            self.target_badge = QLabel("TARGET- Select an agent")
             self.target_badge.setObjectName("ControlTargetBadge")
-            self.target_badge.setMinimumWidth(235)
+            self.target_badge.setFont(self.font())
             self.target_badge.setMaximumWidth(320)
-            self.target_badge.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            self.target_badge.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             self.top_row.addWidget(self.target_badge)
-            self._add_divider()
+            self.top_row.addSpacing(6)
 
             self.restart_btn = self._make_button(
                 "↻", "Restart",
@@ -343,6 +349,10 @@ class ControlBar(QWidget):
             self.default_buttons = [self.restart_btn, self.replace_btn, self.hotswap_btn, self.inject_btn]
             for button in self.default_buttons:
                 self.top_row.addWidget(button)
+
+            self.restart_btn.ensurePolished()
+            self.target_badge.setFixedHeight(self.restart_btn.sizeHint().height())
+            self.restart_btn.installEventFilter(self)
 
             self._add_divider()
             self.routes_btn = self._make_button(

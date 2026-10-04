@@ -126,6 +126,7 @@ class BridgeTests(unittest.TestCase):
         self.cockpit = FakeCockpit()
         self.backend = PhoenixBackend(self.cockpit, self.events, FakeVaultCore)
         self.events.emit("vault.unlocked")
+        self.backend.enable_assignment(["demo"])
 
     def test_public_agent_excludes_host_and_config(self):
         agent = FakeVaultCore.vault.deployments["demo"]["agents"][0]

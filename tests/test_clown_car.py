@@ -199,6 +199,33 @@ class ClownCarSourceTests(SourceFixture):
         with self.assertRaisesRegex(ValueError, "Invalid embedded source"):
             set_hash_bang(directive)
 
+    def test_deploy_embeds_entry_point_without_neighbouring_environment_files(self):
+        code = b"print('fixture worker')\n"
+        self.source("worker/worker.py", code)
+        for name in (".env", ".env.local", "SAMPLE.env", "settings.env.json"):
+            self.source("worker/" + name, b"SYNTHETIC_ENV_VALUE=DO_NOT_EMBED")
+        directive = {"name": "worker", "children": []}
+        bundle, key, _ = generate_swarm_encrypted_directive(directive, base_path=str(self.root))
+        decoded = decrypt_swarm_encrypted_directive(bundle, base64.b64encode(key).decode())
+        self.assertEqual(code, base64.b64decode(decoded["src_embed"]))
+        self.assertNotIn("DO_NOT_EMBED", repr(decoded))
+
+    def test_cached_environment_source_is_rejected_before_reading(self):
+        for name in (".env", ".ENV", ".env.local", "SAMPLE.env", "config.env.json", ".env.saved/worker.py"):
+            path = self.source(name, b"SYNTHETIC_ENV_VALUE=DO_NOT_EMBED")
+            directive = {"name": "worker", "src": str(path)}
+            with self.subTest(name=name), mock.patch.object(Path, "read_bytes") as read:
+                with self.assertRaisesRegex(ValueError, "Environment files"):
+                    embed_agent_sources(directive)
+                read.assert_not_called()
+            self.assertNotIn("src_embed", directive)
+
+    def test_discovery_never_reads_entry_points_under_environment_directories(self):
+        self.source(".env.saved/worker.py")
+        selection = AgentSourceSelection({"name": "worker"})
+        self.assertFalse(selection.add_directory(self.root))
+        self.assertEqual(["worker (python)"], selection.missing_agents)
+
 
 class FakeVault:
     def __init__(self, data=None):

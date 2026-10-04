@@ -263,7 +263,7 @@ class Agent(BootAgent):
                 outer_packet,
                 self.remote_pubkey,
                 self.local_privkey,
-                logger=self.log
+                logger=self.log,
             )
 
             if not unwrapped:

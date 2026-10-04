@@ -1,9 +1,7 @@
 import time
 import json
 import base64
-import hashlib
-import threading
-from collections import OrderedDict
+from core.python_core.utils.packet_freshness import packet_is_fresh
 from core.python_core.mixin.log_method import LogMixin
 
 from Crypto.Cipher import AES
@@ -15,57 +13,6 @@ from Crypto.Random import get_random_bytes
 from core.python_core.utils.debug.config import DebugConfig
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.sig_payload_json import SigPayloadJson
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.interfaces.sig_payload import SigPayload
-
-
-_REPLAY_TTL = 314
-_REPLAY_CACHE_LIMIT = 16_384
-_replay_cache = OrderedDict()
-_replay_lock = threading.Lock()
-
-
-def _hash_sig(sig: str):
-    return hashlib.sha256(sig.encode("utf-8")).hexdigest() if sig else None
-
-
-def _replay_block(sig: str, timestamp: int, logger=None) -> bool:
-    """Accept a fresh signature once within the bounded packet lifetime."""
-    now = int(time.time())
-    sig_hash = _hash_sig(sig)
-    if not sig_hash:
-        if logger:
-            logger("[SECURE][REPLAY] Missing packet signature hash.")
-        return False
-    if not isinstance(timestamp, int) or isinstance(timestamp, bool):
-        if logger:
-            logger("[SECURE][REPLAY] Missing or invalid packet timestamp.")
-        return False
-    if abs(now - timestamp) > _REPLAY_TTL:
-        if logger:
-            logger(
-                f"[SECURE][REPLAY] Timestamp outside {_REPLAY_TTL}s window "
-                f"(ts={timestamp}, now={now})."
-            )
-        return False
-
-    with _replay_lock:
-        while _replay_cache:
-            _, expires_at = next(iter(_replay_cache.items()))
-            if expires_at >= now:
-                break
-            _replay_cache.popitem(last=False)
-
-        if sig_hash in _replay_cache:
-            if logger:
-                logger(
-                    "[SECURE][REPLAY] Duplicate packet signature detected "
-                    f"({sig_hash[:10]}...)."
-                )
-            return False
-
-        _replay_cache[sig_hash] = now + _REPLAY_TTL
-        while len(_replay_cache) > _REPLAY_CACHE_LIMIT:
-            _replay_cache.popitem(last=False)
-    return True
 
 
 class PacketCryptoMixin(LogMixin):
@@ -106,7 +53,8 @@ class PacketCryptoMixin(LogMixin):
                 raise RuntimeError("Payload is not a dictionary.")
 
             # Step 1: Load identity into packet (optional)
-            subpacket = {"payload": raw_payload, "timestamp": int(time.time())}
+            subpacket = {"payload": raw_payload, "timestamp": int(time.time()),
+                         "nonce": base64.b64encode(get_random_bytes(16)).decode()}
 
             #this will include identity(universal_id, pubkey, timestamp) + sig(Matrix signature of the identity)
             if self.football.use_payload_identity_file():
@@ -248,14 +196,8 @@ class PacketCryptoMixin(LogMixin):
                     raise RuntimeError(f"Packet dropped: sender \"{self.get_sender_uid()}\" not in allowlist.")
 
                 step = "2.6"
-                if not _replay_block(
-                    packet.get("sig"),
-                    subpacket.get("timestamp"),
-                    logger=lambda message: self.log(
-                        message, block="UNPACK", level="WARNING"
-                    ),
-                ):
-                    raise RuntimeError("Packet dropped: stale or replayed signature.")
+                if not packet_is_fresh(subpacket.get("timestamp")):
+                    raise RuntimeError("Packet dropped: stale or invalid timestamp.")
 
             #exit(json.dumps(packet, indent=2, sort_keys=True))
 

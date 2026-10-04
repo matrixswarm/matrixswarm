@@ -26,6 +26,8 @@ jobs:
           python-version: "3.12"
       - name: Install isolated lab dependencies
         run: python -m pip install -r phoenix_test_terminal/requirements.txt
+      - name: Install optional Terminal MCP adapter for integration checks
+        run: python -m pip install -e "./phoenix_terminal[mcp]"
       - name: Install Linux Qt runtime libraries
         if: runner.os == 'Linux'
         run: |
@@ -45,6 +47,24 @@ jobs:
         run: python -B -m phoenix_test_terminal run cold-start --report cold-start-report.json
       - name: Exercise registry persistence and rejected transactions
         run: python -B -m phoenix_test_terminal run registry-lifecycle --report registry-report.json
+      - name: Verify Terminal Mode window, access policy and encrypted metadata
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -B -m unittest discover -s tests -p "test_terminal*.py" -v
+      - name: Verify signed timestamp freshness and encrypted directive reload
+        run: python -B -m unittest discover -s tests -p "test_*replay*.py" -v
+      - name: Verify encrypted traveling clipboard and two-client Phoenix lifecycle
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -B -m unittest discover -s tests -p "test_drop_vault*.py" -v
+      - name: Verify separate headless terminal and retired GUI launch hooks
+        working-directory: phoenix_terminal
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -B -m unittest discover -s tests -v
+      - name: Verify MatrixOS MCP worker protocol with the real SDK
+        if: runner.os == 'Linux'
+        run: python -B -m unittest discover -s tests -p "test_mcp_reflex_security.py" -v
       - name: Exercise workspace graph persistence and rejected transactions
         run: python -B -m phoenix_test_terminal run workspace-lifecycle --report workspace-report.json
       - name: Verify workspace store rollback

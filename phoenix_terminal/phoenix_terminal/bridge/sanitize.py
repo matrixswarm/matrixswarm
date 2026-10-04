@@ -54,7 +54,8 @@ def redact_log_line(line: Any, max_chars: int = 8000) -> str:
 
 def public_deployment(deployment_id: str, deployment: dict[str, Any]) -> dict[str, Any]:
     """Return deployment identity without connections, certificates, or config."""
-    agents = deployment.get("agents") if isinstance(deployment, dict) else []
+    from .deployment_view import agent_nodes
+    agents = agent_nodes(deployment.get("agents", [])) if isinstance(deployment, dict) else []
     return {
         "id": deployment_id,
         "label": deployment.get("label", deployment_id),

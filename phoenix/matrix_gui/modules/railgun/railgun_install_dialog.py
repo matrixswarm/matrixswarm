@@ -1,6 +1,7 @@
 # Authored by Daniel F MacDonald and ChatGPT-5.1 aka The Generals
 # Commander Edition — Railgun MatrixOS Installer (Operational Core)
 import os
+import shlex
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -10,6 +11,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QFileDialog, QTextEdit, QLineEdit, QGroupBox, QProgressBar
 )
+from matrix_gui.core.class_lib.paths.source_policy import is_environment_path
 from matrix_gui.modules.railgun.ssh_support import (
     clean_secret,
     connect_ssh_profile,
@@ -360,6 +362,8 @@ class RailgunInstallWorker(QThread):
             client, actual_fingerprint = connect_ssh_profile(self.ssh_cfg)
             self.output.emit(f"[SSH] Connected to {host} ({actual_fingerprint})")
             client.get_transport().set_keepalive(15)
+            self._phase("Verifying root or passwordless sudo installation access")
+            self._verify_install_privileges(client)
             self._phase("Creating remote staging directory")
             remote_staging = self._create_remote_staging(client)
 
@@ -386,7 +390,7 @@ class RailgunInstallWorker(QThread):
             self.output.emit(f"[Railgun] Installer uploaded: {remote_script}")
 
             self._phase("Starting remote installer")
-            cmd = f"PYTHON_MODE={self.pyflag} bash {remote_script}"
+            cmd = self._root_installer_command(remote_script)
             transport = client.get_transport()
             channel = transport.open_session(timeout=self.IO_TIMEOUT)
             channel.settimeout(self.IO_TIMEOUT)
@@ -416,6 +420,50 @@ class RailgunInstallWorker(QThread):
                 except Exception:
                     pass
             self.ssh_cfg.clear()
+
+    def _verify_install_privileges(self, client):
+        """Fail before upload unless this account can run the fixed installer as root."""
+        command = (
+            "if [ \"$(id -u)\" -eq 0 ]; then "
+            "echo '[Railgun] Root installation access verified.'; "
+            "elif command -v sudo >/dev/null 2>&1 && "
+            "sudo -n /bin/bash -c 'exit 0' >/dev/null 2>&1; then "
+            "echo '[Railgun] Passwordless sudo installation access verified.'; "
+            "else echo '[Railgun][ERROR] MatrixOS installation requires root or "
+            "passwordless sudo for this SSH account.' >&2; exit 77; fi"
+        )
+        channel = client.get_transport().open_session(timeout=self.IO_TIMEOUT)
+        try:
+            channel.settimeout(self.IO_TIMEOUT)
+            channel.exec_command(command)
+            exit_code = self._drain_channel(
+                channel,
+                client.get_transport(),
+                self.IO_TIMEOUT,
+            )
+        finally:
+            channel.close()
+        if exit_code != 0:
+            raise PermissionError(
+                "Selected SSH account lacks root or passwordless sudo installation access"
+            )
+
+    @staticmethod
+    def _root_installer_command(remote_script):
+        """Run only the uploaded installer, elevating noninteractively when needed."""
+        if not isinstance(remote_script, str) or not remote_script.startswith(
+            "/tmp/matrix_staging_"
+        ) or not remote_script.endswith("/install_matrixos.sh"):
+            raise ValueError("Unexpected remote installer path")
+        script = shlex.quote(remote_script)
+        return (
+            "if [ \"$(id -u)\" -eq 0 ]; then "
+            f"/bin/bash {script}; "
+            "elif command -v sudo >/dev/null 2>&1; then "
+            f"sudo -n /bin/bash {script}; "
+            "else echo '[Railgun][ERROR] Root or passwordless sudo is required.' "
+            ">&2; exit 77; fi"
+        )
 
     def _drain_channel(self, channel, transport, timeout=None):
         started = last_output = time.monotonic()
@@ -468,7 +516,7 @@ class RailgunInstallWorker(QThread):
         if not self.local_src or not root.is_dir():
             raise ValueError("Local source must be a MatrixOS directory")
         allowed_dirs = {"agents", "core", "scripts", "boot_directives", "maxmind"}
-        allowed_exts = (".py", ".txt", ".json", ".env", ".md", ".sh", ".cfg", ".conf")
+        allowed_exts = (".py", ".txt", ".json", ".md", ".sh", ".cfg", ".conf")
         directories, files = [], []
 
         def scan(directory, flat=False):
@@ -477,6 +525,10 @@ class RailgunInstallWorker(QThread):
                     self.output.emit(f"[Upload] Skipping linked path: {path.relative_to(root)}")
                     continue
                 relative = path.relative_to(root).as_posix()
+                # Apply before both directory recursion and the flat-script rule.
+                # Ignore templates too: no environment file belongs in a source upload.
+                if is_environment_path(relative):
+                    continue
                 if path.is_dir():
                     if flat or (directory == root and path.name not in allowed_dirs):
                         continue
@@ -519,9 +571,103 @@ class RailgunInstallWorker(QThread):
         report(force=True)
         self.output.emit(f"[Upload] Complete: {done:,} files ({_format_bytes(sent)})")
 
+    @staticmethod
+    def _python_provisioning_block():
+        """Return one pinned, checksum-verified Python 3.12 bootstrap."""
+        return r'''PYTHON_VERSION="3.12.15"
+PYTHON_SOURCE_SHA256="c2c4321961fab0fb999d66e0cecf521c2ab3994c7992873ea99e306c1094fd5a"
+PYTHON_PREFIX="/opt/matrix-python/$PYTHON_VERSION"
+
+find_python312() {
+    local candidate
+    for candidate in \
+        "$(command -v python3.12 || true)" \
+        "$PYTHON_PREFIX/bin/python3.12" \
+        "$(command -v python3 || true)"; do
+        [ -n "$candidate" ] || continue
+        if "$candidate" -c 'import ensurepip, ssl, sys, venv; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)' \
+                >/dev/null 2>&1; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+install_python312_from_source() {
+    echo "[Installer] OS repositories do not provide a complete Python 3.12; building verified Python $PYTHON_VERSION..."
+    if command -v dnf >/dev/null 2>&1; then
+        install_os_packages gcc make openssl-devel bzip2-devel libffi-devel \
+            zlib-devel xz-devel readline-devel sqlite-devel ncurses-devel \
+            tar gzip curl ca-certificates
+    elif command -v apt-get >/dev/null 2>&1; then
+        install_os_packages build-essential pkg-config libssl-dev zlib1g-dev \
+            libbz2-dev libreadline-dev libsqlite3-dev libncurses-dev xz-utils \
+            libffi-dev liblzma-dev uuid-dev curl ca-certificates
+    else
+        echo "[Installer][ERROR] Cannot install Python build dependencies on this OS."
+        exit 69
+    fi
+
+    local build_dir archive source_dir jobs
+    build_dir="$(mktemp -d /tmp/matrix-python-build.XXXXXXXX)"
+    archive="$build_dir/Python-$PYTHON_VERSION.tar.xz"
+    source_dir="$build_dir/Python-$PYTHON_VERSION"
+    trap 'rm -rf "$build_dir"' EXIT
+    curl --fail --location --proto '=https' --tlsv1.2 \
+        --output "$archive" \
+        "https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tar.xz"
+    printf '%s  %s\n' "$PYTHON_SOURCE_SHA256" "$archive" | sha256sum -c -
+    tar -xJf "$archive" -C "$build_dir"
+    cd "$source_dir"
+    ./configure --prefix="$PYTHON_PREFIX" --with-ensurepip=install
+    jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+    case "$jobs" in ''|*[!0-9]*) jobs=2 ;; esac
+    [ "$jobs" -le 8 ] || jobs=8
+    make -j "$jobs"
+    rm -rf "$PYTHON_PREFIX"
+    make altinstall
+    ln -sfn "$PYTHON_PREFIX/bin/python3.12" /usr/local/bin/python3.12
+    cd /
+    rm -rf "$build_dir"
+    trap - EXIT
+}
+
+PYTHON_BIN="$(find_python312 || true)"
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Installer] Python 3.12 not found; trying the OS package manager..."
+    if command -v dnf >/dev/null 2>&1; then
+        if ! dnf install -y python3.12 python3.12-pip; then
+            echo "[Installer] Python 3.12 packages are unavailable; source fallback required."
+        fi
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y
+        if ! DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                python3.12 python3.12-venv; then
+            echo "[Installer] Python 3.12 packages are unavailable; source fallback required."
+        fi
+    fi
+    PYTHON_BIN="$(find_python312 || true)"
+fi
+if [ -z "$PYTHON_BIN" ]; then
+    install_python312_from_source
+    PYTHON_BIN="$(find_python312 || true)"
+fi
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[Installer][ERROR] Verified Python 3.12 provisioning failed."
+    exit 65
+fi
+if ! "$PYTHON_BIN" -c 'import ensurepip, ssl, sys, venv; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
+    echo "[Installer][ERROR] $PYTHON_BIN is not a complete Python 3.12 runtime."
+    exit 65
+fi
+echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"'''
+
     def _generate_installer(self, remote_staging, mode, pyflag):
+        python_bootstrap = self._python_provisioning_block()
         return f"""#!/bin/bash
 set -euo pipefail
+PYTHON_MODE={pyflag}
 
 echo "[Installer] Local Full Install: syncing MatrixOS from staging..."
 
@@ -542,27 +688,7 @@ install_os_packages() {{
     fi
 }}
 
-PYTHON_BIN="$(command -v python3.12 || true)"
-if [ -z "$PYTHON_BIN" ]; then
-    echo "[Installer] Python 3.12 not found; provisioning it from the OS package manager..."
-    if command -v dnf >/dev/null 2>&1; then
-        dnf install -y python3.12 python3.12-pip
-    elif command -v apt-get >/dev/null 2>&1; then
-        apt-get update -y
-        DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            python3.12 python3.12-venv
-    fi
-    PYTHON_BIN="$(command -v python3.12 || true)"
-fi
-if [ -z "$PYTHON_BIN" ]; then
-    echo "[Installer][ERROR] Python 3.12 is required; refusing the system python fallback."
-    exit 65
-fi
-if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
-    echo "[Installer][ERROR] $PYTHON_BIN is not Python 3.12."
-    exit 65
-fi
-echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"
+{python_bootstrap}
 
 if ! command -v rsync >/dev/null 2>&1 || \
    ! command -v sudo >/dev/null 2>&1 || \
@@ -641,6 +767,7 @@ for runtime_dir in agents core scripts; do
     if [ -d "$SRC_DIR/$runtime_dir" ]; then
         mkdir -p "$TARGET/$runtime_dir"
         rsync -a --delete \
+            --exclude='.[eE][nN][vV]*' --exclude='*.[eE][nN][vV]' --exclude='*.[eE][nN][vV].*' \
             "$SRC_DIR/$runtime_dir/" "$TARGET/$runtime_dir/"
     fi
 done
@@ -649,11 +776,13 @@ for preserved_dir in boot_directives maxmind; do
     if [ -d "$SRC_DIR/$preserved_dir" ]; then
         mkdir -p "$TARGET/$preserved_dir"
         rsync -a \
+            --exclude='.[eE][nN][vV]*' --exclude='*.[eE][nN][vV]' --exclude='*.[eE][nN][vV].*' \
             "$SRC_DIR/$preserved_dir/" "$TARGET/$preserved_dir/"
     fi
 done
 
 find "$SRC_DIR" -maxdepth 1 -type f \
+    ! -iname '.env*' ! -iname '*.env' ! -iname '*.env.*' \
     ! -name "install_matrixos.sh" \
     -exec cp -a {{}} "$TARGET/" \\;
 
@@ -739,8 +868,10 @@ exit 0
 """
 
     def _generate_github_installer(self, pyflag):
+        python_bootstrap = self._python_provisioning_block()
         return f"""#!/bin/bash
 set -euo pipefail
+PYTHON_MODE={pyflag}
 
 echo "[Installer] GitHub mode: cloning MatrixOS..."
 
@@ -761,27 +892,7 @@ install_os_packages() {{
     fi
 }}
 
-PYTHON_BIN="$(command -v python3.12 || true)"
-if [ -z "$PYTHON_BIN" ]; then
-    echo "[Installer] Python 3.12 not found; provisioning it from the OS package manager..."
-    if command -v dnf >/dev/null 2>&1; then
-        dnf install -y python3.12 python3.12-pip
-    elif command -v apt-get >/dev/null 2>&1; then
-        apt-get update -y
-        DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            python3.12 python3.12-venv
-    fi
-    PYTHON_BIN="$(command -v python3.12 || true)"
-fi
-if [ -z "$PYTHON_BIN" ]; then
-    echo "[Installer][ERROR] Python 3.12 is required; refusing the system python fallback."
-    exit 65
-fi
-if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'; then
-    echo "[Installer][ERROR] $PYTHON_BIN is not Python 3.12."
-    exit 65
-fi
-echo "[Installer] Selected Python: $PYTHON_BIN ($($PYTHON_BIN --version 2>&1))"
+{python_bootstrap}
 
 if ! command -v git >/dev/null 2>&1 || \
    ! command -v rsync >/dev/null 2>&1 || \
@@ -883,6 +994,7 @@ for runtime_dir in agents ai core docs scripts sounds teams; do
     if [ -d "$SRC_DIR/$runtime_dir" ]; then
         mkdir -p "$TARGET/$runtime_dir"
         rsync -a --delete \
+            --exclude='.[eE][nN][vV]*' --exclude='*.[eE][nN][vV]' --exclude='*.[eE][nN][vV].*' \
             "$SRC_DIR/$runtime_dir/" "$TARGET/$runtime_dir/"
     fi
 done
@@ -891,11 +1003,13 @@ for preserved_dir in boot_directives maxmind; do
     if [ -d "$SRC_DIR/$preserved_dir" ]; then
         mkdir -p "$TARGET/$preserved_dir"
         rsync -a \
+            --exclude='.[eE][nN][vV]*' --exclude='*.[eE][nN][vV]' --exclude='*.[eE][nN][vV].*' \
             "$SRC_DIR/$preserved_dir/" "$TARGET/$preserved_dir/"
     fi
 done
 
 find "$SRC_DIR" -maxdepth 1 -type f \
+    ! -iname '.env*' ! -iname '*.env' ! -iname '*.env.*' \
     -exec cp -a {{}} "$TARGET/" \\;
 
 if [ "{pyflag}" = "create" ]; then

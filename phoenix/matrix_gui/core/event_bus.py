@@ -10,10 +10,10 @@ class EventBus:
 
     @classmethod
     def emit(self, event_name, *args, **kwargs):
-        listeners = self._listeners.get(event_name, [])
+        # Callbacks may unsubscribe themselves while handling the event.
+        listeners = tuple(self._listeners.get(event_name, ()))
         for cb in listeners:
             try:
-                print(f"    ↳ calling {cb.__module__}.{cb.__name__}")
                 cb(*args, **kwargs)
             except Exception:
                 traceback.print_exc()

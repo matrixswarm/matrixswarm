@@ -1,4 +1,4 @@
-"""Exercise the native MCP adapter against an operator-enabled Phoenix bridge."""
+"""Exercise read-only MCP against an operator-enabled headless test inventory."""
 
 from __future__ import annotations
 
@@ -51,7 +51,8 @@ async def _call(client: Client, name: str, arguments: dict[str, Any]) -> dict[st
     return structured
 
 
-async def verify(exercise_logs: bool, launch_deployment: str | None) -> dict[str, Any]:
+async def verify() -> dict[str, Any]:
+    """Read only an already-enabled test assignment. Never connect or launch."""
     terminal_root = Path(__file__).resolve().parents[1]
     process = StdioServerParameters(
         command=sys.executable,
@@ -62,93 +63,37 @@ async def verify(exercise_logs: bool, launch_deployment: str | None) -> dict[str
     summary: dict[str, Any] = {}
     async with Client(process) as client:
         listed = await client.list_tools()
-        tool_names = {tool.name for tool in listed.tools}
-        expected = set(MCP_TOOL_NAMES)
-        if tool_names != expected:
-            raise RuntimeError(
-                f"MCP tool surface mismatch: missing={sorted(expected - tool_names)}, "
-                f"unexpected={sorted(tool_names - expected)}"
-            )
-        summary["tools"] = sorted(tool_names)
-
+        names = {tool.name for tool in listed.tools}
+        if names != set(MCP_TOOL_NAMES):
+            raise RuntimeError("MCP tool surface does not match the five read-only inventory tools.")
+        if not all(tool.annotations and tool.annotations.read_only_hint for tool in listed.tools):
+            raise RuntimeError("Every published inventory tool must be read-only.")
+        summary["tools"] = sorted(names)
         status = await _call(client, "phoenix_bridge_status", {})
-        if status.get("bridge") != "ready" or status.get("vault") != "unlocked":
-            raise RuntimeError(f"Phoenix is not ready for acceptance: {status}")
-        summary["bridge"] = status.get("bridge")
-        summary["vault"] = status.get("vault")
-
-        deployments_result = await _call(client, "phoenix_list_deployments", {})
-        sessions_result = await _call(client, "phoenix_list_sessions", {})
-        deployments = deployments_result.get("deployments") or []
-        sessions = sessions_result.get("sessions") or []
+        if status.get("mode") != "headless_inventory" or status.get("read_only") is not True:
+            raise RuntimeError("Expected an operator-enabled headless inventory endpoint.")
+        summary["mode"] = status["mode"]
+        described = await _call(client, "phoenix_describe_tools", {})
+        if described.get("remote_actions_available") is not False:
+            raise RuntimeError("Inventory endpoint must not expose remote actions.")
+        deployments = (await _call(client, "phoenix_list_deployments", {})).get("deployments", [])
         summary["deployment_count"] = len(deployments)
-        summary["session_count"] = len(sessions)
-
         if deployments:
-            deployment_id = str(deployments[0]["id"])
-            agents_result = await _call(
-                client,
-                "phoenix_list_agents",
-                {"deployment_id": deployment_id},
-            )
-            summary["agent_count"] = len(agents_result.get("agents") or [])
-
-        if sessions:
-            session_id = str(sessions[0]["session_id"])
-            tree = await _call(
-                client,
-                "phoenix_agent_tree",
-                {"session_id": session_id, "refresh": True},
-            )
-            summary["tree_state"] = tree.get("state")
-            summary["tree_agent_count"] = len(tree.get("agents") or [])
-
-            if exercise_logs:
-                agents = agents_result.get("agents") if deployments else []
-                if not agents:
-                    raise RuntimeError("no deployment agent is available for log acceptance")
-                agent_id = str(agents[0]["universal_id"])
-                started = await _call(
-                    client,
-                    "phoenix_start_agent_logs",
-                    {"session_id": session_id, "agent_id": agent_id, "follow": False},
-                )
-                subscription_id = str(started["subscription_id"])
-                await asyncio.sleep(1)
-                logs = await _call(
-                    client,
-                    "phoenix_read_agent_logs",
-                    {"subscription_id": subscription_id, "after": 0, "limit": 20},
-                )
-                summary["logs_state"] = logs.get("state")
-                summary["log_line_count"] = len(logs.get("lines") or [])
-
-        if launch_deployment:
-            launched = await _call(
-                client,
-                "phoenix_launch_deployment",
-                {"deployment_id": launch_deployment},
-            )
-            summary["launch_state"] = launched.get("state")
-
+            deployment_id = deployments[0]["id"]
+            agents = (await _call(client, "phoenix_list_agents",
+                                 {"deployment_id": deployment_id})).get("agents", [])
+            summary["agent_count"] = len(agents)
+            if agents:
+                await _call(client, "phoenix_describe_agent",
+                            {"deployment_id": deployment_id, "agent_id": agents[0]["universal_id"]})
     return summary
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--exercise-logs",
-        action="store_true",
-        help="Create and read one temporary, redacted log subscription.",
-    )
-    parser.add_argument(
-        "--launch-deployment",
-        metavar="ID",
-        help="Request one Phoenix-confirmed connection for the supplied deployment ID.",
-    )
-    args = parser.parse_args()
+    parser.parse_args()
     try:
-        summary = asyncio.run(verify(args.exercise_logs, args.launch_deployment))
+        summary = asyncio.run(verify())
     # The MCP client's task group may wrap a tool failure in ExceptionGroup on
     # Python 3.11+, so keep the command-line failure compact at this boundary.
     except Exception as exc:

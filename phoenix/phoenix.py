@@ -45,7 +45,6 @@ try:
 except Exception as e:
     print("PyQt import error:", e)
 import sys, multiprocessing
-from PyQt6.QtGui import QWindow
 from PyQt6.QtWidgets import QVBoxLayout, QMainWindow,  QWidget, QHBoxLayout, QPushButton, QApplication,QGraphicsDropShadowEffect, QMessageBox, QStackedWidget, QTabBar, QStatusBar, QLabel, QDialog, QTabWidget
 from PyQt6.QtCore import (
     QEvent,
@@ -56,6 +55,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QColor, QIcon
 from matrix_gui.core.session_window import run_session
+from matrix_gui.core.utils.session_embedding import create_embedded_session_container
 
 import matrix_gui.config.boot.boot #don't take this out, looks like it's not doing anything but it setups event listeners
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
@@ -170,6 +170,7 @@ class PhoenixCockpit(QMainWindow):
         self.status_sessions = QLabel("Sessions: 0")
 
         self.status_bar = QStatusBar()
+        self.status_bar.setContentsMargins(0, 4, 0, 4)
         self.status_bar.addPermanentWidget(self.status_vault)
         self.status_bar.addPermanentWidget(self.status_deployments)
         self.status_bar.addPermanentWidget(self.status_sessions)
@@ -199,6 +200,7 @@ class PhoenixCockpit(QMainWindow):
         #self.main_layout.setStretchFactor(self.status_bar, 0)  # fixed bottom
 
         self.tab_stack = QTabWidget()
+        self.tab_stack.setObjectName("PhoenixSessionTabs")
         self.tab_stack.setTabsClosable(True)
         self.tab_stack.tabCloseRequested.connect(self._on_tab_close_requested)
         self.main_layout.addWidget(self.tab_stack)
@@ -321,12 +323,7 @@ class PhoenixCockpit(QMainWindow):
                 return
 
             # Build the embedded container tab
-            remote_window = QWindow.fromWinId(win_id)
-            remote_window.setFlags(Qt.WindowType.FramelessWindowHint)
-            container = QWidget.createWindowContainer(remote_window)
-            container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-            container.setMinimumSize(800, 600)
-            container.setStyleSheet("background-color: #111;")
+            container = create_embedded_session_container(win_id)
 
             tab = QWidget()
             layout = QVBoxLayout(tab)
@@ -337,11 +334,22 @@ class PhoenixCockpit(QMainWindow):
             idx = self.tab_stack.addTab(tab, label)
             self.tab_stack.setCurrentIndex(idx)
 
+            # Give the child process the same native parent used by the host.
+            layout.activate()
+            parent_conn.send({
+                "type": "session.embedded",
+                "session_id": session_id,
+                "parent_win_id": int(container.winId()),
+                "width": container.width(),
+                "height": container.height(),
+            })
+
             # Use direct reference, not index
             self.session_processes.append({
                 "proc": p,
                 "conn": parent_conn,
                 "session_id": session_id,
+                "deployment_id": deployment.get("id"),
                 "tab": tab,  # store the widget itself
             })
 
@@ -511,6 +519,34 @@ class PhoenixCockpit(QMainWindow):
 
 
 
+            elif mtype == "railgun.request_identity":
+                from matrix_gui.modules.railgun.request_identity import (
+                    ControlIdentityError, session_control_identity,
+                )
+                request_id = msg.get("request_id")
+                dep_id = msg.get("dep_id")
+                response = {"type": "railgun.identity.response", "request_id": request_id,
+                            "dep_id": dep_id, "ok": False, "code": "INVALID_REQUEST"}
+                try:
+                    session = next((item for item in self.session_processes
+                                    if item.get("conn") == conn), None)
+                    if not session or session.get("deployment_id") != dep_id:
+                        raise ControlIdentityError("INVALID_REQUEST")
+                    vault = VaultCoreSingleton.get()
+                    response["railgun_request_id"] = session_control_identity(
+                        vault, dep_id, msg.get("action"), msg.get("flags"),
+                        msg.get("expected_scope_key"),
+                        new_operation=msg.get("new_operation"),
+                    )
+                    response["ok"] = True
+                    response.pop("code")
+                except ControlIdentityError as error:
+                    response["code"] = str(error)
+                except Exception as error:
+                    print(f"[RAILGUN][CONTROL] Identity request refused ({type(error).__name__}).")
+                    response["code"] = "CONTROL_UNAVAILABLE"
+                conn.send(response)
+
             elif mtype == "vault.update.requested":
 
                 dep_id = msg.get("dep_id")
@@ -674,8 +710,8 @@ class PhoenixCockpit(QMainWindow):
             deployments = vcs.read().get("deployments", {})
             dep_count = len(deployments)
             method = str(kwargs.get("auth_method", "password")).strip().casefold()
-            credential = "🔑 YubiKey" if method == "yubikey" else "🔐 Password"
-            self.status_vault.setText(f"{credential} • Vault: 🔓")
+            credential = "YubiKey" if method == "yubikey" else "Password"
+            self.status_vault.setText(f"Vault ({credential}): 🔓")
             self.status_deployments.setText(f"Deployments: {dep_count}")
             self.status_sessions.setText("Sessions: 0")  # reset at unlock
 
@@ -728,6 +764,7 @@ class PhoenixCockpit(QMainWindow):
                         print(f"[MIRV] Terminated PID {proc.pid}")
                 except Exception as e:
                     print(f"[MIRV][ERROR] Could not kill process: {e}")
+            reset_startup_policy()
             super().closeEvent(ev)
 
         except Exception as e:

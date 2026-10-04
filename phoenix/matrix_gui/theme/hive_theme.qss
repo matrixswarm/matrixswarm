@@ -25,7 +25,7 @@ QFrame, QGroupBox {
 }
 
 /* === Buttons === */
-QPushButton {
+QPushButton, QToolButton#MatrixDOperationButton {
     background-color: #1b1b1d;
     border: 1px solid #2d2d30;
     border-radius: 6px;
@@ -33,16 +33,16 @@ QPushButton {
     color: #e0e0e0;
     font-weight: 500;
 }
-QPushButton:hover {
+QPushButton:hover, QToolButton#MatrixDOperationButton:hover {
     background-color: #232327;
     border-color: #0ae8b5;        /* teal accent */
 }
-QPushButton:pressed {
+QPushButton:pressed, QToolButton#MatrixDOperationButton:pressed {
     background-color: #0e0e10;
     border-color: #08856c;
     color: #b0b0b0;
 }
-QPushButton:disabled {
+QPushButton:disabled, QToolButton#MatrixDOperationButton:disabled {
     background-color: #161616;
     color: #555;
     border-color: #222;
@@ -81,6 +81,14 @@ QComboBox:hover {
 QTabWidget::pane {
     border: none;
     background: #0f0f11;
+}
+/* The main tab stack inherits QFrame chrome; keep the session canvas open. */
+QTabWidget#PhoenixSessionTabs > QStackedWidget {
+    border: none;
+    border-radius: 0;
+    background: #0d0d0f;
+    padding: 0;
+    margin: 0;
 }
 QTabBar::tab {
     background-color: #1e1e1e;
@@ -323,12 +331,12 @@ QGroupBox::title {
 QLabel {
     color: #ccc;
 }
-QPushButton {
+QPushButton, QToolButton#MatrixDOperationButton {
     border: 1px solid #333;
     border-radius: 4px;
     background-color: #1a1a1a;
 }
-QPushButton:hover {
+QPushButton:hover, QToolButton#MatrixDOperationButton:hover {
     background-color: #242424;
     border: 1px solid #555;
 }

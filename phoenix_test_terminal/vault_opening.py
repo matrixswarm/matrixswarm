@@ -44,7 +44,7 @@ def run(stage, sandbox):
     with patch.object(QMessageBox, "warning") as warning, patch.object(QMessageBox, "critical"), patch.object(QMessageBox, "information"):
         if stage == "opening":
             dialog = Unlock()
-            check(not dialog.allow_secret_viewing and not dialog.debug_output and not dialog.close_on_minimize_or_sleep, "All three session permissions default off")
+            check(not dialog.allow_secret_viewing and not dialog.debug_output and not dialog.close_on_minimize_or_sleep, "All three session options default off")
             dialog.unlock_btn.click()
             check(closed(dialog) and warning.call_args.args[1] == "Missing File", "Unlock without file rejected with correct diagnostic")
             with patch.object(QFileDialog, "getOpenFileName", return_value=("", "")):

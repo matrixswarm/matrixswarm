@@ -2,7 +2,8 @@
 
 The policy is deliberately kept out of the Vault and application settings.  A
 new Phoenix process therefore starts locked down every time.  The cockpit
-passes the debug choice explicitly to each embedded session process.
+passes the debug choice to each embedded session process. Terminal Mode
+authoring belongs to its own window, outside login capabilities.
 """
 
 from __future__ import annotations

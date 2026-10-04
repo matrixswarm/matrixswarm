@@ -155,8 +155,12 @@ class ControlLifecycleTests(unittest.TestCase):
         self.assertIsNone(self.dialog._active_channel)
 
     def test_stop_button_dispatches_worker_and_blocks_second_operation(self):
-        target = {"host": "example.invalid", "username": "root", "auth_type": "password"}
-        dialog = DeployDialog({"profile": target}, deployment={"universe": "test"})
+        target = {"host": "example.invalid", "port": 22, "username": "root",
+                  "auth_type": "password", "trusted_host_fingerprint": "synthetic"}
+        record = {"universe": "test", "label": "test", "ssh_serial": "profile",
+                  "railgun_target_identity": {"host": "example.invalid", "port": 22,
+                                              "pin": "synthetic"}}
+        dialog = DeployDialog({"profile": target}, deployment=record)
         self.addCleanup(dialog.deleteLater)
         with patch.object(ControlSessionWorker, "start") as start:
             dialog._run_remote("stop")
@@ -177,6 +181,20 @@ class ControlLifecycleTests(unittest.TestCase):
         self.assertTrue(self.dialog._poll_timer.isActive())
         self.assertEqual(self.dialog._poll_timer.thread(), self.app.thread())
         self.dialog._close_ssh_session()
+
+    def test_completed_control_keeps_its_request_available_for_recovery(self):
+        channel = Mock()
+        channel.recv_ready.return_value = False
+        channel.recv_stderr_ready.return_value = False
+        channel.exit_status_ready.return_value = True
+        channel.recv_exit_status.return_value = 0
+        self.dialog._active_channel = channel
+        self.dialog._ssh_client = Mock()
+        request = {"flags": ["--protect-memory"], "scope_key": "b" * 64, "request_id": "a" * 32}
+        self.dialog._control_requests["restart"] = request
+        self.dialog._poll_ssh_channel()
+        self.assertIs(self.dialog._control_requests["restart"], request)
+        self.assertIsNone(self.dialog._active_channel)
 
 
 if __name__ == "__main__":

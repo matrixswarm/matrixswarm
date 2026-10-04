@@ -1,6 +1,7 @@
 import time
 import json
 import base64
+from matrix_gui.core.utils.packet_freshness import packet_is_fresh
 from core.python_core.mixin.log_method import LogMixin
 
 from Crypto.Cipher import AES
@@ -51,7 +52,8 @@ class PacketCryptoMixin(LogMixin):
                 raise RuntimeError("Payload is not a dictionary.")
 
             # Step 1: Load identity into packet (optional)
-            subpacket = {"payload": raw_payload, "timestamp": int(time.time())}
+            subpacket = {"payload": raw_payload, "timestamp": int(time.time()),
+                         "nonce": base64.b64encode(get_random_bytes(16)).decode()}
 
             #this will include identity(universal_id, pubkey, timestamp) + sig(Matrix signature of the identity)
             if self.football.use_payload_identity_file():
@@ -108,6 +110,7 @@ class PacketCryptoMixin(LogMixin):
         if not self.football:
             raise RuntimeError("Football not injected.")
 
+        step = "0"
         try:
             packet=raw_payload
             if self.football.use_symmetric_encryption():
@@ -191,6 +194,9 @@ class PacketCryptoMixin(LogMixin):
                     step = "2.5"
                     raise RuntimeError(f"Packet dropped: sender \"{self.get_sender_uid()}\" not in allowlist.")
 
+                if not packet_is_fresh(subpacket.get("timestamp")):
+                    raise RuntimeError("Packet dropped: stale or invalid timestamp.")
+
             #exit(json.dumps(packet, indent=2, sort_keys=True))
 
             # Step 3: Decrypt RSA-wrapped payload if present
@@ -209,20 +215,11 @@ class PacketCryptoMixin(LogMixin):
                     subpacket["payload"] = json.loads(decrypted_payload_json.decode())
 
             step = "4"
-            # Step 4: Extract creamy center and validate timestamp
-            subpacket_ts = subpacket.get("timestamp")
-            now = int(time.time())
-            ttl_limit = 90  # seconds
-
-            if subpacket_ts and (now - subpacket_ts) > ttl_limit:
-                step = "4.1"
-                #raise RuntimeError(f"Packet too old. Age: {now - subpacket_ts}s > TTL {ttl_limit}s")
-
             #return unencrypted
             return subpacket["payload"]
 
         except Exception as e:
-
+            self._decrypted_packet = None
             self.log(f"Failed to unpack secure packet step({step})", error=e, block="UNPACK", level="ERROR")
 
 

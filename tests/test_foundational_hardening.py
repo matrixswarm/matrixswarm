@@ -140,9 +140,16 @@ class FoundationalHardeningTests(unittest.TestCase):
         installer = source(
             "phoenix/matrix_gui/modules/railgun/railgun_install_dialog.py"
         )
-        # Each installer probes once, then probes again after optional package
-        # provisioning before it permits the isolated environment to exist.
-        self.assertEqual(installer.count("command -v python3.12"), 4)
+        self.assertIn('PYTHON_VERSION="3.12.15"', installer)
+        self.assertIn(
+            'PYTHON_SOURCE_SHA256="c2c4321961fab0fb999d66e0cecf521c2ab3994c7992873ea99e306c1094fd5a"',
+            installer,
+        )
+        self.assertIn("https://www.python.org/ftp/python/$PYTHON_VERSION/", installer)
+        self.assertIn("sha256sum -c -", installer)
+        self.assertIn("install_python312_from_source", installer)
+        self.assertIn("--with-ensurepip=install", installer)
+        self.assertIn("source fallback required", installer)
         self.assertEqual(
             installer.count('"$PYTHON_BIN" -m venv "$VENV_DIR"'), 2
         )
@@ -150,21 +157,9 @@ class FoundationalHardeningTests(unittest.TestCase):
             installer.count('"$PYTHON_BIN" -m venv "$MCP_VENV"'), 2
         )
         self.assertNotIn("python3 -m venv \"$VENV_DIR\"", installer)
-        self.assertIn("refusing the system python fallback", installer)
-        self.assertEqual(
-            installer.count(
-                "Python 3.12 not found; provisioning it from the OS package manager"
-            ),
-            2,
-        )
-        self.assertEqual(
-            installer.count("dnf install -y python3.12 python3.12-pip"),
-            2,
-        )
-        self.assertEqual(
-            installer.count("python3.12 python3.12-venv"),
-            2,
-        )
+        self.assertIn("Verified Python 3.12 provisioning failed", installer)
+        self.assertIn("dnf install -y python3.12 python3.12-pip", installer)
+        self.assertIn("python3.12 python3.12-venv", installer)
 
     def test_railgun_installs_dependencies_on_rocky_and_debian(self):
         installer = source(

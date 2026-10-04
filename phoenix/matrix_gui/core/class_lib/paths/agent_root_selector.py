@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+from .source_policy import is_environment_path
 
 
 LANG_EXT_MAP = {
@@ -78,7 +79,8 @@ class AgentRootSelector:
         if not matches and lang == "python":
             folders = ([root] if root.name == name else []) + list(root.rglob(name))
             matches = [p / "__init__.py" for p in folders if (p / "__init__.py").is_file()]
-        unique = sorted({str(p.resolve()) for p in matches})
+        unique = sorted({str(p.resolve()) for p in matches
+                         if not is_environment_path(p) and not is_environment_path(p.resolve())})
         if len(unique) > 1:
             raise ValueError(f"Multiple sources found for {name}; select that agent's exact directory.")
         return unique[0] if unique else None
@@ -103,6 +105,8 @@ class AgentSourceSelection:
 
     @staticmethod
     def _check_readable(path):
+        if is_environment_path(path) or is_environment_path(Path(path).resolve()):
+            raise PermissionError("Environment files cannot be used as agent sources.")
         if not Path(path).is_file():
             raise FileNotFoundError(f"Source file no longer exists: {path}")
         with Path(path).open("rb") as source:

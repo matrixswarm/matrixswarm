@@ -4,6 +4,7 @@ import base64
 import hashlib
 from pathlib import Path
 from matrix_gui.core.class_lib.paths.agent_root_selector import AgentRootSelector, LANG_EXT_MAP
+from matrix_gui.core.class_lib.paths.source_policy import is_environment_path
 
 
 def resolve_agent_source(agent_name: str, base_path: str, lang_hint: str = "python") -> str:
@@ -17,6 +18,8 @@ def _source_path(node, base_path):
         source = resolve_agent_source(name, base_path, lang)
     if not source or not Path(source).is_file():
         raise ValueError(f"Missing source for {node['name']}; select its source directory again.")
+    if is_environment_path(source) or is_environment_path(Path(source).resolve()):
+        raise ValueError("Environment files cannot be embedded as agent sources.")
     return str(Path(source).resolve())
 
 

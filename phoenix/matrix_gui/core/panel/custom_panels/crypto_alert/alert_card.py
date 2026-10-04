@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QComboBox, QCheckBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSignalBlocker
 from PyQt6.QtWidgets import QFrame
 
 class AlertCard(QWidget):
@@ -461,6 +461,25 @@ class AlertCard(QWidget):
 
     def from_dict(self, alert: Dict):
         """Populate card fields from backend config."""
+        focused = self.focusWidget()
+        field = focused if isinstance(focused, QLineEdit) and focused.hasFocus() else None
+        if field is not None:
+            cursor, selection = field.cursorPosition(), field.selectionStart()
+            selected = field.selectedText()
+            selected_all = bool(selected) and selected == field.text()
+        # Updating an existing card after save is not another user edit. Keep
+        # the widget/focus stable even if the agent normalizes 84750 to 84750.0.
+        with QSignalBlocker(self):
+            self._populate_from_dict(alert)
+        if field is not None:
+            if selected_all:
+                field.selectAll()
+            elif selection >= 0:
+                field.setSelection(selection, len(selected))
+            else:
+                field.setCursorPosition(cursor)
+
+    def _populate_from_dict(self, alert: Dict):
         self.alert_id = alert.get("id") or uuid.uuid4().hex
         self.label_edit.setText(alert.get("label", ""))
         self.address_edit.setText(alert.get("address", ""))

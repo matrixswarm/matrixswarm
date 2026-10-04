@@ -540,6 +540,7 @@ def build_remote_matrixd_command(
     reboot_id=None,
     runtime_capabilities=None,
     request_id=None,
+    require_inactive=False,
 ):
     """Build the shared Railgun/DeployDialog least-privilege command.
 
@@ -570,6 +571,10 @@ def build_remote_matrixd_command(
     restart_requested = action == "restart" or any(
         flag in flags for flag in ("--reboot", "--reboot-new", "--reboot-id")
     )
+    if type(require_inactive) is not bool:
+        raise ValueError("require_inactive must be boolean")
+    if require_inactive and (action != "start" or restart_requested or request_id is None):
+        raise ValueError("Guarded launch requires start without restart flags and a durable request ID")
 
     q_universe = quote_remote_argument(universe, "Universe name")
     q_user = quote_remote_argument(linux_user, "Swarm Linux user")
@@ -964,5 +969,11 @@ def build_remote_matrixd_command(
             f"exec /matrix/.venv/bin/python3 {wrapper} --universe {q_universe} "
             f"--request-id {shlex.quote(request_id)} --command-b64 {shlex.quote(encoded_command)}",
         ])
+        if require_inactive:
+            # Older servers cannot silently ignore the non-replacement contract.
+            request_preflight.insert(-1,
+                f"test \"$(/matrix/.venv/bin/python3 {wrapper} --inactive-protocol)\" = railgun-inactive-v1 || "
+                "{ echo '[RAILGUN][ERROR] Update MatrixOS: inactive launch guard missing.' >&2; exit 69; }")
+            request_preflight[-1] += " --require-inactive"
         return _root_shell("\n".join(request_preflight))
     return _root_shell("\n".join(lines))

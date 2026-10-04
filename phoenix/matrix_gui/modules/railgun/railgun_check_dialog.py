@@ -106,8 +106,9 @@ class RailgunCheckWorker(QThread):
             self.output.emit(f"[OK] Found {version} at {response}")
         else:
             self.output.emit(
-                "<span style='color:red'>[FAIL] Python 3.12 not found; "
-                "Railgun will refuse installation.</span>"
+                "<span style='color:yellow'>[WARN] Python 3.12 not found; "
+                "the installer will try OS packages, then a checksum-verified "
+                "Python.org source build.</span>"
             )
 
         self.output.emit("[Check] Checking pip…")

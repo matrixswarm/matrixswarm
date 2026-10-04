@@ -2,6 +2,8 @@
 import os
 import sys
 import unittest
+import base64
+import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -10,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "phoenix"))
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QCloseEvent
 from matrix_gui.modules.railgun import remote_shell
+from matrix_gui.modules.railgun import control_worker
 from matrix_gui.swarm_workspace.cls_lib.deployment.dialog import railgun
 
 
@@ -31,6 +34,44 @@ class UploadCancellationTests(unittest.TestCase):
             worker.run()
         connect.assert_not_called()
         self.assertIn("No remote boot command", errors[0])
+
+    def test_deploy_and_session_restart_stream_only_saved_bundle_without_file_reads(self):
+        bundle = {field: base64.b64encode(b"synthetic sealed bytes").decode()
+                  for field in ("ciphertext", "nonce", "tag")}
+        key = base64.b64encode(b"x" * 32).decode()
+        for action in ("deploy", "restart"):
+            with self.subTest(action=action):
+                client, channel = Mock(), Mock()
+                client.get_transport.return_value.open_session.return_value = channel
+                channel.recv_ready.return_value = False
+                channel.recv_stderr_ready.return_value = False
+                channel.exit_status_ready.return_value = True
+                channel.recv_exit_status.return_value = 0
+                payload = bytearray()
+                def send(chunk):
+                    payload.extend(chunk)
+                    return len(chunk)
+                channel.send.side_effect = send
+                module = railgun if action == "deploy" else control_worker
+                if action == "deploy":
+                    worker = railgun.RailgunWorker({}, bundle, key, {
+                        "universe": "test", "linux_user": "matrix-test"})
+                else:
+                    worker = control_worker.ControlSessionWorker({}, "synthetic restart", action, bundle, key)
+                with patch.object(module, "connect_ssh_profile", return_value=(client, "synthetic")), \
+                        patch.object(module, "verify_remote_matrixd_stdin"), \
+                        patch("builtins.open", side_effect=AssertionError("No local files may be read")), \
+                        patch.object(Path, "open", side_effect=AssertionError("No local files may be read")):
+                    worker.run()
+                self.assertEqual({"version": 1, "encrypted_bundle": bundle, "swarm_key": key},
+                                 json.loads(payload))
+                channel.shutdown_write.assert_called_once()
+                client.open_sftp.assert_not_called()
+                if action == "restart":
+                    self.assertIsNone(worker.error)
+                    self.assertEqual((client, channel), worker.result)
+                    channel.close()
+                    client.close()
 
     def test_cancel_mid_upload_closes_transport_and_reports_unknown(self):
         worker = self.worker()

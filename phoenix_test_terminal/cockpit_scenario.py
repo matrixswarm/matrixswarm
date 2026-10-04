@@ -49,6 +49,7 @@ def run(stage, sandbox):
                 return QDialog.exec(dialog)
             def unlock(dialog):
                 def action():
+                    check(not dialog.optional_capabilities.isHidden(), "Login capabilities are always expanded")
                     dialog.vault_path = str(vault)
                     dialog.pass_input.setText(PASSWORD)
                     dialog.unlock_btn.click()
@@ -70,6 +71,13 @@ def run(stage, sandbox):
                 cockpit.unlock_button.click()
             _application.processEvents()
             check(cockpit.stack.currentIndex() == 1, "Real cockpit unlock signal reaches unlocked screen")
+            from matrix_gui.core.dialog.terminal_mode_dialog import TerminalModeDialog
+            terminal = TerminalModeDialog(cockpit)
+            terminal.show()
+            _application.processEvents()
+            check(terminal.controls.isVisible(), "Terminal Mode opens its own authoring window after unlock")
+            terminal.reject()
+            terminal.deleteLater()
             check(isinstance(module.VaultService.load_vault(str(vault), PASSWORD), dict), "Vault independently decrypts after cockpit route")
             from matrix_gui.swarm_workspace.workspace_manager import WorkspaceManagerDialog
             from matrix_gui.swarm_workspace.swarm_workspace import SwarmWorkspaceDialog

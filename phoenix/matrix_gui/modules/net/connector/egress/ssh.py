@@ -11,6 +11,7 @@ import uuid
 from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
 from matrix_gui.modules.net.connector.interfaces.base_connector import BaseConnector
+from matrix_gui.modules.net.connector.egress.ssh_sftp import open_inbox_sftp
 from matrix_gui.modules.railgun.ssh_support import connect_ssh_profile
 
 
@@ -129,8 +130,9 @@ class SSHConnector(BaseConnector):
         self._client, _ = connect_ssh_profile(self.connection, timeout=15)
         transport = self._client.get_transport()
         transport.set_keepalive(30)
-        self._sftp = self._client.open_sftp()
-        self._sftp.stat(self.inbox)
+        self._sftp, used_sudo = open_inbox_sftp(self._client, self.inbox, timeout=15)
+        if used_sudo:
+            print("[SSHConnector] Inbox delivery is using passwordless sudo SFTP.")
         self._emit_status("connected", self.host, self.port)
 
     def _secure_envelope(self, packet, transport_id):

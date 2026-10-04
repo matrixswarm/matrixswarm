@@ -33,7 +33,11 @@ from matrix_gui.core.panel.universe_teardown_dialog import UniverseTeardownDialo
 from matrix_gui.core.panel.control_bar import ControlBar
 from matrix_gui.modules.vault.services.vault_connection_singleton import VaultConnectionSingleton
 from matrix_gui.modules.directive.deploy_dialog import DeployDialog
-from matrix_gui.core.startup_policy import configure_debug_output, install_print_gate
+from matrix_gui.core.startup_policy import configure_startup_policy, install_print_gate
+from matrix_gui.core.utils.session_embedding import (
+    bind_embedded_session_window,
+    prepare_embedded_session_window,
+)
 
 def run_session(session_id, conn, debug_output=False):
     """
@@ -47,7 +51,7 @@ def run_session(session_id, conn, debug_output=False):
     """
 
     install_print_gate()
-    configure_debug_output(debug_output)
+    configure_startup_policy(debug_output=debug_output)
 
     app = QApplication.instance() or QApplication(sys.argv)
 
@@ -144,14 +148,10 @@ def run_session(session_id, conn, debug_output=False):
 
         win.start_pipe_timer()
 
-        # make window embeddable and not auto-activate
-        win.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.SubWindow)
-        win.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
-        win.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
-        win.create()  # physically create the native handle without showing yet
-        wid = int(win.winId())
+        wid = prepare_embedded_session_window(win)
         conn.send({"type": "window_ready", "session_id": session_id, "win_id": wid})
-        win.show()
+        # Show only after the cockpit supplies the native container parent.
+        # Both Qt processes must agree on child coordinates before layout runs.
 
 
         try:
@@ -363,10 +363,15 @@ class SessionWindow(QMainWindow):
         if not self.conn:
             return
         try:
-            while self.conn.poll():
-                msg = self.conn.recv()
+            queued = self.vault_singleton.take_deferred_messages()
+            while queued or self.conn.poll():
+                msg = queued.pop(0) if queued else self.conn.recv()
                 mtype = msg.get("type")
-                if mtype == "force_close":
+                if mtype == "session.embedded" and msg.get("session_id") == self.cockpit_id:
+                    bind_embedded_session_window(
+                        self, msg["parent_win_id"], msg["width"], msg["height"]
+                    )
+                elif mtype == "force_close":
                     print(f"[SESSION] 🧨 Received external close for {self.session_id}")
                     self._handle_external_close()
 
@@ -618,7 +623,10 @@ class SessionWindow(QMainWindow):
 
         try:
 
-            cache_key = panel_name
+            # A panel carries its target UID, callback token and cached data.
+            # Reusing one agent's panel for another silently targets the wrong
+            # inbox (and the same rule applies to other agent-scoped panels).
+            cache_key = (panel_name, (node or {}).get("universal_id"))
             if cache_key in self._panel_cache:
                 return self._panel_cache[cache_key]
 
@@ -1327,6 +1335,7 @@ class SessionWindow(QMainWindow):
                 ssh_map=ssh_map,
                 default_serial=default_serial,
                 deployment=self.deployment,
+                vault_connection=self.vault_singleton,
                 parent=self
             )
 
@@ -1410,8 +1419,12 @@ class SessionWindow(QMainWindow):
             status_bar = QToolBar("Session Status", self)
             status_bar.setObjectName("SessionStatusBar")
             status_bar.setMovable(False)
-            status_bar.setContentsMargins(
-                COCKPIT_CONTENT_GUTTER, 3, COCKPIT_CONTENT_GUTTER, 3
+            # QToolBar's layout uses style padding, rather than QWidget margins.
+            # Match the panel gutter explicitly so the badge borders line up.
+            status_bar.setContentsMargins(0, 0, 0, 0)
+            status_bar.setStyleSheet(
+                "QToolBar#SessionStatusBar { border: none; margin: 0; "
+                f"padding: 3px {COCKPIT_CONTENT_GUTTER}px; }}"
             )
 
             # Primary status label

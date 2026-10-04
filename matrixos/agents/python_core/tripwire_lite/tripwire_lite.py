@@ -34,7 +34,7 @@ class Agent(BootAgent):
           and `allowed_extensions`. Ignored paths are whitelisted.
       * **Enforcement Mode:**
           * `ENFORCE` (Active): Moves suspicious files to a timestamped quarantine
-              directory structure under `/matrix/quarantine`.
+              directory structure in the agent's static storage.
           * `DRY-RUN` (Simulated): Logs and alerts what *would* have been quarantined.
           * `Detect-Only` (Enforce=False): Logs detections without quarantining.
       * **Alerting:** Dispatches alerts to a configured role (`alert_to_role`)
@@ -70,13 +70,16 @@ class Agent(BootAgent):
             self._watch_paths = self._normalize_watch_paths(watch_paths)
 
             # Quarantine settings (where suspicious files will be moved)
-            self._quarantine_root = cfg.get("quarantine_root", "/matrix/quarantine")
-            # Ensure the quarantine directory exists (create it if necessary)
-            os.makedirs(self._quarantine_root, exist_ok=True)
+            self._quarantine_root = self._resolve_quarantine_root(cfg.get("quarantine_root"))
 
             # Operation mode settings
             self._dry_run = bool(cfg.get("dry_run", False))  # If True, no real enforcement is done
             self._enforce = bool(cfg.get("enforce", True))  # If True, security rules are enforced
+
+            # Read-only monitoring must not require write access to quarantine.
+            # Only active enforcement needs a quarantine directory.
+            if self._enforce and not self._dry_run:
+                os.makedirs(self._quarantine_root, mode=0o700, exist_ok=True)
 
             # Configure file extension policies
             self.allowed_extensions = set(cfg.get("allowed_extensions", []))  # Safe file extensions
@@ -129,7 +132,7 @@ class Agent(BootAgent):
             # Log the initialization state for debugging purposes
             self.log(
                 f"[TRIPWIRE-GUARD][INIT] watch={self._watch_paths} ignore={self._ignore_paths} "
-                f"dry_run={self._dry_run} enforce={self._enforce}"
+                f"dry_run={self._dry_run} enforce={self._enforce} quarantine={self._quarantine_root}"
             )
 
             # Security configuration (symmetric encryption)
@@ -139,11 +142,32 @@ class Agent(BootAgent):
 
         except Exception as e:
             self.log("[TRIPWIRE-GUARD][INIT] Failed to init", error=e, level="CRITICAL")
+            # Do not boot a partially initialized guard. Otherwise worker()
+            # hides this original failure behind repeated missing-field errors.
+            raise
 
     # ---------- Core Helpers ----------
+    def _resolve_quarantine_root(self, configured):
+        """Keep the automatic quarantine beside this agent's writable logs/state."""
+        if configured is not None and not isinstance(configured, str):
+            raise ValueError("quarantine_root must be a path string or empty for automatic storage")
+        requested = (configured or "").strip()
+        # Existing directives explicitly saved the former shared default.
+        # Resolve that value as automatic too, so updating the agent source
+        # repairs those deployments without needing to rebuild their config.
+        if not requested or requested.rstrip("/") == "/matrix/quarantine":
+            resolved = os.path.join(self.path_resolution["static_comm_path_resolved"], "quarantine")
+            if requested:
+                self.log(f"[TRIPWIRE-GUARD][QUARANTINE] Legacy default {requested} now uses {resolved}")
+            return resolved
+        return requested
+
     def _is_ignored(self, full_path: str) -> bool:
         """Check if the given path should be ignored based on the ignore list."""
         full_path = os.path.abspath(full_path)
+        quarantine = os.path.abspath(self._quarantine_root)
+        if full_path == quarantine or full_path.startswith(quarantine + os.sep):
+            return True
         for p in self._ignore_paths:
             if full_path.startswith(p + os.sep) or full_path == p:
                 return True
@@ -297,8 +321,7 @@ class Agent(BootAgent):
 
     def _build_quarantine_path(self, full_path: str) -> str:
         """
-        /opt/quarantine/global/<timestamp>/<full/absolute/path>
-        e.g. /opt/quarantine/global/20251127T083000Z/sites/public_html/.../file.php
+        <quarantine_root>/<timestamp>/<full/absolute/path>
         """
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
         # Strip leading "/" so it becomes a proper relative path under ts dir
@@ -322,6 +345,7 @@ class Agent(BootAgent):
             status = {
                 "enforce": self._enforce,
                 "dry_run": self._dry_run,
+                "quarantine_root": self._quarantine_root,
                 "ignore": self._ignore_paths,
                 "paths": self._watch_paths,
                 "cooldown": self._cooldown,

@@ -104,6 +104,62 @@ class PanelTests(unittest.TestCase):
         self.assertTrue(self.panel.dirty)
         self.assertIn("No acknowledgment", self.panel.status_label.text())
 
+    def test_actual_typing_after_repeated_save_and_live_updates(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+        self.reply(watch_list=[{"id": "btc", "pair": "BTC/USDT",
+                                "trigger_type": "price_below", "threshold": 84750,
+                                "one_shot": True}])
+        for revision in range(1, 4):
+            card = self.panel.alert_cards[0]
+            field = card.threshold_edit
+            self.panel.scroll_area.ensureWidgetVisible(field)
+            self.panel.activateWindow()
+            self.app.processEvents()
+            QTest.mouseClick(field, Qt.MouseButton.LeftButton)
+            QTest.keyClick(field, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+            QTest.keyClicks(field, str(84750 + revision))
+            self.assertTrue(field.isEnabled())
+            self.assertFalse(field.isReadOnly())
+            self.assertEqual(str(84750 + revision), field.text())
+            self.assertTrue(self.panel.dirty)
+            self.panel._handle_price_update("session-a", payload={"content": {
+                "token": self.panel.token, "agent_uid": "crypto-a", "revision": self.panel.revision,
+                "live": {"btc": {"price": 84669.97, "price_ts": time.time()}},
+                "runtime": {"btc": {"hits": 1, "complete": True}}}})
+            self.panel._tick()
+            self.app.processEvents()
+            self.assertEqual(str(84750 + revision), field.text())
+            self.panel.btn_save.click()
+            submitted = self.bus.sent[-1]["content"]["payload"]["watch_list"]
+            self.reply(revision=revision, watch_list=submitted)
+            self.assertFalse(self.panel.dirty)
+
+    def test_save_ack_preserves_active_input_widget_focus_and_selection(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+        self.reply(watch_list=[{"id": "btc", "pair": "BTC/USDT", "threshold": 84750}])
+        card = self.panel.alert_cards[0]
+        field = card.threshold_edit
+        self.panel.btn_save.click()
+        submitted = self.bus.sent[-1]["content"]["payload"]["watch_list"]
+        self.panel.scroll_area.ensureWidgetVisible(field)
+        self.panel.activateWindow()
+        self.app.processEvents()
+        QTest.mouseClick(field, Qt.MouseButton.LeftButton)
+        QTest.keyClick(field, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+        self.assertTrue(field.hasFocus())
+        # The normalized acknowledgement arrives just as the user begins edit #2.
+        submitted[0]["threshold"] = 84750.0
+        self.reply(revision=1, watch_list=submitted)
+        self.assertIs(card, self.panel.alert_cards[0])
+        self.assertTrue(field.hasFocus())
+        self.assertEqual("84750.0", field.selectedText())
+        self.assertFalse(self.panel.dirty)  # Programmatic normalization is not an edit.
+        QTest.keyClicks(field, "85000")
+        self.assertEqual("85000", field.text())
+        self.assertTrue(self.panel.dirty)
+
     def test_stream_does_not_overwrite_edits_and_hide_releases_subscription(self):
         self.reply(watch_list=[{"id": "a", "pair": "BTC/ETH", "threshold": 20}])
         self.panel.alert_cards[0].threshold_edit.setText("25")

@@ -116,7 +116,7 @@ class SwarmsRemoteTests(unittest.TestCase):
         controls = (
             ROOT / "phoenix/matrix_gui/core/phoenix_control_panel.py"
         ).read_text(encoding="utf-8")
-        self.assertIn('QPushButton("🌌 Swarms")', controls)
+        self.assertIn('QPushButton("Swarms")', controls)
         self.assertIn('QPushButton("⛔ Kill All on This Server")', dialog)
         self.assertIn('QPushButton("⛔ Kill")', dialog)
         self.assertIn("setSingleShot(True)", dialog)
