@@ -23,7 +23,19 @@ class TripwireLite(BaseEditor, ServiceRolesMixin, ListEditorMixin):
         general_layout.setContentsMargins(0, 0, 0, 0)
         general_layout.setSpacing(4)
 
-        self.quarantine_root = QLineEdit(cfg.get("quarantine_root", "/matrix/quarantine"))
+        quarantine_root = cfg.get("quarantine_root", "")
+        if quarantine_root is None or (
+            isinstance(quarantine_root, str) and quarantine_root.strip().rstrip("/") == "/matrix/quarantine"
+        ):
+            quarantine_root = ""
+        self.quarantine_root = QLineEdit()
+        self.quarantine_root.setPlaceholderText("Automatic: agent's static storage")
+        self.quarantine_root.setToolTip(
+            "Leave empty to use this agent's quarantine directory in its universe's static storage. "
+            "The legacy /matrix/quarantine setting also uses automatic storage. "
+            "A custom directory must be writable by the swarm account."
+        )
+        self._load_saved_text(self.quarantine_root, quarantine_root)
 
         self.interval = QSpinBox()
         self.interval.setRange(1, 3600)
@@ -124,7 +136,7 @@ class TripwireLite(BaseEditor, ServiceRolesMixin, ListEditorMixin):
         suspicious_extensions = [x["extension"] for x in self._collect_list_data("suspicious_extensions")]
 
         self.node.config.update({
-            "quarantine_root": self.quarantine_root.text().strip(),
+            "quarantine_root": self._saved_text(self.quarantine_root, "Quarantine Root").strip(),
             "interval": int(self.interval.value()),
             "cooldown": int(self.cooldown.value()),
             "dry_run": self.dry_run.isChecked(),

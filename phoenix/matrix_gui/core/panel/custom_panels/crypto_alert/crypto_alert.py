@@ -247,6 +247,16 @@ class CryptoAlert(PhoenixPanelInterface):
                         card._draft = False
                     card.render_boiler()
                 self.dirty = any(card._draft for card in self.alert_cards)
+            elif (operation == "update_config"
+                  and [card.alert_id for card in self.alert_cards]
+                  == [alert.get("id") for alert in content["watch_list"]]):
+                # A save acknowledgement must not destroy a field the user has
+                # just focused for their next edit. Normalize in place; preserve
+                # the newer-typing branch above and replace only on actual reload.
+                for card, alert in zip(self.alert_cards, content["watch_list"]):
+                    card.from_dict(alert)
+                    card._draft = False
+                self.dirty = False
             else:
                 while self.alert_cards:
                     card = self.alert_cards.pop()

@@ -1,4 +1,4 @@
-"""Authenticated loopback JSON-RPC transport for the in-process bridge."""
+"""Authenticated loopback transport; the headless console owns access lifetime."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import os
 import secrets
 import socket
 import threading
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -51,8 +52,8 @@ class BridgeServer:
         if isinstance(existing, dict) and self._endpoint_is_listening(existing):
             owner = existing.get("pid", "unknown")
             raise RuntimeError(
-                f"Another Phoenix LLM Bridge is already enabled (PID {owner}). "
-                "Disable it in that Phoenix window before enabling this one."
+                f"Another terminal endpoint is already enabled (PID {owner}). "
+                "Lock its operator console before enabling another endpoint in this state directory."
             )
         try:
             self.connection_path.unlink(missing_ok=True)
@@ -60,7 +61,7 @@ class BridgeServer:
             raise RuntimeError(f"Could not remove stale bridge connection file: {exc}") from exc
 
     def start(self) -> dict[str, Any]:
-        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._reject_active_or_remove_stale_connection()
         bridge = self
 
@@ -82,6 +83,7 @@ class BridgeServer:
                 if self.path != "/rpc":
                     self._json(404, {"ok": False, "error": "not_found"})
                     return
+                self.connection.settimeout(5)
                 supplied = self.headers.get("Authorization", "")
                 expected = f"Bearer {bridge._token}"
                 if not hmac.compare_digest(supplied, expected):
@@ -104,14 +106,18 @@ class BridgeServer:
                     if length <= 0 or length > 65536:
                         raise ValueError("request size is invalid")
                     request = json.loads(self.rfile.read(length).decode("utf-8"))
+                    if not isinstance(request, dict) or set(request) != {"method", "params"}:
+                        raise ValueError("Request must contain only method and params.")
                     method = request.get("method")
                     params = request.get("params", {})
                     if not isinstance(method, str) or not isinstance(params, dict):
                         raise ValueError("method must be a string and params must be an object")
                     result = bridge._dispatch(method, params)
                     self._json(200, {"ok": True, "result": result})
-                except Exception as exc:
+                except (ValueError, PermissionError) as exc:
                     self._json(400, {"ok": False, "error": str(exc)})
+                except Exception:
+                    self._json(400, {"ok": False, "error": "Phoenix could not complete the request. Inspect the operator session."})
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._server.daemon_threads = True
@@ -125,11 +131,19 @@ class BridgeServer:
             "token": self._token,
             "pid": os.getpid(),
         }
-        self.connection_path.write_text(json.dumps(connection, indent=2) + "\n", encoding="utf-8")
+        # Create privately before any token bytes are written, then publish atomically.
+        fd, temporary = tempfile.mkstemp(prefix=".bridge-", dir=self._data_dir)
         try:
-            self.connection_path.chmod(0o600)
-        except OSError:
-            pass
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(connection, stream, indent=2)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self.connection_path)
+        except Exception:
+            Path(temporary).unlink(missing_ok=True)
+            self.stop()
+            raise
         self._connection = connection
         return {key: value for key, value in connection.items() if key != "token"}
 

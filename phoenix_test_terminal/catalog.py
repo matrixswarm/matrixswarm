@@ -80,7 +80,7 @@ SECTIONS = {
     },
     "startup": {
         "purpose": "Startup policy, first-swarm guidance and workspace behavior.",
-        "tests": ["test_phoenix_startup_policy.py", "test_dashboard_onboarding.py", "test_workspace_manager_refresh.py", "test_swarms_control.py"],
+        "tests": ["test_phoenix_startup_policy.py", "test_vault_capabilities.py", "test_dashboard_onboarding.py", "test_workspace_manager_refresh.py", "test_swarms_control.py"],
         "checks": "Existing startup, dashboard, workspace and swarm regression assertions.",
         "diagnose": "Always compare fresh profile with existing profile. Source-text assertions are supporting evidence, not an end-to-end first-run test.",
         "limits": "Full packaged-app onboarding is not yet automated; source assertions alone cannot clear the release gate.",

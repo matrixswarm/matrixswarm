@@ -11,6 +11,9 @@ authors = [{name = "MatrixSwarm operators"}]
 
 [project.optional-dependencies]
 mcp = ["mcp>=2,<3"]
+desktop = ["PyQt6>=6,<7"]
+alerts = ["websockets>=15,<16", "cryptography>=45", "pycryptodome>=3.23"]
+remote = ["paramiko>=3,<5"]
 
 [project.scripts]
 phoenixctl = "phoenix_terminal.cli:main"

@@ -1,9 +1,8 @@
-import time, uuid
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QMessageBox, QCheckBox
 )
-from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
+from matrix_gui.core.class_lib.services.agent_actions import restart_agent
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 
 class RestartAgentDialog(QDialog):
@@ -64,22 +63,7 @@ class RestartAgentDialog(QDialog):
             if confirm != QMessageBox.StandardButton.Yes:
                 return
 
-            restart_packet = Packet()
-            restart_packet.set_data({
-                "handler": "cmd_restart_subtree",
-                "content": {
-                    "target_universal_id": self.agent_id,
-                    "restart_full_subtree": full_subtree,
-                    "session_id": self.session_id,
-                    "token": str(uuid.uuid4()),
-                    "confirm_response": 1,
-                    "return_handler": "restart_dialog.result"
-                },
-                "ts": time.time()
-            })
-
-            self.bus.emit("outbound.message", session_id=self.session_id,
-                          channel="outgoing.command", packet=restart_packet)
+            restart_agent(self.bus, self.session_id, self.agent_id, full_subtree)
             self.accept()
 
         except Exception as e:

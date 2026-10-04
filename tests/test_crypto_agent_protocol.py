@@ -1,6 +1,7 @@
 """Exercise real agent handlers without booting a swarm or opening sockets."""
 import ast
 from copy import deepcopy
+import json
 import os
 from pathlib import Path
 import re
@@ -192,6 +193,73 @@ class ProtocolTests(unittest.TestCase):
         agent.pass_packet.assert_not_called()
         encrypt.assert_not_called()
 
+    def test_drop_vault_callback_requires_one_live_session_and_reports_delivery(self):
+        agent = Mock()
+        agent.tree_node = {"config": {}}
+        agent.command_line_args = {"universal_id": "drop-one"}
+        relay = Mock()
+        relay.get_handler.return_value = "cmd_rpc_route"
+        relay.get_universal_id.return_value = "websocket-one"
+        agent.get_nodes_by_role.return_value = [relay]
+        agent.get_delivery_packet.side_effect = lambda name: Command()
+        dispatcher = PhoenixCallbackDispatcher(agent)
+        context = CallbackCtx(
+            agent=agent, rpc_role="hive.rpc", signing_key=object(),
+            remote_pub_pem=b"fixture", serial="a" * 64,
+            response_handler="drop_vault.result", confirm_response=True,
+            session_id="session-a",
+        )
+        with tempfile.TemporaryDirectory() as comm_path:
+            agent.path_resolution = {"comm_path": comm_path}
+            flag_dir = Path(comm_path) / "websocket-one" / "broadcast"
+            flag_dir.mkdir(parents=True)
+            (flag_dir / "connected.flag.session-a").touch()
+            (flag_dir / "connected.flag.session-b").touch()
+            with patch("core.python_core.class_lib.gui.callback_dispatcher.encrypt_with_ephemeral_aes", return_value={"sealed": True}), \
+                 patch("core.python_core.class_lib.gui.callback_dispatcher.sign_data", return_value="sig"):
+                agent.pass_packet.return_value = True
+                self.assertTrue(dispatcher.dispatch(context, {"ok": True}, quiet=True))
+                sent = agent.pass_packet.call_args.args[0].get_packet()
+                self.assertEqual(sent["session_id"], "session-a")
+                self.assertEqual(agent.pass_packet.call_args.args[1], "websocket-one")
+                agent.pass_packet.return_value = False
+                self.assertFalse(dispatcher.dispatch(context, {"ok": True}, quiet=True))
+                agent.pass_packet.reset_mock()
+                context.set_session_id(None)
+                self.assertFalse(dispatcher.dispatch(context, {"ok": True}, quiet=True))
+                agent.pass_packet.assert_not_called()
+                context.set_session_id("session-a")
+                (flag_dir / "connected.flag.session-a").unlink()
+                self.assertFalse(dispatcher.dispatch(context, {"ok": True}, quiet=True))
+                self.assertTrue(any("No live RPC relay owns" in str(call)
+                                    for call in agent.log.call_args_list))
+                agent.pass_packet.assert_not_called()
+
+    def test_websocket_rpc_delivers_only_to_named_session(self):
+        path = ROOT / "matrixos/agents/python_core/matrix_websocket/matrix_websocket.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        method = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+                      and node.name == "cmd_rpc_route")
+        scheduler = Mock()
+        namespace = {"asyncio": Mock(run_coroutine_threadsafe=scheduler), "json": json,
+                     "IdentityObject": IdentityObject}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[method], type_ignores=[])),
+                     str(path), "exec"), namespace)
+        relay = Mock()
+        relay.lockdown_state = False
+        relay.debug.is_enabled.return_value = False
+        relay.loop = object()
+        session_a, session_b = Mock(), Mock()
+        session_a.send.return_value = "to-session-a"
+        relay._sessions = {"session-a": {"ws": session_a},
+                           "session-b": {"ws": session_b}}
+        namespace["cmd_rpc_route"](relay, {"sealed": True},
+                                    {"session_id": "session-a"},
+                                    IdentityObject(True, "drop-one"))
+        session_a.send.assert_called_once_with('{"sealed":true}')
+        session_b.send.assert_not_called()
+        scheduler.assert_called_once_with("to-session-a", relay.loop)
+
     def test_email_egress_defensive_disposal_log_is_rate_limited(self):
         path = ROOT / "matrixos/agents/python_core/matrix_email_egress/matrix_email_egress.py"
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -244,6 +312,28 @@ class ProtocolTests(unittest.TestCase):
         matrix.pass_packet.assert_called_once()
         self.assertEqual(matrix.pass_packet.call_args.args[1], "crypto-two")
         self.assertNotIn("/private/server/path", str(matrix.log.call_args_list))
+        # Drop Vault must also target one agent and keep pasted data out of Matrix logs.
+        matrix.pass_packet.reset_mock()
+        drop_payload = dict(self.content, target_universal_id="crypto-two",
+                            args={"data": "SYNTHETIC-PRIVATE-PASTE"})
+        namespace["_cmd_service_request"](
+            matrix,
+            {"service": "hive.drop_vault.request", "payload": drop_payload},
+            None,
+        )
+        matrix.pass_packet.assert_called_once()
+        self.assertEqual(matrix.pass_packet.call_args.args[1], "crypto-two")
+        self.assertNotIn("SYNTHETIC-PRIVATE-PASTE", str(matrix.log.call_args_list))
+        matrix.log.reset_mock()
+        matrix.pass_packet.return_value = False
+        namespace["_cmd_service_request"](
+            matrix,
+            {"service": "hive.drop_vault.request", "payload": drop_payload},
+            None,
+        )
+        self.assertTrue(any("Delivery failed" in str(call) for call in matrix.log.call_args_list))
+        self.assertFalse(any("Routed" in str(call) for call in matrix.log.call_args_list))
+        self.assertNotIn("SYNTHETIC-PRIVATE-PASTE", str(matrix.log.call_args_list))
         # Other service routing retains its existing fan-out behavior.
         matrix.pass_packet.reset_mock()
         namespace["_cmd_service_request"](matrix, {"service": "hive.example", "payload": {}}, None)

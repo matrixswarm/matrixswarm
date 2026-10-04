@@ -1311,7 +1311,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             # Private panel configuration should not enter Matrix's ordinary
             # service-request log or fan out to unrelated agent instances.
             private_targeted_request = isinstance(service_role, str) and service_role.startswith(
-                ("hive.crypto_alert.", "hive.rsync_boy.")
+                ("hive.crypto_alert.", "hive.rsync_boy.", "hive.drop_vault.")
             )
             if private_targeted_request:
                 self.log("[SERVICE-REQ] Targeted panel request (payload withheld).")
@@ -1349,8 +1349,10 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                     "origin": self.command_line_args.get("universal_id", "matrix")
                 })
 
-                self.pass_packet(pk, target_uid)
-                self.log(f"[SERVICE-REQ] Routed '{service_role}' → {target_uid} ({handler})")
+                if self.pass_packet(pk, target_uid):
+                    self.log(f"[SERVICE-REQ] Routed '{service_role}' → {target_uid} ({handler})")
+                else:
+                    self.log(f"[SERVICE-REQ][ERROR] Delivery failed for '{service_role}' → {target_uid} ({handler})", level="ERROR")
 
         except Exception as e:
             self.log(error=e, block="main_try")

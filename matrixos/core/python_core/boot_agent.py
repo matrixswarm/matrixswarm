@@ -537,8 +537,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             if token:
                 ctx.set_token(token)
 
-            self.callback.dispatch(ctx, payload, quiet=quiet)
-            return True
+            return bool(self.callback.dispatch(ctx, payload, quiet=quiet))
 
         except Exception as e:
             self.log("[CALLBACK][ERROR] crypto_reply failed", error=e)

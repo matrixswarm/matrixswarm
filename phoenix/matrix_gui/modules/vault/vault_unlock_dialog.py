@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton,
-    QMessageBox, QFileDialog, QCheckBox
+    QMessageBox, QFileDialog, QCheckBox, QWidget
 )
 from PyQt6.QtCore import Qt
 from .vault_service import VaultService
@@ -36,9 +36,13 @@ class VaultUnlockDialog(QDialog):
         self.pass_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         layout.addWidget(self.pass_input)
 
-        capability_label = QLabel("Optional capabilities for this session:")
-        capability_label.setStyleSheet("color: #8fd; margin-top: 8px;")
-        layout.addWidget(capability_label)
+        capability_heading = QLabel("Optional capabilities for this session:")
+        capability_heading.setStyleSheet("color: #8fd; margin-top: 8px;")
+        layout.addWidget(capability_heading)
+        self.optional_capabilities = QWidget()
+        capability_layout = QVBoxLayout(self.optional_capabilities)
+        capability_layout.setContentsMargins(14, 4, 0, 6)
+        layout.addWidget(self.optional_capabilities)
 
         self.allow_secret_viewing_checkbox = QCheckBox(
             "Allow viewing Swarm Keys and Vault details"
@@ -47,7 +51,7 @@ class VaultUnlockDialog(QDialog):
         self.allow_secret_viewing_checkbox.setToolTip(
             "Off by default. When off, Phoenix hides and blocks secret-viewing actions."
         )
-        layout.addWidget(self.allow_secret_viewing_checkbox)
+        capability_layout.addWidget(self.allow_secret_viewing_checkbox)
 
         self.debug_output_checkbox = QCheckBox(
             "Enable Phoenix debug console output"
@@ -56,7 +60,7 @@ class VaultUnlockDialog(QDialog):
         self.debug_output_checkbox.setToolTip(
             "Off by default. Applies to the cockpit and session windows opened after sign-in."
         )
-        layout.addWidget(self.debug_output_checkbox)
+        capability_layout.addWidget(self.debug_output_checkbox)
 
         self.close_on_minimize_or_sleep_checkbox = QCheckBox(
             "Close Phoenix on minimize or system sleep"
@@ -65,7 +69,7 @@ class VaultUnlockDialog(QDialog):
         self.close_on_minimize_or_sleep_checkbox.setToolTip(
             "Off by default. When enabled, either event terminates Phoenix and all sessions."
         )
-        layout.addWidget(self.close_on_minimize_or_sleep_checkbox)
+        capability_layout.addWidget(self.close_on_minimize_or_sleep_checkbox)
 
         self.unlock_btn = QPushButton("🔓 Unlock Vault")
         self.unlock_btn.clicked.connect(self._unlock)

@@ -51,6 +51,7 @@ def bridged_run_session(
     class BridgeSessionWindow(original_window):
         def __init__(self, *args: Any, **kwargs: Any):
             super().__init__(*args, **kwargs)
+            self._bridge_restart_ids = set()
             self._bridge_log_tokens: dict[str, dict[str, Any]] = {}
             self.bus.on("inbound.verified.agent_log_view.update", self._bridge_on_log_update)
 
@@ -66,11 +67,35 @@ def bridged_run_session(
                         self._handle_external_close()
                     elif message_type == "bridge.fetch_logs":
                         self._bridge_fetch_logs(message)
+                    elif message_type == "bridge.revoke":
+                        self._bridge_log_tokens.clear()
+                    elif message_type == "bridge.restart":
+                        self._bridge_restart(message)
                     elif message_type == "bridge.agent_tree":
                         self._bridge_send_agent_tree()
             except (EOFError, OSError):
                 print(f"[SESSION][PIPE] Lost pipe for {self.session_id}")
                 self._pipe_timer.stop()
+
+        def _bridge_restart(self, message):
+            from matrix_gui.core.class_lib.services.agent_actions import restart_agent
+            request_id = message.get("request_id")
+            agent_id = message.get("agent_id")
+            from .deployment_view import agent_nodes
+            known = {a.get("universal_id") for a in agent_nodes(self.deployment.get("agents", []))}
+            state = "failed"
+            try:
+                if (message.get("session_id") != self.session_id or agent_id not in known
+                        or not isinstance(request_id, str) or not request_id
+                        or request_id in self._bridge_restart_ids or len(self._bridge_restart_ids) >= 256):
+                    raise ValueError("Invalid or duplicate terminal restart.")
+                self._bridge_restart_ids.add(request_id)
+                restart_agent(self.bus, self.session_id, agent_id, False, request_id)
+                state = "sent"
+            except Exception:
+                pass
+            self.conn.send({"type": "bridge.action", "session_id": self.session_id,
+                            "request_id": request_id, "state": state})
 
         def _bridge_fetch_logs(self, message: dict[str, Any]) -> None:
             subscription_id = str(message.get("subscription_id", ""))
@@ -83,9 +108,10 @@ def bridged_run_session(
                     "error": "subscription_id and agent_id are required",
                 })
                 return
+            from .deployment_view import agent_nodes
             known_agents = {
                 str(agent.get("universal_id"))
-                for agent in self.deployment.get("agents", [])
+                for agent in agent_nodes(self.deployment.get("agents", []))
                 if isinstance(agent, dict) and agent.get("universal_id")
             }
             if agent_id not in known_agents:

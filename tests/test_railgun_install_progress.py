@@ -114,6 +114,7 @@ class SFTP:
 
 class Client:
     def __init__(self, *, code=0, delay=0, fail_put=False, fail_script=False):
+        self.privilege = Channel()
         self.staging = Channel()
         self.installer = Channel(code, delay, b"final stdout", b"final stderr")
         self.channels = []
@@ -129,7 +130,12 @@ class Client:
         self.keepalive = interval
 
     def open_session(self, timeout):
-        channel = self.staging if not self.channels else self.installer
+        if not self.channels:
+            channel = self.privilege
+        elif len(self.channels) == 1:
+            channel = self.staging
+        else:
+            channel = self.installer
         self.channels.append(channel)
         return channel
 
@@ -181,10 +187,10 @@ class RailgunInstallTests(unittest.TestCase):
     def test_manifest_preserves_selection_and_flat_directory_rules(self):
         expected = ("agents/a.py", "agents/sub/b.json", "core/lib.py",
                     "scripts/matrixd", "boot_directives/boot.json", "maxmind/config.txt",
-                    "requirements.txt", ".env", "root.PY")
+                    "requirements.txt", "root.PY")
         ignored = ("agents/a.pyc", "scripts/nested/no.py", "boot_directives/nested/no.json",
                    "maxmind/database.mmdb", ".venv/no.py", "universes/secret.json",
-                   "backups/data.json", "root.exe")
+                   "backups/data.json", "root.exe", ".env", "SAMPLE.env")
         for path in expected + ignored:
             self.add_file(path)
         (self.root / "core/empty").mkdir()
@@ -195,6 +201,33 @@ class RailgunInstallTests(unittest.TestCase):
         for directory in dirs:
             if "/" in directory:
                 self.assertLess(dirs.index(directory.rsplit("/", 1)[0]), dirs.index(directory))
+
+    def test_environment_files_never_enter_upload_even_in_flat_script_folders(self):
+        expected = {"scripts/matrixd", "agents/worker/worker.py", "requirements.txt"}
+        for relative in expected:
+            self.add_file(relative)
+        env_names = (".env", ".ENV", ".env.local", ".env.production", ".env~",
+                     "SAMPLE.env", "credentials.ENV", "settings.env.json", "settings.env.bak")
+        for directory in ("", "agents/worker/", "core/", "scripts/", "boot_directives/", "maxmind/"):
+            for name in env_names:
+                self.add_file(directory + name, "SYNTHETIC_ENV_VALUE=DO_NOT_UPLOAD")
+        self.add_file("core/.env.saved/not_source.py")
+        self.add_file("agents/worker/.env.saved/settings.json")
+        worker, client = self.run_worker()
+        self.assertTrue(worker.success)
+        uploaded = {Path(local).relative_to(self.root).as_posix()
+                    for local, _ in client.sftps[0].puts}
+        self.assertEqual(expected, uploaded)
+        self.assertFalse(any(".env" in path.casefold() for path in client.sftps[0].dirs))
+
+    def test_local_and_github_installers_exclude_environment_files_from_copy(self):
+        worker = self.worker()
+        for script in (worker._generate_installer("/tmp/test", worker.mode, "skip"),
+                       worker._generate_github_installer("skip")):
+            self.assertEqual(2, script.count("--exclude='.[eE][nN][vV]*'"))
+            self.assertEqual(2, script.count("--exclude='*.[eE][nN][vV]'"))
+            self.assertEqual(2, script.count("--exclude='*.[eE][nN][vV].*'"))
+            self.assertIn("! -iname '.env*' ! -iname '*.env' ! -iname '*.env.*'", script)
 
     def test_empty_or_missing_source_fails_before_connect(self):
         worker = self.worker()
@@ -220,7 +253,9 @@ class RailgunInstallTests(unittest.TestCase):
         self.assertTrue(all(c.closed for c in client.channels))
         self.assertTrue(client.closed)
         self.assertEqual({}, worker.ssh_cfg)
-        self.assertIn("PYTHON_MODE=skip bash /tmp/matrix_staging_", client.installer.command)
+        self.assertIn('if [ "$(id -u)" -eq 0 ]', client.installer.command)
+        self.assertIn("sudo -n /bin/bash /tmp/matrix_staging_", client.installer.command)
+        self.assertIn("PYTHON_MODE=skip", worker._generate_installer("/tmp/test", worker.mode, "skip"))
 
     def test_github_skips_local_scan_and_source_upload(self):
         worker = self.worker("Install from GitHub")
@@ -274,6 +309,38 @@ class RailgunInstallTests(unittest.TestCase):
         self.assertFalse(worker.success)
         self.assertEqual([], client.sftps)
         self.assertTrue(client.closed)
+
+    def test_missing_root_or_passwordless_sudo_fails_before_staging_or_upload(self):
+        client = Client()
+        client.privilege.code = 77
+        worker, client = self.run_worker(client, "Install from GitHub")
+        self.assertFalse(worker.success)
+        self.assertIn("passwordless sudo", worker.error)
+        self.assertIsNone(client.staging.command)
+        self.assertIsNone(client.installer.command)
+        self.assertEqual([], client.sftps)
+        self.assertFalse(any("partial changes" in message for message in worker.messages))
+
+    def test_installer_command_rejects_non_staging_paths(self):
+        worker = self.worker()
+        for path in ("/tmp/not-railgun/install_matrixos.sh", "/etc/passwd", ""):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                worker._root_installer_command(path)
+
+    def test_python_bootstrap_has_verified_source_fallback_in_both_modes(self):
+        worker = self.worker()
+        scripts = (
+            worker._generate_installer("/tmp/test", "Local Full Install", "create"),
+            worker._generate_github_installer("create"),
+        )
+        for script in scripts:
+            with self.subTest(prefix=script[:40]):
+                self.assertIn('PYTHON_VERSION="3.12.15"', script)
+                self.assertIn("sha256sum -c -", script)
+                self.assertIn("install_python312_from_source", script)
+                self.assertIn("source fallback required", script)
+                self.assertIn("--with-ensurepip=install", script)
+                self.assertNotIn("refusing the system python fallback", script)
 
     def test_staging_deadline_and_disconnect_are_reported(self):
         worker = self.worker()

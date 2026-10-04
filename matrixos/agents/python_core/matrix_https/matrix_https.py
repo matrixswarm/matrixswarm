@@ -9,6 +9,7 @@ from flask import Response
 from flask import Flask, request, jsonify
 import threading
 import time
+from core.python_core.utils.packet_freshness import packet_is_fresh
 import ssl
 from Crypto.PublicKey import RSA
 from werkzeug.serving import WSGIRequestHandler
@@ -400,6 +401,8 @@ class Agent(BootAgent):
                     #inner["ts"] = int(time.time())
                     #inner["session_id"] = self.session_id
                 outer = request.get_json(silent=True, force=True) or {}
+                if not isinstance(outer, dict) or not isinstance(outer.get("content"), dict):
+                    return jsonify({"status": "denied", "message": "bad packet format"}), 400
                 sig_b64 = outer.get("sig")
                 inner = outer.get("content")
                 matrix_packet=inner.get("matrix_packet")
@@ -410,14 +413,10 @@ class Agent(BootAgent):
                     self.log(f"[HTTPS][PACKET_SIZE_GUARD] bad or oversized payload")
                     return jsonify({"status": "error", "message": "bad or oversized payload"}), 413
 
-                # 4) Replay window
-                try:
-                    if not ts or abs(time.time() - float(ts)) > 120:
-                        self.log(f"[HTTPS][REPLAY_WINDOW_GUARD] packet is stale {abs(time.time() - float(ts))} > 120")
-                        return jsonify({"status": "denied", "message": "stale"}), 403
-                except Exception as e:
-                    self.log(error=e, block="replay_check")
-                    return jsonify({"status": "denied", "message": "bad timestamp"}), 403
+                # 4) Freshness window; the signature below authenticates ts.
+                if not packet_is_fresh(ts, window=120):
+                    self.log("[HTTPS][TIMESTAMP] Stale or invalid packet timestamp")
+                    return jsonify({"status": "denied", "message": "stale or bad timestamp"}), 403
 
                 # 5) Signature verification over inner dict
                 if not (self._peer_pub_key and sig_b64 and inner):
@@ -426,7 +425,8 @@ class Agent(BootAgent):
 
                 # 6) Verify Signature
                 try:
-                    crypto_utils.verify_signed_payload(inner, sig_b64, self._peer_pub_key)
+                    if not crypto_utils.verify_signed_payload(inner, sig_b64, self._peer_pub_key):
+                        raise ValueError("Signature verification failed")
                 except Exception as e:
                     self.log(f"[HTTPS][SIG DENY]", error=e, block="packet_signing_check")
                     return jsonify({"status": "denied", "message": "bad signature"}), 403

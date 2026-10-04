@@ -1,7 +1,25 @@
-import os, json, base64, rsa, tempfile, shutil, glob
+import os, json, base64, rsa, tempfile, shutil, glob, sys
 from cryptography.fernet import Fernet
 
 from matrix_gui.modules.vault.crypto.password_encryption import derive_key_from_password
+
+
+def _diagnostic(message):
+    """Best-effort console output must not change a persistence outcome.
+
+    Keep readable text on legacy consoles; a missing glyph or closed pipe is not
+    a failed vault transaction. Real I/O/encryption failures still propagate.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        try:
+            encoding = getattr(stream, "encoding", None) or "utf-8"
+            text = message.encode(encoding, errors="backslashreplace").decode(encoding)
+            print(text, file=stream)
+            return
+        except (UnicodeError, OSError, ValueError):
+            continue
 
 
 def prune_old_backups(data_path, keep=20):
@@ -17,9 +35,9 @@ def prune_old_backups(data_path, keep=20):
         try:
             os.remove(bak)
             # Convert backslashes to forward slashes for consistent output
-            print(f"[VAULT] 🧹 Pruned old backup: {normalize_path(bak)}")
+            _diagnostic(f"[VAULT] 🧹 Pruned old backup: {normalize_path(bak)}")
         except Exception as e:
-            print(f"[VAULT] ⚠️ Could not remove {bak}: {e}")
+            _diagnostic(f"[VAULT] ⚠️ Could not remove {bak}: {e}")
 
 def save_vault_singlefile(data: dict, password: str, data_path: str):
     """
@@ -34,7 +52,7 @@ def save_vault_singlefile(data: dict, password: str, data_path: str):
         deployments = data.get("deployments", {})
         for dep_id in list(deployments):
             if not isinstance(deployments[dep_id], dict):
-                print(f"[VAULT] 🚮 Purged corrupt deployment {dep_id}")
+                _diagnostic(f"[VAULT] 🚮 Purged corrupt deployment {dep_id}")
                 deployments.pop(dep_id, None)
 
         # --- 2. Encrypt as usual ---
@@ -56,10 +74,10 @@ def save_vault_singlefile(data: dict, password: str, data_path: str):
             backup_path = f"{data_path}.{int(os.path.getmtime(data_path))}.bak"
             try:
                 shutil.copy2(data_path, backup_path)
-                print(f"[VAULT] 📦 Backup created at {normalize_path(backup_path)}")
+                _diagnostic(f"[VAULT] 📦 Backup created at {normalize_path(backup_path)}")
                 prune_old_backups(data_path, keep=20)
             except Exception as e:
-                print(f"[VAULT] ⚠️ Backup failed: {e}")
+                _diagnostic(f"[VAULT] ⚠️ Backup failed: {e}")
 
         # --- 4. Atomic write ---
         dir_name = os.path.dirname(data_path) or "."
@@ -70,9 +88,9 @@ def save_vault_singlefile(data: dict, password: str, data_path: str):
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, data_path)  # atomic swap
-        print(f"[VAULT] ✅ Saved safely to {normalize_path(data_path)}")
+        _diagnostic(f"[VAULT] ✅ Saved safely to {normalize_path(data_path)}")
     except Exception as e:
-        print(f"[VAULT_HANDLER_ERROR] Failed to save vault: {e}")
+        _diagnostic(f"[VAULT_HANDLER_ERROR] Failed to save vault: {e}")
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
         raise
@@ -95,7 +113,7 @@ def load_vault_singlefile(password: str, data_path: str) -> dict:
 
         return json.loads(decrypted_data.decode("utf-8"))
     except Exception as e:
-        print(f"[VAULT_HANDLER_ERROR] Failed to load vault: {e}")
+        _diagnostic(f"[VAULT_HANDLER_ERROR] Failed to load vault: {e}")
         return False
 
 
@@ -114,7 +132,7 @@ def sign_payload(payload_dict: dict, password: str, data_path: str) -> str:
         sig = rsa.sign(data, priv, "SHA-256")
         return base64.b64encode(sig).decode()
     except Exception as e:
-        print(f"[VAULT_HANDLER_ERROR] failed to sign payload: {e}")
+        _diagnostic(f"[VAULT_HANDLER_ERROR] failed to sign payload: {e}")
 
 def normalize_path(path: str) -> str:
     """Return a uniform, portable path."""
@@ -125,7 +143,7 @@ def verify_signature(payload_dict: dict, signature_b64: str, sender_name: str, p
         vault = load_vault_singlefile(password, data_path)
         sender_info = vault.get("trusted_servers", {}).get(sender_name)
         if not sender_info:
-            print(f"[SECURITY] No pubkey for sender: {sender_name}")
+            _diagnostic(f"[SECURITY] No pubkey for sender: {sender_name}")
             return False
         pub = rsa.PublicKey.load_pkcs1(sender_info["pubkey"].encode())
         sig = base64.b64decode(signature_b64)
@@ -133,5 +151,5 @@ def verify_signature(payload_dict: dict, signature_b64: str, sender_name: str, p
         rsa.verify(data, sig, pub)
         return True
     except rsa.VerificationError:
-        print(f"[VAULT_HANDLER_ERROR] failed to sign payload: {e}")
+        _diagnostic("[VAULT_HANDLER_ERROR] Signature verification failed")
         return False

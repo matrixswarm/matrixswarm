@@ -19,6 +19,23 @@ To use the `tripwire_lite` agent, add it to your directive. You can customize th
 
 * **`watch_paths`**: A list of directory paths (relative to the `SITE_ROOT`) that the agent should monitor. If not provided, it defaults to monitoring key swarm directories like `agent`, `core`, and `boot_directives`.
 
+### Quarantine storage
+
+Leave `quarantine_root` empty or omit it to use
+`<agent static_comm_path_resolved>/quarantine`, beside the agent's logs and alert
+history. The directory is scoped to the universe boot and agent and is writable
+by the swarm's service account. New directories use owner-only permissions.
+
+Existing directives containing the former default `/matrix/quarantine` also
+resolve to automatic storage. The resolved path is logged at initialization and
+included in the status response. Existing files at the former path stay there.
+Other configured paths are used as supplied and require suitable permissions.
+
+Dry-run and detect-only modes do not create the directory. Active enforcement
+also requires permission to move files out of the watched source directories.
+Tripwire ignores its own quarantine directory to avoid processing moved files
+again. An initialization failure stops startup and reports the original error.
+
 ### Example Directive
 
 This directive launches a `tripwire_lite` agent to monitor the `/var/www` and `/etc/nginx` directories.

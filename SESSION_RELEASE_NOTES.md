@@ -68,7 +68,12 @@ Passing this suite is not a claim of full GUI parity or release certification.
   Changed content under the same ID is rejected. Interrupted outcomes retain a
   lock and require operator reconciliation, not blind replay or lock deletion.
 - Persist original request identity/options/target for an explicit initial retry.
-  Intentional new boot/restart remains a separate choice.
+- Start and Restart automatically save a fresh operation identity. Their arrow
+  menus recover the last matching control request from the cockpit session; Start
+  also offers recovery of the original saved deployment launch. Recovery keeps
+  the original flags and identity and refuses changed deployments or replaced
+  requests. The manual new-operation checkbox and standalone retry button are
+  removed.
 - Missing helper fails before stopping the old universe. Updated MatrixOS must be
   installed before using this new path.
 

@@ -58,7 +58,7 @@
         "ignore_paths": [
             "/matrix/universes"
         ],
-        "quarantine_root": "/matrix/quarantine",
+        "quarantine_root": "",
         "dry_run": true,
         "enforce": false,
         "interval": 5,

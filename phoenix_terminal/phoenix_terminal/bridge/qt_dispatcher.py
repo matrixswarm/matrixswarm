@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,6 +17,8 @@ class _Ticket:
     done: threading.Event = field(default_factory=threading.Event)
     result: dict[str, Any] | None = None
     error: BaseException | None = None
+    deadline: float = field(default_factory=lambda: time.monotonic() + 125)
+    cancelled: threading.Event = field(default_factory=threading.Event)
 
 
 class QtBridgeDispatcher(QObject):
@@ -30,13 +33,18 @@ class QtBridgeDispatcher(QObject):
         ticket = _Ticket(method=method, params=params)
         self.requested.emit(ticket)
         if not ticket.done.wait(timeout=125):
+            ticket.cancelled.set()
             raise TimeoutError("Phoenix did not answer the bridge request in time")
         if ticket.error is not None:
-            raise RuntimeError(str(ticket.error))
+            if isinstance(ticket.error, (ValueError, PermissionError)):
+                raise ticket.error
+            raise RuntimeError("Phoenix could not complete the request.")
         return ticket.result or {}
 
     def _execute(self, ticket: _Ticket) -> None:
         try:
+            if ticket.cancelled.is_set() or time.monotonic() >= ticket.deadline:
+                raise TimeoutError("Request expired before dispatch.")
             ticket.result = self._backend.handle(ticket.method, ticket.params)
         except BaseException as exc:
             ticket.error = exc

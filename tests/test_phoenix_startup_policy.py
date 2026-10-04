@@ -123,6 +123,7 @@ print('must-remain-hidden')
         ).read_text(encoding="utf-8")
         self.assertIn("self.allow_secret_viewing_checkbox.setChecked(False)", source)
         self.assertIn("self.debug_output_checkbox.setChecked(False)", source)
+        self.assertNotIn("llm_record_mode_checkbox", source)
         self.assertIn(
             "self.close_on_minimize_or_sleep_checkbox.setChecked(False)",
             source,
@@ -139,14 +140,14 @@ print('must-remain-hidden')
             2,
         )
 
-    def test_session_process_receives_the_debug_choice(self):
+    def test_session_process_receives_debug_choice(self):
         cockpit = (PHOENIX_ROOT / "phoenix.py").read_text(encoding="utf-8")
         session = (
             PHOENIX_ROOT / "matrix_gui/core/session_window.py"
         ).read_text(encoding="utf-8")
         self.assertIn("args=(session_id, child_conn, debug_output_enabled())", cockpit)
         self.assertIn("def run_session(session_id, conn, debug_output=False):", session)
-        self.assertIn("configure_debug_output(debug_output)", session)
+        self.assertIn("configure_startup_policy(debug_output=debug_output)", session)
 
     def test_failed_unlock_runtime_resets_selected_capabilities(self):
         cockpit = (PHOENIX_ROOT / "phoenix.py").read_text(encoding="utf-8")

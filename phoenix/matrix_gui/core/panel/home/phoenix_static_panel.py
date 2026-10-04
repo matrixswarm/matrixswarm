@@ -315,7 +315,8 @@ class PhoenixStaticPanel(QWidget):
     def _connect_deployment(self, data):
         try:
             dep_id = data["dep_id"]
-            meta = data["meta"]
+            meta = dict(data["meta"])
+            meta["id"] = dep_id
             print(f"[COCKPIT] Connecting to deployment {dep_id}…")
 
             EventBus.emit("session.open.requested", dep_id, meta, self.vault_data)

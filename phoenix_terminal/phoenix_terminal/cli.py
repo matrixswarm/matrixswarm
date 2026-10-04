@@ -48,8 +48,66 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="Read-only Phoenix workspace inspection")
     status.add_argument("--phoenix-root", type=Path, required=True, help="Existing Phoenix source directory")
 
-    launch = subparsers.add_parser("launch", help="Launch unmodified Phoenix with the local LLM bridge")
+    launch = subparsers.add_parser("launch", help="Launch the normal Phoenix GUI; no terminal listener or bridge hooks")
     launch.add_argument("--phoenix-root", type=Path, required=True, help="Existing Phoenix source directory")
+
+    vault = subparsers.add_parser("vault", help="Operator-only headless vault inventory; no remote execution")
+    vault_sub = vault.add_subparsers(dest="vault_command", required=True)
+    vault_open = vault_sub.add_parser("open", help="Prompt privately, select inventory, and enable expiring read-only access",
+        description="Open a normal Phoenix password vault in a private operator terminal. Nothing is exposed by default. "
+                    "Only public inventory may be shared after explicit selection and confirmation. No vault writes, "
+                    "connections, deploys, or credential export. Hardware-factor unlock remains in the GUI.")
+    vault_open.add_argument("--phoenix-root", type=Path, required=True, help="Trusted Phoenix source containing its vault crypto")
+    vault_open.add_argument("--vault", type=Path, required=True, help="Operator-prepared encrypted vault file (never a password)")
+
+    terminal = subparsers.add_parser(
+        "terminal",
+        help="Independent operator-approved Terminal connection lifecycle",
+    )
+    terminal_sub = terminal.add_subparsers(dest="terminal_command", required=True)
+    terminal_open = terminal_sub.add_parser(
+        "open",
+        help="Privately open a prepared Vault and show Terminal-owned approvals",
+    )
+    terminal_open.add_argument(
+        "--phoenix-root", type=Path, required=True, help="Trusted Phoenix source"
+    )
+    terminal_open.add_argument(
+        "--vault", type=Path, required=True, help="Operator-prepared encrypted Vault"
+    )
+    terminal_request = terminal_sub.add_parser(
+        "request", help="Request a connection; the operator must approve it"
+    )
+    terminal_request.add_argument(
+        "--label", required=True, help="Unverified client label shown to the operator"
+    )
+    terminal_sub.add_parser("status", help="Read endpoint or current request status")
+    terminal_sub.add_parser("disconnect", help="Revoke this client's connection")
+    terminal_alerts = terminal_sub.add_parser(
+        "alerts", help="Read an approved deployment's live alert buffer",
+        description="Read-only, operator-approved alerts from the exact saved deployment. "
+        "Use an ID returned by terminal status after approval. Start with --after 0; "
+        "for subsequent pages pass next_cursor as --after and source.stream_id as --stream-id. "
+        "Check source.state/code: an empty page is NOT proof of server health. "
+        "Only new broadcasts are collected; offline intervals cannot be replayed. "
+        "PEER_IDENTITY_FAILED: operator must check the saved CA/pin; never disable TLS. "
+        "CONNECTION_FAILED: check the operator's network/VPN and saved endpoint. "
+        "PACKET_REJECTED: check deployment keys and clock. Reopen the Vault after corrections.",
+    )
+    terminal_alerts.add_argument("deployment_id", help="Exact permitted saved deployment ID")
+    terminal_alerts.add_argument("--after", type=int, default=0, help="Absolute cursor (default 0)")
+    terminal_alerts.add_argument("--limit", type=int, default=100, help="Page size, 1–200")
+    terminal_alerts.add_argument("--stream-id", help="source.stream_id returned with the cursor")
+
+    terminal_swarms = terminal_sub.add_parser("swarms", help="One live inventory read on this permitted deployment's fixed SSH server")
+    terminal_swarms.add_argument("deployment_id")
+    terminal_railgun = terminal_sub.add_parser("railgun", help="Start only an inactive saved universe; no restart or replacement")
+    railgun_sub = terminal_railgun.add_subparsers(dest="railgun_command", required=True)
+    for name in ("launch", "status"):
+        command = railgun_sub.add_parser(name)
+        command.add_argument("deployment_id")
+        command.add_argument("--operation-id", required=True,
+            help="32 lowercase hex characters; retain and REUSE for retries, never generate a fresh ID for an uncertain outcome")
 
     inspect = subparsers.add_parser("inspect", help="Read Phoenix metadata without executing it")
     inspect_sub = inspect.add_subparsers(dest="inspect_command", required=True)
@@ -76,30 +134,74 @@ def build_parser() -> argparse.ArgumentParser:
     watch.add_argument("--interval", type=float, default=60.0)
     watch.add_argument("--timeout", type=float, default=10.0)
 
-    bridge = subparsers.add_parser("bridge", help="Call the bridge hosted inside a running Phoenix")
+    bridge = subparsers.add_parser("bridge", help="Call the headless terminal endpoint (inventory only)",
+        description="Only describe, status, deployments, agents and agent are currently supported. "
+                    "Legacy operational commands are retained for compatibility but unavailable. "
+                    "No command opens a GUI approval dialog or grants authority.")
     bridge_sub = bridge.add_subparsers(dest="bridge_command", required=True)
-    bridge_sub.add_parser("status", help="Show bridge, vault, and session state")
+    bridge_sub.add_parser("describe", help="Discover exact operation schemas and approval hints")
+    bridge_sub.add_parser("status", help="Show headless assignment state and expiry")
     bridge_sub.add_parser("deployments", help="List redacted deployments from the unlocked vault")
-    bridge_sub.add_parser("sessions", help="List active Phoenix sessions")
+    bridge_sub.add_parser("sessions", help="Legacy GUI operation (unavailable)")
     bridge_agents = bridge_sub.add_parser("agents", help="List redacted agents for a deployment")
     bridge_agents.add_argument("deployment_id")
-    bridge_tree = bridge_sub.add_parser("tree", help="Read or refresh the live Phoenix agent tree")
+    bridge_tree = bridge_sub.add_parser("tree", help="Legacy GUI operation (unavailable)")
     bridge_tree.add_argument("session_id")
     bridge_tree.add_argument("--cached", action="store_true", help="Do not request a refresh")
-    bridge_launch = bridge_sub.add_parser("launch", help="Request a deployment session; Phoenix asks the human")
+    bridge_launch = bridge_sub.add_parser("launch", help="Legacy GUI operation (unavailable)")
     bridge_launch.add_argument("deployment_id")
-    logs_start = bridge_sub.add_parser("logs-start", help="Start a Phoenix-routed agent log subscription")
+    bridge_launch.add_argument("--request-id", default=None, help="Reuse this ID to avoid duplicate action requests")
+    logs_start = bridge_sub.add_parser("logs-start", help="Legacy GUI operation (unavailable)")
     logs_start.add_argument("session_id")
     logs_start.add_argument("agent_id")
     logs_start.add_argument("--once", action="store_true", help="Request one response instead of following")
-    logs_read = bridge_sub.add_parser("logs-read", help="Read buffered lines from a log subscription")
+    logs_read = bridge_sub.add_parser("logs-read", help="Legacy GUI operation (unavailable)")
     logs_read.add_argument("subscription_id")
     logs_read.add_argument("--after", type=int, default=0)
     logs_read.add_argument("--limit", type=int, default=100)
+    describe = bridge_sub.add_parser("agent", help="Read one saved agent's public identity; no configuration")
+    describe.add_argument("deployment_id")
+    describe.add_argument("agent_id")
+    settings = bridge_sub.add_parser("config-set", help="Legacy GUI operation (unavailable)")
+    settings.add_argument("deployment_id")
+    settings.add_argument("agent_id")
+    settings.add_argument("--changes", required=True, help='JSON object, e.g. {"poll_interval": 5}')
+    settings.add_argument("--request-id", default=None)
+    restart = bridge_sub.add_parser("restart", help="Legacy GUI operation (unavailable)")
+    restart.add_argument("session_id")
+    restart.add_argument("agent_id")
+    restart.add_argument("--request-id", default=None)
+    action = bridge_sub.add_parser("action", help="Legacy GUI operation (unavailable)")
+    action.add_argument("request_id")
+    alerts = bridge_sub.add_parser("alerts", help="Legacy GUI operation (unavailable)")
+    alerts.add_argument("session_id")
+    alerts.add_argument("--after", type=int, default=0)
+    alerts.add_argument("--limit", type=int, default=100)
     bridge_call = bridge_sub.add_parser("call", help="Call an allowlisted method with JSON parameters")
     bridge_call.add_argument("method")
     bridge_call.add_argument("--params", default="{}", help="JSON object")
-    subparsers.add_parser("mcp", help="Run the native Phoenix MCP adapter over stdio")
+    investigation = subparsers.add_parser("investigation", help="Legacy GUI prototype; unavailable in headless inventory mode")
+    investigations = investigation.add_subparsers(dest="investigation_command", required=True)
+    investigations.add_parser("list", help="List saved selections within the current assignment")
+    opened = investigations.add_parser("open", help="Save a fixed deployment/agent selection; no remote action")
+    opened.add_argument("investigation_id")
+    opened.add_argument("deployment_id")
+    opened.add_argument("agent_id")
+    resumed = investigations.add_parser("resume", help="Show selection, review positions, and missing evidence windows")
+    resumed.add_argument("investigation_id")
+    attached = investigations.add_parser("attach", help="Start reviewing one running session; does not connect or deploy")
+    attached.add_argument("investigation_id")
+    attached.add_argument("session_id")
+    attached.add_argument("--reset", action="store_true", help="Acknowledge lost buffers and start a new review window")
+    reviewed = investigations.add_parser("read", help="Read evidence without advancing the saved position")
+    reviewed.add_argument("investigation_id")
+    reviewed.add_argument("stream", choices=("logs", "alerts"))
+    reviewed.add_argument("--limit", type=int, default=100)
+    acknowledged = investigations.add_parser("ack", help="Save a reviewed page's receipt in the encrypted Phoenix vault")
+    acknowledged.add_argument("investigation_id")
+    acknowledged.add_argument("receipt")
+    mcp = subparsers.add_parser("mcp", help="Run the native Phoenix MCP adapter over stdio")
+    mcp.add_argument("--terminal-access", action="store_true", help="Use operator-approved alert, Swarms and guarded Railgun tools instead of legacy inventory")
     return parser
 
 
@@ -194,38 +296,59 @@ def run_monitor(args: argparse.Namespace) -> int:
 
 
 def run_bridge(args: argparse.Namespace) -> int:
+    from .vault_console import READ_OPERATIONS
+
     command = args.bridge_command
-    if command == "status":
-        method, params = "bridge.status", {}
-    elif command == "deployments":
-        method, params = "deployment.list", {}
-    elif command == "sessions":
-        method, params = "session.list", {}
+    simple = {"describe": "tools.describe", "status": "bridge.status", "deployments": "deployment.list"}
+    if command in simple:
+        method, params = simple[command], {}
     elif command == "agents":
         method, params = "agent.list", {"deployment_id": args.deployment_id}
-    elif command == "tree":
-        method, params = "agent.tree", {"session_id": args.session_id, "refresh": not args.cached}
-    elif command == "launch":
-        method, params = "deployment.launch", {"deployment_id": args.deployment_id}
-    elif command == "logs-start":
-        method, params = "agent.logs.start", {
-            "session_id": args.session_id,
-            "agent_id": args.agent_id,
-            "follow": not args.once,
-        }
-    elif command == "logs-read":
-        method, params = "agent.logs.read", {
-            "subscription_id": args.subscription_id,
-            "after": args.after,
-            "limit": args.limit,
-        }
-    else:
-        method = args.method
-        params = json.loads(args.params)
+    elif command == "agent":
+        method, params = "agent.describe", {"deployment_id": args.deployment_id, "agent_id": args.agent_id}
+    elif command == "call":
+        method, params = args.method, json.loads(args.params)
         if not isinstance(params, dict):
             raise ValueError("--params must be a JSON object")
+    else:
+        raise ValueError("Unavailable: the GUI bridge has been retired. The headless terminal currently exposes inventory only.")
+    if method not in READ_OPERATIONS:
+        raise ValueError("Unavailable in headless inventory mode. No GUI bridge operations or remote actions are enabled.")
     result = call_bridge(args.data_dir, method, params)
     print(safe_console_text(json.dumps(result, indent=2, ensure_ascii=False)))
+    return 0
+
+
+def run_investigation(args: argparse.Namespace) -> int:
+    raise ValueError("Unavailable: GUI investigation hooks were retired. A standalone terminal evidence adapter is not implemented.")
+
+
+def run_terminal_command(args: argparse.Namespace) -> int:
+    if args.terminal_command == "open":
+        from .terminal_runtime import run_terminal
+
+        return run_terminal(args.phoenix_root, args.vault, args.data_dir)
+
+    from .terminal_client import TerminalClientIdentity, call_terminal
+
+    identity = TerminalClientIdentity(args.data_dir)
+    if args.terminal_command == "request":
+        result = identity.request(args.label)
+    elif args.terminal_command == "disconnect":
+        result = identity.disconnect()
+    elif args.terminal_command == "alerts":
+        result = identity.read_alerts(args.deployment_id, after=args.after,
+                                      limit=args.limit, stream_id=args.stream_id)
+    elif args.terminal_command == "swarms":
+        result = identity.list_swarms(args.deployment_id)
+    elif args.terminal_command == "railgun":
+        operation = identity.launch_railgun if args.railgun_command == "launch" else identity.railgun_status
+        result = operation(args.deployment_id, args.operation_id)
+    elif identity.path.is_file():
+        result = identity.status()
+    else:
+        result = call_terminal(args.data_dir, "terminal.status", {})
+    print(json.dumps(result, indent=2, ensure_ascii=True))
     return 0
 
 
@@ -238,6 +361,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "launch":
             from .bridge.launcher import launch
             return launch(args.phoenix_root, args.data_dir)
+        if args.command == "vault":
+            from .vault_console import run_console
+            return run_console(args.phoenix_root, args.vault, args.data_dir)
+        if args.command == "terminal":
+            return run_terminal_command(args)
         if args.command == "inspect":
             if args.inspect_command == "agents":
                 return inspect_agents(args.phoenix_root)
@@ -263,9 +391,11 @@ def main(argv: list[str] | None = None) -> int:
             return run_monitor(args)
         if args.command == "bridge":
             return run_bridge(args)
+        if args.command == "investigation":
+            return run_investigation(args)
         if args.command == "mcp":
             from .mcp_server import main as run_mcp
-            return run_mcp(args.data_dir)
+            return run_mcp(args.data_dir, terminal_access=args.terminal_access)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2

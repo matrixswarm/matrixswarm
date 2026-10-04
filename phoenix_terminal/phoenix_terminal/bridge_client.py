@@ -1,4 +1,4 @@
-"""Client for the authenticated bridge hosted inside Phoenix Cockpit."""
+"""Client for the authenticated endpoint owned by the headless operator console."""
 
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ from urllib.request import Request, urlopen
 def call_bridge(data_dir: Path, method: str, params: dict[str, Any] | None = None, timeout: float = 130) -> dict[str, Any]:
     connection_path = data_dir / "bridge.json"
     if not connection_path.exists():
-        raise RuntimeError("Phoenix bridge is not running; launch Phoenix with 'phoenixctl launch'")
+        raise RuntimeError("Terminal endpoint is not running or has expired. Ask the operator to open "
+                           "'phoenixctl vault open', select inventory, and enable access. "
+                           "Launching the Phoenix GUI does not enable terminal access.")
     connection = json.loads(connection_path.read_text(encoding="utf-8"))
     host = connection.get("host")
     port = connection.get("port")

@@ -152,16 +152,16 @@ class PhoenixCallbackDispatcher:
             # === 1. Context validation ===
             if not context.has_rpc_role():
                 self.agent.log("[CALLBACK] rpc_role missing — aborting dispatch.")
-                return
+                return False
             if not context.has_confirm_response():
                 self.agent.log("[CALLBACK] confirm_response=0 — skipping callback.")
-                return
+                return False
             if not isinstance(content, dict) or not content:
                 self.agent.log("[CALLBACK] Invalid or empty content — nothing to send.")
-                return
+                return False
             if not context.is_ready():
                 self.agent.log("[CALLBACK] Incomplete context — missing crypto or role data.")
-                return
+                return False
 
             rpc_role = context.get_rpc_role()
             signing_key = context.get_signing_key()
@@ -172,19 +172,27 @@ class PhoenixCallbackDispatcher:
             session_id = context.get_session_id()
             token = context.get_token()
 
+            # Drop Vault content belongs to one live Phoenix session. Never
+            # take the generic callback path that can fan out to all relays.
+            if response_handler == "drop_vault.result" and not session_id:
+                self.agent.log("[CALLBACK][DROP_VAULT] Missing target session; reply discarded.", level="ERROR")
+                return False
+
             # === 2. Find endpoints ===
             endpoints = self.agent.get_nodes_by_role(rpc_role)
             if not endpoints:
                 self.agent.log(f"[CALLBACK] No endpoints found for rpc_role='{rpc_role}'.")
-                return
+                return False
             endpoints = self._session_endpoints(endpoints, session_id)
             if not endpoints:
-                if not quiet:
+                if response_handler == "drop_vault.result":
+                    self.agent.log("[CALLBACK][DROP_VAULT] No live RPC relay owns the target session.", level="ERROR")
+                elif not quiet:
                     self.agent.log(
                         f"[CALLBACK] No active relay owns session '{session_id}' "
                         f"for rpc_role='{rpc_role}'."
                     )
-                return
+                return False
             if not quiet:
                 self.agent.log(f"[CALLBACK] Found {len(endpoints)} endpoints for rpc_role='{rpc_role}'")
 
@@ -214,11 +222,20 @@ class PhoenixCallbackDispatcher:
             pk.set_data(data)
 
             # === 4. Send ===
+            delivered = False
             for ep in endpoints:
                 pk.set_payload_item("handler", ep.get_handler())
-                self.agent.pass_packet(pk, ep.get_universal_id())
-                if not quiet:
+                sent_this = bool(self.agent.pass_packet(pk, ep.get_universal_id()))
+                if sent_this:
+                    delivered = True
+                elif response_handler == "drop_vault.result":
+                    self.agent.log("[CALLBACK][DROP_VAULT] Encrypted reply could not be queued to the session relay.", level="ERROR")
+                elif not quiet:
+                    self.agent.log(f"[CALLBACK][ERROR] Delivery failed to rpc handler uid={ep.get_universal_id()}.", level="ERROR")
+                if sent_this and not quiet:
                     self.agent.log(f"[CALLBACK] ✅ Callback dispatched to rpc handler (uid={ep.get_universal_id()}.{ep.get_handler()}) ")
+            return delivered
 
         except Exception as e:
             self.agent.log(f"[CALLBACK][ERROR] Dispatch failed: {e}")
+            return False

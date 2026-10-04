@@ -25,6 +25,7 @@ from matrix_gui.modules.vault.services.vault_core_singleton import (
     VaultCoreSingleton,
 )
 from matrix_gui.registry.object_classes import EDITOR_REGISTRY, PROVIDER_REGISTRY
+from matrix_gui.registry.terminal_fields import merge_record_metadata
 from matrix_gui.swarm_workspace.cls_lib.constraint.constraint_resolver import (
     ConstraintResolver,
 )
@@ -41,9 +42,10 @@ class RegistryManagerDialog(QDialog):
     Double-click always opens the selected object's editor in either mode.
     """
 
-    def __init__(self, parent=None, class_lock=None, assign_callback=None, selected_serial=None):
+    def __init__(self, parent=None, class_lock=None, assign_callback=None, selected_serial=None, *, terminal_mode=False):
         super().__init__(parent)
 
+        self.terminal_mode = terminal_mode is True
         self.class_lock = str(class_lock).strip() if class_lock else None
         self.assign_callback = assign_callback
         self.selected_serial = selected_serial
@@ -222,7 +224,9 @@ class RegistryManagerDialog(QDialog):
                 )
                 return
 
-            editor = editor_class(new_conn=True)
+            editor = (editor_class(new_conn=True, terminal_mode=True)
+                      if self.terminal_mode and class_name == "matrix_ssh"
+                      else editor_class(new_conn=True))
             if not editor.exec():
                 return
 
@@ -258,7 +262,9 @@ class RegistryManagerDialog(QDialog):
             if not current:
                 return
 
-            editor = editor_class(new_conn=False)
+            editor = (editor_class(new_conn=False, terminal_mode=True)
+                      if self.terminal_mode and class_name == "matrix_ssh"
+                      else editor_class(new_conn=False))
             editor._load_data(current)
             if not editor.exec():
                 return
@@ -266,7 +272,7 @@ class RegistryManagerDialog(QDialog):
             updated = editor.serialize()
             updated["path"] = editor.get_directory_path()
             # Keep creation/version metadata while advancing modification time.
-            updated["meta"] = dict(current.get("meta", {}))
+            merge_record_metadata(current, updated)
             self._stamp_record(updated, class_name, serial)
             namespace[serial] = updated
             if not self._commit_namespace(class_name, namespace):

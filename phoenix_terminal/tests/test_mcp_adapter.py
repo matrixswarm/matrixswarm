@@ -6,9 +6,13 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from phoenix_terminal.bridge.server import BridgeServer
-from phoenix_terminal.mcp_server import MCP_TOOL_NAMES, SERVER_INSTRUCTIONS, PhoenixMcpAdapter, create_server
+from phoenix_terminal.mcp_server import (
+    MCP_TOOL_NAMES, SERVER_INSTRUCTIONS, TERMINAL_TOOL_NAMES,
+    PhoenixMcpAdapter, create_server, create_terminal_server,
+)
 
 
 class McpAdapterTests(unittest.TestCase):
@@ -27,18 +31,15 @@ class McpAdapterTests(unittest.TestCase):
             MCP_TOOL_NAMES,
             (
                 "phoenix_bridge_status",
+                "phoenix_describe_tools",
                 "phoenix_list_deployments",
-                "phoenix_list_sessions",
                 "phoenix_list_agents",
-                "phoenix_agent_tree",
-                "phoenix_start_agent_logs",
-                "phoenix_read_agent_logs",
-                "phoenix_launch_deployment",
+                "phoenix_describe_agent",
             ),
         )
         self.assertNotIn("call", MCP_TOOL_NAMES)
         self.assertFalse(any("vault" in name for name in MCP_TOOL_NAMES))
-        self.assertTrue(SERVER_INSTRUCTIONS.startswith("Phoenix is authoritative."))
+        self.assertIn("headless operator console owns terminal access", SERVER_INSTRUCTIONS)
         self.assertIn("human", SERVER_INSTRUCTIONS)
         self.assertIn("Never ask for", SERVER_INSTRUCTIONS)
         source = Path(create_server.__code__.co_filename).read_text(encoding="utf-8")
@@ -47,28 +48,22 @@ class McpAdapterTests(unittest.TestCase):
 
     def test_adapter_maps_only_allowlisted_bridge_methods(self):
         self.adapter.bridge_status()
+        self.adapter.describe_tools()
         self.adapter.list_deployments()
-        self.adapter.list_sessions()
         self.adapter.list_agents("demo")
-        self.adapter.agent_tree("runtime-1", False)
-        self.adapter.start_agent_logs("runtime-1", "matrix", True)
-        self.adapter.read_agent_logs("sub-1", 12, 50)
-        self.adapter.launch_deployment("demo")
+        self.adapter.describe_agent("demo", "agent-1")
         self.assertEqual(
             [method for _data_dir, method, _params in self.calls],
             [
                 "bridge.status",
+                "tools.describe",
                 "deployment.list",
-                "session.list",
                 "agent.list",
-                "agent.tree",
-                "agent.logs.start",
-                "agent.logs.read",
-                "deployment.launch",
+                "agent.describe",
             ],
         )
         self.assertTrue(all(data_dir == self.data_dir for data_dir, _method, _params in self.calls))
-        self.assertEqual(self.calls[-1][2], {"deployment_id": "demo"})
+        self.assertEqual(self.calls[-1][2], {"deployment_id": "demo", "agent_id": "agent-1"})
 
     @unittest.skipUnless(importlib.util.find_spec("mcp"), "MCP SDK is not installed")
     def test_sdk_discovery_exposes_hints_and_structured_results(self):
@@ -85,10 +80,8 @@ class McpAdapterTests(unittest.TestCase):
                 self.assertEqual(set(tools), set(MCP_TOOL_NAMES))
                 for name in MCP_TOOL_NAMES:
                     self.assertTrue(tools[name].description)
-                self.assertTrue(tools["phoenix_bridge_status"].annotations.read_only_hint)
-                self.assertFalse(tools["phoenix_start_agent_logs"].annotations.read_only_hint)
-                self.assertFalse(tools["phoenix_launch_deployment"].annotations.read_only_hint)
-                self.assertFalse(tools["phoenix_launch_deployment"].annotations.destructive_hint)
+                self.assertTrue(all(tool.annotations.read_only_hint for tool in tools.values()))
+                self.assertFalse(any(tool.annotations.destructive_hint for tool in tools.values()))
                 result = await client.call_tool("phoenix_bridge_status", {})
                 self.assertFalse(result.is_error)
                 self.assertEqual(result.structured_content["method"], "bridge.status")
@@ -141,6 +134,43 @@ class McpAdapterTests(unittest.TestCase):
             finally:
                 bridge.stop()
         self.assertEqual(calls, [("bridge.status", {})])
+
+    @unittest.skipUnless(importlib.util.find_spec("mcp"), "MCP SDK is not installed")
+    def test_terminal_sdk_tools_keep_exact_scopes_and_launch_identity(self):
+        import asyncio
+
+        from mcp import Client
+
+        async def exercise():
+            with patch("phoenix_terminal.mcp_server.TerminalMcpAdapter") as factory:
+                adapter = factory.return_value
+                adapter.status.return_value = {"state": "pending"}
+                adapter.launch.return_value = {"state": "queued"}
+                server = create_terminal_server(self.data_dir)
+                async with Client(server) as client:
+                    listed = await client.list_tools()
+                    tools = {tool.name: tool for tool in listed.tools}
+                    self.assertEqual(set(TERMINAL_TOOL_NAMES), set(tools))
+                    self.assertTrue(tools["phoenix_terminal_status"].annotations.read_only_hint)
+                    launch = tools["phoenix_terminal_railgun_launch"]
+                    self.assertFalse(launch.annotations.read_only_hint)
+                    self.assertTrue(launch.annotations.idempotent_hint)
+                    result = await client.call_tool("phoenix_terminal_status", {})
+                    self.assertFalse(result.is_error)
+                    self.assertEqual({"state": "pending"}, result.structured_content)
+                    operation_id = "a" * 32
+                    result = await client.call_tool("phoenix_terminal_railgun_launch", {
+                        "deployment_id": "fixture", "operation_id": operation_id,
+                    })
+                    self.assertFalse(result.is_error)
+                    adapter.launch.assert_called_once_with("fixture", operation_id)
+                    adapter.alerts.side_effect = PermissionError("Connection is not approved")
+                    result = await client.call_tool("phoenix_terminal_alerts", {"deployment_id": "fixture"})
+                    self.assertTrue(result.is_error)
+                    self.assertIn("Connection is not approved", result.content[0].text)
+                    adapter.alerts.assert_called_once_with("fixture", 0, 100, None)
+
+        asyncio.run(exercise())
 
 
 if __name__ == "__main__":

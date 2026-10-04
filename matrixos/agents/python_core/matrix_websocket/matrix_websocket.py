@@ -7,6 +7,7 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 import ssl
 import time
+from core.python_core.utils.packet_freshness import packet_is_fresh
 import copy
 import threading
 import asyncio
@@ -642,19 +643,16 @@ class Agent(BootAgent):
                     await websocket.send(json.dumps({"type": "error", "message": "bad or oversize payload"}))
                     continue
 
-                # --- Timestamp / Replay guard ---
+                # --- Timestamp guard; authenticated by the signature below ---
                 ts = inner.get("ts")
-                try:
-                    if not ts or abs(time.time() - float(ts)) > 120:
-                        await websocket.send(json.dumps({"type": "error", "message": "stale or bad timestamp"}))
-                        continue
-                except Exception:
-                    await websocket.send(json.dumps({"type": "error", "message": "bad timestamp format"}))
+                if not packet_is_fresh(ts, window=120):
+                    await websocket.send(json.dumps({"type": "error", "message": "stale or bad timestamp"}))
                     continue
 
                 # --- Signature guard ---
                 try:
-                    crypto_utils.verify_signed_payload(inner, sig_b64, self._peer_pub_key)
+                    if not crypto_utils.verify_signed_payload(inner, sig_b64, self._peer_pub_key):
+                        raise ValueError("Signature verification failed")
                     data = inner
                     self.log(f"[WS][MSG] Signature Accepted")
                 except Exception as e:

@@ -22,10 +22,10 @@ class DashboardOnboardingTests(unittest.TestCase):
 
     def test_deploy_control_uses_clear_launch_icon_and_help(self):
         source = CONTROL_PANEL.read_text(encoding="utf-8")
-        self.assertIn('QPushButton("🚀 Deploy")', source)
+        self.assertIn('QPushButton("Deploy")', source)
         self.assertNotIn('QPushButton("🗘 Deploy")', source)
         self.assertIn('setAccessibleName("Deploy a swarm")', source)
-        self.assertIn('QPushButton("🔐 Vault")', source)
+        self.assertIn('QPushButton("Vault")', source)
         self.assertIn('setAccessibleName("Manage encrypted vault")', source)
 
     def test_first_swarm_guide_matches_railgun_only_workflow(self):
@@ -78,7 +78,7 @@ class DashboardOnboardingTests(unittest.TestCase):
         )[1].split("}", 1)[0]
         self.assertIn("margin-bottom: 0", lower_inset_rule)
         self.assertIn('status_bar.setObjectName("SessionStatusBar")', session)
-        self.assertIn("COCKPIT_CONTENT_GUTTER, 3, COCKPIT_CONTENT_GUTTER, 3", session)
+        self.assertIn("padding: 3px {COCKPIT_CONTENT_GUTTER}px", session)
         self.assertIn('badge_style = "padding: 4px 8px;', session)
 
 

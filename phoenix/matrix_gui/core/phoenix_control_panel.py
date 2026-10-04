@@ -1,5 +1,7 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
 import uuid
+from pathlib import Path
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton, QMessageBox, QMenu
 from PyQt6 import QtCore
 
@@ -17,6 +19,13 @@ from matrix_gui.modules.swarms.swarms_dialog import SwarmsDialog
 
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from PyQt6.QtWidgets import QFileDialog
+
+
+def _set_toolbar_icon(button, name):
+    icon_path = Path(__file__).resolve().parents[1] / "resources" / "icons" / "toolbar" / f"{name}.svg"
+    button.setIcon(QIcon(str(icon_path)))
+    button.setIconSize(QtCore.QSize(16, 16))
+
 
 class PhoenixControlPanel(QWidget):
     """
@@ -48,17 +57,20 @@ class PhoenixControlPanel(QWidget):
             self.deployment_selector = QComboBox()
             self.layout.addWidget(self.deployment_selector)
 
-            self.connect_btn = QPushButton("🖧 Connect")
+            self.connect_btn = QPushButton("Connect")
+            _set_toolbar_icon(self.connect_btn, "connect")
             self.connect_btn.setObjectName("connect")
             self.connect_btn.clicked.connect(self.launch_deployment_dialog)
             self.layout.addWidget(self.connect_btn)
 
-            self.conn_btn = QPushButton("🗄 Registry")
+            self.conn_btn = QPushButton("Registry")
+            _set_toolbar_icon(self.conn_btn, "registry")
             self.conn_btn.setObjectName("connMgr")
             self.conn_btn.clicked.connect(self.launch_registry_manager)
             self.layout.addWidget(self.conn_btn)
 
-            self.swarms_btn = QPushButton("🌌 Swarms")
+            self.swarms_btn = QPushButton("Swarms")
+            _set_toolbar_icon(self.swarms_btn, "swarms")
             self.swarms_btn.setObjectName("swarms")
             self.swarms_btn.setToolTip(
                 "List and stop active MatrixOS universes on Registry SSH servers."
@@ -66,7 +78,8 @@ class PhoenixControlPanel(QWidget):
             self.swarms_btn.clicked.connect(self.open_swarms)
             self.layout.addWidget(self.swarms_btn)
 
-            self.directives_btn = QPushButton("🚀 Deploy")
+            self.directives_btn = QPushButton("Deploy")
+            _set_toolbar_icon(self.directives_btn, "deploy")
             self.directives_btn.setObjectName("document")
             self.directives_btn.setToolTip(
                 "Create or open a swarm workspace, then launch it securely "
@@ -79,7 +92,8 @@ class PhoenixControlPanel(QWidget):
             #railgun build
             self.build_railgun_menu()
 
-            self.vault_btn = QPushButton("🔐 Vault")
+            self.vault_btn = QPushButton("Vault")
+            _set_toolbar_icon(self.vault_btn, "vault")
             self.vault_btn.setObjectName("vault")
             self.vault_btn.setToolTip(
                 "Close the active encrypted vault and return to vault unlock."
@@ -87,6 +101,13 @@ class PhoenixControlPanel(QWidget):
             self.vault_btn.setAccessibleName("Manage encrypted vault")
             self.vault_btn.clicked.connect(self.reopen_vault)
             self.layout.addWidget(self.vault_btn)
+
+            self.terminal_btn = QPushButton("Terminal Mode")
+            self.terminal_btn.setObjectName("terminalMode")
+            _set_toolbar_icon(self.terminal_btn, "terminal")
+            self.terminal_btn.setToolTip("Configure Terminal access and fixed SSH targets in a separate window.")
+            self.terminal_btn.clicked.connect(self.open_terminal_mode)
+            self.layout.addWidget(self.terminal_btn)
 
             #keep the registry dialog alive
             self._registry_dialog = None
@@ -107,7 +128,8 @@ class PhoenixControlPanel(QWidget):
         try:
 
             # === Railgun Button ===
-            self.railgun_btn = QPushButton("🗱 Railgun")
+            self.railgun_btn = QPushButton("Railgun")
+            _set_toolbar_icon(self.railgun_btn, "railgun")
             self.railgun_btn.setObjectName("railgun")
 
             # Give Railgun a dropdown menu
@@ -125,6 +147,19 @@ class PhoenixControlPanel(QWidget):
 
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.launch", e)
+
+    def open_terminal_mode(self):
+        from matrix_gui.core.dialog.terminal_mode_dialog import TerminalModeDialog
+
+        try:
+            dialog = TerminalModeDialog(self)
+            try:
+                dialog.exec()
+            finally:
+                dialog.deleteLater()
+        except Exception as error:
+            emit_gui_exception_log("PhoenixControlPanel.open_terminal_mode", error)
+            QMessageBox.warning(self, "Terminal Mode", "Unlock the Vault before opening Terminal Mode.")
 
     def open_railgun_installer(self):
         """

@@ -1,0 +1,13 @@
+{
+  "name": "drop_vault",
+  "universal_id": "drop-vault",
+  "constraints": [
+    {"packet_signing": {"in": true, "out": true}},
+    {"persistent_state": null}
+  ],
+  "config": {
+    "ui": {"agent_tree": {"emoji": "📥"}, "panel": ["drop_vault.drop_vault"]},
+    "service-manager": [{"role": ["hive.drop_vault.request@cmd_request"]}],
+    "rpc_router_role": "hive.rpc"
+  }
+}

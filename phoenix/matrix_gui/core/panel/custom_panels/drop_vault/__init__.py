@@ -1,0 +1,1 @@
+"""Drop Vault live panel."""

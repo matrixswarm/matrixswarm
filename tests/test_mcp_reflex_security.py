@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -247,6 +248,7 @@ class McpReflexBoundaryTests(unittest.TestCase):
         self.assertIn("sdk_available", response["result"])
 
     @unittest.skipUnless(importlib.util.find_spec("mcp"), "isolated MCP SDK is not installed")
+    @unittest.skipUnless(os.name == "posix", "MatrixOS MCP worker requires POSIX absolute executable paths")
     def test_mcp_v2_stdio_discovery_filter_and_call(self) -> None:
         worker = AGENT_DIR / "worker" / "mcp_stdio_worker.py"
         server = ROOT / "tests" / "fixtures" / "mcp_echo_server.py"
