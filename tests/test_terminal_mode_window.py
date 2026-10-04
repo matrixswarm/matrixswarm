@@ -1,4 +1,5 @@
 """Terminal setup is window-scoped and never starts a runtime or grants access."""
+import io
 import os
 import sys
 import unittest
@@ -64,10 +65,23 @@ class TerminalModeWindowTests(unittest.TestCase):
     def test_vault_close_closes_setup_and_removes_subscription(self):
         dialog, _ = self.dialog()
         dialog.show()
-        with patch.object(EventBus, "off", wraps=EventBus.off) as unsubscribe:
-            EventBus.emit("vault.closed")
+        with io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict") as stdout:
+            with patch.object(sys, "stdout", stdout), patch.object(EventBus, "off", wraps=EventBus.off) as unsubscribe:
+                EventBus.emit("vault.closed")
         self.assertFalse(dialog.isVisible())
         unsubscribe.assert_any_call("vault.closed", dialog._vault_closed)
+
+    def test_vault_close_closes_all_setup_windows(self):
+        first, _ = self.dialog()
+        second, _ = self.dialog()
+        first.show()
+        second.show()
+        EventBus.emit("vault.closed")
+        self.assertFalse(first.isVisible())
+        self.assertFalse(second.isVisible())
+        listeners = EventBus._listeners.get("vault.closed", [])
+        self.assertNotIn(first._vault_closed, listeners)
+        self.assertNotIn(second._vault_closed, listeners)
 
     def test_top_bar_opens_terminal_mode_with_a_white_icon(self):
         panel = PhoenixControlPanel()

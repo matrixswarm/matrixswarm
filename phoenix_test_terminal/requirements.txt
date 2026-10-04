@@ -1,5 +1,6 @@
 # Offline lab dependencies only. No production vault or live bridge is required.
 PyQt6==6.10.0
+Flask==3.1.1
 cryptography==45.0.4
 paramiko==4.0.0
 pycryptodome==3.23.0
