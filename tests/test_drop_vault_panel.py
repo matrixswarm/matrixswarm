@@ -271,7 +271,7 @@ class PanelTests(unittest.TestCase):
         self.select_first()
         self.panel.paste.setPlainText("unsent draft")
         selected = self.panel._selected()
-        self.panel._last_poll = 0
+        self.panel._last_poll = time.monotonic() - 61
         self.panel._tick()
         self.pump()
         self.assertEqual(self.panel._selected(), selected)
@@ -287,7 +287,7 @@ class PanelTests(unittest.TestCase):
     def test_selection_and_delete_remain_available_during_background_list(self):
         upload(self.store, b"synthetic drop")
         self.pump()
-        self.panel._last_poll = 0
+        self.panel._last_poll = time.monotonic() - 61
         previous_status = self.panel.status.text()
         self.panel._tick()
         self.assertEqual(self.panel.pending["operation"], "list")
@@ -297,7 +297,7 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.panel.pending["operation"], "read")
         self.pump()  # The superseded list reply must not displace the read.
         self.assertEqual(self.panel.preview.toPlainText(), "synthetic drop")
-        self.panel._last_poll = 0
+        self.panel._last_poll = time.monotonic() - 61
         self.panel._tick()
         self.assertEqual(self.panel.pending["operation"], "list")
         self.assertTrue(self.panel.delete.isEnabled())
@@ -407,7 +407,7 @@ class PanelTests(unittest.TestCase):
         source.write_text("SYNTHETIC FILE", encoding="utf-8")
         mime = QMimeData()
         mime.setUrls([QUrl.fromLocalFile(str(source))])
-        self.panel._last_poll = 0
+        self.panel._last_poll = time.monotonic() - 61
         self.panel._tick()
         self.assertEqual(self.panel.pending["operation"], "list")
         self.assertTrue(self.panel.drop.isEnabled())
