@@ -29,9 +29,9 @@ class PlainLauncherTests(unittest.TestCase):
             previous = Path.cwd(), sys.argv, list(sys.path)
 
             def entrypoint(path, run_name):
-                self.assertEqual(str(root / "phoenix.py"), path)
+                self.assertEqual(str((root / "phoenix.py").resolve()), path)
                 self.assertEqual("__main__", run_name)
-                self.assertEqual(root, Path.cwd())
+                self.assertEqual(root.resolve(), Path.cwd().resolve())
                 self.assertEqual([path], sys.argv)
                 raise SystemExit(17)
 
