@@ -1,5 +1,10 @@
 # Phoenix Terminal
 
+> **Status: Experimental — testing phase. Not ready for production use.**
+> Phoenix Terminal and its Terminal Mode integration are under active development.
+> Use disposable test vaults and non-production swarms. Commands, workflows, and
+> interfaces may change; passing automated tests does not establish production readiness.
+
 Phoenix GUI authors the vault; the separate operator terminal owns terminal access.
 Launching Phoenix no longer installs an LLM bridge, activity indicator, approval
 presenter, or session monkeypatch. Opening the GUI does not grant an agent access.

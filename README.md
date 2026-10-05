@@ -25,6 +25,7 @@ This monorepo contains the complete system:
 | --- | --- | --- |
 | **Phoenix Cockpit** | Desktop control plane, vault, directive builder, monitoring, and remote deployment | [Phoenix README](phoenix/README.md) |
 | **MatrixOS** | Swarm runtime, agent lifecycle, encrypted communication, and resurrection | [MatrixOS README](matrixos/README.md) |
+| **Phoenix Terminal (experimental)** | Operator-approved terminal access; currently in testing, not ready for production use | [Terminal README](phoenix_terminal/README.md) |
 
 ## Repository Layout
 
@@ -61,6 +62,19 @@ MatrixSwarm is built around explicit trust boundaries:
 - File-based inter-agent communication scoped to each universe
 
 Sensitive credentials are not intended to be committed to this repository. Use the supplied sample files as templates and keep operational vaults, keys, and encrypted directives private.
+
+### Agent permissions: work in progress
+
+Some agent functions, including those in Tripwire and Ghostwire, remain limited
+by operating-system permissions. An agent may start successfully while being
+unable to inspect a protected directory, read a system resource, or perform a
+privileged operation. Do not assume full monitoring coverage from startup alone.
+
+We are working toward explicit, narrowly scoped permissions for each agent that
+remain effective across reloads. Strict per-agent isolation and automatic
+permission provisioning are not complete. **We prioritize security over
+convenience:** broad root access or relaxed system permissions are not the default
+solution to these gaps.
 
 ## Legacy Package Notice
 
