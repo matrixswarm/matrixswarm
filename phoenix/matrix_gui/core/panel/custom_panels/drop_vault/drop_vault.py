@@ -19,6 +19,7 @@ from matrix_gui.core.panel.custom_panels.interfaces.base_panel_interface import 
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.core.panel.control_bar import PanelButton
 from .local_files import FileJob, MAX_BYTES
+from .text_qr_dialog import MAX_QR_BYTES, TextQrDialog
 
 CHUNK = 8 * 1024
 
@@ -284,6 +285,7 @@ class DropVault(PhoenixPanelInterface):
         self._recent_file_uploads = {}
         self._last_poll = 0
         self._clipboard_marker = None
+        self._qr_dialog = None
         self.setLayout(self._build_ui())
         self.received.connect(self._receive)
         self.timer = QTimer(self)
@@ -401,13 +403,16 @@ class DropVault(PhoenixPanelInterface):
         row = QHBoxLayout()
         self.copy = QPushButton("Copy text")
         self.copy.clicked.connect(self._copy_text)
+        self.show_qr = QPushButton("Show QR")
+        self.show_qr.setToolTip("Show retrieved text as a QR code for 60 seconds (up to 512 UTF-8 bytes).")
+        self.show_qr.clicked.connect(self._show_qr)
         self.save = QPushButton("Save copy…")
         self.save.clicked.connect(lambda: self._export(False))
         self.copy_file = QPushButton("Copy file…")
         self.copy_file.clicked.connect(lambda: self._export(True))
         self.drag = QPushButton("Drag saved copy")
         self.drag.pressed.connect(self._drag)
-        for w in (self.copy, self.save, self.copy_file, self.drag):
+        for w in (self.copy, self.show_qr, self.save, self.copy_file, self.drag):
             row.addWidget(w)
         browser.addLayout(row)
         self.clear_clipboard = QCheckBox("Clear my copied text after 60 seconds (clipboard history is not cleared)")
@@ -443,6 +448,8 @@ class DropVault(PhoenixPanelInterface):
         self.cancel.setEnabled(busy and not self._list_pending())
         loaded = bool(self.loaded and self.loaded[0]["id"] == self._selected() and not busy)
         self.copy.setEnabled(loaded and self.loaded[0]["kind"] == "text")
+        self.show_qr.setEnabled(loaded and self.loaded[0]["kind"] == "text"
+                               and 0 < len(self.loaded[1]) <= MAX_QR_BYTES)
         self.save.setEnabled(loaded)
         self.copy_file.setEnabled(loaded and self.loaded[0]["kind"] == "file")
         self.drag.setEnabled(loaded and self.exported is not None)
@@ -566,6 +573,7 @@ class DropVault(PhoenixPanelInterface):
                 self.listing.setCurrentItem(item)
         self.listing.blockSignals(False)
         if selected not in self.entries:
+            self._close_qr()
             self.loaded = self.exported = None
             self.preview.clear()
             self.detail.setText("Select an item to retrieve it.")
@@ -583,6 +591,7 @@ class DropVault(PhoenixPanelInterface):
             self.listing.setCurrentItem(self.listing.topLevelItem(target))
 
     def _select(self):
+        self._close_qr()
         if self._list_pending():
             # An interactive selection takes priority over a background list.
             # Its late callback is ignored by the request-id check.
@@ -821,6 +830,36 @@ class DropVault(PhoenixPanelInterface):
             drag.setMimeData(self._file_mime())
             drag.exec(Qt.DropAction.CopyAction)
 
+    def _show_qr(self):
+        if (not self._signals_connected or not self.isVisible() or not self._idle()
+                or not self.loaded or self.loaded[0]["kind"] != "text"
+                or self.loaded[0]["id"] != self._selected()):
+            return
+        if not 0 < len(self.loaded[1]) <= MAX_QR_BYTES:
+            self.status.setText("Show QR supports 1–512 UTF-8 bytes of text. Longer text is not split or truncated.")
+            return
+        if self._qr_dialog is not None:
+            return
+        try:
+            dialog = TextQrDialog(self.loaded[1], self)
+        except ImportError:
+            self.status.setText("QR support needs Segno. Update Phoenix dependencies and reopen Phoenix.")
+            return
+        except Exception:
+            # Encoder diagnostics must never expose the retrieved secret.
+            self.status.setText("Could not create the text QR code. Nothing was saved or copied.")
+            return
+        self._qr_dialog = dialog
+        try:
+            dialog.exec()
+        finally:
+            self._qr_dialog = None
+            dialog.deleteLater()
+
+    def _close_qr(self):
+        if self._qr_dialog is not None:
+            self._qr_dialog.reject()
+
     def _copy_text(self):
         if not self.loaded or self.loaded[0]["kind"] != "text":
             return
@@ -836,6 +875,7 @@ class DropVault(PhoenixPanelInterface):
         self.status.setText("Text copied. System clipboard history may keep a copy.")
 
     def _delete(self):
+        self._close_qr()
         object_id = self._selected()
         if not object_id or (not self._idle() and not self._list_pending()):
             return
@@ -902,6 +942,7 @@ class DropVault(PhoenixPanelInterface):
             self._signals_connected = True
 
     def _disconnect_signals(self):
+        self._close_qr()
         if self._signals_connected:
             self.bus.off("inbound.verified.drop_vault.result", self._callback)
             self._signals_connected = False
@@ -911,6 +952,7 @@ class DropVault(PhoenixPanelInterface):
         self._refresh()
 
     def _on_hide(self):
+        self._close_qr()
         self.timer.stop()
         self._cancel_transfer()
         self.loaded = self.exported = None
@@ -918,6 +960,7 @@ class DropVault(PhoenixPanelInterface):
         self._buttons()
 
     def _on_close(self):
+        self._close_qr()
         self._cancel_transfer()
         self.loaded = self.exported = None
         self.preview.clear()
