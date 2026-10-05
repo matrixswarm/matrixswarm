@@ -25,6 +25,7 @@ This monorepo contains the complete system:
 | --- | --- | --- |
 | **Phoenix Cockpit** | Desktop control plane, vault, directive builder, monitoring, and remote deployment | [Phoenix README](phoenix/README.md) |
 | **MatrixOS** | Swarm runtime, agent lifecycle, encrypted communication, and resurrection | [MatrixOS README](matrixos/README.md) |
+| **Phoenix Terminal (experimental)** | Operator-approved terminal access; currently in testing, not ready for production use | [Terminal README](phoenix_terminal/README.md) |
 
 ## Repository Layout
 

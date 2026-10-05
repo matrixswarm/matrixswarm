@@ -1,5 +1,12 @@
 # Phoenix reliability sweep, test terminal and safer Railgun deployment
 
+## Phoenix Terminal status
+
+**Phoenix Terminal is experimental, currently in the testing phase, and not ready
+for production use.** This includes its Terminal Mode integration. Use disposable
+test vaults and non-production swarms while the feature is developed and validated.
+Commands, workflows, and interfaces may change.
+
 ## Summary
 
 This change set strengthens Phoenix's first-run, persistence, editor, deployment,
