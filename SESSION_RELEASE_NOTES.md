@@ -7,6 +7,17 @@ for production use.** This includes its Terminal Mode integration. Use disposabl
 test vaults and non-production swarms while the feature is developed and validated.
 Commands, workflows, and interfaces may change.
 
+## Known agent permission limitations
+
+Some operations in Tripwire, Ghostwire, and other agents remain unavailable under
+the current operating-system permissions. Successful startup does not establish
+that every configured resource can be monitored or every function can run.
+
+Work is ongoing toward explicit, narrowly scoped permissions for each agent that
+survive reloads. Strict per-agent isolation and automatic permission provisioning
+are not complete. We prioritize security over convenience; this release does not
+grant broad root access or relax system permissions to work around these limits.
+
 ## Summary
 
 This change set strengthens Phoenix's first-run, persistence, editor, deployment,
