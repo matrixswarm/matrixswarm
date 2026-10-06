@@ -21,11 +21,13 @@ success is a publication gate, not a claim of complete application coverage.
 - Install `publish.py` outside the document root, e.g.
   `/usr/local/lib/matrixswarm-downloads/publish.py`.
 - Create `/sites/matrixswarm/shared/downloads` and make it writable by a dedicated
-  `matrix-downloads` account. Serve it as the active release's `public/downloads`
-  symlink. The PHP/web account only needs read access.
+  `matrix-downloads` account. The PHP/web account only needs read access.
 - Run every five minutes as that account, using the root-owned installed script:
   `python3 publish.py --destination /sites/matrixswarm/shared/downloads`.
-- Install `apache.conf` with mod_headers and reload Apache after checking config.
+- Install `apache.conf` with mod_headers and include it inside MatrixSwarm's
+  HTTPS and internal-origin VirtualHost blocks only (not as a global conf).
+  Its Alias serves the public artifacts outside the PHP document root, which
+  otherwise blocks ZIP files. Reload Apache after checking config.
   It prevents caching the current manifest and download page. Immutable versioned
   assets can be cached without confusing one release with another.
 - Install `download.phtml` as the MatrixSwarm site's download template. It reads
@@ -37,8 +39,8 @@ The runtime publisher and web template are deliberately installed copies, not
 automatically executed scripts from new commits. Deploy changes to this tooling
 explicitly. The lock prevents concurrent publishers; review the publisher log
 if no new version appears. GitHub API limits or failed checks postpone updates.
-Recreate the downloads symlink when switching website releases. Retention is
-manual: do not delete the version referenced by `latest.json`.
+The downloads Alias survives website release changes. Retention is manual:
+do not delete the version referenced by `latest.json`.
 
 For the first installation, if current main is failing, seed the last checked
 main commit with `--bootstrap-commit FULL_COMMIT_SHA`. This is allowed only when
