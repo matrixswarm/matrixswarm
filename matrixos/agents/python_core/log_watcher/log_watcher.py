@@ -22,7 +22,7 @@ class Agent(BootAgent):
             self._emit_beacon = self.check_for_thread_poke("worker", timeout=self._interval * 2,  emit_to_file_interval=10)
 
 
-            self.AGENT_VERSION = "2.0.0"
+            self.AGENT_VERSION = "2.1.0"
 
             self._patrol_interval = int(cfg.get("patrol_interval_hours", 6)) * 3600
             self._last_patrol = 0
@@ -35,7 +35,7 @@ class Agent(BootAgent):
 
             self.oracle_timeout = int(cfg.get("oracle_timeout", 600))
             self._active_collectors = []
-            self.collectors = cfg.get("collectors", ["httpd", "sshd"])
+            self.collectors = cfg.get("collectors", {})
             self._rpc_role = self.tree_node.get("rpc_router_role", "hive.rpc")
 
             self.oracle_stack = {}
@@ -92,20 +92,27 @@ class Agent(BootAgent):
             self.log(error=e, block="log_reader_loader", level="ERROR")
             return {}
 
-        # Normalize collector selection list
-        if limit_to:
-            limit_to = [c.strip().lower() for c in limit_to]
+        if not isinstance(collectors_cfg, dict):
+            return {"configuration": {"lines": ["[collector error: collectors must be a settings object]"]}}
+        # None means all configured collectors; an explicit empty selection
+        # must never unexpectedly collect every configured log.
+        if limit_to is not None:
+            if not isinstance(limit_to, list) or any(not isinstance(c, str) for c in limit_to):
+                return {"configuration": {"lines": ["[collector error: invalid collector selection]"]}}
+            limit_to = {c.strip().lower() for c in limit_to}
 
         for name, cfg in collectors_cfg.items():
 
             try:
                 key = name.strip().lower()
+                if limit_to is not None and key not in limit_to:
+                    continue
+                if not isinstance(cfg, dict):
+                    collector_results[name] = {"lines": ["[collector error: settings must be an object]"]}
+                    continue
                 self.log(
                     f'[LOG-WATCHER][COLLECT] → {name} | paths={cfg.get("paths",[])} | max_lines={cfg.get("max_lines",[])} | rotate_depth={cfg.get("rotate_depth",[])}'
                 )
-
-                if limit_to and key not in limit_to:
-                    continue
 
                 try:
                     result = loader.collect_log(self.log, cfg or {})
@@ -114,6 +121,7 @@ class Agent(BootAgent):
                 except ModuleNotFoundError:
                     self.log(f"[COLLECTOR] ❌ {name} not found")
                 except Exception as e:
+                    collector_results[name] = {"lines": [f"[collector error: {e}]"]}
                     self.log(f"[COLLECTOR] ❌ {name} failed: {e}", error=e)
 
             except Exception as e:

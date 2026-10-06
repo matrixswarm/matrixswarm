@@ -28,24 +28,25 @@
         "collectors": {
             "httpd": {
                 "paths": [
-                    "/var/log/httpd/error_log",
-                    "/var/log/httpd/dragoart_error.log",
-                    "/var/log/httpd/matrixswarm_error.log"
+                    "/var/log/apache2/error.log"
                 ],
+                "rotation_style": "numbered",
                 "rotate_depth": 1,
                 "max_lines": 50
             },
             "mod_secure": {
                 "paths": [
-                    "/var/log/httpd"
+                    "/var/log/apache2/modsec_audit.log"
                 ],
+                "rotation_style": "numbered",
                 "rotate_depth": 1,
                 "max_lines": 50
             },
             "sshd": {
                 "paths": [
-                    "/var/log/secure"
+                    "/var/log/auth.log"
                 ],
+                "rotation_style": "numbered",
                 "rotate_depth": 1,
                 "max_lines": 50
             },
@@ -53,20 +54,23 @@
                 "paths": [
                     "/var/log/fail2ban.log"
                 ],
+                "rotation_style": "numbered",
                 "rotate_depth": 1,
                 "max_lines": 50
             },
             "systemd": {
                 "paths": [
-                    "/var/log/messages"
+                    "/var/log/syslog"
                 ],
+                "rotation_style": "numbered",
                 "rotate_depth": 1,
                 "max_lines": 50
             },
             "postfix": {
                 "paths": [
-                    "/var/log/maillog"
+                    "/var/log/mail.log"
                 ],
+                "rotation_style": "numbered",
                 "rotate_depth": 1,
                 "max_lines": 50
             },
@@ -74,10 +78,12 @@
                 "paths": [
                     "/var/log/dovecot.log"
                 ],
+                "rotation_style": "numbered",
                 "rotate_depth": 1,
                 "max_lines": 50
             }
         },
+        "check_interval_sec": 30,
         "enable_oracle": 0,
         "oracle_role": "hive.oracle",
         "oracle_timeout": 600,

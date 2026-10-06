@@ -1,9 +1,10 @@
 {
     "name": "log_health",
     "universal_id": "log-health",
-    "constraints": [],
+    "constraints": [{"packet_signing": {"in": true, "out": true}}],
     "config": {
         "ui": {
+            "panel": ["log_health.log_health"],
             "agent_tree": {
                 "emoji": "\ud83e\uddfe"
             }
@@ -19,6 +20,11 @@
                 "client denied"
             ]
         },
-        "report_to_role": "hive.forensics.data_feed"
+        "report_to_role": "hive.forensics.data_feed",
+        "oracle_role": "hive.oracle",
+        "service-manager": [{"role": [
+            "hive.log_health.snapshot@cmd_snapshot",
+            "hive.log_health.analyze@cmd_analyze"
+        ]}]
     }
 }

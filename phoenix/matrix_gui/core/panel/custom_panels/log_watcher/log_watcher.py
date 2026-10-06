@@ -1,7 +1,7 @@
 import uuid, time
 from PyQt6.QtWidgets import (
     QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
-    QTextEdit, QCheckBox
+    QTextEdit, QCheckBox, QGridLayout
 )
 from PyQt6.QtCore import QTimer, Qt
 from collections import deque
@@ -77,18 +77,24 @@ class LogWatcher(PhoenixPanelInterface):
         layout.addLayout(btn_row)
 
         # --- Collector Selection ---
-        bar = QHBoxLayout()
-        bar.addWidget(QLabel("Collectors:"))
+        bar = QGridLayout()
+        bar.addWidget(QLabel("Collectors:"), 0, 0)
         self.collector_checkboxes = {}
-        for name in ["httpd", "sshd", "dovecot", "fail2ban", "systemd", "postfix"]:
+        collectors = (self.node or {}).get("config", {}).get("collectors", {})
+        if not isinstance(collectors, dict):
+            collectors = {}
+        for index, (name, cfg) in enumerate(collectors.items()):
             cb = QCheckBox(name)
             cb.setChecked(name in ("httpd", "sshd"))
-            bar.addWidget(cb)
+            paths = cfg.get("paths", []) if isinstance(cfg, dict) else []
+            if isinstance(paths, list):
+                cb.setToolTip("\n".join(str(p) for p in paths))
+            bar.addWidget(cb, 1 + index // 4, index % 4)
             self.collector_checkboxes[name] = cb
 
         self.oracle_cb = QCheckBox("Oracle Analysis")
         self.oracle_cb.setChecked(False)
-        bar.addWidget(self.oracle_cb)
+        bar.addWidget(self.oracle_cb, 0, 1, 1, 2)
         layout.addLayout(bar)
 
         # --- Output box ---
@@ -122,6 +128,9 @@ class LogWatcher(PhoenixPanelInterface):
             self.output_box.clear()
 
             collectors = [name for name, cb in self.collector_checkboxes.items() if cb.isChecked()]
+            if not collectors:
+                self.output_box.setPlainText("Select at least one configured collector. Edit log locations in the deployment workspace, then redeploy.")
+                return
             use_oracle = self.oracle_cb.isChecked()
             self._last_token = str(uuid.uuid4())
 

@@ -1,5 +1,32 @@
 # Phoenix reliability sweep, test terminal and safer Railgun deployment
 
+## October 6, 2026 — Log monitoring and Windows session embedding
+
+- Add a signed, read-only Log Monitor panel for Log Health, with bounded
+  in-memory events, search, severity filters, display pause and an access check.
+- Add explicit Ask Oracle requests with an editable excerpt preview, bounded
+  payloads, pinned reply identity and timeout handling. Suggestions are displayed
+  as text; no actions are executed. Log excerpts may reach Oracle's AI provider.
+- Add Log Health's workspace upgrade controls, signing constraint and targeted
+  service routes. Deploy updated Phoenix and MatrixOS sources together.
+- Add a Log Watcher editor for collector names, server file paths, line limits
+  and numbered or dated rotation. Existing workspace settings are retained.
+- Populate digest selections from deployed collectors and report missing or
+  unreadable files. Tail reads accept regular files and have a per-file byte cap.
+- Align Ubuntu metadata with Railgun's exact-file allowlist for syslog and mail
+  logs; reject unsupported editor paths before deployment. This does not add
+  strict per-agent Linux isolation. Exact-file grants do not automatically cover
+  rotated siblings or replacement files.
+- Correct Windows embedded session ownership for Qt dialogs while retaining the
+  window type needed for native drops. Use Qt's numeric embedding event because
+  PyQt6 does not expose its named enum member.
+
+Validation for this update: Python syntax, metadata JSON and Git whitespace
+checks; operator-reported live Log Watcher digest collection and stable Phoenix
+use after the embedding correction. No automated tests were added or run for
+this update. Oracle analysis, sleep/resume and native drag-and-drop still need
+dedicated validation. The Terminal and permission limitations below remain.
+
 ## Phoenix Terminal status
 
 **Phoenix Terminal is experimental, currently in the testing phase, and not ready
