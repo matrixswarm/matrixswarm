@@ -179,7 +179,13 @@ class InboundDispatcher:
             return
 
         packet_timestamp = signed_wrapper["timestamp"]
+        # Resolve sender identity from the certificate that was verified,
+        # never from an agent_uid claimed inside the reply body.
+        verified_sender = next((agent.get("universal_id")
+                                for agent in deployment.get("agents", [])
+                                if isinstance(agent, dict) and agent.get("serial") == serial), None)
         verified_payload = {
+            "verified_sender": verified_sender,
             "handler": handler,
             "content": directive.get("content", directive),
             "timestamp": packet_timestamp,

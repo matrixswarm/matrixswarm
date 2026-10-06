@@ -44,10 +44,12 @@ _ALLOWED_EXACT_LOG_FILES = {
     "/var/log/auth.log",
     "/var/log/dovecot.log",
     "/var/log/fail2ban.log",
+    "/var/log/mail.log",
     "/var/log/maillog",
     "/var/log/messages",
     "/var/log/mysqld.log",
     "/var/log/secure",
+    "/var/log/syslog",
 }
 _WATCHDOG_LOG_TARGETS = {
     "apache_watchdog": ("/var/log/apache2", "/var/log/httpd"),
@@ -265,6 +267,12 @@ def _log_read_target(value, label="Log path"):
     raise ValueError(
         f"{label} is outside the approved service-log allowlist: {normalized}"
     )
+
+
+def validate_service_log_path(value, label="Log path"):
+    """Validate editor input against the same log policy used by deployment."""
+    _log_read_target(value, label)
+    return posixpath.normpath(str(value).strip())
 
 
 def _append_log_target(scopes, files, value, label="Log path"):
