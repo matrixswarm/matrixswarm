@@ -1,0 +1,79 @@
+<?php
+$this->headTitle('Download MatrixSwarm');
+$manifestPath = '/sites/matrixswarm/shared/downloads/latest.json';
+$release = null;
+if (is_readable($manifestPath)) {
+    $data = json_decode(file_get_contents($manifestPath, false, null, 0, 16384), true);
+    if (is_array($data) && ($data['schema_version'] ?? null) === 1
+        && preg_match('/^[0-9a-f]{40}$/D', $data['commit'] ?? '')
+        && preg_match('/^\d{4}\.\d{2}\.\d{2}-[0-9a-f]{40}$/D', $data['version'] ?? '')
+        && ($data['filename'] ?? '') === 'matrixswarm-' . $data['version'] . '.zip'
+        && substr($data['version'], -40) === $data['commit']
+        && preg_match('/^[0-9a-f]{64}$/D', $data['sha256'] ?? '')
+        && preg_match('/^[0-9a-f]{128}$/D', $data['sha512'] ?? '')
+        && is_int($data['bytes'] ?? null) && $data['bytes'] > 0) {
+        $release = $data;
+    }
+}
+$escape = static fn($text) => htmlspecialchars((string) $text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$download = $release ? '/downloads/' . rawurlencode($release['filename']) : null;
+?>
+<main class="ms-store">
+    <header class="ms-store-hero">
+        <p class="ms-store-kicker">GET THE PROJECT</p>
+        <h1>Put a swarm to work.</h1>
+        <p>Get Phoenix Cockpit and the MatrixOS runtime together from the official MatrixSwarm repository.</p>
+        <div class="ms-store-actions">
+            <?php if ($release): ?>
+                <a class="ms-store-button" href="<?= $escape($download) ?>">Download versioned source ZIP</a>
+            <?php endif; ?>
+            <a class="ms-store-secondary" href="https://github.com/matrixswarm/matrixswarm" rel="noopener noreferrer">View on GitHub &nearr;</a>
+        </div>
+        <?php if ($release): ?>
+            <p>Source snapshot <?= $escape(substr($release['version'], 0, 10)) ?>
+                &middot; commit <a href="https://github.com/matrixswarm/matrixswarm/commit/<?= $escape($release['commit']) ?>"><?= $escape(substr($release['commit'], 0, 12)) ?></a>
+                &middot; <?= $escape(number_format($release['bytes'] / 1048576, 1)) ?> MiB</p>
+        <?php else: ?>
+            <p>The versioned download is being prepared. The source repository is available above.</p>
+        <?php endif; ?>
+    </header>
+    <?php if ($release): ?>
+    <section class="ms-store-panel" aria-label="Download checksums">
+        <h2>Verify your download</h2>
+        <p>These checksums belong to this exact ZIP. Each new published version gets its own filename.</p>
+        <div class="ms-store-actions">
+            <a class="ms-store-secondary" href="<?= $escape($download) ?>.sha256" download>SHA-256 checksum file</a>
+            <a class="ms-store-secondary" href="<?= $escape($download) ?>.sha512" download>SHA-512 checksum file</a>
+        </div>
+        <details style="margin-top:1rem">
+            <summary>Show checksums</summary>
+            <p>SHA-256</p><code style="overflow-wrap:anywhere;word-break:break-all"><?= $escape($release['sha256']) ?></code>
+            <p>SHA-512</p><code style="overflow-wrap:anywhere;word-break:break-all"><?= $escape($release['sha512']) ?></code>
+        </details>
+        <p>To compare a local file in PowerShell, use <code>Get-FileHash .\filename.zip -Algorithm SHA256</code> or <code>SHA512</code>.</p>
+    </section>
+    <?php endif; ?>
+    <section class="ms-store-panel">
+        <h2>Or clone the repository</h2>
+        <pre><code>git clone https://github.com/matrixswarm/matrixswarm.git
+cd matrixswarm</code></pre>
+        <p>The ZIP and repository contain source code. Follow the component instructions to install and configure your system.</p>
+    </section>
+    <section class="ms-store-grid" aria-label="Setup guides">
+        <article class="ms-store-panel">
+            <p class="ms-store-kicker">THE CONTROL PLANE</p><h2>Phoenix Cockpit</h2>
+            <p>Start with the desktop cockpit, workspace, and vault setup.</p>
+            <a href="https://github.com/matrixswarm/matrixswarm/blob/main/phoenix/README.md" rel="noopener noreferrer">Phoenix setup guide &nearr;</a>
+        </article>
+        <article class="ms-store-panel">
+            <p class="ms-store-kicker">THE AGENT RUNTIME</p><h2>MatrixOS</h2>
+            <p>Set up the runtime and deploy your first swarm.</p>
+            <a href="https://github.com/matrixswarm/matrixswarm/blob/main/matrixos/README.md" rel="noopener noreferrer">MatrixOS setup guide &nearr;</a>
+        </article>
+        <article class="ms-store-panel">
+            <p class="ms-store-kicker">YOUR NEXT STEP</p><h2>Find a useful agent</h2>
+            <p>Explore the built-in agents, read the docs, and browse community extensions.</p>
+            <div class="ms-store-actions"><a href="/agents/listing/">Agents</a><a href="/docs/listing/">Docs</a><a href="/store/">Agent Store</a></div>
+        </article>
+    </section>
+</main>

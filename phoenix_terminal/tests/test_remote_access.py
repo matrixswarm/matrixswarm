@@ -312,8 +312,15 @@ class LoopbackSshTests(unittest.TestCase):
                         channel.sendall(f"[RAILGUN][COMPLETED] request={remote_id} exit=73\n".encode())
                         channel.send_exit_status(73)
                     channel.shutdown_write()
-                    time.sleep(0.05)
-                    channel.close()
+                    # Keep the SSH transport alive until the client consumes
+                    # the response and closes it. A fixed 50 ms sleep can race
+                    # the exec acknowledgement/data delivery on Linux and reset
+                    # the connection before the inventory reaches the client.
+                    deadline = time.monotonic() + 5
+                    while transport.is_active() and not stop.is_set():
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Fixture client did not disconnect")
+                        time.sleep(0.01)
                 except Exception as error:
                     failures.append(type(error).__name__)
                 finally:
