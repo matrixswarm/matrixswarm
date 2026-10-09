@@ -1,5 +1,15 @@
 {
     "name": "sora",
+    "description": "Submits configured video-generation prompts and tracks their results.",
+    "keywords": [
+        "ai",
+        "video",
+        "content"
+    ],
+    "groups": [
+        "ai",
+        "automation"
+    ],
     "universal_id": "sora-agent-1",
     "constraints": [
         {

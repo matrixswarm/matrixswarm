@@ -1,5 +1,14 @@
 {
     "name": "network_health",
+    "description": "Reports network interfaces, connections, traffic errors and resource usage.",
+    "keywords": [
+        "network",
+        "metrics",
+        "monitoring"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "network-health-1",
     "constraints": [],
     "config": {

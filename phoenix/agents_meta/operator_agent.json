@@ -1,5 +1,16 @@
 {
   "name": "operator_agent",
+  "description": "Runs reusable cognitive workflows with operator approval through MCP Reflex.",
+  "keywords": [
+    "ai",
+    "mcp",
+    "approval",
+    "workflow"
+  ],
+  "groups": [
+    "ai",
+    "automation"
+  ],
   "universal_id": "operator-agent-1",
   "constraints": [
     {"packet_signing": {"in": true, "out": true}},

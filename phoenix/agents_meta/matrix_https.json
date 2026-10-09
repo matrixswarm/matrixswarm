@@ -1,5 +1,14 @@
 {
     "name": "matrix_https",
+    "description": "Accepts authenticated Phoenix command packets over HTTPS and forwards them to Matrix.",
+    "keywords": [
+        "https",
+        "transport",
+        "ingress"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "matrix-https",
     "constraints": [
         {

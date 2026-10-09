@@ -1,5 +1,16 @@
 {
   "name": "mcp_reflex",
+  "description": "Exposes approved external MCP tools to the swarm through a signed, policy-controlled gateway.",
+  "keywords": [
+    "mcp",
+    "tools",
+    "approval",
+    "ai"
+  ],
+  "groups": [
+    "ai",
+    "communication"
+  ],
   "universal_id": "mcp-reflex-1",
   "constraints": [
     {"packet_signing": {"in": true, "out": true}},

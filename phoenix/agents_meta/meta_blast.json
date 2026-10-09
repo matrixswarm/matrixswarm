@@ -1,6 +1,16 @@
 {
   "universal_id": "meta_blast",
   "name": "meta_blast",
+  "description": "Processes configured content objects in batches with Oracle assistance.",
+  "keywords": [
+    "content",
+    "batch",
+    "ai"
+  ],
+  "groups": [
+    "automation",
+    "ai"
+  ],
   "constraints": [
     {
       "mysql": {}

@@ -1,6 +1,16 @@
 {
     "universal_id": "cdn_dozer",
     "name": "cdn_dozer",
+    "description": "Uploads files to the configured CDN and verifies completed uploads.",
+    "keywords": [
+        "cdn",
+        "files",
+        "content",
+        "upload"
+    ],
+    "groups": [
+        "automation"
+    ],
     "constraints": [
         {
             "cdn": {}

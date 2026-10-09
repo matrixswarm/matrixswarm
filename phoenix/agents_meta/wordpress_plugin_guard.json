@@ -1,5 +1,16 @@
 {
     "name": "wordpress_plugin_guard",
+    "description": "Checks WordPress plugin files against a signed SHA-256 baseline and reports integrity changes.",
+    "keywords": [
+        "web",
+        "wordpress",
+        "integrity",
+        "filesystem",
+        "alerts"
+    ],
+    "groups": [
+        "security"
+    ],
     "universal_id": "wordpress-plugin-guard-1",
     "constraints": [
         {

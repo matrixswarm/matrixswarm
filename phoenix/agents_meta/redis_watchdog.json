@@ -1,5 +1,16 @@
 {
     "name": "redis_watchdog",
+    "description": "Monitors Redis availability, attempts service recovery and reports failures.",
+    "keywords": [
+        "database",
+        "redis",
+        "service",
+        "availability",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "redis-hammer",
     "constraints": [],
     "config": {

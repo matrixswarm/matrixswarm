@@ -1,5 +1,16 @@
 {
     "name": "log_streamer",
+    "description": "Streams agent logs and current runtime diagnostics to connected Phoenix sessions.",
+    "keywords": [
+        "logs",
+        "diagnostics",
+        "rpc",
+        "streaming"
+    ],
+    "groups": [
+        "communication",
+        "monitoring"
+    ],
     "universal_id": "log-streamer-1",
     "constraints": [
         {

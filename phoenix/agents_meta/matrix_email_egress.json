@@ -1,5 +1,17 @@
 {
     "name": "matrix_email_egress",
+    "description": "Sends encrypted swarm replies and alerts to active Phoenix sessions through SMTP.",
+    "keywords": [
+        "email",
+        "smtp",
+        "transport",
+        "egress",
+        "rpc",
+        "alerts"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "matrix-email-egress",
     "constraints": [
         {

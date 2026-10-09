@@ -1,5 +1,15 @@
 {
     "name": "ghost_wire",
+    "description": "Observes user activity and filesystem events and reports security evidence to the swarm.",
+    "keywords": [
+        "audit",
+        "filesystem",
+        "authentication",
+        "alerts"
+    ],
+    "groups": [
+        "security"
+    ],
     "universal_id": "invisible-man",
     "constraints": [],
     "config": {

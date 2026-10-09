@@ -6,10 +6,11 @@ from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.dispatcher.session_bus import SessionBus
 from matrix_gui.core.connector_bus import ConnectorBus
 from matrix_gui.modules.net.connector.interfaces.connector_spec import ConnectorSpec, ConnectorPolicy
+from matrix_gui.modules.net.primary_ingress import select_primary_ingress
 
 # Supported connector types for outbound/inbound agent protocols
-SUPPORTED_PROTOS = {"https", "wss", "smtp", "ssh"}
-PERSISTENT_PROTOS = {"wss", "imap"}   # loop connectors
+SUPPORTED_PROTOS = {"https", "wss", "smtp", "ssh", "imap", "ssh_egress"}
+PERSISTENT_PROTOS = {"wss", "imap", "ssh_egress"}   # loop connectors
 EPHEMERAL_PROTOS  = {"https", "smtp"} # one-shot connectors (adjust if smtp becomes loop)
 
 # Mapping of protocol type → full class path of connector implementation
@@ -18,6 +19,7 @@ CONNECTOR_MAP = {
     "wss": "matrix_gui.modules.net.connector.ingress.wss.wss.WSSConnector",
     "smtp": "matrix_gui.modules.net.connector.egress.smtp.smtp.SMTPConnector",
     "ssh": "matrix_gui.modules.net.connector.egress.ssh.SSHConnector",
+    "ssh_egress": "matrix_gui.modules.net.connector.ingress.ssh.SSHIngressConnector",
     "imap": "matrix_gui.modules.net.connector.ingress.imap.imap.IMAPIngressConnector",
     # Future connector types (examples):
     # "discord": connect_discord,
@@ -47,7 +49,7 @@ def _connect_single(deployment, session_id, dep_id, *, managed_startup=False):
       - Ingress connectors (payload.reception) launch ONLY if they are the *selected primary ingress*.
         All other ingress connectors are registered but held until the Multiplexer activates them.
       - If multiple agents are marked default_payload_reception, we don't block deployment:
-        we deterministically pick the *first* one encountered (deployment order).
+        we pick the last one in deployment order, matching the session and Routes UI.
     """
     try:
         sessions = get_sessions()
@@ -108,38 +110,11 @@ def _connect_single(deployment, session_id, dep_id, *, managed_startup=False):
         print(f"[BRIDGE] ConnectorBus wired into SessionBus for {session_id}")
 
         # ---------------------------------------------------------
-        # Choose PRIMARY ingress deterministically.
-        # If multiple defaults are flagged, "first wins" by deployment order.
+        # Startup, the dispatcher and Routes must select the same receiver.
+        # Otherwise the displayed route can remain dormant until Apply is clicked.
         # ---------------------------------------------------------
-        primary_ingress_uid = None
-
-        # Pass 1: pick the first agent flagged default_payload_reception
-        for agent in deployment.get("agents", []):
-            conn = (agent.get("connection") or {})
-            channel = (conn.get("channel") or "").strip().lower()
-            if channel == "payload.reception" and bool(conn.get("default_payload_reception")):
-                primary_ingress_uid = agent.get("universal_id")
-                break
-
-        # Pass 2: if none flagged, prefer websocket/wss ingress
-        if not primary_ingress_uid:
-            incoming = []
-            for agent in deployment.get("agents", []):
-                conn = (agent.get("connection") or {})
-                if (conn.get("channel") or "").strip().lower() == "payload.reception":
-                    incoming.append(agent)
-
-            # Prefer wss / websocket by proto or name
-            for agent in incoming:
-                proto = ((agent.get("connection") or {}).get("proto") or "").strip().lower()
-                name = (agent.get("name") or "").strip().lower()
-                if proto == "wss" or "websocket" in name:
-                    primary_ingress_uid = agent.get("universal_id")
-                    break
-
-            # Final fallback: first payload.reception in deployment order
-            if not primary_ingress_uid and incoming:
-                primary_ingress_uid = incoming[0].get("universal_id")
+        primary_ingress = select_primary_ingress(deployment)
+        primary_ingress_uid = primary_ingress.get("universal_id") if primary_ingress else None
 
         # ---------------------------------------------------------
         # Register connectors. Launch only what should be live at boot.

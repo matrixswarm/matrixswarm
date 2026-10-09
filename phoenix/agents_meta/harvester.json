@@ -1,5 +1,15 @@
 {
     "name": "harvester",
+    "description": "Discovers local or SSH-reachable swarms using matrixd and reports their inventory and state.",
+    "keywords": [
+        "ssh",
+        "inventory",
+        "swarm",
+        "monitoring"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "harvester-1",
     "constraints": [
         {

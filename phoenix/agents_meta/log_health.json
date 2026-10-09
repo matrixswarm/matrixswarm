@@ -1,5 +1,16 @@
 {
     "name": "log_health",
+    "description": "Reads bounded log samples, publishes signed snapshots and requests Oracle analysis.",
+    "keywords": [
+        "logs",
+        "analysis",
+        "ai",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring",
+        "ai"
+    ],
     "universal_id": "log-health",
     "constraints": [{"packet_signing": {"in": true, "out": true}}],
     "config": {

@@ -1,5 +1,15 @@
 {
     "name": "terminal_streamer",
+    "description": "Streams terminal output and handles configured command requests through the swarm RPC interface.",
+    "keywords": [
+        "terminal",
+        "rpc",
+        "streaming",
+        "commands"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "terminal-1",
     "constraints": [
         {

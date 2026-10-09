@@ -1,5 +1,17 @@
 {
     "name": "site_sentinel",
+    "description": "Monitors website integrity, load and aggressive clients using configured files and access logs.",
+    "keywords": [
+        "web",
+        "integrity",
+        "logs",
+        "traffic",
+        "alerts"
+    ],
+    "groups": [
+        "security",
+        "monitoring"
+    ],
     "universal_id": "site-sentinel-1",
     "constraints": [],
     "config": {

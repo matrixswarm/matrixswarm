@@ -1,5 +1,16 @@
 {
     "name": "forensic_detective",
+    "description": "Correlates reported events and system evidence to investigate failures and security incidents.",
+    "keywords": [
+        "forensics",
+        "investigation",
+        "logs",
+        "ai"
+    ],
+    "groups": [
+        "security",
+        "ai"
+    ],
     "universal_id": "forensic-detective-1",
     "constraints": [
         {

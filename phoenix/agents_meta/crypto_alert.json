@@ -1,5 +1,14 @@
 {
     "name": "crypto_alert",
+    "description": "Watches cryptocurrency prices and Bitcoin addresses and sends configured alerts.",
+    "keywords": [
+        "cryptocurrency",
+        "prices",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "crypto_bull",
     "constraints": [
         {

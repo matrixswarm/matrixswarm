@@ -1,5 +1,15 @@
 {
     "name": "matrix_email",
+    "description": "Receives signed, encrypted Phoenix command packets through an IMAP mailbox and forwards them to Matrix.",
+    "keywords": [
+        "email",
+        "imap",
+        "transport",
+        "ingress"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "limbo-email-venue",
     "constraints": [
         {

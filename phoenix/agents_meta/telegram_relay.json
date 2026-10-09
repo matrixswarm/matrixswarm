@@ -1,5 +1,14 @@
 {
     "name": "telegram_relay",
+    "description": "Forwards swarm alerts to Telegram with optional signed encryption.",
+    "keywords": [
+        "telegram",
+        "alerts",
+        "relay"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "telegram-bot-father-2",
     "constraints": [
         {

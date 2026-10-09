@@ -1,5 +1,16 @@
 {
     "name": "matrix_websocket",
+    "description": "Maintains authenticated WebSocket connections for live Phoenix replies, alerts and session traffic.",
+    "keywords": [
+        "websocket",
+        "transport",
+        "rpc",
+        "streaming",
+        "egress"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "websocket-relay",
     "constraints": [
         {

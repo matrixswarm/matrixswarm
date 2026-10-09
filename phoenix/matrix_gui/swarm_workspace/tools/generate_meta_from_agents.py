@@ -66,6 +66,9 @@ def generate_meta_for_agents(agents_root: Path, output_to_same_dir=True):
             "config": node.get("config", {}),
             "ui": meta.get("ui", {"agent_tree": {"emoji": "🤖"}})
         }
+        for field in ("description", "keywords", "groups"):
+            if field in meta:
+                final_meta[field] = meta[field]
 
         # Save back into file
         out_path = meta_path if output_to_same_dir else (agent_dir / "meta.generated.json")

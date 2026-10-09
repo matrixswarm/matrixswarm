@@ -1,5 +1,14 @@
 {
     "name": "discord_relay",
+    "description": "Forwards swarm alerts to Discord with optional signed encryption.",
+    "keywords": [
+        "discord",
+        "alerts",
+        "relay"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "discord-delta-5",
     "constraints": [
         {

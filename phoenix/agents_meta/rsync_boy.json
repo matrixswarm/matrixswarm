@@ -1,5 +1,17 @@
 {
     "name": "rsync_boy",
+    "description": "Schedules filesystem snapshots, MySQL dumps and isolated restore drills with separate success records.",
+    "keywords": [
+        "backup",
+        "recovery",
+        "filesystem",
+        "database",
+        "ssh",
+        "schedule"
+    ],
+    "groups": [
+        "backup"
+    ],
     "universal_id": "rsync-boy-1",
     "constraints": [
         {

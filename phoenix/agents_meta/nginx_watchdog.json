@@ -1,5 +1,15 @@
 {
     "name": "nginx_watchdog",
+    "description": "Monitors the Nginx service and listening ports, attempts recovery and reports failures.",
+    "keywords": [
+        "web",
+        "service",
+        "availability",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "nginx-sentinel",
     "constraints": [],
     "config": {

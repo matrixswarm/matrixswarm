@@ -21,6 +21,7 @@ from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.core.panel.log_panel.log_panel import LogPanel
 from matrix_gui.core.panel.agent_tree.agent_tree import PhoenixAgentTree
 from matrix_gui.modules.net.deployment_connector import _connect_single
+from matrix_gui.modules.net.primary_ingress import select_primary_ingress
 from matrix_gui.core.dispatcher.inbound_dispatcher import InboundDispatcher
 from matrix_gui.core.dispatcher.outbound_dispatcher import OutboundDispatcher
 from matrix_gui.config.boot.globals import get_sessions
@@ -293,33 +294,7 @@ class SessionWindow(QMainWindow):
                 self.outgoing_badge.setText(f"Outgoing: {first_uid}  ⚪")
 
             try:
-                incoming_candidate = None
-                incoming_agents = []
-
-                # collect all payload.reception agents in deployment order
-                for a in deployment.get("agents", []):
-                    ch = (a.get("connection", {}).get("channel") or "").strip().lower()
-                    if ch == "payload.reception":
-                        incoming_agents.append(a)
-
-                # rule: last one flagged true wins
-                for a in incoming_agents:
-                    conn = a.get("connection", {}) or {}
-                    if bool(conn.get("default_payload_reception", False)):
-                        incoming_candidate = a
-
-                # fallback: websocket if no explicit default set
-                if not incoming_candidate:
-                    for a in incoming_agents:
-                        name = (a.get("name") or "").strip().lower()
-                        proto = (a.get("connection", {}).get("proto") or "").strip().lower()
-                        if proto == "wss" or "websocket" in name:
-                            incoming_candidate = a
-                            break
-
-                # final fallback: first payload.reception connector
-                if not incoming_candidate and incoming_agents:
-                    incoming_candidate = incoming_agents[0]
+                incoming_candidate = select_primary_ingress(deployment)
 
                 if incoming_candidate:
                     uid = incoming_candidate.get("universal_id")

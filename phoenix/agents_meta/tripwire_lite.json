@@ -1,5 +1,15 @@
 {
     "name": "tripwire_lite",
+    "description": "Watches configured filesystem paths for changes and can quarantine files according to its enforcement policy.",
+    "keywords": [
+        "filesystem",
+        "integrity",
+        "quarantine",
+        "alerts"
+    ],
+    "groups": [
+        "security"
+    ],
     "universal_id": "tripwire-guard-1",
     "constraints": [
         {

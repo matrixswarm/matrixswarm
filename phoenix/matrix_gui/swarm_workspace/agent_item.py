@@ -7,6 +7,7 @@ from PyQt6.QtGui import QColor, QPen, QPainter, QKeyEvent, QFont
 from .cls_lib.agent.config_editors.base_editor import BaseEditor, log_editor_failure
 from .cls_lib.color.color_manager import ColorManager
 from .cls_lib.agent.agent_node import AgentNode
+from .agent_catalog import agent_tooltip
 
 class AgentItem(QGraphicsRectItem):
     WIDTH, HEIGHT = 160, 60
@@ -19,6 +20,7 @@ class AgentItem(QGraphicsRectItem):
         # -----------------------------
         self.node = node                  # ← REAL agent model
         self.meta = node.meta             # ← static meta.json
+        self.setToolTip(agent_tooltip(self.meta))
 
         # visual state
         self.color = QColor("#888")
@@ -31,7 +33,6 @@ class AgentItem(QGraphicsRectItem):
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, False)
             self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, False)
             self.color = QColor("#3a78ff")
-            self.setToolTip("👑 MATRIX – Root of the Swarm")
 
         # -----------------------------
         # Base visuals

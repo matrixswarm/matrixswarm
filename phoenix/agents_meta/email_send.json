@@ -1,5 +1,15 @@
 {
     "name": "email_send",
+    "description": "Sends swarm alerts through configured SMTP accounts, with optional signed encryption.",
+    "keywords": [
+        "email",
+        "smtp",
+        "alerts",
+        "egress"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "email-dagger",
     "constraints": [
         {

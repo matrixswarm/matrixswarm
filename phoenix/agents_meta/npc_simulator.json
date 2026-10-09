@@ -1,5 +1,14 @@
 {
     "name": "npc_simulator",
+    "description": "Runs a controllable NPC simulation and streams its state to Phoenix.",
+    "keywords": [
+        "simulation",
+        "npc",
+        "streaming"
+    ],
+    "groups": [
+        "simulation"
+    ],
     "universal_id": "npc-simulator-1",
     "constraints": [
         {

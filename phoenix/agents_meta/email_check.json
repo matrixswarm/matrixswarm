@@ -1,5 +1,14 @@
 {
     "name": "email_check",
+    "description": "Polls configured IMAP mailboxes and stores received mail for swarm processing.",
+    "keywords": [
+        "email",
+        "imap",
+        "ingress"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "email-harvest",
     "constraints": [
         {
