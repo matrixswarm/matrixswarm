@@ -20,8 +20,12 @@ agents are shown. Filtering does not remove agents already on the canvas.
 
 Hover either a picker entry or a workspace node for its description, groups
 and keywords. Tooltip text is escaped before display. Reopen a workspace after
-editing catalog files to load the new descriptions. Existing deployment and
-agent configuration data is independent of these presentation fields.
+editing catalog files to load the new descriptions. The picker and saved
+workspace loaders resolve the same bundled `agents_meta` directory. Saved
+nodes receive current catalog descriptions when reopened; their configured
+settings, including intentionally empty configurations, take precedence over
+catalog defaults. Defaults seed only legacy nodes without a saved `config`.
+Existing deployment data is independent of these presentation fields.
 
 Both metadata generator tools preserve supplied descriptions, keywords and
 groups. Catalog metadata is curated; generators do not invent descriptions.

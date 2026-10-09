@@ -1,13 +1,12 @@
 # Authored by Daniel F MacDonald and ChatGPT-5.1 aka The Generals
 import json
-from pathlib import Path
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import Qt, QMimeData
 from PyQt6.QtGui import QDrag
-from .agent_catalog import agent_tooltip, catalog_values
+from .agent_catalog import agent_catalog_root, agent_tooltip, catalog_values
 
 class AgentPalette(QListWidget):
     def __init__(self):
@@ -16,8 +15,7 @@ class AgentPalette(QListWidget):
         self.setSelectionMode(self.SelectionMode.SingleSelection)
 
         # Use agents_meta as source of truth
-        base_dir = Path(__file__).resolve().parents[2]  # matrix_gui/swarm_workspace
-        self.agents_root = base_dir / "agents_meta"
+        self.agents_root = agent_catalog_root()
         self.load_agents()
 
     def load_agents(self):

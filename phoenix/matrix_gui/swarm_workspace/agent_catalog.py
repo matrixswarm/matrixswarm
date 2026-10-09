@@ -1,6 +1,12 @@
 """Presentation metadata shared by the agent picker and workspace canvas."""
 
 from html import escape
+from pathlib import Path
+
+
+def agent_catalog_root():
+    """Locate the bundled catalog independently of the caller's module depth."""
+    return Path(__file__).resolve().parents[2] / "agents_meta"
 
 
 def catalog_values(meta, field):
