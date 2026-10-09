@@ -1,6 +1,5 @@
 # Authored by Daniel F MacDonald and ChatGPT-5.1 (“The Generals”)
-from paramiko import RSAKey, Ed25519Key
-import io, base64, uuid
+import base64, uuid
 from pathlib import Path
 import re
 from PyQt6.QtCore import QTimer
@@ -16,6 +15,8 @@ from .base_editor import BaseEditor
 from matrix_gui.modules.railgun.ssh_support import (
     clean_secret,
     connect_ssh_profile,
+    encrypt_private_key,
+    generate_private_key,
     generate_strong_passphrase,
     load_private_key,
     normalize_fingerprint,
@@ -29,9 +30,10 @@ from matrix_gui.modules.railgun.ssh_support import (
 
 class SSH(BaseEditor):
 
+    accept_button_text = "Save to Vault"
+
     def __init__(self, parent=None, new_conn=False, default_channel_options=None):
         super().__init__(parent, new_conn)
-        self._loaded_key_passphrase = None
 
         # Identity
         self.label = QLineEdit(self.generate_default_label())
@@ -54,15 +56,25 @@ class SSH(BaseEditor):
 
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password.setPlaceholderText("Server account's login password")
+        self.password.setToolTip(
+            "The Ubuntu/server account password, used for password login "
+            "or one-time public-key installation."
+        )
 
         self.private_key = QTextEdit()
         self.private_key.setPlaceholderText("-----BEGIN OPENSSH PRIVATE KEY-----")
 
         self.passphrase = QLineEdit()
         self.passphrase.setEchoMode(QLineEdit.EchoMode.Password)
-        self.apply_passphrase_btn = QPushButton("🔐 Apply Passphrase to Existing Key")
+        self.passphrase.setPlaceholderText("Existing key's passphrase")
+        self.passphrase.setToolTip(
+            "Enter the current passphrase that unlocks this private key. "
+            "Use Change Passphrase to choose a new one."
+        )
+        self.apply_passphrase_btn = QPushButton("🔐 Change Passphrase…")
         self.apply_passphrase_btn.clicked.connect(self._apply_key_passphrase)
-        self.generate_passphrase_btn = QPushButton("🎲 Generate Strong Passphrase")
+        self.generate_passphrase_btn = QPushButton("🎲 Generate Passphrase…")
         self.generate_passphrase_btn.clicked.connect(self._generate_passphrase)
 
         # Security
@@ -86,9 +98,9 @@ class SSH(BaseEditor):
         self.public_key = QTextEdit()
         self.public_key.setReadOnly(True)
         self.public_key.setPlaceholderText("(Public key appears here after generation)")
-        self.save_key_btn = QPushButton("💾 Save Key Pair to Disk")
+        self.save_key_btn = QPushButton("💾 Export Key Files…")
         self.save_key_btn.clicked.connect(self._save_key_pair)
-        self.install_key_btn = QPushButton("🚀 Install Public Key on Server")
+        self.install_key_btn = QPushButton("🚀 Install Public Key…")
         self.install_key_btn.clicked.connect(self._install_public_key)
         self.test_btn = QPushButton("🔌 Test Connection")
         self.test_btn.clicked.connect(self._test_connection)
@@ -126,10 +138,17 @@ class SSH(BaseEditor):
         auth_group = QGroupBox("Authentication")
         auth_form = QFormLayout(auth_group)
         self._auth_form = auth_form
+        auth_help = QLabel(
+            "Server Password signs in to the account. Key Passphrase unlocks "
+            "the private key. For an encrypted key, enter its existing "
+            "passphrase to connect."
+        )
+        auth_help.setWordWrap(True)
+        auth_form.addRow(auth_help)
         auth_form.addRow("Auth Type", self.auth_type)
-        auth_form.addRow("Password / One-time Install", self.password)
+        auth_form.addRow("Server Password", self.password)
         auth_form.addRow("Private Key", self.private_key)
-        auth_form.addRow("Passphrase", self.passphrase)
+        auth_form.addRow("Key Passphrase", self.passphrase)
         self.passphrase_actions = QWidget()
         passphrase_actions_layout = QHBoxLayout(self.passphrase_actions)
         passphrase_actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -155,6 +174,14 @@ class SSH(BaseEditor):
         key_actions_layout.addWidget(self.save_key_btn)
         key_actions_layout.addWidget(self.install_key_btn)
         generation_form.addRow(key_actions)
+        save_help = QLabel(
+            "Save to Vault stores this entry. Export Key Files writes the "
+            "private and public key files on this computer. Install Public Key "
+            "adds this public key to the server and verifies a login. "
+            "Generating a key or changing its passphrase edits this draft."
+        )
+        save_help.setWordWrap(True)
+        generation_form.addRow(save_help)
         key_layout.addWidget(generation_group)
         key_layout.addStretch()
         tabs.addTab(key_tab, "Authentication & Keys")
@@ -233,7 +260,6 @@ class SSH(BaseEditor):
         self.password.setText(clean_secret(data.get("password")) or "")
         self.private_key.setText(clean_secret(data.get("private_key")) or "")
         loaded_passphrase = clean_secret(data.get("private_key_passphrase"))
-        self._loaded_key_passphrase = loaded_passphrase
         self.passphrase.setText(loaded_passphrase or "")
 
         self.fingerprint.setText(str(data.get("trusted_host_fingerprint", "")))
@@ -290,21 +316,11 @@ class SSH(BaseEditor):
         key_size = int(self.key_size.currentText()) if key_type == "RSA" else None
 
         try:
-            # --- Generate private key ---
-            if key_type == "RSA":
-                key = RSAKey.generate(bits=key_size)
-            elif key_type == "Ed25519":
-                key = Ed25519Key.generate()
-            else:
-                QMessageBox.warning(self, "Unsupported", f"Key type {key_type} not supported.")
-                return
-
-            # --- Export private key (PEM) ---
-            private_io = io.StringIO()
             passphrase = clean_secret(self.passphrase.text())
-            key.write_private_key(private_io, password=passphrase)
-            private_key_text = private_io.getvalue()
-            self._loaded_key_passphrase = passphrase
+            private_key_text = generate_private_key(
+                key_type, bits=key_size, passphrase=passphrase
+            )
+            key = load_private_key(private_key_text, passphrase)
 
             # --- Export public key (authorized_keys format) ---
             public_key_text = f"{key.get_name()} {key.get_base64()} generated@phoenix"
@@ -319,8 +335,10 @@ class SSH(BaseEditor):
             QMessageBox.information(
                 self,
                 "Key Generated",
-                f"New {key_type} key pair created "
+                f"New {key_type} key pair created in this editor "
                 f"({'with passphrase protection' if passphrase else 'without a passphrase'})."
+                "\n\nClick Save to Vault to keep the Registry entry. "
+                "Use Export Key Files to write the key files on this computer."
                 f"\n\nClient-key fingerprint:\n{fp_str}\n\n"
                 f"Public key:\n{public_key_text[:80]}..."
             )
@@ -388,9 +406,10 @@ class SSH(BaseEditor):
             return
         QMessageBox.information(
             self,
-            "Key Pair Saved",
+            "Key Files Exported",
             f"Private key:\n{private_path}\n\nPublic key:\n{public_path}\n\n"
-            "The private key was written with restricted permissions.",
+            "The private key was written with restricted permissions. "
+            "Click Save to Vault to keep any changes to the Registry entry.",
         )
 
     def _verified_host_fingerprint(self):
@@ -434,13 +453,16 @@ class SSH(BaseEditor):
         )
         dialog.exec()
         if dialog.installed_key_profile is not None:
-            self.on_load(dialog.installed_key_profile)
-        elif dialog.updated_profile:
-            if dialog.updated_serial == self.serial.text().strip():
-                self.on_load(dialog.updated_profile)
+            # The installer uses a snapshot of our draft key. Bring back only
+            # the verified login method and host pin, preserving editor fields.
+            self.auth_type.setCurrentText("private_key")
+            self.fingerprint.setText(
+                str(dialog.installed_key_profile.get("trusted_host_fingerprint", ""))
+            )
 
     def _generate_passphrase(self):
         """Review and adopt a cryptographically random 48-character passphrase."""
+        has_existing_key = bool(self.private_key.toPlainText().strip())
         dialog = QDialog(self)
         dialog.setWindowTitle("Generate Strong SSH Passphrase")
         dialog.setMinimumWidth(680)
@@ -449,7 +471,14 @@ class SSH(BaseEditor):
         explanation = QLabel(
             "Phoenix generated this passphrase with the operating system's "
             "cryptographic random source. Store it securely before using it; "
-            "losing it makes the encrypted private key unusable."
+            "losing it makes the encrypted private key unusable. "
+            + (
+                "Confirming will encrypt the existing key with this new "
+                "passphrase. Its current passphrase must already be entered "
+                "in Key Passphrase."
+                if has_existing_key else
+                "This will be used when you generate a new key pair."
+            )
         )
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
@@ -479,7 +508,7 @@ class SSH(BaseEditor):
             | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
-            "Use Passphrase"
+            "Encrypt Existing Key" if has_existing_key else "Use for New Key"
         )
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
@@ -510,50 +539,113 @@ class SSH(BaseEditor):
         generated.setFocus()
 
         if dialog.exec():
-            self.passphrase.setText(generated.text())
-            self.passphrase.setEchoMode(QLineEdit.EchoMode.Password)
+            if has_existing_key:
+                self._replace_key_passphrase(generated.text())
+            else:
+                self.passphrase.setText(generated.text())
+                self.passphrase.setEchoMode(QLineEdit.EchoMode.Password)
 
     def _apply_key_passphrase(self):
-        """Encrypt the current private key without changing its key pair."""
-        key_text = self.private_key.toPlainText().strip()
-        new_passphrase = clean_secret(self.passphrase.text())
-        if not key_text:
+        """Ask for a new passphrase separately from the current unlock secret."""
+        if not self.private_key.toPlainText().strip():
             QMessageBox.warning(self, "Missing Key", "Private Key is required.")
             return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Change Key Passphrase")
+        layout = QVBoxLayout(dialog)
+        explanation = QLabel(
+            "The current passphrase comes from Key Passphrase in the editor. "
+            "Choose the new passphrase below. This changes key encryption; "
+            "your server login password is separate."
+        )
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
+        form = QFormLayout()
+        new_value = QLineEdit()
+        confirm_value = QLineEdit()
+        for field in (new_value, confirm_value):
+            field.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("New Key Passphrase", new_value)
+        form.addRow("Confirm New Passphrase", confirm_value)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Change Passphrase")
+
+        def accept_change():
+            if not clean_secret(new_value.text()):
+                QMessageBox.warning(dialog, "Missing Passphrase", "Enter a new key passphrase.")
+            elif new_value.text() != confirm_value.text():
+                QMessageBox.warning(dialog, "Passphrases Differ", "The new passphrases must match.")
+            else:
+                dialog.accept()
+
+        buttons.accepted.connect(accept_change)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        new_value.setFocus()
+        if dialog.exec():
+            self._replace_key_passphrase(new_value.text())
+
+    def _replace_key_passphrase(self, new_passphrase):
+        """Publish replacement editor fields only after successful encryption."""
+        key_text = self.private_key.toPlainText().strip()
+        current_passphrase = clean_secret(self.passphrase.text())
+        new_passphrase = clean_secret(new_passphrase)
+        if not key_text:
+            QMessageBox.warning(self, "Missing Key", "Private Key is required.")
+            return False
         if not new_passphrase:
             QMessageBox.warning(
                 self,
                 "Missing Passphrase",
-                "Enter a new passphrase before applying it to the private key.",
+                "Enter a new key passphrase.",
             )
-            return
+            return False
 
         try:
             try:
-                key = load_private_key(key_text, self._loaded_key_passphrase)
+                key = load_private_key(key_text, current_passphrase)
             except ValueError:
                 # Profiles created by the old editor may contain an arbitrary
                 # passphrase beside a key that was never encrypted.
-                key = load_private_key(key_text, None)
+                try:
+                    key = load_private_key(key_text, None)
+                    current_passphrase = None
+                except ValueError:
+                    QMessageBox.warning(
+                        self,
+                        "Cannot Unlock Private Key",
+                        "Enter this key's current passphrase in Key Passphrase "
+                        "before changing it. The server login password does "
+                        "not unlock the private key.",
+                    )
+                    return False
 
-            protected = io.StringIO()
-            key.write_private_key(protected, password=new_passphrase)
-            protected_text = protected.getvalue()
-            load_private_key(protected_text, new_passphrase)
+            protected_text = encrypt_private_key(
+                key_text, current_passphrase, new_passphrase
+            )
 
             self.private_key.setPlainText(protected_text)
-            self._loaded_key_passphrase = new_passphrase
+            self.passphrase.setText(new_passphrase)
+            self.passphrase.setEchoMode(QLineEdit.EchoMode.Password)
             self.public_key.setPlainText(
                 f"{key.get_name()} {key.get_base64()} protected@phoenix"
             )
             QMessageBox.information(
                 self,
                 "Passphrase Applied",
-                "The existing private key is now encrypted. Its public key "
-                "and the server's authorized_keys entry did not change.",
+                "The editor's private key is encrypted with the new passphrase. "
+                "Click Save to Vault to keep this change. Use Export Key Files "
+                "to update a key file on this computer. The public key "
+                "and server authorization stay the same.",
             )
+            return True
         except Exception as exc:
             QMessageBox.critical(self, "Passphrase Error", str(exc))
+            return False
 
     # --------------------------
     def is_validated(self):

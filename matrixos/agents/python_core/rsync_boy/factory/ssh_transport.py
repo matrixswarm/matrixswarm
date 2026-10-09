@@ -252,7 +252,7 @@ class SSHTransport:
         prefix, env = self._auth_prefix_and_env()
         ssh_command = shlex.join(self._ssh_argv())
         target = f"{self._host_target()}:{shlex.quote(remote_path)}"
-        return subprocess.run(
+        return self._run_rsync(
             [
                 *prefix,
                 "rsync",
@@ -261,10 +261,7 @@ class SSHTransport:
                 source,
                 target,
             ],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=env,
+            env,
         )
 
     def rsync_from(self, remote_path: str, destination: str, options=None):
@@ -273,7 +270,7 @@ class SSHTransport:
         prefix, env = self._auth_prefix_and_env()
         ssh_command = shlex.join(self._ssh_argv())
         source = f"{self._host_target()}:{shlex.quote(remote_path)}"
-        return subprocess.run(
+        return self._run_rsync(
             [
                 *prefix,
                 "rsync",
@@ -283,8 +280,28 @@ class SSHTransport:
                 source,
                 destination,
             ],
-            check=True,
-            capture_output=True,
-            text=True,
-            env=env,
+            env,
         )
+
+    def _run_rsync(self, argv, env):
+        try:
+            return subprocess.run(
+                argv, check=True, capture_output=True, text=True, env=env,
+            )
+        except subprocess.CalledProcessError as exc:
+            # rsync's stderr names the failed file/attribute; the exception's
+            # default string only repeats the command and exit status.
+            detail = exc.stderr or "No rsync error detail was returned."
+            if isinstance(detail, bytes):
+                detail = detail.decode("utf-8", errors="replace")
+            for secret in (self.profile.password, self.profile.private_key,
+                           self.profile.private_key_passphrase):
+                if secret:
+                    detail = detail.replace(secret, "[REDACTED]")
+            truncated = len(detail) > 4096
+            detail = detail[:4096].strip()
+            if truncated:
+                detail += "\n[rsync error detail truncated]"
+            raise RuntimeError(
+                f"rsync transfer failed (exit {exc.returncode}): {detail}"
+            ) from None

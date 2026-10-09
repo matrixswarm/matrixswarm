@@ -70,6 +70,9 @@ class RsyncSnapshotJob:
 
     def _rsync_options(self, job, latest_exists):
         options = ["-a", "--numeric-ids", "--partial"]
+        if job.get("source_ssh_sudo", False):
+            # Only a pull job can enable this fixed remote sender command.
+            options.append("--rsync-path=sudo -n -- rsync")
         if job["preserve_hard_links"]:
             options.append("-H")
         if job["preserve_acls"]:
@@ -208,6 +211,11 @@ class RsyncSnapshotJob:
 
     def _validate_and_normalize_cfg(self, cfg: dict) -> dict:
         source_via_ssh = bool(cfg.get("source_via_ssh", False))
+        source_ssh_sudo = cfg.get("source_ssh_sudo", False)
+        if not isinstance(source_ssh_sudo, bool):
+            raise ValueError("config.source_ssh_sudo must be true or false")
+        if source_ssh_sudo and not source_via_ssh:
+            raise ValueError("config.source_ssh_sudo requires pulling the source through SSH")
         source_path = str(cfg.get("source_path") or "").strip()
         remote_path = str(cfg.get("remote_path") or "").strip().rstrip("/")
         prefix = str(cfg.get("snapshot_prefix") or self.job_id).strip()
@@ -252,6 +260,7 @@ class RsyncSnapshotJob:
 
         return {
             "source_via_ssh": source_via_ssh,
+            "source_ssh_sudo": source_ssh_sudo,
             "source_path": source_path,
             "remote_path": remote_path,
             "snapshot_prefix": prefix,
@@ -269,6 +278,7 @@ class RsyncSnapshotJob:
             "job_id": self.job_id,
             "backup_definition_hash": self.ctx.get("definition_hash"),
             "transfer_mode": "pull_from_ssh" if job["source_via_ssh"] else "push_to_ssh",
+            "source_ssh_sudo": job.get("source_ssh_sudo", False),
             "source_path": job["source_path"],
             "remote_path": job["remote_path"],
             "snapshot": snapshot_name,

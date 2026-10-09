@@ -6,8 +6,12 @@ A drill copies one completed snapshot into a fresh private directory, checks it
 against the inventory sealed during backup, and removes the scratch copy.
 It never restores into a live source directory and never runs restored code.
 
-This iteration is ready for operator validation. Automated and live acceptance
-checks have not been run for this change.
+The first live operator drill passed on 2026-10-09 at 18:22:45 America/New_York:
+`dragoart-etc-restore` verified snapshot `etc_20261009_220814`, checking 1,500
+regular files, 2,716 entries and 3,491,579 logical file bytes. Its private
+receipt recorded `result: ok`, and no scratch directory remained afterward.
+Automated acceptance checks and the remaining failure scenarios have not been
+run for this iteration.
 
 ## Scope
 
@@ -51,6 +55,16 @@ detect corruption that already existed in the snapshot.
   files; an inode may be shared by multiple snapshots.
 
 ## Configure in Phoenix
+
+For protected SSH sources such as `/etc` or `/var/spool/cron`, enable
+**Read Protected SSH Source with sudo** on the filesystem backup job. It is
+off by default and available only when **Pull Source Through SSH** is enabled.
+The selected SSH account must already have permission to run `sudo -n -- rsync`;
+RsyncBoy does not install sudo policy. This option runs the remote sender as
+root while the local snapshot storage continues to use the swarm account.
+It does not grant extra metadata or ownership verification to a restore drill.
+Transfer failures report up to 4,096 characters of rsync error detail with
+configured SSH secrets redacted, including source-read and attribute failures.
 
 1. Open the live RsyncBoy panel in Normal Mode. Edit a filesystem backup job
    and enable **Create SHA-256 Verification Inventory**. Save the schedule.

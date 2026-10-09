@@ -302,6 +302,12 @@ class JobEditorDialog(QDialog):
         self.source_via_ssh.setChecked(
             bool(filesystem_cfg.get("source_via_ssh", not existing_filesystem_job))
         )
+        self.source_ssh_sudo = QCheckBox()
+        self.source_ssh_sudo.setChecked(bool(filesystem_cfg.get("source_ssh_sudo", False)))
+        self.source_ssh_sudo.setToolTip(
+            "Run the remote rsync sender through sudo to read protected source files. "
+            "The SSH account must already be allowed to run rsync with passwordless sudo."
+        )
         self.source_path = QLineEdit(filesystem_cfg.get("source_path", "/sites"))
         self.snapshot_remote_path = QLineEdit(
             filesystem_cfg.get("remote_path", "/backup/snapshots/sites")
@@ -336,6 +342,7 @@ class JobEditorDialog(QDialog):
 
         filesystem_layout.addRow(QLabel("— Filesystem Snapshot Options —"))
         filesystem_layout.addRow("Pull Source Through SSH", self.source_via_ssh)
+        filesystem_layout.addRow("Read Protected SSH Source with sudo", self.source_ssh_sudo)
         filesystem_layout.addRow(self.transfer_hint)
         filesystem_layout.addRow(self.source_path_label, self.source_path)
         filesystem_layout.addRow(self.snapshot_root_label, self.snapshot_remote_path)
@@ -407,6 +414,9 @@ class JobEditorDialog(QDialog):
         self.ssh_profile.setEnabled(factory != RESTORE_FACTORY)
 
     def _transfer_direction_changed(self):
+        self.source_ssh_sudo.setEnabled(self.source_via_ssh.isChecked())
+        if not self.source_via_ssh.isChecked():
+            self.source_ssh_sudo.setChecked(False)
         if self.source_via_ssh.isChecked():
             self.transfer_hint.setText(
                 "SSH server → this MatrixOS backup host (recommended for offsite backups)."
@@ -477,6 +487,7 @@ class JobEditorDialog(QDialog):
         elif factory == FILESYSTEM_FACTORY:
             config = {
                 "source_via_ssh": self.source_via_ssh.isChecked(),
+                "source_ssh_sudo": self.source_ssh_sudo.isChecked(),
                 "source_path": self.source_path.text().strip(),
                 "remote_path": self.snapshot_remote_path.text().strip(),
                 "snapshot_prefix": self.snapshot_prefix.text().strip(),

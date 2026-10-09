@@ -88,6 +88,10 @@ def _normalize_mysql_config(config):
 
 
 def _normalize_filesystem_config(config):
+    source_via_ssh = _boolean(config, "source_via_ssh", True)
+    source_ssh_sudo = _boolean(config, "source_ssh_sudo", False)
+    if source_ssh_sudo and not source_via_ssh:
+        raise JobClipboardError("source_ssh_sudo requires pulling the source through SSH")
     prefix = _string(config, "snapshot_prefix", "sites", max_length=128)
     if not _SAFE_PREFIX.fullmatch(prefix):
         raise JobClipboardError("snapshot_prefix contains unsafe characters")
@@ -101,8 +105,8 @@ def _normalize_filesystem_config(config):
         if not isinstance(pattern, str) or not pattern.strip() or len(pattern) > 512:
             raise JobClipboardError("exclude contains an invalid pattern")
         normalized_excludes.append(pattern.strip())
-    return {
-        "source_via_ssh": _boolean(config, "source_via_ssh", True),
+    result = {
+        "source_via_ssh": source_via_ssh,
         "source_path": _absolute_non_root(
             _string(config, "source_path", "/sites"), "source_path"
         ),
@@ -119,6 +123,9 @@ def _normalize_filesystem_config(config):
         "verify_manifest": _boolean(config, "verify_manifest", False),
         "remote_prune": _retention(config),
     }
+    if source_ssh_sudo:
+        result["source_ssh_sudo"] = True
+    return result
 
 
 def _normalize_drill_config(config):

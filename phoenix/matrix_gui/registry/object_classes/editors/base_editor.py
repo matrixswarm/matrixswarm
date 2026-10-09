@@ -7,6 +7,8 @@ class EditorABCMeta(type(QWidget), ABCMeta):
 
 class BaseEditor(QWidget, metaclass=EditorABCMeta):
 
+    accept_button_text = "OK"
+
     def __init__(self, parent=None, default_channel_options=None):
         super().__init__(parent)
         self._default_channel_options = default_channel_options or []
@@ -147,6 +149,9 @@ class BaseEditor(QWidget, metaclass=EditorABCMeta):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            self.accept_button_text
         )
 
         def on_ok():
