@@ -15,6 +15,7 @@ import inotify.adapters
 import inotify.constants
 from core.python_core.class_lib.inotify_events.jedi_event_flow import JediEventFlow
 from core.python_core.boot_agent import BootAgent
+from core.python_core.agent_progress import AgentProgress, failure_reason, path_target
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.python_core.class_lib.crypto.symmetric_encryption.aes.aes import AESHandlerBytesShim
@@ -46,6 +47,8 @@ class Agent(BootAgent):
 
     def __init__(self):
         super().__init__()
+        self.progress = AgentProgress(self, {"watch_setup": (None, 300),
+            "event_listener": (60, 120), "quarantine": (None, 120)})
         try:
 
             # Retrieve inotify kernel limits for watches and instances
@@ -141,6 +144,7 @@ class Agent(BootAgent):
             self._aes = AESHandlerBytesShim(self._aes_key)  # Initialize AES encryption handler
 
         except Exception as e:
+            self.progress.block("watch_setup", failure_reason(e))
             self.log("[TRIPWIRE-GUARD][INIT] Failed to init", error=e, level="CRITICAL")
             # Do not boot a partially initialized guard. Otherwise worker()
             # hides this original failure behind repeated missing-field errors.
@@ -709,7 +713,8 @@ class Agent(BootAgent):
                     "quarantine_path": qpath,
                     "status": "quarantined"
                 })
-                shutil.move(full_path, qpath)
+                with self.progress.attempt("quarantine"):
+                    shutil.move(full_path, qpath)
                 info["action"] = "quarantine"
                 self._last_quarantine[full_path] = time.time()
                 self.log(f"[TRIPWIRE-GUARD][QUARANTINE] {full_path} → {qpath}", level="WARN")
@@ -750,13 +755,18 @@ class Agent(BootAgent):
     # ---------- Agent Lifecycle ----------
     def post_boot(self):
         """Perform post-initialization tasks after loading configuration."""
+        setup_started = False
         try:
             self.log(f"{self.NAME} – Tripwire v2 GlobalGuard online.")
             self._notifier = inotify.adapters.Inotify()
+            setup_started = True
             self._build_watcher_table()
             threading = __import__("threading")
             threading.Thread(target=self._listen_for_events, daemon=True).start()
         except Exception as e:
+            if not setup_started:
+                self.progress.block("watch_setup", failure_reason(e))
+            self.progress.block("event_listener", "LISTENER_STOPPED")
             self.log(error=e, level="ERROR", block="main_try")
 
     def _clear_all_watches(self):
@@ -766,13 +776,26 @@ class Agent(BootAgent):
                 self._notifier = inotify.adapters.Inotify()  # recreate the notifier object
             self.watch_count = 0
         except Exception as e:
+            self._watch_build_reason = failure_reason(e)
             self.log(f"[TRIPWIRE] Failed to clear watches: {e}")
 
     def _listen_for_events(self):
         """Listen for inotify events and handle them in real-time."""
+        poll_failed = False
         try:
             self.log("[TRIPWIRE] 🔌 Listening for file events…")
-            for event in self._notifier.event_gen():
+            events = iter(self._notifier.event_gen(yield_nones=True))
+            while self.running:
+                token = self.progress.begin("event_listener")
+                try:
+                    event = next(events)
+                except Exception as exc:
+                    poll_failed = True
+                    reason = "LISTENER_STOPPED" if isinstance(exc, StopIteration) else failure_reason(exc)
+                    self.progress.finish("event_listener", token, reason)
+                    raise
+                else:
+                    self.progress.finish("event_listener", token)
 
                 self._emit_beacon_trip_guard()
                 # flush any events qued to the logs
@@ -801,6 +824,8 @@ class Agent(BootAgent):
                 except Exception as e:
                     self.log(f"[TRIPWIRE][EVT-FAIL] {event} → {e}", level="ERROR")
         except Exception as e:
+            if not poll_failed:
+                self.progress.block("event_listener", "LISTENER_STOPPED")
             self.log("[TRIPWIRE][EVT-LOOP-CRASH] Event listener crashed", error=e)
 
     def _handle_new_directory(self, full_path: str):
@@ -840,16 +865,59 @@ class Agent(BootAgent):
                                 self.log(f"[TRIPWIRE] 📄 Added watcher (deep) for: {fpath}")
 
         except Exception as e:
+            self.progress.block("watch_setup", failure_reason(e))
             self.log(f"[TRIPWIRE][DIR-WATCH] Error adding watcher for {full_path}", error=e)
 
     def _build_watcher_table(self):
         """Build and maintain a table of active watchers to track monitored paths."""
+        token = self.progress.begin("watch_setup")
+        self._watch_build_reason = None
+        self._watch_building = True
+        self._watch_context_index = None
+        self._watch_targets = {index: path_target("watch_path", index, entry["path"], "not_attempted")
+                               for index, entry in enumerate(self._watch_paths, 1)}
+        try:
+            self._populate_watcher_table()
+        except Exception as exc:
+            self.progress.finish("watch_setup", token, failure_reason(exc))
+            raise
+        else:
+            reason = self._watch_build_reason or (None if self.watch_count else "NO_WATCHES")
+            self.progress.finish("watch_setup", token, reason)
+        finally:
+            self.progress.set_context("watch_setup", list(self._watch_targets.values()))
+            self._watch_context_index = None
+            self._watch_building = False
+
+    def _note_watch_target(self, path, state, reason=None):
+        index = getattr(self, "_watch_context_index", None)
+        if index is None:
+            index = next((i for i, entry in enumerate(self._watch_paths, 1)
+                          if path == entry["path"] or str(path).startswith(entry["path"].rstrip("/") + "/")),
+                         len(self._watch_paths) + 1)
+        targets = getattr(self, "_watch_targets", {})
+        prior = targets.get(index)
+        if prior and prior["reason"]:
+            return  # Preserve the failing location until a complete rebuild.
+        label = path if reason else self._watch_paths[index - 1]["path"] if index <= len(self._watch_paths) else path
+        targets[index] = path_target("watch_path", index, label, state, reason)
+        self._watch_targets = targets
+        if not getattr(self, "_watch_building", False):
+            self.progress.set_context("watch_setup", list(targets.values()))
+
+    def _note_watch_failure(self, path, reason):
+        state = {"MISSING_PATH": "missing", "PERMISSION_DENIED": "permission_denied",
+                 "INVALID_CONFIGURATION": "invalid"}.get(reason, "io_failure")
+        self._note_watch_target(path, state, reason)
+
+    def _populate_watcher_table(self):
         try:
             max_watches, max_instances = self._get_kernel_inotify_limits()
             current = self._get_current_watchers()
             needed = self._estimate_watchers_needed()
 
             if current + needed > int(max_watches * 0.8):
+                self._watch_build_reason = "RESOURCE_LIMIT"
                 self.log("[TRIPWIRE-GUARD][CRITICAL] Watcher limit too low! Sentinel refusing to start.")
                 self.drop_alert({
                     "path": "SENTINEL",
@@ -863,6 +931,7 @@ class Agent(BootAgent):
                 })
                 return
         except Exception as e:
+            self._watch_build_reason = failure_reason(e)
             self.log(error=e, level="ERROR", block="main_try")
 
 
@@ -871,18 +940,23 @@ class Agent(BootAgent):
         self.watch_count = 0
         watched_entries = []
 
-        for entry in self._watch_paths:
+        for index, entry in enumerate(self._watch_paths, 1):
+            self._watch_context_index = index
             base = entry["path"]
             recursive = entry["recursive"]
             watch_dirs = entry["watch_dirs"]
             watch_files = entry["watch_files"]
 
-            if not base or not os.path.exists(base):
-                self.log(f"[TRIPWIRE] ⚠ Skipped missing path: {base}")
+            try:
+                os.stat(base)
+            except OSError as exc:
+                self._watch_build_reason = failure_reason(exc)
+                self._note_watch_failure(base, self._watch_build_reason)
+                self.log(f"[TRIPWIRE] ⚠ Skipped inaccessible path: {base}")
                 continue
 
             if recursive:
-                for dirpath, dirnames, filenames in os.walk(base):
+                for dirpath, dirnames, filenames in os.walk(base, onerror=self._watch_walk_error):
                     # Normalize current path
                     dirpath = os.path.abspath(dirpath)
                     # Skip the current directory entirely
@@ -918,12 +992,20 @@ class Agent(BootAgent):
                                 if self._safe_add_watch(fpath):
                                     watched_entries.append(fpath)
                     except Exception as e:
+                        self._watch_build_reason = failure_reason(e)
+                        self._note_watch_failure(base, self._watch_build_reason)
                         self.log(f"[TRIPWIRE] ⚠ Unable to list {base}: {e}")
 
         self.log("[TRIPWIRE] WATCH SUMMARY:")
         for path in watched_entries:
             self.log(f"  • {path}")
         self.log(f"[TRIPWIRE] Total watches: {self.watch_count}")
+
+    def _watch_walk_error(self, exc):
+        self._watch_build_reason = failure_reason(exc)
+        self._note_watch_failure(getattr(exc, "filename", None), self._watch_build_reason)
+        if not getattr(self, "_watch_building", False):
+            self.progress.block("watch_setup", self._watch_build_reason)
 
     def _safe_add_watch(self, path):
         """Safely add an inotify watch for the given path, handling errors if any."""
@@ -944,9 +1026,14 @@ class Agent(BootAgent):
 
             self._notifier.add_watch(path, mask=WATCH_MASK)
             self.watch_count += 1
+            self._note_watch_target(path, "watching")
             return True
 
         except Exception as e:
+            self._watch_build_reason = failure_reason(e)
+            self._note_watch_failure(path, self._watch_build_reason)
+            if not getattr(self, "_watch_building", False):
+                self.progress.block("watch_setup", self._watch_build_reason)
             self.log(f"[WATCH] Failed for {repr(path)}: {e}")
             return False
 
@@ -984,6 +1071,7 @@ class Agent(BootAgent):
             #threading.Thread(target=self._watch_loop, daemon=True).start()
 
         self._emit_beacon()
+        self.progress.flush()
         interruptible_sleep(self, self._interval)
 
 

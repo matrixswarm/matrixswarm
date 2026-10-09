@@ -33,11 +33,26 @@ from matrix_gui.modules.vault.terminal_access_policy import (
 class TerminalAccessControls(QGroupBox):
     """Author policy only; this widget never starts or approves a connection."""
 
-    def __init__(self, parent=None, *, vault_authority=None, terminal_mode=False):
-        super().__init__("Terminal access", parent)
+    _AI_UNAVAILABLE_OPERATIONS = {
+        "alerts.read": (
+            "Pending",
+            "Live alert subscriptions have no approved adapter yet. Alert permission "
+            "cannot be selected or saved in this pilot. Logs / inspect can still "
+            "report findings from recent logs.",
+        ),
+        "railgun.launch": (
+            "Blocked",
+            "Railgun launch has no approved AI adapter in this pilot. Launch "
+            "permission cannot be selected or saved.",
+        ),
+    }
+
+    def __init__(self, parent=None, *, vault_authority=None, terminal_mode=False, access_mode=False):
+        super().__init__("AI access" if access_mode else "Terminal access", parent)
         self.setObjectName("TerminalAccessControls")
         self._vault_authority = vault_authority
         self._terminal_mode = terminal_mode is True
+        self._access_mode = access_mode is True
         self._loading = False
 
         layout = QVBoxLayout(self)
@@ -82,26 +97,35 @@ class TerminalAccessControls(QGroupBox):
 
         self.swarms_checkbox = QCheckBox("Prepare read-only Swarms inventory on saved servers")
         self.railgun_checkbox = QCheckBox("Prepare Railgun launch of saved deployments (never replace active swarms)")
+        self.agents_checkbox = QCheckBox("Prepare read-only agent process and heartbeat inventory")
+        self.logs_checkbox = QCheckBox("Prepare read-only recent agent logs (swarm inspection also requires agent inventory above)")
+        self.sessions_checkbox = QCheckBox("Prepare listing of Phoenix cockpit session tabs")
+        self.connect_checkbox = QCheckBox("Prepare opening a Phoenix cockpit session (Connect; does not start a swarm)")
         self.operation_checkboxes = {
             "alerts.read": self.alerts_checkbox,
             "swarms.list": self.swarms_checkbox,
+            "agents.list": self.agents_checkbox,
+            "logs.read": self.logs_checkbox,
+            "sessions.list": self.sessions_checkbox,
+            "sessions.open": self.connect_checkbox,
             "railgun.launch": self.railgun_checkbox,
         }
         for operation, checkbox in tuple(self.operation_checkboxes.items())[1:]:
             checkbox.setObjectName("Terminal" + operation.replace(".", "_") + "Enabled")
-            checkbox.setToolTip("Fixed saved Registry SSH target only; no alternate server, shell, kill, or restart authority.")
+            checkbox.setToolTip("Exact saved deployment only. Logs may contain sensitive application text; review before sharing with a model. No arbitrary shell, edit, kill, or restart authority.")
             checkbox.toggled.connect(self._sync_enabled_state)
             layout.addWidget(checkbox)
 
         self.deployment_scope = QTreeWidget()
         self.deployment_scope.setObjectName("TerminalAlertDeploymentScope")
-        self.deployment_scope.setHeaderLabels(("Prepared deployment", "Alert reads", "Swarms inventory", "Railgun launch", "Fixed destination"))
+        self._destination_column = len(self.operation_checkboxes) + 1
+        self.deployment_scope.setHeaderLabels(("Prepared deployment", "Alert reads", "Swarms inventory", "Agents", "Logs / inspect", "Session list", "Connect", "Railgun launch", "Fixed destination"))
         header = self.deployment_scope.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in (1, 2, 3):
+        for column in range(1, self._destination_column):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(self._destination_column, QHeaderView.ResizeMode.Stretch)
         self.deployment_scope.setStyleSheet(
             "QHeaderView { border: none; margin: 0; padding: 0; }"
             "QHeaderView::section { background: #1b1b1d; color: #ddd; "
@@ -125,6 +149,20 @@ class TerminalAccessControls(QGroupBox):
         layout.addLayout(row)
 
         self.refresh_from_vault()
+        if self._access_mode:
+            explanation.setText("Choose what an AI connection may request. Live diagnostic reads require Connect for the same deployment. Saving revokes current approvals; open AI access separately and approve the requesting client in Phoenix.")
+            self.enabled_checkbox.setText("Allow AI access requests for this Vault")
+            self.connect_checkbox.setText("Prepare opening a live read-only Phoenix AI session (does not boot a swarm)")
+            self.swarms_checkbox.setText("Prepare read-only inventory of the connected live swarm")
+            self.agents_checkbox.setText("Prepare live agent tree, process/thread/spawn and work observations")
+            self.logs_checkbox.setText("Prepare current-boot recent logs (inspection also requires agent inventory)")
+            self.sessions_checkbox.setText("Prepare listing the client's AI inspection tabs")
+            self.alerts_checkbox.setText("Live alert subscription — adapter pending")
+            self.railgun_checkbox.setText("Railgun launch — blocked in this AI Mode pilot")
+            for operation, (_, tooltip) in self._AI_UNAVAILABLE_OPERATIONS.items():
+                self.operation_checkboxes[operation].setToolTip(tooltip)
+            self.save_button.setText("Save AI access policy")
+            self._sync_enabled_state()
 
     def _authority(self):
         return self._vault_authority or VaultCoreSingleton.get()
@@ -139,7 +177,8 @@ class TerminalAccessControls(QGroupBox):
             self.setEnabled(True)
             ids = deployment_ids(vault)
             try:
-                policy = validate_policy(vault.get(SECTION_KEY), ids)
+                raw_policy = self._authority().access_control.policy() if self._access_mode else vault.get(SECTION_KEY)
+                policy = validate_policy(raw_policy, ids)
                 warning = ""
             except TerminalAccessPolicyError as exc:
                 policy = default_policy()
@@ -156,15 +195,14 @@ class TerminalAccessControls(QGroupBox):
                 label = meta.get("label") if isinstance(meta.get("label"), str) else deployment_id
                 target = meta.get("railgun_target_identity") or {}
                 destination = f"{target.get('host', '?')}:{target.get('port', '?')} · {meta.get('universe', '?')}"
-                item = QTreeWidgetItem((f"{label} [{deployment_id}]", "", "", "", destination))
+                item = QTreeWidgetItem((f"{label} [{deployment_id}]", *("" for _ in self.operation_checkboxes), destination))
                 item.setToolTip(0, f"{label} [{deployment_id}]")
-                item.setToolTip(4, destination)
+                item.setToolTip(self._destination_column, destination)
                 item.setData(0, Qt.ItemDataRole.UserRole, deployment_id)
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                for column, operation in enumerate(self.operation_checkboxes, 1):
-                    item.setCheckState(column, Qt.CheckState.Checked
-                        if deployment_id in policy.permissions[operation].deployment_ids
-                        else Qt.CheckState.Unchecked)
+                for operation in self.operation_checkboxes:
+                    self.set_deployment_selection(item, operation,
+                        deployment_id in policy.permissions[operation].deployment_ids)
                 self.deployment_scope.addTopLevelItem(item)
             self._loading = False
             self._sync_enabled_state()
@@ -176,7 +214,26 @@ class TerminalAccessControls(QGroupBox):
         finally:
             self._loading = False
 
+    def supports_operation(self, operation):
+        return not self._access_mode or operation not in self._AI_UNAVAILABLE_OPERATIONS
+
+    def set_deployment_selection(self, item, operation, selected):
+        """Unavailable columns show status rather than a selectable checkbox."""
+        column = tuple(self.operation_checkboxes).index(operation) + 1
+        if not self.supports_operation(operation):
+            label, tooltip = self._AI_UNAVAILABLE_OPERATIONS[operation]
+            item.setData(column, Qt.ItemDataRole.CheckStateRole, None)
+            item.setText(column, label)
+            item.setToolTip(column, tooltip)
+            return
+        item.setText(column, "")
+        item.setCheckState(column,
+            Qt.CheckState.Checked if selected else Qt.CheckState.Unchecked)
+
     def _selected_deployment_ids(self, column=1) -> list[str]:
+        operation = tuple(self.operation_checkboxes)[column - 1]
+        if not self.supports_operation(operation):
+            return []
         return [
             self.deployment_scope.topLevelItem(index).data(
                 0, Qt.ItemDataRole.UserRole
@@ -191,11 +248,16 @@ class TerminalAccessControls(QGroupBox):
         self.lifetime_seconds.setEnabled(enabled)
         for checkbox in self.operation_checkboxes.values():
             checkbox.setEnabled(enabled)
+        if self._access_mode:
+            for checkbox in (self.alerts_checkbox, self.railgun_checkbox):
+                checkbox.setChecked(False)
+                checkbox.setEnabled(False)
         self.deployment_scope.setEnabled(enabled and any(c.isChecked() for c in self.operation_checkboxes.values()))
         if self._loading:
             return
         if not enabled:
-            self.summary.setText("Terminal access is off; saving grants nothing.")
+            self.summary.setText("AI access is off; saving grants nothing." if self._access_mode
+                                 else "Terminal access is off; saving grants nothing.")
         elif not any(c.isChecked() for c in self.operation_checkboxes.values()):
             self.summary.setText("Approval may be requested, but no operation is permitted.")
         else:
@@ -205,7 +267,20 @@ class TerminalAccessControls(QGroupBox):
             self.summary.setText(
                 f"Prepared deployment scopes — {scopes}; "
                 f"approval expires within {self.lifetime_seconds.value()} seconds."
+                + self._inspection_summary()
             )
+
+    def _inspection_summary(self):
+        if not self.enabled_checkbox.isChecked() or not self.logs_checkbox.isChecked():
+            return ""
+        columns = {operation: column for column, operation in enumerate(self.operation_checkboxes, 1)}
+        logs = set(self._selected_deployment_ids(columns["logs.read"]))
+        agents = set(self._selected_deployment_ids(columns["agents.list"])) if self.agents_checkbox.isChecked() else set()
+        missing = logs - agents
+        if missing:
+            return (f" Swarm inspection is unavailable for {len(missing)} log-enabled deployment(s): "
+                    "enable agent inventory above and select the same deployment in Agents.")
+        return f" Swarm inspection prepared for {len(logs & agents)} deployment(s)."
 
     def save_policy(self):
         try:
@@ -215,7 +290,9 @@ class TerminalAccessControls(QGroupBox):
                 selected = self._selected_deployment_ids(column)
                 if self.enabled_checkbox.isChecked() and checkbox.isChecked() and not selected:
                     raise TerminalAccessPolicyError(f"Select at least one prepared deployment for {operation}")
-                permissions[operation] = {"enabled": checkbox.isChecked(), "deployment_ids": selected}
+                supported = self.supports_operation(operation)
+                permissions[operation] = {"enabled": checkbox.isChecked() and supported,
+                                          "deployment_ids": selected if supported else []}
             record = {
                 "schema_version": 1,
                 "enabled": self.enabled_checkbox.isChecked(),
@@ -223,13 +300,20 @@ class TerminalAccessControls(QGroupBox):
                 "permissions": permissions,
             }
             policy = validate_policy(record, ids)
-            if not self._authority().patch(SECTION_KEY, policy.to_record()):
+            if self._access_mode:
+                self._authority().access_control.set_policy(enabled=policy.enabled,
+                    approval_lifetime_seconds=policy.approval_lifetime_seconds,
+                    permissions=policy.to_record()["permissions"])
+            elif not self._authority().patch(SECTION_KEY, policy.to_record()):
                 raise RuntimeError("Vault writer rejected the update")
             self.summary.setText(
-                "Terminal access policy saved. No listener or client access was started."
+                ("AI policy saved; previous approvals revoked. Open AI access to accept new requests."
+                 if self._access_mode else "Terminal access policy saved. No listener or client access was started.")
+                + self._inspection_summary()
             )
-        except (RuntimeError, TerminalAccessPolicyError) as exc:
-            self.summary.setText(f"Terminal access policy was not saved: {exc}")
+        except (RuntimeError, ValueError, PermissionError) as exc:
+            name = "AI" if self._access_mode else "Terminal"
+            self.summary.setText(f"{name} access policy was not saved: {exc}")
 
 
 class TerminalAccessPanel(QWidget):

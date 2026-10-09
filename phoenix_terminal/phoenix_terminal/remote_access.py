@@ -27,6 +27,9 @@ def public_inventory_page(deployment_id, value):
     rows = value.get("universes")
     if not isinstance(rows, list) or len(rows) > 1024:
         raise ValueError("Invalid universe inventory")
+    metrics = value.get("resource_metrics_available", True)
+    if type(metrics) is not bool:
+        raise ValueError("Invalid metric coverage")
     projected, seen = [], set()
     for row in rows:
         if not isinstance(row, dict):
@@ -34,14 +37,17 @@ def public_inventory_page(deployment_id, value):
         name, count, rss, cpu = (row.get(k) for k in ("universe", "agent_count", "rss_bytes", "cpu_percent"))
         if (not isinstance(name, str) or not _UNIVERSE.fullmatch(name) or name in seen
             or row.get("status") != "active" or type(count) is not int or not 0 <= count <= 100000
-            or type(rss) is not int or not 0 <= rss <= 2**63 - 1
-            or type(cpu) not in (int, float) or not math.isfinite(cpu) or not 0 <= cpu <= 10**7):
+            or (metrics and (type(rss) is not int or not 0 <= rss <= 2**63 - 1
+                or type(cpu) not in (int, float) or not math.isfinite(cpu) or not 0 <= cpu <= 10**7))
+            or (not metrics and (rss is not None or cpu is not None))):
             raise ValueError("Invalid universe inventory row")
         seen.add(name)
         projected.append({"universe": name, "status": "active", "agent_count": count,
-                          "rss_bytes": rss, "cpu_percent": float(cpu)})
-    return {"deployment_id": deployment_id, "universes": projected,
-            "live_snapshot": True, "replacement_allowed": False}
+                          "rss_bytes": rss, "cpu_percent": float(cpu) if metrics else None})
+    from .swarm_inspection import session_evidence_context
+    return session_evidence_context(value, {"deployment_id": deployment_id, "universes": projected,
+            "resource_metrics_available": metrics,
+            "live_snapshot": True, "replacement_allowed": False})
 
 
 def public_launch_status(deployment_id, operation_id, value):
@@ -71,9 +77,11 @@ class FixedTarget:
     envelope: bytes | None = field(default=None, repr=False)
     connector: object = field(default=None, repr=False, compare=False)
     command_builder: object = field(default=None, repr=False, compare=False)
+    agent_inventory_json: str = field(default="[]", repr=False)
+    log_key: bytes | None = field(default=None, repr=False)
 
 
-def target_from_vault(data, deployment_id, revision, *, launch=False):
+def target_from_vault(data, deployment_id, revision, *, launch=False, diagnostics=False, logs=False):
     """Called during private decryption, never via a client API; no network."""
     from matrix_gui.modules.railgun.ssh_support import normalize_fingerprint, connect_ssh_profile
     from matrix_gui.modules.railgun.remote_shell import build_remote_matrixd_command, encode_boot_envelope
@@ -142,10 +150,27 @@ def target_from_vault(data, deployment_id, revision, *, launch=False):
                 separators=(",", ":")).encode()).hexdigest()
             if stored_hash != actual_hash:
                 raise ValueError("Saved sealed directive hash did not match")
+    agents, log_key = [], None
+    if diagnostics or logs:
+        from .vault_console import public_inventory
+        agents = list(public_inventory(data)[deployment_id]["agents"].values())
+        from .swarm_inspection import agent_identifier
+        if len(agents) > 256:
+            raise ValueError("Terminal diagnostics supports at most 256 prepared agents")
+        for agent in agents:
+            agent_identifier(agent["universal_id"])
+    if logs:
+        try:
+            log_key = base64.b64decode(deployment.get("swarm_key", ""), validate=True)
+        except (ValueError, TypeError):
+            raise ValueError("Saved log decryption key is invalid") from None
+        if len(log_key) not in (16, 24, 32):
+            raise ValueError("Saved log decryption key is invalid")
     return FixedTarget(deployment_id, universe, f"{user}@{host}:{port} · {universe} · {pin}",
                        revision, json.dumps(profile, sort_keys=True),
                        json.dumps(options, sort_keys=True) if options else None, envelope,
-                       connect_ssh_profile, build_remote_matrixd_command)
+                       connect_ssh_profile, build_remote_matrixd_command,
+                       json.dumps(agents), log_key)
 
 
 def _exchange(client, command, check, *, payload=None, on_dispatch=None, timeout=45):
@@ -190,7 +215,9 @@ def _exchange(client, command, check, *, payload=None, on_dispatch=None, timeout
                 if type(code) is not int or not 0 <= code <= 255:
                     raise ConnectionError("SSH exit status missing")
                 return code, bytes(output), bytes(errors)
-            if channel.closed:
+            # Paramiko may mark the channel closed with unread output still in
+            # its buffers. Drain both streams before judging the exit receipt.
+            if channel.closed and not channel.recv_ready() and not channel.recv_stderr_ready():
                 raise ConnectionError("SSH channel closed without a receipt")
             time.sleep(0.02)
     finally:
@@ -230,6 +257,55 @@ class RemoteOperations:
             if client is not None:
                 client.close()
             self._connections.release()
+
+    def _diagnostic(self, deployment_id, method, lease, agent_id=None):
+        from .swarm_inspection import diagnostic_command, inventory_page, log_page, inspection_page, DiagnosticReadError
+        target = self._targets[deployment_id]
+        expected = json.loads(target.agent_inventory_json)
+        command = diagnostic_command(target.universe, method, agent_id, expected)
+        self._check(lease)
+        if not self._connections.acquire(blocking=False):
+            raise RuntimeError("Remote operation concurrency limit reached")
+        client = None
+        stage = "SSH connection"
+        try:
+            client, _ = target.connector(json.loads(target.profile_json), timeout=10)
+            stage = "remote diagnostic command"
+            code, output, error = _exchange(client, command, lambda: self._check(lease))
+            if code != 0 or error.strip():
+                raise DiagnosticReadError("Diagnostic read failed. The operator must check the saved SSH account's authorization and update MatrixOS with the matrixd agents/logs/inspect commands. No server output is exposed.")
+            stage = "diagnostic response decoding"
+            document = json.loads(output)
+            self._check(lease)
+            stage = "local evidence processing"
+            if method == "agents":
+                return inventory_page(deployment_id, target.universe, expected, document)
+            if method == "logs":
+                return log_page(deployment_id, target, agent_id, document)
+            return inspection_page(deployment_id, target, expected, document)
+        except (PermissionError, DiagnosticReadError):
+            raise
+        except Exception as exc:
+            # Never expose exception messages, SSH stderr, keys, or log content.
+            kind = ("missing dependency" if isinstance(exc, ImportError) else
+                    "timeout" if isinstance(exc, TimeoutError) else
+                    "invalid response" if isinstance(exc, (ValueError, TypeError, KeyError)) else
+                    "internal error")
+            raise DiagnosticReadError(f"Diagnostic read failed during {stage}: {kind}. "
+                                      "The audit is incomplete; no agent health conclusion is available.") from None
+        finally:
+            if client is not None:
+                client.close()
+            self._connections.release()
+
+    def agents(self, deployment_id, lease):
+        return self._diagnostic(deployment_id, "agents", lease)
+
+    def logs(self, deployment_id, agent_id, lease):
+        return self._diagnostic(deployment_id, "logs", lease, agent_id)
+
+    def inspect(self, deployment_id, lease):
+        return self._diagnostic(deployment_id, "inspect", lease)
 
     def launch(self, deployment_id, operation_id, owner, lease):
         self._check(lease)

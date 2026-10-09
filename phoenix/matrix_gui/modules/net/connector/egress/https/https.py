@@ -1,5 +1,5 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-import os, ssl, socket, http.client, json, time, uuid
+import os, ssl, socket, http.client, json, time, uuid, re
 from Crypto.PublicKey import RSA
 from matrix_gui.core.utils.spki_utils import verify_spki_pin
 from matrix_gui.core.utils.crypto_utils import sign_data
@@ -9,6 +9,10 @@ from matrix_gui.core.utils.cert_loader import load_cert_chain_from_memory
 from matrix_gui.core.connector_bus import ConnectorBus
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.modules.net.connector.interfaces.base_connector import BaseConnector
+
+
+class HTTPSTrustError(ConnectionError):
+    """A terminal peer-identity failure, distinct from a temporary outage."""
 
 
 class HTTPSConnector(BaseConnector):
@@ -70,8 +74,8 @@ class HTTPSConnector(BaseConnector):
                 print("[HTTPSConnector] ❌ No packet provided in shared context.")
                 return
 
-            self.send(packet)
-            print("[HTTPSConnector] Mission complete.")
+            if self.send(packet):
+                print("[HTTPSConnector] Mission complete.")
 
         except Exception as e:
             print(f"[HTTPSConnector][ERROR] {e}")
@@ -83,6 +87,16 @@ class HTTPSConnector(BaseConnector):
     # ------------------------------------------------------------------
     # TRANSMISSION ROUTINE
     # ------------------------------------------------------------------
+    def _delivery_receipt(self, state, http_status=None, error_code=None):
+        """Local metadata only; never emit packets, response text or credentials."""
+        delivery_id = self._shared.get("delivery_id")
+        if not isinstance(delivery_id, str) or not re.fullmatch(r"[a-f0-9]{32}", delivery_id):
+            return
+        ConnectorBus.get(self.session_id).emit("channel.delivery",
+            session_id=self.session_id, channel=self.agent.get("universal_id"),
+            delivery_id=delivery_id, state=state, http_status=http_status,
+            error_code=error_code)
+
     def send(self, packet: Packet, timeout=10):
         """
         Sign, secure, and POST a Matrix packet over HTTPS.
@@ -104,7 +118,8 @@ class HTTPSConnector(BaseConnector):
         ctx = get_sessions().get(self.session_id)
         if not ctx:
             print(f"[HTTPSConnector] ❌ No session context for {self.session_id}")
-            return
+            self._delivery_receipt("failed", error_code="EGRESS_SESSION_ENDED")
+            return False
 
         # Emit start of transmission
         if hasattr(ctx, "bus"):
@@ -113,15 +128,13 @@ class HTTPSConnector(BaseConnector):
         uid = self.agent.get("universal_id")
         https_conn = tls_sock = raw_sock = None
         cert_path = key_path = None
+        http_status = None
         try:
             inner = {
                 "matrix_packet": packet.get_packet(),
                 "ts": int(time.time()),
                 "session_id": self.session_id,
             }
-
-            #flash connecting on session_window footer
-            self._emit_status("connected")
 
             signing = self.deployment["certs"][uid]["signing"]
             priv_key = RSA.import_key(signing["remote_privkey"].encode())
@@ -161,13 +174,13 @@ class HTTPSConnector(BaseConnector):
             # Verify the peer before transmitting any application data.
             peer_cert = tls_sock.getpeercert(binary_form=True)
             if not peer_cert:
-                raise ConnectionError("HTTPS peer did not present a certificate")
+                raise HTTPSTrustError("HTTPS peer did not present a certificate")
             ok, actual_pin = verify_spki_pin(
                 peer_cert,
                 cert_adapter.server_spki_pin,
             )
             if not ok:
-                raise ConnectionError(
+                raise HTTPSTrustError(
                     "HTTPS SPKI mismatch: "
                     f"expected {cert_adapter.server_spki_pin}, got {actual_pin}"
                 )
@@ -179,10 +192,34 @@ class HTTPSConnector(BaseConnector):
                 "POST", "/matrix", body, headers={"Content-Type": "application/json"}
             )
             resp = https_conn.getresponse()
-            print(f"[HTTPSConnector] 🌐 Sent → HTTPS {resp.status}")
+            http_status = resp.status
+            print(f"[HTTPSConnector] 🌐 Sent → HTTPS {http_status}")
+            if http_status != 200:
+                code = ("EGRESS_DENIED" if http_status in {401, 403} else
+                        "EGRESS_TEMPORARY" if http_status in {408, 429} or 500 <= http_status <= 599
+                        else "EGRESS_REJECTED")
+                self._delivery_receipt("failed", http_status, code)
+                return False
+            raw_ack = resp.read(4097)
+            try:
+                ack = json.loads(raw_ack) if len(raw_ack) <= 4096 else None
+            except (ValueError, UnicodeError):
+                ack = None
+            if not isinstance(ack, dict) or ack.get("status") != "ok":
+                self._delivery_receipt("failed", http_status, "EGRESS_INVALID_ACK")
+                return False
+            self._emit_status("connected")
+            self._delivery_receipt("accepted", http_status)
+            return True
 
         except Exception as e:
+            code = ("EGRESS_TRUST_FAILED" if isinstance(e, (HTTPSTrustError, ssl.SSLError)) else
+                    "EGRESS_TIMEOUT" if isinstance(e, (socket.timeout, TimeoutError)) else
+                    "EGRESS_UNAVAILABLE" if isinstance(e, (OSError, http.client.HTTPException)) else
+                    "EGRESS_CONFIGURATION_INVALID")
+            self._delivery_receipt("failed", http_status, code)
             print(f"[HTTPSConnector] ❌ Send error: {e}")
+            return False
 
         finally:
             for resource in (https_conn, tls_sock, raw_sock):

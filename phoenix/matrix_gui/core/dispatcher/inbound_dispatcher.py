@@ -191,6 +191,10 @@ class InboundDispatcher:
             "timestamp": packet_timestamp,
             "ts": packet_timestamp,
         }
+        # Only an authenticated inner directive may attach a runtime binding.
+        runtime_id = directive.get("runtime_id")
+        if isinstance(runtime_id, str) and 0 < len(runtime_id) <= 32 and all(c in "0123456789_" for c in runtime_id):
+            verified_payload["runtime_id"] = runtime_id
         self.bus.emit(
             f"inbound.verified.{handler}",
             session_id=session_id,

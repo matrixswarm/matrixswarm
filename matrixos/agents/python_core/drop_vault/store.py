@@ -30,6 +30,9 @@ _SHA = re.compile(r"^[a-f0-9]{64}$")
 
 class DropError(ValueError):
     """Public, deliberately content-free protocol error."""
+    def __init__(self, message, *, reason=None):
+        super().__init__(message)
+        self.reason = reason
 
 
 def integer(value, low, high):
@@ -58,6 +61,7 @@ class DropStore:
         self.uploads = {}
         self.cache = OrderedDict()
         self.cleanup_error = None
+        self.cleanup_errno = None
         self._closed = False
         # A shared persistent_state profile must not produce competing writers.
         self._lease = open(persistence._encrypted_state_root / ".writer.lock", "a+b")
@@ -76,7 +80,7 @@ class DropStore:
                 fcntl.flock(self._lease.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except Exception:
             self._lease.close()
-            raise DropError("Storage is already in use or its writer lock is unavailable") from None
+            raise DropError("Storage is already in use or its writer lock is unavailable", reason="IO_FAILURE") from None
         try:
             self.db = sqlite3.connect(":memory:", check_same_thread=False)
             self.db.row_factory = sqlite3.Row
@@ -95,10 +99,10 @@ class DropStore:
                 self._save_catalog()
             else:
                 if not isinstance(saved, dict) or saved.get("format") != "sqlite-sql-v1":
-                    raise DropError("Unsupported encrypted catalogue format; storage was not reset")
+                    raise DropError("Unsupported encrypted catalogue format; storage was not reset", reason="INVALID_CONFIGURATION")
                 self.db.executescript(saved["sql"])
                 if self.db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                    raise DropError("Encrypted catalogue integrity check failed")
+                    raise DropError("Encrypted catalogue integrity check failed", reason="IO_FAILURE")
                 self.db.execute("SELECT revision FROM state").fetchone()[0]
                 self.db.execute("SELECT id, created, kind, title, filename, notes, size, sha256, owner FROM objects LIMIT 1")
         except Exception:
@@ -111,7 +115,7 @@ class DropStore:
 
     def _guard(self):
         if self._closed:
-            raise DropError("Storage is closed")
+            raise DropError("Storage is closed", reason="IO_FAILURE")
 
     def _row(self, object_id):
         return self.db.execute("SELECT * FROM objects WHERE id=?", (identifier(object_id),)).fetchone()
@@ -180,9 +184,9 @@ class DropStore:
                 return {"object_id": object_id, "offset": len(current["data"]), "committed": False}
             count, stored = self.db.execute("SELECT COUNT(*), COALESCE(SUM(size),0) FROM objects").fetchone()
             if count + len(self.uploads) >= MAX_ITEMS or len(self.uploads) >= 4:
-                raise DropError("Inbox or concurrent upload limit reached")
+                raise DropError("Inbox or concurrent upload limit reached", reason="RESOURCE_LIMIT")
             if stored + sum(u["meta"]["size"] for u in self.uploads.values()) + size > MAX_TOTAL_BYTES:
-                raise DropError("Inbox storage quota reached")
+                raise DropError("Inbox storage quota reached", reason="RESOURCE_LIMIT")
             self.uploads[object_id] = {"meta": meta, "data": bytearray(), "expires": time.monotonic() + UPLOAD_TTL}
             return {"object_id": object_id, "offset": 0, "committed": False}
 
@@ -266,7 +270,7 @@ class DropStore:
                 saved = self.persistence.load_encrypted_state(object_id, directory="objects")
                 data = base64.b64decode(saved["data"], validate=True)
                 if len(data) != row["size"] or hashlib.sha256(data).hexdigest() != row["sha256"]:
-                    raise DropError("Stored object failed integrity verification")
+                    raise DropError("Stored object failed integrity verification", reason="IO_FAILURE")
             self.cache[object_id] = (time.monotonic() + 60, data)
             self.cache.move_to_end(object_id)
             while len(self.cache) > 2:
@@ -305,6 +309,7 @@ class DropStore:
         with self.lock:
             self._guard()
             self.cleanup_error = None
+            self.cleanup_errno = None
             rows = self.db.execute("SELECT id FROM garbage LIMIT 10").fetchall()
             for row in rows:
                 try:
@@ -315,6 +320,7 @@ class DropStore:
                 except Exception as exc:
                     self.db.rollback()
                     self.cleanup_error = type(exc).__name__
+                    self.cleanup_errno = getattr(exc, "errno", None)
                     # Keep the encrypted deletion receipt for a later retry.
                     return
 

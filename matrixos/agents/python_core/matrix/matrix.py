@@ -1307,12 +1307,26 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
             service_role = content.get("service")
             payload = content.get("payload", {})
+            diagnostic_request = (service_role == "hive.log_streamer"
+                                  and isinstance(payload, dict) and "operation" in payload)
+            if diagnostic_request:
+                fields = {"target_universal_id", "session_id", "token", "request_id", "operation", "runtime_id"}
+                if (set(payload) not in (fields, fields | {"agent_id"})
+                        or not isinstance(payload.get("operation"), str)
+                        or payload.get("operation") not in {"bind", "agents", "logs", "inspect"}):
+                    return
+                from core.python_core.live_diagnostics import tree_snapshot
+                master = self.get_agent_tree_master()
+                payload = dict(payload)
+                # The spawner supplies /comm/; Path discards the trailing slash.
+                payload["diagnostic_tree"] = tree_snapshot(getattr(master, "root", None),
+                    Path(self.path_resolution["comm_path"]).parent.name)
 
             # Private panel configuration should not enter Matrix's ordinary
             # service-request log or fan out to unrelated agent instances.
             private_targeted_request = isinstance(service_role, str) and service_role.startswith(
                 ("hive.crypto_alert.", "hive.rsync_boy.", "hive.drop_vault.", "hive.log_health.")
-            )
+            ) or diagnostic_request
             if private_targeted_request:
                 self.log("[SERVICE-REQ] Targeted panel request (payload withheld).")
             else:
@@ -1500,6 +1514,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                         data = {
                             "handler": "agent_tree_master.update",
                             "session_id": sess,
+                            "runtime_id": Path(self.path_resolution["comm_path"]).parent.name,
                             "content": outbound_tree,
                         }
 

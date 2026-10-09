@@ -38,7 +38,7 @@ def _transport_policy(proto, connection):
     persistent = proto in PERSISTENT_PROTOS
     return persistent, proto in EPHEMERAL_PROTOS
 
-def _connect_single(deployment, session_id, dep_id):
+def _connect_single(deployment, session_id, dep_id, *, managed_startup=False):
     """
     Create a SessionContext and register + launch connector threads for a deployment.
 
@@ -72,6 +72,7 @@ def _connect_single(deployment, session_id, dep_id):
         ctx = sessions.create(group)
         ctx.channels = {}   # channel_uid -> agent dict (metadata)
         ctx.status = {}     # channel_uid -> status string (optional)
+        ctx.failures = {}   # Fixed transport codes observed during startup.
 
         ctx.bus = SessionBus(session_id)
         ctx._bus_refs = []  # track bus bindings for cleanup
@@ -80,14 +81,28 @@ def _connect_single(deployment, session_id, dep_id):
             ctx.bus.emit("inbound.message", **kw)
 
         def status_proxy(**kw):
+            # Retain status even if a parent-owned listener subscribes just
+            # after connector startup; this is observation, not authorization.
+            ctx.status[kw.get("channel")] = kw.get("status")
             ctx.bus.emit("channel.status", **kw)
+
+        def delivery_proxy(**kw):
+            ctx.bus.emit("channel.delivery", **kw)
+
+        def failure_proxy(**kw):
+            ctx.failures[kw.get("channel")] = kw.get("error_code")
+            ctx.bus.emit("channel.failure", **kw)
 
         ConnectorBus.get(session_id).on("inbound.raw", inbound_proxy)
         ConnectorBus.get(session_id).on("channel.status", status_proxy)
+        ConnectorBus.get(session_id).on("channel.delivery", delivery_proxy)
+        ConnectorBus.get(session_id).on("channel.failure", failure_proxy)
 
         ctx._bus_refs.extend([
             ("inbound.raw", inbound_proxy),
             ("channel.status", status_proxy),
+            ("channel.delivery", delivery_proxy),
+            ("channel.failure", failure_proxy),
         ])
 
         print(f"[BRIDGE] ConnectorBus wired into SessionBus for {session_id}")
@@ -170,8 +185,8 @@ def _connect_single(deployment, session_id, dep_id):
             }
 
             # --- policy: monitor/autostart/packet gating ---
-            monitor = should_monitor  # only loop connectors we want alive
-            auto_start = (is_ingress and is_primary_ingress and monitor) or (is_egress and monitor)
+            monitor = should_monitor and not managed_startup
+            auto_start = not managed_startup and ((is_ingress and is_primary_ingress and monitor) or (is_egress and monitor))
 
             policy = ConnectorPolicy(
                 auto_start=auto_start,
@@ -201,7 +216,8 @@ def _connect_single(deployment, session_id, dep_id):
             launcher.launch(uid)
 
         # Start watchdog after registration/initial launches are complete
-        launcher.start_monitor()
+        if not managed_startup:
+            launcher.start_monitor()
         return ctx
 
     except Exception as e:

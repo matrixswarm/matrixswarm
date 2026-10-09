@@ -32,6 +32,8 @@ class VaultService:
         password: str,
         path: str,
         auth_method: str = "password",
+        *,
+        ai_mode: bool = False,
     ):
         """Initialize the cockpit vault and publish session authentication metadata."""
         auth_method = (
@@ -42,7 +44,8 @@ class VaultService:
         VaultCoreSingleton.initialize(
             vault_data=vault_data,
             password=password,
-            vault_path=path
+            vault_path=path,
+            ai_mode=ai_mode,
         )
 
         EventBus.emit(
@@ -51,6 +54,7 @@ class VaultService:
             password=password,
             vault_data=vault_data,
             auth_method=auth_method,
+            ai_mode=ai_mode,
         )
 
     @staticmethod

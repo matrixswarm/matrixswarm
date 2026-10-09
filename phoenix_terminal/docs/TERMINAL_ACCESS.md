@@ -3,11 +3,13 @@
 ## Agreed product contract and implementation boundary
 
 The authoring policy, independent connection lifecycle, scoped live alerts,
-fixed-server Swarms inventory, and guarded Railgun launch adapters are implemented:
+fixed-server Swarms/agent inventory, bounded recent logs, swarm inspection,
+cockpit session listing/Connect, and guarded Railgun launch adapters are implemented:
 
 - In Phoenix’s separate Terminal Mode window, the operator can save an exact, per-deployment
-  `alerts.read`, `swarms.list`, and `railgun.launch` policy and an approval lifetime.
-  The three whitelists are independent; old policies leave new operations off.
+  `alerts.read`, `swarms.list`, `agents.list`, `logs.read`, `sessions.list`,
+  `sessions.open`, and `railgun.launch` policy and an approval lifetime.
+  The whitelists are independent; old policies leave new operations off.
   Saving does not start a
   listener, expose inventory, or approve a client.
 - The policy validator rejects unknown fields and operations, foreign or
@@ -57,7 +59,10 @@ server. Credentials stay within the trusted operator runtime; temporary TLS
 identity files are removed after SSL context loading. No credentials are
 returned through the client API.
 
-Logs, health queries, panel actions and restarts are still future adapters.
+Functional health probes, panel actions and restarts are still future adapters.
+Bounded log sampling and process/heartbeat observations are implemented; they
+do not exercise every function or certify a release. The diagnostic commands
+require the updated MatrixOS script/module on the fixed saved server.
 The legacy read-only inventory console is a separate compatibility
 endpoint. The sections below remain the controlling contract for those future
 adapters, not a claim that they are already available.
@@ -131,7 +136,11 @@ and per-agent restrictions can narrow vault-wide settings, never widen them.
 
 The operator confirmed that **Allow connection? belongs to Phoenix Terminal**,
 not Phoenix GUI. It is an independent Terminal-owned approval dialog; Phoenix
-GUI stays a vault authoring application and does not regain its retired bridge.
+GUI uses only an opt-in Connect/session endpoint, never the retired generic
+action bridge. It independently checks the Terminal grant, current unlocked
+Vault policy and exact Vault revision on its Qt thread. A session open reuses an
+existing tab, never starts or restarts a server swarm. Closing/expiry revokes tool
+access; already-opened tabs remain operator-owned.
 On a machine without a display, this desktop approval path must fail with a
 clear diagnostic rather than silently auto-approve. A future terminal-text
 approval presenter can implement the same contract without changing authority.

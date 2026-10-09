@@ -22,7 +22,7 @@ DEFAULT_APPROVAL_LIFETIME_SECONDS = 900
 
 # Only operations with a real, separately reviewed adapter belong here.  A
 # forged record cannot invent authority because unknown names fail validation.
-SUPPORTED_OPERATIONS = frozenset({"alerts.read", "swarms.list", "railgun.launch"})
+SUPPORTED_OPERATIONS = frozenset({"alerts.read", "swarms.list", "railgun.launch", "agents.list", "logs.read", "sessions.list", "sessions.open"})
 
 
 class TerminalAccessPolicyError(ValueError):

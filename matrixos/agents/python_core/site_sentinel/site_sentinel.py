@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import socket
 import ssl
+import stat
 import sys
 import time
 from collections import deque
@@ -20,6 +21,7 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 from core.python_core.boot_agent import BootAgent
+from core.python_core.agent_progress import AgentProgress, failure_reason, path_target
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from site_sentinel.analysis import classify_target, parse_access_line, summarize_traffic
@@ -99,6 +101,12 @@ class Agent(BootAgent):
         self._traffic_events: deque[dict] = deque()
         self._warned_missing_logs = False
         self._last_summary = 0.0
+        cadence = min(86400, self.interval)
+        cycle_timeout = min(3600, max(30, len(self.targets) * self.timeout * (self.max_assets + 3)))
+        self.progress = AgentProgress(self, {
+            "site_checks": (cadence if self.targets else None, cycle_timeout),
+            "traffic_read": (cadence if self.traffic_enabled else None, 60)},
+            publish_interval=min(3600, self.interval))
         self._emit_beacon = self.check_for_thread_poke(
             "worker", timeout=self.interval * 6, emit_to_file_interval=10
         )
@@ -113,7 +121,11 @@ class Agent(BootAgent):
             return
         try:
             self._emit_beacon()
-            observations = [self._check_target(target) for target in self.targets]
+            if self.targets:
+                with self.progress.attempt("site_checks"):
+                    observations = [self._check_target(target) for target in self.targets]
+            else:
+                observations = []
             traffic = self._collect_traffic()
             pressure = self._system_pressure(traffic)
 
@@ -147,6 +159,7 @@ class Agent(BootAgent):
                 )
         except Exception as exc:
             self.log("[SITE-SENTINEL] Monitoring cycle failed", error=exc, level="ERROR")
+        self.progress.flush()
         interruptible_sleep(self, self.interval)
 
     def _check_target(self, target: dict) -> dict:
@@ -265,35 +278,57 @@ class Agent(BootAgent):
     def _collect_traffic(self):
         if not self.traffic_enabled:
             return {"severity": "INFO", "reasons": [], "total_rpm": 0, "top_ips": []}
+        token = self.progress.begin("traffic_read")
+        targets, failures = [], []
+        try:
+            return self._read_traffic(targets, failures)
+        except Exception as exc:
+            failures.append(failure_reason(exc))
+            raise
+        finally:
+            self.progress.set_context("traffic_read", targets)
+            reason = failures[0] if failures else None if self.access_logs else "MISSING_CONFIGURATION"
+            self.progress.finish("traffic_read", token, reason)
+
+    def _read_traffic(self, targets, failures):
         now = time.time()
         found_log = False
-        for raw_path in self.access_logs:
+        for index, raw_path in enumerate(self.access_logs, 1):
             path = Path(raw_path)
             try:
-                stat = path.stat()
-            except OSError:
-                continue
-            found_log = True
-            inode = int(getattr(stat, "st_ino", 0))
-            prior = self._log_offsets.get(raw_path)
-            if prior is None:
-                self._log_offsets[raw_path] = (inode, stat.st_size)
-                continue
-            old_inode, offset = prior
-            if old_inode != inode or stat.st_size < offset:
-                offset = 0
-            try:
-                with path.open("r", encoding="utf-8", errors="replace") as stream:
-                    stream.seek(offset)
-                    for line in stream:
-                        parsed = parse_access_line(
-                            line, prefer_forwarded_ip=self.prefer_forwarded_ip
-                        )
-                        if parsed:
-                            parsed["ts"] = now
-                            self._traffic_events.append(parsed)
+                fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+                try:
+                    details = os.fstat(fd)
+                    if not stat.S_ISREG(details.st_mode):
+                        raise ValueError("Access log must be a regular file")
+                    stream = os.fdopen(fd, "r", encoding="utf-8", errors="replace")
+                except Exception:
+                    os.close(fd)
+                    raise
+                with stream:
+                    inode = int(details.st_ino)
+                    prior = self._log_offsets.get(raw_path)
+                    if prior is None:
+                        stream.seek(0, os.SEEK_END)  # Preserve first-read tail semantics.
+                    else:
+                        old_inode, offset = prior
+                        if old_inode != inode or details.st_size < offset:
+                            offset = 0
+                        stream.seek(offset)
+                        for line in stream:
+                            parsed = parse_access_line(line, prefer_forwarded_ip=self.prefer_forwarded_ip)
+                            if parsed:
+                                parsed["ts"] = now
+                                self._traffic_events.append(parsed)
                     self._log_offsets[raw_path] = (inode, stream.tell())
-            except OSError:
+                found_log = True
+                targets.append(path_target("access_log", index, raw_path, "readable"))
+            except (OSError, ValueError) as exc:
+                reason = "INVALID_CONFIGURATION" if isinstance(exc, ValueError) else failure_reason(exc)
+                failures.append(reason)
+                state = {"MISSING_PATH": "missing", "PERMISSION_DENIED": "permission_denied",
+                         "INVALID_CONFIGURATION": "invalid"}.get(reason, "io_failure")
+                targets.append(path_target("access_log", index, raw_path, state, reason))
                 continue
         if not found_log and not self._warned_missing_logs:
             self._warned_missing_logs = True
@@ -302,6 +337,8 @@ class Agent(BootAgent):
                 "request/IP analysis is idle.",
                 level="WARNING",
             )
+        if found_log:
+            self._warned_missing_logs = False
         cutoff = now - self.traffic_window
         while self._traffic_events and self._traffic_events[0]["ts"] < cutoff:
             self._traffic_events.popleft()

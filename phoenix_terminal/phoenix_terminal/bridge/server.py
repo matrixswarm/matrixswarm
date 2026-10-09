@@ -113,6 +113,9 @@ class BridgeServer:
                     if not isinstance(method, str) or not isinstance(params, dict):
                         raise ValueError("method must be a string and params must be an object")
                     result = bridge._dispatch(method, params)
+                    guard = getattr(bridge, "_response_guard", None)
+                    if guard is not None:
+                        result = guard(method, params, result)
                     self._json(200, {"ok": True, "result": result})
                 except (ValueError, PermissionError) as exc:
                     self._json(400, {"ok": False, "error": str(exc)})

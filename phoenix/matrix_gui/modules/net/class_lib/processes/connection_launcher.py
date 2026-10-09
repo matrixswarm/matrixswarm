@@ -77,7 +77,7 @@ class ConnectionLauncher:
                     setattr(spec.policy, k, v)
             return True
 
-    def launch(self, uid: str, packet=None, fire_catapult=False):
+    def launch(self, uid: str, packet=None, fire_catapult=False, delivery_id=None):
         """
         Start a connector thread if policy allows.
         - No instantiation is required to evaluate policy gates.
@@ -160,6 +160,7 @@ class ConnectionLauncher:
                     "deployment": context.get("deployment"),
                     "context": context,
                     "packet": packet,
+                    "delivery_id": delivery_id,  # Local receipt correlation; never serialized.
                 })
 
                 thread_id = uuid.uuid4().hex

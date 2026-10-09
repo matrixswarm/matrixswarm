@@ -278,6 +278,12 @@ class PhoenixCockpit(QMainWindow):
         EventBus.on("vault.reopen.requested", self._on_vault_reopen_requested)
 
         self._start_pipe_monitor()
+        self._terminal_cockpit_endpoint = None
+        try:
+            from matrix_gui.core.terminal_cockpit_endpoint import attach
+            self._terminal_cockpit_endpoint = attach(self)
+        except Exception as e:
+            emit_gui_exception_log("PhoenixCockpit.terminal_session_endpoint", e)
 
         self.security_sleep_timer = QTimer(self)
         self.security_sleep_timer.timeout.connect(self._check_for_system_sleep)
@@ -292,7 +298,11 @@ class PhoenixCockpit(QMainWindow):
         self.show()
 
     def launch_session(self, session_id: str, deployment: dict, vault_data: dict = None):
+        p = parent_conn = child_conn = None
+        registered = False
         try:
+            from matrix_gui.modules.access_control.gates import require_normal_mode
+            require_normal_mode()  # Gate before any process or credential handoff.
             from multiprocessing import Process, Pipe
             parent_conn, child_conn = Pipe()
             p = Process(
@@ -306,7 +316,7 @@ class PhoenixCockpit(QMainWindow):
                 "type": "init",
                 "session_id": session_id,
                 "deployment": deployment,
-                "vault_data": vault_data
+                "vault_data": VaultCoreSingleton.get().session_snapshot()
             })
 
             # Wait for child to report its native window id
@@ -352,6 +362,7 @@ class PhoenixCockpit(QMainWindow):
                 "deployment_id": deployment.get("id"),
                 "tab": tab,  # store the widget itself
             })
+            registered = True
 
             self._active_sessions.add(session_id)
             self.status_sessions.setText(f"Sessions: {len(self._active_sessions)}")
@@ -360,6 +371,15 @@ class PhoenixCockpit(QMainWindow):
 
         except Exception as e:
             emit_gui_exception_log("PhoenixCockpit.launch_session", e)
+        finally:
+            if child_conn is not None:
+                child_conn.close()
+            if not registered:
+                if p is not None and p.is_alive():
+                    p.terminate()
+                    p.join(timeout=2)
+                if parent_conn is not None:
+                    parent_conn.close()
 
 
     def _start_pipe_monitor(self):
@@ -451,6 +471,12 @@ class PhoenixCockpit(QMainWindow):
         try:
             mtype = msg.get("type")
             sid = msg.get("session_id")
+            core = VaultCoreSingleton.get()
+            if core.access_control.ai_mode:
+                # AI inspection uses the typed parent adapter, never child IPC.
+                # A stale native child may only signal lifecycle cleanup.
+                if mtype not in {"heartbeat", "exit"}:
+                    return
 
             if mtype == "ready":
                 print(f"[MIRV] Session {sid} READY")
@@ -479,7 +505,7 @@ class PhoenixCockpit(QMainWindow):
                 try:
 
                     vcs = VaultCoreSingleton.get()
-                    vault_snapshot = vcs.read()  # full top-level vault data snapshot
+                    vault_snapshot = vcs.session_snapshot()
                     # Default: backward-compatible deployment access
                     if target == "deployment":
                         dep_store = vcs.get_store("deployments")
@@ -712,6 +738,8 @@ class PhoenixCockpit(QMainWindow):
             method = str(kwargs.get("auth_method", "password")).strip().casefold()
             credential = "YubiKey" if method == "yubikey" else "Password"
             self.status_vault.setText(f"Vault ({credential}): 🔓")
+            if vcs.access_control.ai_mode:
+                self.status_vault.setText(f"Vault ({credential}): AI Mode 🔓")
             self.status_deployments.setText(f"Deployments: {dep_count}")
             self.status_sessions.setText("Sessions: 0")  # reset at unlock
 
@@ -746,6 +774,11 @@ class PhoenixCockpit(QMainWindow):
                     return
 
             print("[MIRV] Cockpit closing, nuking all session processes...")
+
+            core = VaultCoreSingleton._instance
+            if core is not None:
+                core.close()
+            self._stop_ai_gateway()
 
             # Stop pipe polling first
             if hasattr(self, "pipe_timer") and self.pipe_timer.isActive():
@@ -814,6 +847,10 @@ class PhoenixCockpit(QMainWindow):
 
     # in PhoenixCockpit._destroy_all_sessions
     def _destroy_all_sessions(self, **_):
+        core = VaultCoreSingleton._instance
+        if core is not None:
+            core.close()
+        self._stop_ai_gateway()
         reset_startup_policy()
         self.status_vault.setText("Vault: 🔒")
         for sess in list(self.session_processes):
@@ -843,6 +880,10 @@ class PhoenixCockpit(QMainWindow):
         """
         Close current vault → hide UI → emit 'vault.closed' → clear singleton → relaunch unlock flow.
         """
+        core = VaultCoreSingleton._instance
+        if core is not None:
+            core.close()
+        self._stop_ai_gateway()
         try:
             # Stop dispatcher/sessions
             if getattr(self, "dispatcher", None):
@@ -932,6 +973,7 @@ class PhoenixCockpit(QMainWindow):
                         password=unlock_dlg.vault_password,
                         path=new_path,
                         auth_method=unlock_dlg.vault_auth_method,
+                        ai_mode=unlock_dlg.ai_mode,
                     )
                     return
 
@@ -953,6 +995,7 @@ class PhoenixCockpit(QMainWindow):
                         password=unlock_dlg.vault_password,
                         path=unlock_dlg.vault_path,
                         auth_method=unlock_dlg.vault_auth_method,
+                        ai_mode=unlock_dlg.ai_mode,
                     )
                     return
 
@@ -988,6 +1031,9 @@ class PhoenixCockpit(QMainWindow):
         try:
             tab = self.tab_stack.widget(index)
             if not tab:
+                return
+            gateway = getattr(self, "_ai_gateway", None)
+            if gateway is not None and gateway.close_tab(tab):
                 return
 
             # Find the session that owns this exact tab widget
@@ -1029,6 +1075,11 @@ class PhoenixCockpit(QMainWindow):
 
         except Exception as e:
             emit_gui_exception_log("PhoenixCockpit._on_tab_close_requested", e)
+
+    def _stop_ai_gateway(self):
+        gateway = getattr(self, "_ai_gateway", None)
+        if gateway is not None:
+            gateway.stop()
 
 
 def show_with_splash(app, main_cls, delay=4000):

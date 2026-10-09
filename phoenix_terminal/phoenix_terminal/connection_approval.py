@@ -11,7 +11,7 @@ import threading
 MIN_LIFETIME_SECONDS = 60
 MAX_LIFETIME_SECONDS = 3600
 MAX_PENDING_REQUESTS = 8
-CURRENT_OPERATIONS = frozenset({"alerts.read", "swarms.list", "railgun.launch"})
+CURRENT_OPERATIONS = frozenset({"alerts.read", "swarms.list", "railgun.launch", "agents.list", "logs.read", "sessions.list", "sessions.open"})
 _REVISION = re.compile(r"^[0-9a-f]{64}$")
 
 

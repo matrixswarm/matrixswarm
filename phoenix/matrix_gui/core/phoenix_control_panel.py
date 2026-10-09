@@ -19,6 +19,7 @@ from matrix_gui.modules.swarms.swarms_dialog import SwarmsDialog
 
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from PyQt6.QtWidgets import QFileDialog
+from matrix_gui.modules.access_control.gates import manual_ui_only
 
 
 def _set_toolbar_icon(button, name):
@@ -102,12 +103,18 @@ class PhoenixControlPanel(QWidget):
             self.vault_btn.clicked.connect(self.reopen_vault)
             self.layout.addWidget(self.vault_btn)
 
-            self.terminal_btn = QPushButton("Terminal Mode")
+            self.terminal_btn = QPushButton("AI Mode")
             self.terminal_btn.setObjectName("terminalMode")
             _set_toolbar_icon(self.terminal_btn, "terminal")
-            self.terminal_btn.setToolTip("Configure Terminal access and fixed SSH targets in a separate window.")
+            self.terminal_btn.setToolTip("Configure vault-owned AI access, approve clients, and revoke connections.")
             self.terminal_btn.clicked.connect(self.open_terminal_mode)
             self.layout.addWidget(self.terminal_btn)
+            self.ai_kill_btn = QPushButton("Kill AI")
+            self.ai_kill_btn.setToolTip("Revoke every AI connection and close AI inspection tabs until the next vault unlock.")
+            self.ai_kill_btn.setStyleSheet("color: #ff7060;")
+            self.ai_kill_btn.clicked.connect(self.kill_ai_access)
+            self.ai_kill_btn.hide()
+            self.layout.addWidget(self.ai_kill_btn)
 
             #keep the registry dialog alive
             self._registry_dialog = None
@@ -149,18 +156,28 @@ class PhoenixControlPanel(QWidget):
             emit_gui_exception_log("PhoenixControlPanel.launch", e)
 
     def open_terminal_mode(self):
-        from matrix_gui.core.dialog.terminal_mode_dialog import TerminalModeDialog
+        from matrix_gui.modules.access_control.access_control_dialog import AccessControlDialog
 
         try:
-            dialog = TerminalModeDialog(self)
+            dialog = AccessControlDialog(self.window())
             try:
                 dialog.exec()
             finally:
                 dialog.deleteLater()
         except Exception as error:
             emit_gui_exception_log("PhoenixControlPanel.open_terminal_mode", error)
-            QMessageBox.warning(self, "Terminal Mode", "Unlock the Vault before opening Terminal Mode.")
+            QMessageBox.warning(self, "AI Mode", "Unlock the Vault before opening access control.")
 
+    def kill_ai_access(self):
+        core = VaultCoreSingleton.get()
+        core.access_control.kill_switch()
+        gateway = getattr(self.window(), "_ai_gateway", None)
+        if gateway is not None:
+            gateway.stop()
+        self.ai_kill_btn.setEnabled(False)
+        self.terminal_btn.setText("AI Mode · Killed")
+
+    @manual_ui_only
     def open_railgun_installer(self):
         """
         Open the Railgun Install dialog.
@@ -176,6 +193,7 @@ class PhoenixControlPanel(QWidget):
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.open_railgun_installer", e)
 
+    @manual_ui_only
     def open_swarms(self):
         try:
             dialog = SwarmsDialog(parent=self)
@@ -183,6 +201,7 @@ class PhoenixControlPanel(QWidget):
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.open_swarms", e)
 
+    @manual_ui_only
     def open_railgun_check(self):
         """
         Remote host inspection via SSH.
@@ -255,6 +274,7 @@ class PhoenixControlPanel(QWidget):
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.on_vault_update", e)
 
+    @manual_ui_only
     def launch_registry_manager(self):
         try:
             # Create once
@@ -275,6 +295,7 @@ class PhoenixControlPanel(QWidget):
     def _on_registry_closed(self, _result=None):
         self._registry_dialog = None
 
+    @manual_ui_only
     def launch_deployment_dialog(self):
             """Open a live session for the currently selected deployment.
 
@@ -338,11 +359,19 @@ class PhoenixControlPanel(QWidget):
 
         #self.vault_data or {}
         self.refresh_deployments()
+        ai_mode = VaultCoreSingleton.get().access_control.ai_mode
+        for button in (self.connect_btn, self.conn_btn, self.swarms_btn,
+                       self.directives_btn, self.railgun_btn):
+            button.setEnabled(not ai_mode)
+        self.terminal_btn.setText("AI Mode · Access" if ai_mode else "AI Mode")
+        self.ai_kill_btn.setVisible(ai_mode)
+        self.ai_kill_btn.setEnabled(ai_mode)
         # now that we have vault_data, start sessions + dispatcher
         #self.sessions = SessionManager(EventBus)
         #self.dispatcher = OutboundDispatcher(EventBus, self.sessions, vault=self.vault_data)
         #self.dispatcher.start()
 
+    @manual_ui_only
     def open_directive_manager(self):
         dlg = DirectiveManagerDialog()
         dlg.exec()

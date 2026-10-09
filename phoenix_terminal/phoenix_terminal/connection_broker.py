@@ -94,7 +94,7 @@ class TerminalConnectionBroker:
         self._closed = False
         self._lock = threading.RLock()
         handlers = dict(operation_handlers or {})
-        unknown = set(handlers).difference(CURRENT_OPERATIONS | {"railgun.status"})
+        unknown = set(handlers).difference(CURRENT_OPERATIONS | {"railgun.status", "swarm.inspect"})
         if unknown or any(not callable(handler) for handler in handlers.values()):
             raise ValueError("Terminal operation handlers are invalid")
         configured = {
@@ -151,7 +151,7 @@ class TerminalConnectionBroker:
         allowed_methods = _BASE_CLIENT_METHODS | set(self._operation_handlers)
         if not isinstance(method, str) or method not in allowed_methods:
             raise PermissionError("Operation is not available from Terminal access")
-        if method in {"swarms.list", "railgun.launch", "railgun.status"}:
+        if method in {"swarms.list", "railgun.launch", "railgun.status", "agents.list", "logs.read", "swarm.inspect", "sessions.list", "sessions.open"}:
             return self._handle_remote(method, params)
         with self._lock:
             if self._closed:
@@ -264,6 +264,7 @@ class TerminalConnectionBroker:
             return self._public_status(record)
 
     def _public_status(self, record):
+        from .tool_routes import permitted_calls
         remaining = None
         if record.state == "approved" and record.deadline is not None:
             remaining = max(0, int(record.deadline - self._clock()))
@@ -272,12 +273,23 @@ class TerminalConnectionBroker:
             "state": record.state,
             "reason": record.reason,
             "remaining_seconds": remaining,
+            "vault_revision": record.request.vault_revision if record.state == "approved" else None,
+            "tool_usage_hint": (
+                "resources below are deployment scopes, NOT MCP resource URIs. "
+                "Call the named tools in tool_calls using their arguments. "
+                "For deferred tools, search the exact tool_name and invoke the full name returned by your host. "
+                "Do not invent res:// paths or use read_resource for swarm data."
+            ),
             "operations_available": (
                 list(record.request.operations) if record.state == "approved" else []
             ),
             "resources": ([
                 {"deployment_id": r.deployment_id, "label": r.label,
                  "operations": list(r.operations),
+                 "tool_calls": permitted_calls(r.deployment_id, r.operations),
+                 "inspection_available": {"agents.list", "logs.read"}.issubset(r.operations),
+                 **({"inspection_unavailable_reason": "Swarm inspection requires BOTH agents.list and logs.read for this deployment."}
+                    if not {"agents.list", "logs.read"}.issubset(r.operations) else {}),
                  **({"fixed_destination": r.fixed_destination} if r.fixed_destination else {})}
                 for r in record.request.resources if r.operations
             ] if record.state == "approved" else []),
@@ -288,9 +300,14 @@ class TerminalConnectionBroker:
         names = {"request_id", "client_secret", "deployment_id"}
         if method.startswith("railgun."):
             names.add("operation_id")
+        if method == "logs.read":
+            names.add("agent_id")
         _exact_params(params, names)
         deployment_id = _plain(params["deployment_id"], "Deployment ID", maximum=256)
         operation_id = params.get("operation_id")
+        if method == "logs.read":
+            from .swarm_inspection import agent_identifier
+            agent_identifier(params["agent_id"])
         if method.startswith("railgun.") and (
             not isinstance(operation_id, str) or not re.fullmatch(r"[a-f0-9]{32}", operation_id)
         ):
@@ -303,24 +320,32 @@ class TerminalConnectionBroker:
             resource = next((r for r in record.request.resources if r.deployment_id == deployment_id), None)
             if record.state != "approved":
                 raise PermissionError("Connection is not approved")
-            if resource is None or operation not in resource.operations:
+            required = {"agents.list", "logs.read"} if method == "swarm.inspect" else {operation}
+            if resource is None or not required.issubset(resource.operations):
                 raise PermissionError(f"{operation} is not allowed for this deployment")
 
-        def lease():
-            with self._lock:
-                self._expire_locked()
-                return not self._closed and record.state == "approved"
+        lease = self._operation_lease(record, method, deployment_id)
 
         # No network while holding the lifecycle lock: the operator must always
         # be able to lock/revoke access, even during an unresponsive SSH call.
+        from .swarm_inspection import DiagnosticReadError
         try:
-            if method == "swarms.list":
+            if method in {"swarms.list", "agents.list", "swarm.inspect"}:
                 value = self._operation_handlers[method](deployment_id, lease)
+            elif method == "logs.read":
+                value = self._operation_handlers[method](deployment_id, params["agent_id"], lease)
+            elif method in {"sessions.list", "sessions.open"}:
+                value = self._operation_handlers[method](method, deployment_id,
+                    {"request_id": params["request_id"], "client_secret": params["client_secret"]}, lease)
             else:
                 value = self._operation_handlers[method](deployment_id, operation_id,
                     record.request.request_id, lease)
         except PermissionError:
             raise PermissionError("Connection approval ended or the operation was denied") from None
+        except DiagnosticReadError as exc:
+            # These errors contain fixed guidance only. Preserve it through the
+            # HTTP boundary instead of replacing it with a generic failure.
+            raise DiagnosticReadError(str(exc)) from None
         except Exception:
             raise RuntimeError("The fixed-target operation could not complete; no raw server output is exposed") from None
         if not lease():
@@ -328,7 +353,21 @@ class TerminalConnectionBroker:
         from .remote_access import public_inventory_page, public_launch_status
         if method == "swarms.list":
             return public_inventory_page(deployment_id, value)
+        if method in {"agents.list", "logs.read", "swarm.inspect"}:
+            from .swarm_inspection import public_diagnostic_page
+            return public_diagnostic_page(method, deployment_id, value, params.get("agent_id"))
+        if method in {"sessions.list", "sessions.open"}:
+            from .cockpit_sessions import public_session_page
+            return public_session_page(deployment_id, value)
         return public_launch_status(deployment_id, operation_id, value)
+
+    def _operation_lease(self, record, method, deployment_id):
+        """Adapter hook; live Phoenix also checks its vault-owned authority."""
+        def lease():
+            with self._lock:
+                self._expire_locked()
+                return not self._closed and record.state == "approved"
+        return lease
 
     def _read_alerts(self, record, deployment_id, after, limit, stream_id=None):
         if record.state != "approved":

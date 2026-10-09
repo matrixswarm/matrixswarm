@@ -82,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--label", required=True, help="Unverified client label shown to the operator"
     )
     terminal_sub.add_parser("status", help="Read endpoint or current request status")
+    terminal_sub.add_parser("doctor", help="Diagnose this client's runtime and approval state without requesting access")
     terminal_sub.add_parser("disconnect", help="Revoke this client's connection")
     terminal_alerts = terminal_sub.add_parser(
         "alerts", help="Read an approved deployment's live alert buffer",
@@ -101,6 +102,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     terminal_swarms = terminal_sub.add_parser("swarms", help="One live inventory read on this permitted deployment's fixed SSH server")
     terminal_swarms.add_argument("deployment_id")
+    for name in ("agents", "inspect", "sessions", "connect"):
+        command = terminal_sub.add_parser(name, help={
+            "agents": "Read scoped agent process and heartbeat inventory",
+            "inspect": "Read bounded swarm diagnostics (requires agents.list and logs.read)",
+            "sessions": "List permitted Phoenix cockpit tabs; not server health",
+            "connect": "Open/reuse a Phoenix cockpit tab (does not boot a swarm)",
+        }[name])
+        command.add_argument("deployment_id", help="Exact ID from approved terminal status")
+    terminal_logs = terminal_sub.add_parser("logs", help="Read a bounded current-boot agent log tail")
+    terminal_logs.add_argument("deployment_id")
+    terminal_logs.add_argument("agent_id", help="Exact agent ID from terminal agents")
     terminal_railgun = terminal_sub.add_parser("railgun", help="Start only an inactive saved universe; no restart or replacement")
     railgun_sub = terminal_railgun.add_subparsers(dest="railgun_command", required=True)
     for name in ("launch", "status"):
@@ -201,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
     acknowledged.add_argument("investigation_id")
     acknowledged.add_argument("receipt")
     mcp = subparsers.add_parser("mcp", help="Run the native Phoenix MCP adapter over stdio")
-    mcp.add_argument("--terminal-access", action="store_true", help="Use operator-approved alert, Swarms and guarded Railgun tools instead of legacy inventory")
+    mcp.add_argument("--terminal-access", action="store_true", help="Use approved alerts, diagnostics, cockpit session and guarded Railgun tools")
     return parser
 
 
@@ -324,6 +336,12 @@ def run_investigation(args: argparse.Namespace) -> int:
 
 
 def run_terminal_command(args: argparse.Namespace) -> int:
+    if args.terminal_command == "doctor":
+        from .client_setup import diagnose
+
+        result = diagnose(args.data_dir)
+        print(json.dumps(result, indent=2, ensure_ascii=True))
+        return 0 if result["code"] in {"APPROVED", "AWAITING_APPROVAL", "REQUEST_REQUIRED"} else 2
     if args.terminal_command == "open":
         from .terminal_runtime import run_terminal
 
@@ -341,6 +359,16 @@ def run_terminal_command(args: argparse.Namespace) -> int:
                                       limit=args.limit, stream_id=args.stream_id)
     elif args.terminal_command == "swarms":
         result = identity.list_swarms(args.deployment_id)
+    elif args.terminal_command == "agents":
+        result = identity.list_agents(args.deployment_id)
+    elif args.terminal_command == "logs":
+        result = identity.read_logs(args.deployment_id, args.agent_id)
+    elif args.terminal_command == "inspect":
+        result = identity.inspect_swarm(args.deployment_id)
+    elif args.terminal_command == "sessions":
+        result = identity.list_sessions(args.deployment_id)
+    elif args.terminal_command == "connect":
+        result = identity.open_session(args.deployment_id)
     elif args.terminal_command == "railgun":
         operation = identity.launch_railgun if args.railgun_command == "launch" else identity.railgun_status
         result = operation(args.deployment_id, args.operation_id)

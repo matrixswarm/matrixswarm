@@ -22,8 +22,7 @@
         "traffic": {
             "enabled": true,
             "access_logs": [
-                "/var/log/httpd/access_log",
-                "/var/log/nginx/access.log"
+                "/var/log/apache2/access.log"
             ],
             "window_sec": 60,
             "top_n_ips": 10,
