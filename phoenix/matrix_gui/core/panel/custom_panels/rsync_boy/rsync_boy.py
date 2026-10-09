@@ -76,6 +76,7 @@ class RsyncBoy(PhoenixPanelInterface):
             "Jobs shown here are loaded from the selected live RsyncBoy agent. "
             "Save Changes validates and encrypts the complete schedule on MatrixOS. "
             "Execute Now runs one saved job immediately, including a disabled job."
+            " Restore drills have their own success record; backup success does not establish recovery."
         )
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
@@ -92,7 +93,7 @@ class RsyncBoy(PhoenixPanelInterface):
                 "SSH Source",
                 "Backup Size",
                 "Schedule",
-                "Last success",
+                "Last backup / drill success",
                 "State",
                 "Actions",
             ]
@@ -130,6 +131,8 @@ class RsyncBoy(PhoenixPanelInterface):
             return "MySQL dump"
         if factory == "filesystem.rsync_snapshot.RsyncSnapshotJob":
             return "Filesystem snapshot"
+        if factory == "filesystem.restore_drill.RestoreDrillJob":
+            return "Restore drill"
         return str(factory)
 
     @staticmethod
@@ -215,11 +218,22 @@ class RsyncBoy(PhoenixPanelInterface):
                 "Enabled" if job.get("enabled") else "Disabled"
             )
             profile_id = str(job.get("ssh_profile", "") or "")
+            report = status.get("restore_report", {})
+            is_drill = job.get("factory") == "filesystem.restore_drill.RestoreDrillJob"
+            if is_drill:
+                backup_id = job.get("config", {}).get("backup_job_id")
+                backup = next((item for item in self.jobs if item.get("id") == backup_id), {})
+                profile_id = str(backup.get("ssh_profile", "") or "")
+                if not status.get("running") and report:
+                    state = "VERIFIED" if report.get("result") == "ok" else "FAILED"
             profile_label = (
                 profile_labels.get(profile_id, f"Missing · {profile_id[-8:]}")
                 if profile_id else "Primary/default"
             )
             storage_label, storage_detail = self._storage_label_for_job(job_id)
+            if is_drill:
+                storage_label = "Scratch only"
+                storage_detail = "Restored on the snapshot host; scratch files are removed after verification."
             values = (
                 job_id,
                 self._factory_label(job.get("factory")),
@@ -235,6 +249,14 @@ class RsyncBoy(PhoenixPanelInterface):
                     item.setToolTip(storage_detail)
                 if column == 6 and status.get("running"):
                     item.setForeground(Qt.GlobalColor.green)
+                if column == 6 and is_drill and report:
+                    item.setToolTip(
+                        f"Snapshot: {report.get('snapshot', 'unavailable')}\n"
+                        f"Verified files: {report.get('verified_files', 'unavailable')}\n"
+                        f"Report on snapshot host: {report.get('report_path', 'unavailable')}\n"
+                        f"Error: {report.get('error_code', 'none')}\n"
+                        "Application/database recovery and ACLs/xattrs/ownership are unverified."
+                    )
                 self.table.setItem(row, column, item)
 
             actions = QHBoxLayout()

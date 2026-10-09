@@ -227,7 +227,7 @@ class SSHTransport:
             env=env,
         )
 
-    def run_script(self, script: bytes, *, check=True, stdout=subprocess.PIPE):
+    def run_script(self, script: bytes, *, check=True, stdout=subprocess.PIPE, timeout=None):
         """Run a private shell script over SSH without placing it in process arguments."""
         prefix, env = self._auth_prefix_and_env()
         return subprocess.run(
@@ -237,6 +237,7 @@ class SSHTransport:
             stderr=subprocess.PIPE,
             check=check,
             env=env,
+            timeout=timeout,
         )
 
     def path_exists(self, remote_path: str) -> bool:

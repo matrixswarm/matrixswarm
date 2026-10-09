@@ -15,9 +15,9 @@ import subprocess
 import time
 
 try:
-    from rsync_boy.job_config import FILESYSTEM_FACTORY, MYSQL_FACTORY
+    from rsync_boy.job_config import FILESYSTEM_FACTORY, MYSQL_FACTORY, RESTORE_FACTORY
 except ImportError:  # Direct module loading used by focused unit tests.
-    from job_config import FILESYSTEM_FACTORY, MYSQL_FACTORY
+    from job_config import FILESYSTEM_FACTORY, MYSQL_FACTORY, RESTORE_FACTORY
 
 
 MAX_SCAN_ENTRIES = 5_000_000
@@ -201,7 +201,10 @@ def measure_backup_storage(jobs: list[dict], progress=None) -> dict:
     for job in jobs:
         job_id = str(job.get("id") or "")
         spec = _storage_spec(job)
-        if spec is None:
+        if job.get("factory") == RESTORE_FACTORY:
+            results[job_id] = {"bytes": None, "state": "scratch",
+                               "detail": "Temporary restore copy; excluded from backup storage totals"}
+        elif spec is None:
             results[job_id] = {
                 "bytes": None,
                 "state": "remote",
