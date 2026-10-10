@@ -44,12 +44,16 @@ def report(count=24, *, failures=1):
 
 
 class CompactInspectionTests(unittest.TestCase):
-    def test_last_agent_failure_is_front_loaded_and_whole_inventory_is_summarized(self):
+    def test_last_agent_failure_is_front_loaded_and_totals_cover_whole_inventory(self):
         source = report()
         result = compact_inspection("fixture-deployment", source)
         self.assertEqual(24, result["summary"]["inventory_agents"])
-        self.assertEqual(24, len(result["agents"]))
-        self.assertEqual(0, result["coverage"]["agent_summaries_omitted"])
+        self.assertEqual(24, result["summary"]["processes_observed"])
+        # Detailed rows share the byte budget with findings and guidance.
+        # Every row that does not fit must remain visible in omission counts.
+        self.assertGreater(len(result["agents"]), 1)
+        self.assertLessEqual(len(result["agents"]), 24)
+        self.assertEqual(24 - len(result["agents"]), result["coverage"]["agent_summaries_omitted"])
         self.assertEqual("agent-023", result["priority_findings"][0]["reporting_agent_id"])
         self.assertEqual("UPSTREAM_QUOTA_EXHAUSTED", result["priority_findings"][0]["code"])
         self.assertEqual("2026-10-07 18:41:59", result["priority_findings"][0]["timestamp"])

@@ -86,8 +86,9 @@ class PublicReleaseSecurityTests(unittest.TestCase):
         self.assertIn('"check_hostname": False', wss_source)
         self.assertNotIn('"ca_certs":', wss_source)
         self.assertNotIn('"CA root": cert_adapter.ca_root_cert', wss_source)
+        self.assertIn("class WSSTrustError(ConnectionError):", wss_source)
         self.assertIn(
-            'raise ConnectionError("WSS peer did not present a certificate")',
+            'raise WSSTrustError("WSS peer did not present a certificate")',
             wss_source,
         )
         self.assertLess(
