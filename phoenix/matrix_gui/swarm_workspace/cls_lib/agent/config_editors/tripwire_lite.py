@@ -63,6 +63,14 @@ class TripwireLite(BaseEditor, ServiceRolesMixin, ListEditorMixin):
         # =======================================================
         # --- WATCH PATHS (list of dicts) ---
         # =======================================================
+        watch_help = QLabel(
+            "Directory event watches: enable watch_dirs and disable watch_files; "
+            "enable recursive for subdirectories. For a protected file, watch its "
+            "readable parent directory instead of granting access to its contents. "
+            "Direct file watches require file read permission. Remove retired paths."
+        )
+        watch_help.setWordWrap(True)
+        self.layout.addRow(watch_help)
         self._build_list_section(
             label="👁️ Watch Paths",
             data=cfg.get("watch_paths", []),

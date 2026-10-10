@@ -98,9 +98,9 @@ class SSHKeyPassphraseTests(unittest.TestCase):
             'QGroupBox("Server & Host Trust")',
             'QGroupBox("Authentication")',
             'QGroupBox("Key Pair")',
-            "Save Key Pair to Disk",
-            "Install Public Key on Server",
-            "Generate Strong Passphrase",
+            "Export Key Files",
+            "Install Public Key",
+            "Generate Passphrase",
             "VaultSSHKeyInstallDialog",
         ):
             self.assertIn(marker, editor)
@@ -111,10 +111,10 @@ class SSHKeyPassphraseTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for marker in (
             "load_registry_ssh_profiles",
-            "Save Private + Public Keys",
+            "Export Key Files",
             "Install && Verify Public Key",
-            "Verify && Remove Vault Password",
-            "One-Time Password",
+            "Verify && Remove Server Password",
+            "One-Time Server Password",
             "install_authorized_key",
             'updated["password"] = "None"',
             "registry_store.commit()",

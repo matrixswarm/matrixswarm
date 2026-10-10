@@ -1,5 +1,14 @@
 {
     "name": "matrix_ssh",
+    "description": "Receives signed, encrypted Phoenix command packets from a private durable inbox uploaded over pinned SSH.",
+    "keywords": [
+        "ssh",
+        "transport",
+        "ingress"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "matrix-ssh",
     "connection": {
         "channel": "outgoing.command"

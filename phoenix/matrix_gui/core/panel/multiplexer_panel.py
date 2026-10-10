@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
+from matrix_gui.modules.net.primary_ingress import select_primary_ingress
 
 
 class MultiplexerPanel(QDialog):
@@ -14,7 +15,7 @@ class MultiplexerPanel(QDialog):
 
     Provides a graphical interface to view and switch transport channels for a session.
     It manages two types of transports:
-      • Incoming (payload.reception): Informational only.
+      • Incoming (payload.reception): Switches the active receiver.
       • Outgoing (outgoing.command): Can be switched live to change the outbound command route.
 
     Attributes:
@@ -89,31 +90,14 @@ class MultiplexerPanel(QDialog):
                 name = a.get("name", uid)
                 self.incoming_dropdown.addItem(f"{name} ({uid})", uid)
 
-            # Prefer explicitly flagged default_payload_reception
-            # rule: last flagged true wins
-            preferred_incoming_index = 0
-            found_default_payload = False
+            primary_ingress = select_primary_ingress(self.deployment)
+            if primary_ingress:
+                preferred_incoming_index = self.incoming_dropdown.findData(
+                    primary_ingress.get("universal_id")
+                )
+                if preferred_incoming_index >= 0:
+                    self.incoming_dropdown.setCurrentIndex(preferred_incoming_index)
 
-            for i, a in enumerate(incoming_agents):
-                conn = a.get("connection", {}) or {}
-                if bool(conn.get("default_payload_reception", False)):
-                    preferred_incoming_index = i
-                    found_default_payload = True
-
-            # Fallback: prefer websocket if no explicit default set
-            if not found_default_payload:
-                for i, a in enumerate(incoming_agents):
-                    conn = a.get("connection", {}) or {}
-                    proto = (conn.get("proto") or "").strip().lower()
-                    name = (a.get("name") or "").strip().lower()
-                    if proto == "wss" or "websocket" in name:
-                        preferred_incoming_index = i
-                        break
-
-            if self.incoming_dropdown.count() > 0:
-                self.incoming_dropdown.setCurrentIndex(preferred_incoming_index)
-
-            # Keep visible/inspectable, but informational only
             self.incoming_dropdown.setToolTip(
                 "Select the active ingress transport for payload.reception. "
                 "Applying will stop other ingress connectors and launch the selected one."

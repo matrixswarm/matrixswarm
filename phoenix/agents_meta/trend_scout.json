@@ -1,5 +1,16 @@
 {
     "name": "trend_scout",
+    "description": "Builds content ideas and topic clusters using configured semantic analysis and generation roles.",
+    "keywords": [
+        "ai",
+        "content",
+        "trends",
+        "analysis"
+    ],
+    "groups": [
+        "ai",
+        "automation"
+    ],
     "universal_id": "gamer-in-nova-1",
     "constraints": [
         {

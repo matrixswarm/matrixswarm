@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from .workspace_loader import load_workspace
-from .agent_palette import AgentPalette
+from .agent_palette import AgentPalettePanel
 from .panels.agent_inspector.agent_inspector import AgentInspector
 from .workspace_serializer import collect_scene_nodes
 from .workspace_validator import validate_workspace
@@ -74,9 +74,10 @@ class SwarmWorkspaceDialog(QDialog):
             right_layout.setContentsMargins(4, 4, 4, 4)
             right_layout.setSpacing(6)
 
-            self.palette = AgentPalette()
-            right_layout.addWidget(self.palette)
-            right_panel.setMinimumWidth(200)
+            self.palette_panel = AgentPalettePanel(right_panel)
+            self.palette = self.palette_panel.palette
+            right_layout.addWidget(self.palette_panel)
+            right_panel.setMinimumWidth(280)
 
             # Inspector gets a fixed minimum width
             self.inspector = AgentInspector(parent=self)

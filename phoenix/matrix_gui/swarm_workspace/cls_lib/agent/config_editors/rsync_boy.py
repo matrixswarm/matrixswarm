@@ -4,7 +4,10 @@ from .base_editor import BaseEditor
 from .rsync_boy_clipboard import (
     FILESYSTEM_FACTORY,
     MYSQL_FACTORY,
+    RESTORE_FACTORY,
     JobClipboardError,
+    normalize_job,
+    normalize_jobs,
     decode_jobs,
     encode_jobs,
 )
@@ -176,8 +179,13 @@ class RsyncBoy(BaseEditor):
     # SAVE
     # ──────────────────────────────────────────────
     def _save(self):
+        try:
+            jobs = normalize_jobs(self.jobs)
+        except JobClipboardError as error:
+            QMessageBox.warning(self, "Invalid RsyncBoy Schedule", str(error))
+            return
         self.node.config["poll_interval"] = int(self.poll_interval.value())
-        self.node.config["jobs"] = self.jobs
+        self.node.config["jobs"] = jobs
         self.node.mark_dirty()
         self.accept()
 
@@ -204,9 +212,11 @@ class JobEditorDialog(QDialog):
         self.job_type = QComboBox()
         self.job_type.addItem("MySQL timestamped dump", MYSQL_FACTORY)
         self.job_type.addItem("Filesystem timestamped snapshot", FILESYSTEM_FACTORY)
+        self.job_type.addItem("Filesystem restore drill", RESTORE_FACTORY)
 
         configured_factory = self.job.get("factory", MYSQL_FACTORY)
         existing_filesystem_job = configured_factory == FILESYSTEM_FACTORY
+        existing_drill_job = configured_factory == RESTORE_FACTORY
         selected = self.job_type.findData(configured_factory)
         if selected < 0:
             self.job_type.addItem(f"Legacy: {configured_factory}", configured_factory)
@@ -257,8 +267,9 @@ class JobEditorDialog(QDialog):
 
         # ───────── JOB-SPECIFIC CONFIG ─────────
         cfg = self.job.get("config", {})
-        mysql_cfg = {} if existing_filesystem_job else cfg
+        mysql_cfg = {} if existing_filesystem_job or existing_drill_job else cfg
         filesystem_cfg = cfg if existing_filesystem_job else {}
+        drill_cfg = cfg if existing_drill_job else {}
         self.config_pages = QStackedWidget()
 
         mysql_page = QWidget()
@@ -291,6 +302,12 @@ class JobEditorDialog(QDialog):
         self.source_via_ssh.setChecked(
             bool(filesystem_cfg.get("source_via_ssh", not existing_filesystem_job))
         )
+        self.source_ssh_sudo = QCheckBox()
+        self.source_ssh_sudo.setChecked(bool(filesystem_cfg.get("source_ssh_sudo", False)))
+        self.source_ssh_sudo.setToolTip(
+            "Run the remote rsync sender through sudo to read protected source files. "
+            "The SSH account must already be allowed to run rsync with passwordless sudo."
+        )
         self.source_path = QLineEdit(filesystem_cfg.get("source_path", "/sites"))
         self.snapshot_remote_path = QLineEdit(
             filesystem_cfg.get("remote_path", "/backup/snapshots/sites")
@@ -309,6 +326,9 @@ class JobEditorDialog(QDialog):
         self.preserve_acls.setChecked(bool(filesystem_cfg.get("preserve_acls", True)))
         self.preserve_xattrs = QCheckBox()
         self.preserve_xattrs.setChecked(bool(filesystem_cfg.get("preserve_xattrs", True)))
+        self.verify_manifest = QCheckBox()
+        self.verify_manifest.setChecked(bool(filesystem_cfg.get("verify_manifest", not existing_filesystem_job)))
+        self.verify_manifest.setToolTip("Hash every regular file in the completed snapshot so later drills have an independent baseline.")
         self.snapshot_keep_days = QSpinBox()
         self.snapshot_keep_days.setRange(0, 3650)
         self.snapshot_keep_days.setValue(
@@ -322,6 +342,7 @@ class JobEditorDialog(QDialog):
 
         filesystem_layout.addRow(QLabel("— Filesystem Snapshot Options —"))
         filesystem_layout.addRow("Pull Source Through SSH", self.source_via_ssh)
+        filesystem_layout.addRow("Read Protected SSH Source with sudo", self.source_ssh_sudo)
         filesystem_layout.addRow(self.transfer_hint)
         filesystem_layout.addRow(self.source_path_label, self.source_path)
         filesystem_layout.addRow(self.snapshot_root_label, self.snapshot_remote_path)
@@ -331,8 +352,44 @@ class JobEditorDialog(QDialog):
         filesystem_layout.addRow("Preserve Existing Hard Links", self.preserve_hard_links)
         filesystem_layout.addRow("Preserve ACLs", self.preserve_acls)
         filesystem_layout.addRow("Preserve Extended Attributes", self.preserve_xattrs)
+        filesystem_layout.addRow("Create SHA-256 Verification Inventory", self.verify_manifest)
         filesystem_layout.addRow("Keep Days", self.snapshot_keep_days)
         self.config_pages.addWidget(filesystem_page)
+
+        drill_page = QWidget()
+        drill_layout = QFormLayout(drill_page)
+        drill_help = QLabel(
+            "Restore a completed snapshot into a fresh private scratch directory on the snapshot host. "
+            "Verify file hashes, entry types, symlink targets, modes and modification times, then remove the scratch copy. "
+            "This does not start applications or restore a database. The backup job supplies the storage location and SSH profile."
+        )
+        drill_help.setWordWrap(True)
+        drill_layout.addRow(drill_help)
+        self.backup_job_id = QComboBox()
+        self.backup_job_id.setEditable(True)
+        for candidate in getattr(parent, "jobs", []):
+            if candidate.get("factory") == FILESYSTEM_FACTORY:
+                self.backup_job_id.addItem(candidate["id"])
+        self.backup_job_id.setCurrentText(drill_cfg.get("backup_job_id", ""))
+        self.drill_snapshot = QLineEdit(drill_cfg.get("snapshot", "latest"))
+        self.drill_snapshot.setToolTip("latest, or an exact completed name such as sites_20261009_120000. Never a .partial directory.")
+        self.restore_root = QLineEdit(drill_cfg.get("restore_root", "/backup/restore-drills"))
+        self.drill_timeout = QSpinBox()
+        self.drill_timeout.setRange(30, 86400)
+        self.drill_timeout.setValue(drill_cfg.get("timeout_sec", 3600))
+        self.drill_entries = QSpinBox()
+        self.drill_entries.setRange(1, 250000)
+        self.drill_entries.setValue(drill_cfg.get("max_entries", 250000))
+        self.drill_bytes = QLineEdit(str(drill_cfg.get("max_bytes", 100 * 1024 ** 3)))
+        self.drill_free = QLineEdit(str(drill_cfg.get("min_free_bytes", 1024 ** 3)))
+        drill_layout.addRow("Filesystem Backup Job ID", self.backup_job_id)
+        drill_layout.addRow("Completed Snapshot", self.drill_snapshot)
+        drill_layout.addRow("Private Restore Root (mode 0700)", self.restore_root)
+        drill_layout.addRow("Deadline (seconds)", self.drill_timeout)
+        drill_layout.addRow("Maximum Entries", self.drill_entries)
+        drill_layout.addRow("Maximum File Bytes", self.drill_bytes)
+        drill_layout.addRow("Free Bytes to Leave Available", self.drill_free)
+        self.config_pages.addWidget(drill_page)
         layout.addRow(self.config_pages)
 
         self.job_type.currentIndexChanged.connect(self._job_type_changed)
@@ -353,9 +410,13 @@ class JobEditorDialog(QDialog):
     def _job_type_changed(self):
         factory = self.job_type.currentData()
         self.factory.setText(factory)
-        self.config_pages.setCurrentIndex(1 if factory == FILESYSTEM_FACTORY else 0)
+        self.config_pages.setCurrentIndex(2 if factory == RESTORE_FACTORY else 1 if factory == FILESYSTEM_FACTORY else 0)
+        self.ssh_profile.setEnabled(factory != RESTORE_FACTORY)
 
     def _transfer_direction_changed(self):
+        self.source_ssh_sudo.setEnabled(self.source_via_ssh.isChecked())
+        if not self.source_via_ssh.isChecked():
+            self.source_ssh_sudo.setChecked(False)
         if self.source_via_ssh.isChecked():
             self.transfer_hint.setText(
                 "SSH server → this MatrixOS backup host (recommended for offsite backups)."
@@ -368,6 +429,11 @@ class JobEditorDialog(QDialog):
             self.snapshot_root_label.setText("SSH Snapshot Root")
 
     def _accept_if_valid(self):
+        try:
+            normalize_job(self.get_job())
+        except (ValueError, JobClipboardError) as error:
+            QMessageBox.warning(self, "Invalid RsyncBoy Job", str(error))
+            return
         if not self.job_id.text().strip():
             QMessageBox.warning(self, "Missing Job ID", "Job ID is required.")
             return
@@ -408,9 +474,20 @@ class JobEditorDialog(QDialog):
     # -----------------------------------
     def get_job(self):
         factory = self.job_type.currentData()
-        if factory == FILESYSTEM_FACTORY:
+        if factory == RESTORE_FACTORY:
+            config = {
+                "backup_job_id": self.backup_job_id.currentText().strip(),
+                "snapshot": self.drill_snapshot.text().strip(),
+                "restore_root": self.restore_root.text().strip(),
+                "timeout_sec": int(self.drill_timeout.value()),
+                "max_entries": int(self.drill_entries.value()),
+                "max_bytes": int(self.drill_bytes.text().strip()),
+                "min_free_bytes": int(self.drill_free.text().strip()),
+            }
+        elif factory == FILESYSTEM_FACTORY:
             config = {
                 "source_via_ssh": self.source_via_ssh.isChecked(),
+                "source_ssh_sudo": self.source_ssh_sudo.isChecked(),
                 "source_path": self.source_path.text().strip(),
                 "remote_path": self.snapshot_remote_path.text().strip(),
                 "snapshot_prefix": self.snapshot_prefix.text().strip(),
@@ -423,6 +500,7 @@ class JobEditorDialog(QDialog):
                 "preserve_hard_links": self.preserve_hard_links.isChecked(),
                 "preserve_acls": self.preserve_acls.isChecked(),
                 "preserve_xattrs": self.preserve_xattrs.isChecked(),
+                "verify_manifest": self.verify_manifest.isChecked(),
                 "remote_prune": {"keep_days": int(self.snapshot_keep_days.value())},
             }
         else:
@@ -447,6 +525,6 @@ class JobEditorDialog(QDialog):
             "config": config,
         }
         ssh_profile = str(self.ssh_profile.currentData() or "").strip()
-        if ssh_profile:
+        if ssh_profile and factory != RESTORE_FACTORY:
             result["ssh_profile"] = ssh_profile
         return result

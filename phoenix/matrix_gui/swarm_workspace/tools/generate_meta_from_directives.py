@@ -80,6 +80,11 @@ def generate_meta_from_directives(
                 "constraints": node.get("constraints", []),
                 "config": node.get("config", {}),
             }
+            for field in ("description", "keywords", "groups"):
+                if field in node.get("meta", {}):
+                    meta[field] = node["meta"][field]
+                elif field in node:
+                    meta[field] = node[field]
 
             out_path = output_dir / f"{name}.json"
             out_path.write_text(json.dumps(meta, indent=4), encoding="utf-8")

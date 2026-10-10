@@ -6,6 +6,7 @@ sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 from core.python_core.boot_agent import BootAgent
+from core.python_core.agent_progress import AgentProgress, REASONS, failure_reason, path_target
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
@@ -22,7 +23,7 @@ class Agent(BootAgent):
             self._emit_beacon = self.check_for_thread_poke("worker", timeout=self._interval * 2,  emit_to_file_interval=10)
 
 
-            self.AGENT_VERSION = "2.1.0"
+            self.AGENT_VERSION = "2.1.1"
 
             self._patrol_interval = int(cfg.get("patrol_interval_hours", 6)) * 3600
             self._last_patrol = 0
@@ -39,6 +40,9 @@ class Agent(BootAgent):
             self._rpc_role = self.tree_node.get("rpc_router_role", "hive.rpc")
 
             self.oracle_stack = {}
+            cadence = min(86400, max(1, self._patrol_interval)) if self.enable_oracle else None
+            self.progress = AgentProgress(self, {"collector_read": (cadence, 300)},
+                publish_interval=min(3600, max(5, self._interval)))
 
 
         except Exception as e:
@@ -74,13 +78,33 @@ class Agent(BootAgent):
                 self._run_digest_cycle(use_oracle=True, patrol=True)
         except Exception as e:
             self.log(error=e, block="main_try", level="ERROR")
-
+        if hasattr(self, "progress"):
+            self.progress.flush()
         interruptible_sleep(self, self._interval)
 
 
 
     # ------------------------------------------------------------------
     def run_collectors(self, limit_to=None):
+        # An explicit empty selection is a no-op, not proof of collection.
+        if limit_to == []:
+            return {}
+        token = self.progress.begin("collector_read")
+        targets, failures = [], []
+        try:
+            return self._collect_logs(limit_to, targets, failures)
+        except Exception as exc:
+            failures.append(failure_reason(exc))
+            raise
+        finally:
+            if limit_to is None or failures:
+                self.progress.set_context("collector_read", targets)
+            # A healthy subset cannot clear a prior failure elsewhere. Only a
+            # complete configured collection may establish aggregate recovery.
+            self.progress.finish("collector_read", token, failures[0] if failures else None,
+                                 clear_failure=limit_to is None)
+
+    def _collect_logs(self, limit_to, targets, failures):
 
         collector_results = {}
         collectors_cfg = self.tree_node.get("config", {}).get("collectors", {})
@@ -89,25 +113,35 @@ class Agent(BootAgent):
             loader = importlib.import_module(f"log_watcher.factory.utility.log_reader")
 
         except Exception as e:
+            failures.append(failure_reason(e))
             self.log(error=e, block="log_reader_loader", level="ERROR")
             return {}
 
         if not isinstance(collectors_cfg, dict):
+            failures.append("INVALID_CONFIGURATION")
             return {"configuration": {"lines": ["[collector error: collectors must be a settings object]"]}}
         # None means all configured collectors; an explicit empty selection
         # must never unexpectedly collect every configured log.
         if limit_to is not None:
             if not isinstance(limit_to, list) or any(not isinstance(c, str) for c in limit_to):
+                failures.append("INVALID_CONFIGURATION")
                 return {"configuration": {"lines": ["[collector error: invalid collector selection]"]}}
             limit_to = {c.strip().lower() for c in limit_to}
 
+        target_offset = 0
         for name, cfg in collectors_cfg.items():
+            # Keep ordinals consistent for the same ordered configuration,
+            # including when a request selects only a subset of collectors.
+            offset = target_offset
+            paths = cfg.get("paths") if isinstance(cfg, dict) else None
+            target_offset += len(paths) if isinstance(paths, list) else 1
 
             try:
                 key = name.strip().lower()
                 if limit_to is not None and key not in limit_to:
                     continue
                 if not isinstance(cfg, dict):
+                    failures.append("INVALID_CONFIGURATION")
                     collector_results[name] = {"lines": ["[collector error: settings must be an object]"]}
                     continue
                 self.log(
@@ -117,16 +151,38 @@ class Agent(BootAgent):
                 try:
                     result = loader.collect_log(self.log, cfg or {})
                     collector_results[name] = result if isinstance(result, dict) else {"lines": result}
-                    self.log(f"[COLLECTOR] ✅ {name} parsed {len(collector_results[name].get('lines', []))} lines.")
+                    diagnostics = collector_results[name].get("diagnostics")
+                    if (not isinstance(diagnostics, dict) or not isinstance(diagnostics.get("targets"), list)
+                            or not diagnostics["targets"]):
+                        # An older/mismatched reader cannot establish successful
+                        # file collection just by returning a formatted digest.
+                        failures.append("DEPENDENCY_UNAVAILABLE")
+                        self.log(f"[COLLECTOR] ⚠ {name}: file-read diagnostics unavailable.", level="WARNING")
+                        continue
+                    reason = diagnostics.get("failure_reason")
+                    if reason is not None and (not isinstance(reason, str) or reason not in REASONS):
+                        raise ValueError("Invalid collector failure reason")
+                    targets.extend(path_target(row["kind"], offset + row["index"], row.get("path"),
+                                               row["state"], row.get("reason"))
+                                   for row in diagnostics["targets"])
+                    if reason:
+                        failures.append(reason)
+                    marker = "⚠ incomplete" if reason else "✅"
+                    self.log(f"[COLLECTOR] {marker} {name} parsed {len(collector_results[name].get('lines', []))} lines.")
                 except ModuleNotFoundError:
+                    failures.append("DEPENDENCY_UNAVAILABLE")
                     self.log(f"[COLLECTOR] ❌ {name} not found")
                 except Exception as e:
+                    failures.append("INVALID_CONFIGURATION" if isinstance(e, ValueError) else failure_reason(e))
                     collector_results[name] = {"lines": [f"[collector error: {e}]"]}
                     self.log(f"[COLLECTOR] ❌ {name} failed: {e}", error=e)
 
             except Exception as e:
+                failures.append(failure_reason(e))
                 self.log(error=e, block="main_try", level="ERROR")
 
+        if not collector_results and not failures:
+            failures.append("MISSING_CONFIGURATION")
         return collector_results
 
     # ------------------------------------------------------------------

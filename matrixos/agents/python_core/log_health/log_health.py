@@ -12,6 +12,7 @@ import time
 import uuid
 
 from core.python_core.boot_agent import BootAgent
+from core.python_core.agent_progress import AgentProgress, failure_reason
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from log_health.monitor import LogMonitor
 
@@ -19,6 +20,7 @@ from log_health.monitor import LogMonitor
 class Agent(BootAgent):
     def __init__(self):
         super().__init__()
+        self.progress = AgentProgress(self, {"log_read": (1, 30)})
         self.AGENT_VERSION = "1.1.0"
         cfg = self.tree_node.get("config", {})
         self.service_name = str(cfg.get("service_name", "generic.log"))[:160]
@@ -45,7 +47,21 @@ class Agent(BootAgent):
         self.log("Log Health v1.1.0: bounded log monitor ready.")
 
     def worker_pre(self):
-        for event in self.monitor.poll():
+        self._poll_log()
+
+    def _poll_log(self):
+        token = self.progress.begin("log_read")
+        try:
+            events = self.monitor.poll()
+        except Exception as exc:
+            self.progress.finish("log_read", token, failure_reason(exc))
+            raise
+        # poll() handles access errors internally; returning [] is not success.
+        reasons = {"denied": "PERMISSION_DENIED", "missing": "MISSING_PATH",
+                   "invalid path": "INVALID_CONFIGURATION", "read error": "IO_FAILURE"}
+        reason = None if self.monitor.state in {"watching", "quiet"} else reasons.get(self.monitor.state, "OPERATION_FAILED")
+        self.progress.finish("log_read", token, reason)
+        for event in events:
             self._send_report(event)
 
     def worker(self, config=None, identity=None):
@@ -54,8 +70,7 @@ class Agent(BootAgent):
         if time.monotonic() - self._last_poll < 1:
             return
         self._last_poll = time.monotonic()
-        for event in self.monitor.poll():
-            self._send_report(event)
+        self._poll_log()
 
     def worker_post(self):
         self.monitor.close()

@@ -68,10 +68,11 @@ def _prepare_toolkit(phoenix_root, vault_path, password, supported_operations, *
             operations = tuple(sorted(op for op in supported
                 if policy_module.allows(policy, op, deployment_id)))
             destination = ""
-            if set(operations).intersection({"swarms.list", "railgun.launch"}):
+            if set(operations).intersection({"swarms.list", "railgun.launch", "agents.list", "logs.read"}):
                 from .remote_access import target_from_vault
                 target = target_from_vault(data, deployment_id, revision,
-                    launch="railgun.launch" in operations)
+                    launch="railgun.launch" in operations,
+                    diagnostics="agents.list" in operations, logs="logs.read" in operations)
                 for module_name, relative in (
                     ("matrix_gui.modules.railgun.ssh_support", "matrix_gui/modules/railgun/ssh_support.py"),
                     ("matrix_gui.modules.railgun.remote_shell", "matrix_gui/modules/railgun/remote_shell.py"),
@@ -171,7 +172,11 @@ def run_terminal(phoenix_root, vault_path, data_dir, *, alert_reader=None):
     handlers = {"alerts.read": alert_reader}
     if remote is not None:
         handlers.update({"swarms.list": remote.inventory, "railgun.launch": remote.launch,
-                         "railgun.status": remote.status})
+                         "railgun.status": remote.status, "agents.list": remote.agents,
+                         "logs.read": remote.logs, "swarm.inspect": remote.inspect})
+    from .cockpit_sessions import CockpitSessionClient
+    cockpit = CockpitSessionClient(data_dir)
+    handlers.update({"sessions.list": cockpit.call, "sessions.open": cockpit.call})
     broker = TerminalConnectionBroker(snapshot, operation_handlers=handlers)
     server = TerminalRequestServer(broker.handle, Path(data_dir))
     active_dialog = {"value": None}
@@ -196,12 +201,26 @@ def run_terminal(phoenix_root, vault_path, data_dir, *, alert_reader=None):
         f"Prepared deployments: {len(snapshot.resources)}\n\n"
         "Clients receive nothing until you approve their connection. "
         "Only permitted live swarm alerts are connected after approval. "
-        "Whitelisted Swarms reads and inactive-only Railgun launches use fixed saved servers. "
+        "Agent inventory, recent logs and Swarms reads use fixed saved servers. "
+        "Cockpit session access uses the separately running Phoenix window. "
+        "Railgun launches are separate and inactive-only. "
         "No replacement, arbitrary commands, edits, or credential export."
     )
     detail.setTextFormat(Qt.TextFormat.PlainText)
     detail.setWordWrap(True)
     layout.addWidget(detail)
+    client_path = QLabel(f"Client data directory: {Path(data_dir).resolve()}")
+    client_path.setTextFormat(Qt.TextFormat.PlainText)
+    client_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    client_path.setWordWrap(True)
+    layout.addWidget(client_path)
+    copy_setup = QPushButton("Copy client setup (PowerShell)" if os.name == "nt" else "Copy client setup (shell)")
+    def copy_client_setup():
+        from .client_setup import client_instructions
+        QApplication.clipboard().setText(client_instructions(data_dir))
+        copy_setup.setText("Client setup copied")
+    copy_setup.clicked.connect(copy_client_setup)
+    layout.addWidget(copy_setup)
     status = QLabel("Pending requests: 0 · Active connections: 0")
     status.setTextFormat(Qt.TextFormat.PlainText)
     layout.addWidget(status)
@@ -216,7 +235,9 @@ def run_terminal(phoenix_root, vault_path, data_dir, *, alert_reader=None):
     read_hint = QLabel(
         "Read received messages in the client console: terminal alerts DEPLOYMENT_ID. "
         "terminal request/status reports approval only, not the alert buffer. "
-        "Rejected packets do not erase alerts already received."
+        "Rejected packets do not erase alerts already received. "
+        "UNEXPECTED_SENDER means the packet did not match the saved alert receiver. "
+        "SSH inventory and log inspection have separate results."
     )
     read_hint.setWordWrap(True)
     layout.addWidget(read_hint)
@@ -240,7 +261,7 @@ def run_terminal(phoenix_root, vault_path, data_dir, *, alert_reader=None):
         if feeds is not None:
             states = feeds.statuses()
             feed_status.setText("\n".join(
-                f"{key}: {value['state']} — {value['code']}\n"
+                f"Alert feed {key}: {value['state']} — {value['code']}\n"
                 f"Received alerts: {value['received_alerts']} · Rejected packets: {value['rejected_packets']}"
                 + (f" · Last rejection: {value['last_rejection']}" if value['last_rejection'] else "")
                 for key, value in states.items()

@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -55,10 +56,10 @@ class VaultSSHKeyInstallDialog(QDialog):
 
         root = QVBoxLayout(self)
         intro = QLabel(
-            "Install the current editor's key using an existing Vault login. "
-            "Host, port, account and pinned host key must match. Verification uses "
-            "only the new private key. Save the editor with OK afterward; the "
-            "selected login profile is not changed."
+            "Use a saved login to install the current editor's public key, "
+            "then verify a fresh login with that key. The target and host key "
+            "must match. Return to the editor and click Save to Vault to keep "
+            "your draft. Exporting key files is optional below."
             if self.key_profile is not None else
             "Select a vaulted SSH profile to install its saved public key. "
             "Installation never removes the SSH login password."
@@ -66,7 +67,7 @@ class VaultSSHKeyInstallDialog(QDialog):
         intro.setWordWrap(True)
         root.addWidget(intro)
 
-        target_group = QGroupBox("Existing Vault Login")
+        target_group = QGroupBox("Saved Login for Installation")
         target_form = QFormLayout(target_group)
         self.profile_combo = QComboBox()
         self.target_value = QLabel("—")
@@ -80,14 +81,16 @@ class VaultSSHKeyInstallDialog(QDialog):
         )
         self.password_input.setToolTip(
             "Leave blank to use the selected profile's authentication method. "
-            "Enter a password to use it for this installation only; it is not saved."
+            "Enter the server account's login password to use it for this "
+            "installation only; it is not saved. This is not the Vault password "
+            "or the private key's passphrase."
         )
         target_form.addRow("Profile", self.profile_combo)
         target_form.addRow("Target", self.target_value)
-        target_form.addRow("Login Method", self.auth_value)
+        target_form.addRow("Saved Login Method", self.auth_value)
         target_form.addRow("Pinned Host Key", self.fingerprint_value)
-        target_form.addRow("Vault Password", self.vault_password_value)
-        target_form.addRow("One-Time Password", self.password_input)
+        target_form.addRow("Saved Server Password", self.vault_password_value)
+        target_form.addRow("One-Time Server Password", self.password_input)
         root.addWidget(target_group)
 
         key_group = QGroupBox("Key to Install")
@@ -108,8 +111,13 @@ class VaultSSHKeyInstallDialog(QDialog):
         key_form.addRow(self.match_value)
         root.addWidget(key_group)
 
-        export_group = QGroupBox("Restricted Local Key Export")
-        export_form = QFormLayout(export_group)
+        self.export_on_install = QCheckBox(
+            "Also export key files to this computer"
+        )
+        self.export_on_install.setChecked(False)
+        root.addWidget(self.export_on_install)
+        self.export_group = QGroupBox("Optional Key File Export")
+        export_form = QFormLayout(self.export_group)
         path_row = QHBoxLayout()
         self.path_input = QLineEdit()
         self.browse_btn = QPushButton("Browse…")
@@ -118,35 +126,49 @@ class VaultSSHKeyInstallDialog(QDialog):
         path_row.addWidget(self.browse_btn)
         export_form.addRow("Private Key File", path_row)
         export_note = QLabel(
-            "Phoenix writes the private key with restricted permissions and "
-            "writes the public key beside it with a .pub suffix."
+            "Exports the same key shown above, with restricted permissions "
+            "on the private key and a .pub file beside it. Existing files "
+            "require confirmation before replacement."
         )
         export_note.setWordWrap(True)
         export_form.addRow(export_note)
-        root.addWidget(export_group)
+        root.addWidget(self.export_group)
 
         actions = QHBoxLayout()
         actions.addStretch()
-        self.save_btn = QPushButton("Save Private + Public Keys")
+        self.save_btn = QPushButton("Export Key Files…")
+        # An editor already has its own export action. The standalone Registry
+        # installer also allows exporting a saved key without installing it.
+        self.save_btn.setVisible(self.key_profile is None)
+        export_form.addRow(self.save_btn)
         self.install_btn = QPushButton("Install && Verify Public Key")
         self.remove_password_btn = QPushButton(
-            "Verify && Remove Vault Password"
+            "Verify && Remove Server Password"
         )
-        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn = QPushButton(
+            "Back to Editor" if self.key_profile is not None else "Close"
+        )
         self.save_btn.clicked.connect(self._save_only)
         self.install_btn.clicked.connect(self._install)
         self.remove_password_btn.clicked.connect(self._remove_password)
         # This legacy action affects the selected Vault login, not an editor key.
         self.remove_password_btn.setVisible(self.key_profile is None)
         self.cancel_btn.clicked.connect(self.reject)
-        actions.addWidget(self.save_btn)
         actions.addWidget(self.install_btn)
         actions.addWidget(self.remove_password_btn)
         actions.addWidget(self.cancel_btn)
         root.addLayout(actions)
 
+        self.export_on_install.toggled.connect(self._export_option_changed)
+        self._export_option_changed(False)
         self.profile_combo.currentIndexChanged.connect(self._profile_changed)
         self._load_profiles()
+
+    def _export_option_changed(self, checked):
+        self.export_group.setEnabled(checked)
+        self.install_btn.setText(
+            "Install, Verify && Export" if checked else "Install && Verify Public Key"
+        )
 
     def _load_profiles(self):
         profiles = load_registry_ssh_profiles()
@@ -415,8 +437,14 @@ class VaultSSHKeyInstallDialog(QDialog):
             )
             QMessageBox.information(
                 self,
-                "SSH Key Pair Saved",
-                f"Private key:\n{private_path}\n\nPublic key:\n{public_path}",
+                "SSH Key Files Exported",
+                f"Private key:\n{private_path}\n\nPublic key:\n{public_path}\n\n"
+                + (
+                    "The key files were exported. Click Save to Vault in the "
+                    "editor to keep changes to the Registry entry."
+                    if self.key_profile is not None else
+                    "The key files were exported from the saved Registry entry."
+                ),
             )
         except Exception as exc:
             QMessageBox.critical(self, "SSH Key Export Failed", str(exc))
@@ -427,17 +455,21 @@ class VaultSSHKeyInstallDialog(QDialog):
             QMessageBox.warning(self, "Missing Profile", "Select an SSH profile.")
             return
 
+        export_requested = self.export_on_install.isChecked()
         filename = self.path_input.text().strip()
-        if not filename:
-            QMessageBox.warning(
-                self, "Missing Export Path", "Choose a private-key file path."
-            )
-            return
-        if not self._confirm_export_replace(filename):
-            return
+        if export_requested:
+            if not filename:
+                QMessageBox.warning(
+                    self, "Missing Export Path", "Choose a private-key file path."
+                )
+                return
+            if not self._confirm_export_replace(filename):
+                return
 
         install_client = None
         key_client = None
+        public_key_added = False
+        key_verified = False
         stage = "Checking installation target"
         try:
             source = deepcopy(self._key_source(profile))
@@ -459,6 +491,7 @@ class VaultSSHKeyInstallDialog(QDialog):
             )
             stage = "Installing the public key"
             result = install_authorized_key(install_client, public_key)
+            public_key_added = result.installed
             self.remote_path_value.setText(result.remote_path)
             self.remote_path_value.setToolTip(result.remote_path)
             install_client.close()
@@ -468,13 +501,9 @@ class VaultSSHKeyInstallDialog(QDialog):
             key_client, _actual = connect_ssh_profile(
                 self._private_key_profile(source, fingerprint), timeout=8
             )
+            key_verified = True
             key_client.close()
             key_client = None
-
-            stage = "Saving the local key pair"
-            private_path, public_path = save_ssh_key_pair(
-                filename, private_key, public_key
-            )
 
             updated = deepcopy(source)
             updated["auth_type"] = "private_key"
@@ -488,10 +517,20 @@ class VaultSSHKeyInstallDialog(QDialog):
             else:
                 self.installed_key_profile = updated
                 save_note = (
-                    "The selected Vault login profile was not changed. "
-                    "Close this dialog and click OK in the editor to save the new credentials."
+                    "Return to the editor and click Save to Vault to keep "
+                    "the verified credentials."
                 )
             self.password_input.clear()
+            export_note = "Local key files were not exported."
+            if export_requested:
+                stage = "Exporting the local key files"
+                private_path, public_path = save_ssh_key_pair(
+                    filename, private_key, public_key
+                )
+                export_note = (
+                    f"Exported private key:\n{private_path}\n\n"
+                    f"Exported public key:\n{public_path}"
+                )
             key_action = "installed" if result.installed else "already present"
             QMessageBox.information(
                 self,
@@ -501,12 +540,19 @@ class VaultSSHKeyInstallDialog(QDialog):
                 f"Target: {source['username']}@{source['host']}:{source.get('port', 22)}\n"
                 f"Verified host key:\n{fingerprint}\n\nRemote file:\n{result.remote_path}\n\n"
                 "A fresh login using only this private key succeeded.\n\n"
-                f"{save_note}\n\nPrivate key:\n{private_path}\n\nPublic key:\n"
-                f"{public_path}",
+                f"{save_note}\n\n{export_note}",
             )
         except Exception as exc:
+            outcome = (
+                "The public key was installed or already present, and a fresh "
+                "private-key login succeeded.\n\n"
+                if key_verified else
+                "The public key was added to the server, but private-key "
+                "login has not been verified.\n\n"
+                if public_key_added else ""
+            )
             QMessageBox.critical(
-                self, "SSH Key Installation Failed", f"{stage} failed.\n\n{exc}"
+                self, "SSH Key Onboarding Incomplete", f"{outcome}{stage} failed.\n\n{exc}"
             )
         finally:
             for client in (install_client, key_client):
@@ -524,8 +570,8 @@ class VaultSSHKeyInstallDialog(QDialog):
         if not clean_secret(profile.get("password")):
             QMessageBox.information(
                 self,
-                "No Vault Password",
-                "This SSH profile does not contain a vaulted password.",
+                "No Saved Server Password",
+                "This SSH profile does not contain a saved server password.",
             )
             return
         try:
@@ -536,9 +582,9 @@ class VaultSSHKeyInstallDialog(QDialog):
 
         confirmed = QMessageBox.question(
             self,
-            "Remove Vault Password",
+            "Remove Saved Server Password",
             "Phoenix will first perform a fresh private-key login. Remove the "
-            "vaulted SSH password only if that verification succeeds?",
+            "saved SSH server password only if that verification succeeds?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -564,7 +610,7 @@ class VaultSSHKeyInstallDialog(QDialog):
             self._commit_profile(serial, updated)
             QMessageBox.information(
                 self,
-                "Vault Password Removed",
+                "Saved Server Password Removed",
                 "Private-key login succeeded. The SSH password was then "
                 "removed from this Vault profile.",
             )

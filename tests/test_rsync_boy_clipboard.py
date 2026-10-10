@@ -36,6 +36,7 @@ def filesystem_job(job_id="sites"):
             "preserve_hard_links": True,
             "preserve_acls": True,
             "preserve_xattrs": True,
+            "verify_manifest": False,
             "remote_prune": {"keep_days": 30},
         },
     }

@@ -56,7 +56,7 @@ class Agent(BootAgent):
     def __init__(self):
         super().__init__()
         try:
-            self.AGENT_VERSION = "1.2.1"
+            self.AGENT_VERSION = "1.3.1"
             cfg = self.tree_node.get("config", {})
 
             self.interval = int(cfg.get("interval", 2))     # seconds between polls
@@ -69,6 +69,7 @@ class Agent(BootAgent):
             self.rate_limit = float(cfg.get("rate_limit", 2.0))  # seconds between sends
 
             self.active_streams = {}
+            self._diagnostic_slots = threading.BoundedSemaphore(2)
 
             self.rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc")
 
@@ -131,8 +132,63 @@ class Agent(BootAgent):
             time.sleep(check_interval)
 
     # ========== COMMAND HANDLERS ==========
+    def cmd_diagnostic(self, content, packet, identity: IdentityObject = None):
+        """One read-only snapshot, reachable only through verified Matrix routing."""
+        fields = {"target_universal_id", "session_id", "token", "request_id", "operation", "runtime_id", "diagnostic_tree"}
+        if not (isinstance(content, dict)
+                and set(content) in (fields, fields | {"agent_id"})
+                and content.get("target_universal_id") == self.command_line_args.get("universal_id")
+                and isinstance(identity, IdentityObject) and identity.has_verified_identity()
+                and identity.get_sender_uid() == self.get_matrix_universal_id()):
+            return
+        if any(not isinstance(content.get(key), str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", content[key])
+               for key in ("session_id", "token", "request_id")):
+            return
+        if (not isinstance(content.get("operation"), str)
+                or content["operation"] not in {"bind", "agents", "logs", "inspect"}
+                or not isinstance(content.get("runtime_id"), str)
+                or len(content["runtime_id"]) > 32
+                or (content["operation"] == "logs") != ("agent_id" in content)):
+            return
+        if not self._diagnostic_slots.acquire(blocking=False):
+            self._diagnostic_reply(content, None, "BUSY")
+            return
+        request = dict(content)
+        def read():
+            try:
+                from core.python_core.live_diagnostics import DiagnosticSnapshotError, session_snapshot
+                try:
+                    document = session_snapshot(self.path_resolution["comm_path"], request["operation"],
+                                                request["runtime_id"], request.get("agent_id"), request["diagnostic_tree"])
+                except DiagnosticSnapshotError as error:
+                    self._diagnostic_reply(request, None, error.code)
+                else:
+                    self._diagnostic_reply(request, document, None)
+            except Exception:
+                self._diagnostic_reply(request, None, "DIAGNOSTIC_READ_FAILED")
+            finally:
+                self._diagnostic_slots.release()
+        try:
+            threading.Thread(target=read, name="cockpit_diagnostic", daemon=True).start()
+        except RuntimeError:
+            self._diagnostic_slots.release()
+            self._diagnostic_reply(request, None, "BUSY")
+
+    def _diagnostic_reply(self, request, document, error):
+        if error:
+            self.log(f"[AI-DIAGNOSTIC][{error}] operation={request['operation']}", level="ERROR")
+        delivered = self.crypto_reply(response_handler="ai_diagnostic.update",
+            payload={"session_id": request["session_id"], "token": request["token"],
+                     "request_id": request["request_id"], "operation": request["operation"],
+                     "ok": error is None, "error": error, "document": document},
+            session_id=request["session_id"], token=request["token"], rpc_role=self.rpc_role, quiet=True)
+        if not delivered:
+            self.log(f"[AI-DIAGNOSTIC][REPLY_DELIVERY_FAILED] operation={request['operation']}", level="ERROR")
+
     def cmd_stream_log(self, content, packet, identity: IdentityObject = None):
         """Start streaming logs for a session with canonical field names."""
+        if isinstance(content, dict) and "operation" in content:
+            return self.cmd_diagnostic(content, packet, identity)
         sess = content.get("session_id")
         token = content.get("token")
         target = content.get("target_agent")

@@ -10,6 +10,7 @@ import time
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from openai import OpenAI
 from core.python_core.boot_agent import BootAgent
+from core.python_core.agent_progress import AgentProgress, failure_reason
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 
 MAX_TOKENS = 12000  # safely below the 8k-ish window
@@ -32,6 +33,8 @@ class Agent(BootAgent):
         to communicate with the LLM API.
         """
         super().__init__()
+        self.progress = AgentProgress(self, {
+            "llm_chat": (None, 180), "llm_embeddings": (None, 180), "llm_clusters": (None, 180)})
 
         try:
             self.AGENT_VERSION = "2.0"
@@ -55,6 +58,9 @@ class Agent(BootAgent):
             self.use_dummy_data = False
             self._emit_beacon = self.check_for_thread_poke("worker", timeout=60, emit_to_file_interval=10)
         except Exception as e:
+            reason = failure_reason(e) if getattr(self, "api_key", None) else "MISSING_CONFIGURATION"
+            for operation in ("llm_chat", "llm_embeddings", "llm_clusters"):
+                self.progress.block(operation, reason)
             self.log(error=e, block='main_try', level='ERROR')
 
     def _spawn_service_thread(self, target, *args, **kwargs):
@@ -206,9 +212,10 @@ class Agent(BootAgent):
                     }
                     if not model.startswith(("gpt-5", "gpt-6")):
                         request["temperature"] = temperature
-                    response = client.chat.completions.create(
-                        **request
-                    ).choices[0].message.content.strip()
+                    with self.progress.attempt("llm_chat"):
+                        response = client.chat.completions.create(
+                            **request
+                        ).choices[0].message.content.strip()
                 except TimeoutError:
                     self.log("[ORACLE][TIMEOUT] OpenAI call exceeded 30s, aborting.")
                     return
@@ -323,11 +330,12 @@ class Agent(BootAgent):
             try:
                 self.dump_messages_check(text)
                 # Support both string and list inputs
-                response = self.client.embeddings.create(
-                    model="text-embedding-3-small",
-                    input=text,
-                    timeout=30
-                )
+                with self.progress.attempt("llm_embeddings"):
+                    response = self.client.embeddings.create(
+                        model="text-embedding-3-small",
+                        input=text,
+                        timeout=30
+                    )
             except TimeoutError:
                 self.log("[ORACLE][EMBEDDINGS][TIMEOUT] OpenAI call exceeded 30s, aborting.")
                 return
@@ -367,6 +375,7 @@ class Agent(BootAgent):
         # Emit beacon for Phoenix heartbeat
         if self.running:
             self._emit_beacon()
+            self.progress.flush()
 
             # Detect config changes dynamically
             if isinstance(config, dict) and bool(config.get("push_live_config", 0)):
@@ -461,9 +470,10 @@ class Agent(BootAgent):
                 }
                 if not self.model.startswith(("gpt-5", "gpt-6")):
                     request["temperature"] = 0.3
-                response = self.client.chat.completions.create(
-                    **request
-                ).choices[0].message.content
+                with self.progress.attempt("llm_clusters"):
+                    response = self.client.chat.completions.create(
+                        **request
+                    ).choices[0].message.content
             except TimeoutError:
                 self.log("[ORACLE][CLUSTERS][TIMEOUT] OpenAI call exceeded 30s, aborting.")
                 return

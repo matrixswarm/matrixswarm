@@ -84,6 +84,12 @@ class SiteSentinel(BaseEditor, ListEditorMixin):
         self.access_logs = QPlainTextEdit()
         self.access_logs.setPlainText("\n".join(traffic_cfg.get("access_logs", [])))
         self.access_logs.setMaximumHeight(80)
+        self.access_logs.setToolTip(
+            "Use existing access-log files on the deployment server, one per line. "
+            "Ubuntu Apache commonly uses /var/log/apache2/access.log. "
+            "Each configured file must be readable by the swarm account; "
+            "remove paths for web servers that are not installed."
+        )
         self.ignored_ips = QPlainTextEdit()
         self.ignored_ips.setPlainText("\n".join(traffic_cfg.get("ignored_ips", [])))
         self.ignored_ips.setMaximumHeight(65)

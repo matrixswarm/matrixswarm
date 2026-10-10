@@ -44,6 +44,15 @@ class VaultUnlockDialog(QDialog):
         capability_layout.setContentsMargins(14, 4, 0, 6)
         layout.addWidget(self.optional_capabilities)
 
+        self.ai_mode_checkbox = QCheckBox("AI Mode (deny by default)")
+        self.ai_mode_checkbox.setObjectName("AIModeEnabled")
+        self.ai_mode_checkbox.setChecked(False)
+        self.ai_mode_checkbox.setToolTip(
+            "Applies to this vault unlock until it closes. AI clients need your "
+            "approval for the selected actions; legacy editing controls are blocked."
+        )
+        capability_layout.addWidget(self.ai_mode_checkbox)
+
         self.allow_secret_viewing_checkbox = QCheckBox(
             "Allow viewing Swarm Keys and Vault details"
         )
@@ -103,6 +112,10 @@ class VaultUnlockDialog(QDialog):
         self.selected_file_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.selected_file_label.setText(f"🔒 Selected:")
         layout.addWidget(self.selected_file_label)
+
+    @property
+    def ai_mode(self):
+        return self.ai_mode_checkbox.isChecked()
 
     @property
     def allow_secret_viewing(self):
@@ -229,6 +242,7 @@ class VaultUnlockDialog(QDialog):
         self.unlock_btn.setEnabled(not busy)
         self.yubikey_btn.setEnabled(not busy)
         self.pass_input.setEnabled(not busy)
+        self.ai_mode_checkbox.setEnabled(not busy)
         self.allow_secret_viewing_checkbox.setEnabled(not busy)
         self.debug_output_checkbox.setEnabled(not busy)
         self.close_on_minimize_or_sleep_checkbox.setEnabled(not busy)

@@ -4,6 +4,7 @@ from .directive_store import DirectiveStore
 from .connection_store import ConnectionStore
 from .workplace_store import WorkspaceStore
 from .registry_store import RegistryStore
+from .access_control_store import AccessControlStore
 class PhoenixVaultCore:
     """
     Internal domain store manager.
@@ -13,6 +14,7 @@ class PhoenixVaultCore:
     def __init__(self, root_vault):
         self.root = root_vault
         self._stores ={}
+        self._stores['access_control'] = AccessControlStore(self.root)
         try:
             self._stores['deployments'] = DeploymentStore(self.root)
         except Exception as e:

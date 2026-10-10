@@ -1,6 +1,7 @@
 # Commander Edition – Converts old workspace nodes to new schema
 
 import uuid
+from copy import deepcopy
 
 def migrate_node_to_new_schema(node, meta):
     """
@@ -18,16 +19,12 @@ def migrate_node_to_new_schema(node, meta):
         node["meta"] = meta
 
     # ---------------------------------------------------------
-    # capture config section from meta
+    # Seed defaults only for legacy nodes with no saved configuration.
+    # Loading current catalog descriptions must preserve workspace settings.
     # ---------------------------------------------------------
-    if "meta" not in node or not node.get("meta"):
-        node["meta"] = meta
-
-    # capture config section directly into node
-    config = (meta or {}).get("config", {})
-    if config:
-        node["config"] = config
-    node.setdefault("config", {})
+    if "config" not in node:
+        config = (meta or {}).get("config", {})
+        node["config"] = deepcopy(config) if isinstance(config, dict) else {}
 
     # ---------------------------------------------------------
     # params normalized

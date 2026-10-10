@@ -1,5 +1,14 @@
 {
   "name": "drop_vault",
+  "description": "Provides an authenticated shared inbox for files and clipboard content across operators.",
+  "keywords": [
+    "files",
+    "clipboard",
+    "sharing"
+  ],
+  "groups": [
+    "communication"
+  ],
   "universal_id": "drop-vault",
   "constraints": [
     {"packet_signing": {"in": true, "out": true}},

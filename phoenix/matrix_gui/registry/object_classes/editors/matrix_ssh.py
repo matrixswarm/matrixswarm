@@ -9,6 +9,10 @@ from .ssh import SSH
 
 
 class MatrixSSH(BaseEditor):
+    channel_name = "outgoing.command"
+    primary_field = "default_outgoing"
+    primary_label = "Primary Outgoing Transport"
+
     def __init__(self, parent=None, new_conn=False, default_channel_options=None, *, terminal_mode=False):
         super().__init__(parent, default_channel_options)
         self._metadata = {}
@@ -40,8 +44,8 @@ class MatrixSSH(BaseEditor):
         self.target_server.currentIndexChanged.connect(self._populate_ssh)
         self._populate_ssh()
         self.default_channel = QComboBox()
-        self.default_channel.addItem("outgoing.command")
-        self.default_outgoing = QCheckBox("Primary Outgoing Transport")
+        self.default_channel.addItem(self.channel_name)
+        self.default_outgoing = QCheckBox(self.primary_label)
         self.path_selector = QComboBox()
         self.path_selector.addItem("config")
         layout = QFormLayout(self)
@@ -80,11 +84,11 @@ class MatrixSSH(BaseEditor):
             self.ssh.addItem(f"Missing or nonmatching SSH profile · {selected}", selected)
             index = self.ssh.count() - 1
         self.ssh.setCurrentIndex(max(0, index))
-        channel = data.get("channel", "outgoing.command")
+        channel = data.get("channel", self.channel_name)
         if self.default_channel.findText(str(channel)) < 0:
             self.default_channel.addItem(str(channel))
         self.default_channel.setCurrentText(str(channel))
-        self.default_outgoing.setChecked(data.get("default_outgoing") is True)
+        self.default_outgoing.setChecked(data.get(self.primary_field) is True)
 
     def serialize(self):
         self._ensure_serial()
@@ -93,7 +97,7 @@ class MatrixSSH(BaseEditor):
             "serial": self.serial.text().strip(),
             "ssh_serial": self.ssh.currentData(),
             "channel": self.default_channel.currentText(),
-            "default_outgoing": self.default_outgoing.isChecked(),
+            self.primary_field: self.default_outgoing.isChecked(),
             "node_directive_path": "config",
         }
         metadata = deepcopy(self._metadata)
@@ -169,8 +173,8 @@ class MatrixSSH(BaseEditor):
     def _validate_route(self):
         if not self.label.text().strip():
             return False, "Label is required."
-        if self.default_channel.currentText() != "outgoing.command":
-            return False, "Matrix SSH requires the outgoing.command channel."
+        if self.default_channel.currentText() != self.channel_name:
+            return False, f"This Matrix SSH route requires the {self.channel_name} channel."
         ok, message = self._require_serial()
         if not ok:
             return ok, message
@@ -196,6 +200,8 @@ class MatrixSSH(BaseEditor):
             fields = editor.deploy_fields()
         finally:
             editor.deleteLater()
-        fields.update(channel="outgoing.command",
-                      default_outgoing=self.default_outgoing.isChecked())
+        fields.update(channel=self.channel_name)
+        fields.pop("default_outgoing", None)
+        fields.pop("default_payload_reception", None)
+        fields[self.primary_field] = self.default_outgoing.isChecked()
         return fields

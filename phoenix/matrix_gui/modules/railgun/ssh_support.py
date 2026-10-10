@@ -18,6 +18,8 @@ import tempfile
 from hashlib import sha256
 
 import paramiko
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 
 from matrix_gui.modules.vault.services.vault_core_singleton import (
     VaultCoreSingleton,
@@ -195,6 +197,59 @@ def load_private_key(key_pem, passphrase=None):
         "Unsupported or invalid private key (RSA, Ed25519, and ECDSA "
         "are supported): " + "; ".join(errors)
     )
+
+
+def generate_private_key(key_type="RSA", bits=4096, passphrase=None):
+    """Generate an OpenSSH key without Paramiko's missing Ed25519 writer."""
+    if key_type == "RSA":
+        if bits not in (2048, 3072, 4096):
+            raise ValueError("RSA key size must be 2048, 3072, or 4096 bits")
+        native_key = rsa.generate_private_key(public_exponent=65537, key_size=bits)
+    elif key_type == "Ed25519":
+        native_key = ed25519.Ed25519PrivateKey.generate()
+    else:
+        raise ValueError("Key type must be RSA or Ed25519")
+    password = clean_secret(passphrase)
+    encryption = (
+        serialization.BestAvailableEncryption(password.encode("utf-8"))
+        if password else serialization.NoEncryption()
+    )
+    key_text = native_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.OpenSSH,
+        encryption,
+    ).decode("ascii")
+    load_private_key(key_text, password)
+    return key_text
+
+
+def encrypt_private_key(key_pem, current_passphrase, new_passphrase):
+    """Change key encryption in memory and verify that its public key survives."""
+    key_text = clean_secret(key_pem)
+    original = load_private_key(key_text, current_passphrase)
+    old_password = clean_secret(current_passphrase)
+    new_password = clean_secret(new_passphrase)
+    if not new_password:
+        raise ValueError("A new key passphrase is required")
+    encoded = key_text.encode("utf-8")
+    loader = (
+        serialization.load_ssh_private_key
+        if key_text.startswith("-----BEGIN OPENSSH PRIVATE KEY-----")
+        else serialization.load_pem_private_key
+    )
+    native_key = loader(
+        encoded,
+        password=old_password.encode("utf-8") if old_password else None,
+    )
+    protected_text = native_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.OpenSSH,
+        serialization.BestAvailableEncryption(new_password.encode("utf-8")),
+    ).decode("ascii")
+    restored = load_private_key(protected_text, new_password)
+    if not hmac.compare_digest(original.asbytes(), restored.asbytes()):
+        raise ValueError("Key encryption did not preserve the public key")
+    return protected_text
 
 
 def public_key_from_private_key(key_pem, passphrase=None, comment="phoenix"):

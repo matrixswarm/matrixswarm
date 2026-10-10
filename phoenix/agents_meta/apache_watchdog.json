@@ -1,5 +1,15 @@
 {
     "name": "apache_watchdog",
+    "description": "Monitors the Apache service and its listening ports; attempts recovery and reports failures.",
+    "keywords": [
+        "web",
+        "service",
+        "availability",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "apache_watchdog-1",
     "constraints": [],
     "config": {

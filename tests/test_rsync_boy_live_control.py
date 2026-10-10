@@ -4,6 +4,7 @@ import ast
 from copy import deepcopy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -24,6 +25,7 @@ sys.path.insert(0, str(AGENT_PATH))
 from job_config import (  # noqa: E402
     FILESYSTEM_FACTORY,
     MYSQL_FACTORY,
+    RESTORE_FACTORY,
     normalize_jobs,
 )
 from storage_usage import (  # noqa: E402
@@ -74,9 +76,11 @@ def load_agent_class():
     namespace = {
         "IdentityObject": Identity,
         "normalize_jobs": normalize_jobs,
+        "RESTORE_FACTORY": RESTORE_FACTORY,
         "normalize_poll_interval": lambda value: value if type(value) is int and 1 <= value <= 86400 else (_ for _ in ()).throw(ValueError("invalid poll")),
         "re": re,
         "json": json,
+        "math": math,
         "hashlib": hashlib,
         "time": time,
         "threading": threading,
@@ -102,6 +106,7 @@ def live_agent():
     agent.launch_stagger_sec = 5
     agent._job_config_revision = 2
     agent._scheduler_state = {"version": 1, "jobs": {}}
+    agent._restore_reports = {}
     agent._last_attempt = {}
     agent._running = {}
     agent._ssh_profiles = {}

@@ -1,5 +1,14 @@
 {
     "name": "slack_relay",
+    "description": "Forwards swarm alerts to the configured Slack destination.",
+    "keywords": [
+        "slack",
+        "alerts",
+        "relay"
+    ],
+    "groups": [
+        "communication"
+    ],
     "universal_id": "slack-it-out-1",
     "constraints": [
         {

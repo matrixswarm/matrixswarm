@@ -66,6 +66,8 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
         self.dialog = self.module.VaultSSHKeyInstallDialog(
             selected_serial=self.serial
         )
+        # These existing onboarding cases exercise the optional file export.
+        self.dialog.export_on_install.setChecked(True)
         self.dialog.path_input.setText("test-key-export")
         self.enterContext(mock.patch.object(
             self.dialog, "_confirm_export_replace", return_value=True

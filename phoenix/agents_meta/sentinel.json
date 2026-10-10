@@ -1,5 +1,16 @@
 {
     "name": "sentinel",
+    "description": "Watches a critical swarm agent and attempts to restart it when its heartbeat becomes stale.",
+    "keywords": [
+        "swarm",
+        "availability",
+        "heartbeat",
+        "recovery"
+    ],
+    "groups": [
+        "monitoring",
+        "core"
+    ],
     "universal_id": "guardian-1",
     "constraints": [],
     "config": {

@@ -1,5 +1,14 @@
 {
     "name": "oracle",
+    "description": "Receives prompts from swarm agents, calls the configured language model and routes the response back.",
+    "keywords": [
+        "ai",
+        "language-model",
+        "analysis"
+    ],
+    "groups": [
+        "ai"
+    ],
     "universal_id": "golden-child-4",
     "constraints": [
         {

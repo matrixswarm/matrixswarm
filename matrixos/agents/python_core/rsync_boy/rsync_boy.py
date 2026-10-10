@@ -15,7 +15,7 @@ from core.python_core.mixin.encrypted_state import EncryptedStateMixin
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.class_lib.processes.thread_launcher import ThreadLauncher
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
-from rsync_boy.job_config import normalize_jobs, normalize_poll_interval
+from rsync_boy.job_config import normalize_jobs, normalize_poll_interval, RESTORE_FACTORY
 from rsync_boy.storage_usage import measure_backup_storage
 
 
@@ -31,7 +31,7 @@ class Agent(EncryptedStateMixin, BootAgent):
 
     def __init__(self):
         super().__init__()
-        self.AGENT_VERSION = "2.5.0"
+        self.AGENT_VERSION = "2.6.0"
 
         cfg = self.tree_node.get("config", {}) or {}
         self._rpc_role = cfg.get("rpc_router_role", "hive.rpc")
@@ -50,6 +50,7 @@ class Agent(EncryptedStateMixin, BootAgent):
         )
         self.jobs = job_config["jobs"]
         self._scheduler_state = self._load_scheduler_state()
+        self._restore_reports = self._load_restore_reports()
         self._last_attempt = {}
         self._running = {}
         self._ensure_storage_state()
@@ -198,10 +199,15 @@ class Agent(EncryptedStateMixin, BootAgent):
     # --------------------------------------------------
     @staticmethod
     def _job_definition_hash(job: dict) -> str:
+        config = dict(job.get("config", {}))
+        if job.get("factory") == "filesystem.rsync_snapshot.RsyncSnapshotJob" and not config.get("verify_manifest"):
+            # An upgraded legacy job keeps its previous schedule hash until
+            # the operator explicitly opts into the new hashing workload.
+            config.pop("verify_manifest", None)
         definition = {
             "factory": job.get("factory"),
             "ssh_profile": job.get("ssh_profile", ""),
-            "config": job.get("config", {}),
+            "config": config,
         }
         encoded = json.dumps(
             definition,
@@ -210,6 +216,34 @@ class Agent(EncryptedStateMixin, BootAgent):
             ensure_ascii=False,
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
+
+    def _backup_for_drill(self, job):
+        backup_id = job["config"]["backup_job_id"]
+        backup = next((item for item in self.jobs if item["id"] == backup_id), None)
+        if backup is None or backup.get("factory") != "filesystem.rsync_snapshot.RsyncSnapshotJob":
+            raise ValueError("The drill's filesystem backup job is unavailable")
+        return json.loads(json.dumps(backup))
+
+    def _effective_job_hash(self, job):
+        if job.get("factory") != RESTORE_FACTORY:
+            return self._job_definition_hash(job)
+        effective = json.loads(json.dumps(job))
+        effective["config"]["backup_definition_hash"] = self._job_definition_hash(self._backup_for_drill(job))
+        return self._job_definition_hash(effective)
+
+    def _load_restore_reports(self):
+        document = self.load_encrypted_state("restore_drills", default={"version": 1, "jobs": {}})
+        if (not isinstance(document, dict) or document.get("version") != 1
+                or not isinstance(document.get("jobs"), dict) or len(document["jobs"]) > 256):
+            raise ValueError("Invalid restore drill ledger")
+        known = {job["id"] for job in self.jobs if job["factory"] == RESTORE_FACTORY}
+        reports = {}
+        for job_id, report in document["jobs"].items():
+            if job_id in known:
+                if not isinstance(report, dict) or len(json.dumps(report)) > 8192:
+                    raise ValueError("Invalid restore drill report")
+                reports[job_id] = report
+        return reports
 
     # --------------------------------------------------
     @staticmethod
@@ -354,7 +388,7 @@ class Agent(EncryptedStateMixin, BootAgent):
         interval = int(sched.get("interval_sec", 0))
         run_on_boot = bool(sched.get("run_on_boot", False))
 
-        definition_hash = self._job_definition_hash(job)
+        definition_hash = self._effective_job_hash(job)
         with self._scheduler_lock:
             if job_id in self._running:
                 return False
@@ -386,6 +420,22 @@ class Agent(EncryptedStateMixin, BootAgent):
         result = completion.get("result")
         with self._scheduler_lock:
             self._running.pop(job_id, None)
+            configured_drills = {job["id"] for job in self.jobs if job["factory"] == RESTORE_FACTORY}
+            if "restore_report" in completion and job_id in configured_drills:
+                report = completion["restore_report"]
+                safe = {key: report[key] for key in (
+                    "snapshot", "backup_job_id", "verified_entries", "verified_files", "verified_bytes",
+                    "report_path", "error_code", "cleanup_required", "scratch_directory"
+                ) if key in report and isinstance(report[key], (str, int, bool))}
+                safe.update(result="ok" if result == "ok" else "error",
+                            finished_at=completion.get("finished_at", time.time()), definition_hash=definition_hash)
+                if len(json.dumps(safe)) > 8192:
+                    raise ValueError("Restore drill report exceeds size limit")
+                reports = dict(getattr(self, "_restore_reports", {}))
+                reports = {key: value for key, value in reports.items() if key in configured_drills}
+                reports[job_id] = safe
+                self.save_encrypted_state("restore_drills", {"version": 1, "jobs": reports})
+                self._restore_reports = reports
             if result != "ok":
                 self.log(
                     f"[RSYNC_BOY] Job '{job_id}' failed; completion was not "
@@ -433,13 +483,18 @@ class Agent(EncryptedStateMixin, BootAgent):
                 job_id = job["id"]
                 completion = self._scheduler_state["jobs"].get(job_id, {})
                 last_success = None
-                if completion.get("definition_hash") == self._job_definition_hash(job):
+                definition_hash = self._effective_job_hash(job)
+                if completion.get("definition_hash") == definition_hash:
                     last_success = completion.get("last_success")
                 runtime[job_id] = {
                     "running": job_id in self._running,
                     "last_attempt": self._last_attempt.get(job_id),
                     "last_success": last_success,
                 }
+                if job["factory"] == RESTORE_FACTORY:
+                    report = getattr(self, "_restore_reports", {}).get(job_id, {})
+                    if report.get("definition_hash") == definition_hash:
+                        runtime[job_id]["restore_report"] = dict(report)
             revision = self._job_config_revision
             poll_interval = self.poll_interval
             ssh_profiles = self._ssh_profile_summaries()
@@ -594,8 +649,9 @@ class Agent(EncryptedStateMixin, BootAgent):
             )
             return None
 
-        definition_hash = self._job_definition_hash(job)
         with self._scheduler_lock:
+            definition_hash = self._effective_job_hash(job)
+            backup_job = self._backup_for_drill(job) if factory == RESTORE_FACTORY else None
             if job_id in self._running:
                 return None
             self._running[job_id] = "launching"
@@ -606,7 +662,7 @@ class Agent(EncryptedStateMixin, BootAgent):
             # into the ephemeral thread context. They never enter schedule state.
             cfg = job.get("config", {}).copy()
             top_cfg = self.tree_node.get("config", {})
-            ssh_profile = str(job.get("ssh_profile", "") or "").strip()
+            ssh_profile = str((backup_job or job).get("ssh_profile", "") or "").strip()
             if ssh_profile:
                 selected = self._ssh_profiles.get(ssh_profile)
                 if selected is None:
@@ -630,14 +686,19 @@ class Agent(EncryptedStateMixin, BootAgent):
                     "top-level config."
                 )
 
-            context = {"job_id": job_id, "config": cfg}
+            restore_report = {}
+            context = {"job_id": job_id, "config": cfg, "definition_hash": definition_hash}
+            if backup_job is not None:
+                context.update(backup_job=backup_job, restore_report=restore_report,
+                               backup_definition_hash=self._job_definition_hash(backup_job))
             self.log(f"[RSYNC_BOY] Launching job '{job_id}' → {factory}")
             thread_id = self.thread_launcher.launch(
                 class_path=f"rsync_boy.factory.{factory}",
                 context=context,
                 persist=False,
                 on_complete=lambda completion: self._job_completed(
-                    job_id, definition_hash, completion
+                    job_id, definition_hash, dict(completion, restore_report=dict(restore_report))
+                    if backup_job is not None else completion
                 ),
             )
         except Exception:

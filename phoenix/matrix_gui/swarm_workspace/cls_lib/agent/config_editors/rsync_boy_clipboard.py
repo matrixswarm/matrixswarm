@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import posixpath
 
 
 CLIPBOARD_FORMAT = "matrixswarm.rsync_boy.jobs"
@@ -13,7 +14,8 @@ MAX_JOBS = 256
 
 MYSQL_FACTORY = "mysql.mysqldump.MySQLDumpJob"
 FILESYSTEM_FACTORY = "filesystem.rsync_snapshot.RsyncSnapshotJob"
-SUPPORTED_FACTORIES = {MYSQL_FACTORY, FILESYSTEM_FACTORY}
+RESTORE_FACTORY = "filesystem.restore_drill.RestoreDrillJob"
+SUPPORTED_FACTORIES = {MYSQL_FACTORY, FILESYSTEM_FACTORY, RESTORE_FACTORY}
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SAFE_PREFIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -51,7 +53,8 @@ def _integer(mapping, key, default, minimum, maximum):
 
 
 def _absolute_non_root(path, field):
-    if not path.startswith("/") or path == "/":
+    if (not path.startswith("/") or path.startswith("//") or posixpath.normpath(path) == "/"
+            or ".." in path.split("/") or "\x00" in path):
         raise JobClipboardError(f"{field} must be an absolute, non-root Linux path")
     return path
 
@@ -85,6 +88,10 @@ def _normalize_mysql_config(config):
 
 
 def _normalize_filesystem_config(config):
+    source_via_ssh = _boolean(config, "source_via_ssh", True)
+    source_ssh_sudo = _boolean(config, "source_ssh_sudo", False)
+    if source_ssh_sudo and not source_via_ssh:
+        raise JobClipboardError("source_ssh_sudo requires pulling the source through SSH")
     prefix = _string(config, "snapshot_prefix", "sites", max_length=128)
     if not _SAFE_PREFIX.fullmatch(prefix):
         raise JobClipboardError("snapshot_prefix contains unsafe characters")
@@ -98,8 +105,8 @@ def _normalize_filesystem_config(config):
         if not isinstance(pattern, str) or not pattern.strip() or len(pattern) > 512:
             raise JobClipboardError("exclude contains an invalid pattern")
         normalized_excludes.append(pattern.strip())
-    return {
-        "source_via_ssh": _boolean(config, "source_via_ssh", True),
+    result = {
+        "source_via_ssh": source_via_ssh,
         "source_path": _absolute_non_root(
             _string(config, "source_path", "/sites"), "source_path"
         ),
@@ -113,7 +120,29 @@ def _normalize_filesystem_config(config):
         "preserve_hard_links": _boolean(config, "preserve_hard_links", True),
         "preserve_acls": _boolean(config, "preserve_acls", True),
         "preserve_xattrs": _boolean(config, "preserve_xattrs", True),
+        "verify_manifest": _boolean(config, "verify_manifest", False),
         "remote_prune": _retention(config),
+    }
+    if source_ssh_sudo:
+        result["source_ssh_sudo"] = True
+    return result
+
+
+def _normalize_drill_config(config):
+    backup = _string(config, "backup_job_id", max_length=128)
+    if not _SAFE_ID.fullmatch(backup):
+        raise JobClipboardError("backup_job_id must identify a filesystem snapshot job")
+    snapshot = _string(config, "snapshot", "latest", max_length=150)
+    if snapshot != "latest" and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*_\d{8}_\d{6}", snapshot):
+        raise JobClipboardError("snapshot must be latest or an exact completed snapshot name")
+    return {
+        "backup_job_id": backup,
+        "snapshot": snapshot,
+        "restore_root": _absolute_non_root(_string(config, "restore_root", "/backup/restore-drills"), "restore_root"),
+        "timeout_sec": _integer(config, "timeout_sec", 3600, 30, 86400),
+        "max_entries": _integer(config, "max_entries", 250000, 1, 250000),
+        "max_bytes": _integer(config, "max_bytes", 100 * 1024 ** 3, 1, 10 * 1024 ** 4),
+        "min_free_bytes": _integer(config, "min_free_bytes", 1024 ** 3, 0, 1024 ** 4),
     }
 
 
@@ -130,14 +159,14 @@ def normalize_job(job):
     config = job.get("config", {}) or {}
     if not isinstance(schedule, dict) or not isinstance(config, dict):
         raise JobClipboardError(f"invalid schedule or config for job '{job_id}'")
-    normalized_config = (
-        _normalize_filesystem_config(config)
-        if factory == FILESYSTEM_FACTORY
-        else _normalize_mysql_config(config)
-    )
+    normalized_config = {RESTORE_FACTORY: _normalize_drill_config,
+                         FILESYSTEM_FACTORY: _normalize_filesystem_config,
+                         MYSQL_FACTORY: _normalize_mysql_config}[factory](config)
     ssh_profile = _string(job, "ssh_profile", "", max_length=128)
     if ssh_profile and not _SAFE_PROFILE_ID.fullmatch(ssh_profile):
         raise JobClipboardError("ssh_profile contains unsafe characters")
+    if factory == RESTORE_FACTORY and ssh_profile:
+        raise JobClipboardError("Restore drills inherit the backup job's SSH profile")
     normalized = {
         "id": job_id,
         "enabled": _boolean(job, "enabled", True),
@@ -162,6 +191,14 @@ def normalize_jobs(jobs):
     ids = [job["id"] for job in normalized]
     if len(ids) != len(set(ids)):
         raise JobClipboardError("job ids must be unique")
+    by_id = {job["id"]: job for job in normalized}
+    for job in normalized:
+        if job["factory"] == RESTORE_FACTORY:
+            backup = by_id.get(job["config"]["backup_job_id"], {})
+            if backup.get("factory") != FILESYSTEM_FACTORY:
+                raise JobClipboardError("Restore drills require a filesystem backup job in this schedule")
+            if not backup["config"]["verify_manifest"]:
+                raise JobClipboardError("The backup job must create verification manifests")
     return normalized
 
 

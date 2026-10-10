@@ -1,5 +1,17 @@
 {
     "name": "site_sentinel",
+    "description": "Monitors website integrity, load and aggressive clients using configured files and access logs.",
+    "keywords": [
+        "web",
+        "integrity",
+        "logs",
+        "traffic",
+        "alerts"
+    ],
+    "groups": [
+        "security",
+        "monitoring"
+    ],
     "universal_id": "site-sentinel-1",
     "constraints": [],
     "config": {
@@ -22,8 +34,7 @@
         "traffic": {
             "enabled": true,
             "access_logs": [
-                "/var/log/httpd/access_log",
-                "/var/log/nginx/access.log"
+                "/var/log/apache2/access.log"
             ],
             "window_sec": 60,
             "top_n_ips": 10,

@@ -1,6 +1,7 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
 import os, time, posixpath, stat
 from log_watcher.factory.utility.parse_results import parse_results
+from core.python_core.agent_progress import failure_reason, path_target
 
 def tail_file(path, n=500, block_size=8192):
     """
@@ -74,13 +75,16 @@ def collect_log(log=None, cfg=None):
     if not isinstance(paths, list) or not 1 <= len(paths) <= 16:
         raise ValueError("configure 1–16 absolute log file paths")
     errors = []
-    for path in paths:
+    targets, failures = [], []
+    for index, path in enumerate(paths, 1):
         if (not isinstance(path, str) or not posixpath.isabs(path)
                 or "\x00" in path or any(c in path for c in "*?[]")
                 or len(path.encode("utf-8")) > 1024):
             raise ValueError("paths must contain absolute Linux file paths without wildcards")
         if path.endswith((".gz", ".xz", ".bz2", ".zip")):
             errors.append(f"[collector error: compressed log not supported: {path}]")
+            failures.append("INVALID_CONFIGURATION")
+            targets.append(path_target("collector_log", index, path, "invalid", "INVALID_CONFIGURATION"))
             continue
         for i in range(rotate_depth + 1):
             suffix = "" if i == 0 else (f".{i}" if rotation_style == "numbered" else
@@ -89,14 +93,23 @@ def collect_log(log=None, cfg=None):
             try:
                 # Read from end of file precisely
                 results.extend(tail_file(file_path, n=max_lines))
+                if i == 0:
+                    targets.append(path_target("collector_log", index, path, "readable"))
             except FileNotFoundError:
                 # Missing rotations are normal; a missing configured base is not.
                 if i == 0:
                     errors.append(f"[collector error: file missing: {file_path}]")
+                    failures.append("MISSING_PATH")
+                    targets.append(path_target("collector_log", index, path, "missing", "MISSING_PATH"))
             except Exception as e:
                 errors.append(f"[collector error: {file_path}: {e}]")
+                reason = "INVALID_CONFIGURATION" if isinstance(e, ValueError) else failure_reason(e)
+                failures.append(reason)
+                state = "permission_denied" if reason == "PERMISSION_DENIED" else "invalid" if reason == "INVALID_CONFIGURATION" else "io_failure"
+                targets.append(path_target("collector_log", index, file_path, state, reason))
 
     parsed = parse_results(results)
+    parsed["diagnostics"] = {"targets": targets, "failure_reason": failures[0] if failures else None}
     if errors:
         parsed["lines"] = errors + parsed["lines"]
         detail = parsed["summary"] if results else "No log lines could be collected."

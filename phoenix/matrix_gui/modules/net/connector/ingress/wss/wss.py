@@ -3,7 +3,7 @@ import os, ssl, json, time, socket, tempfile
 from websocket import create_connection
 from Crypto.PublicKey import RSA
 
-from websocket._exceptions import WebSocketTimeoutException
+from websocket._exceptions import WebSocketTimeoutException, WebSocketBadStatusException
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.modules.net.entity.adapter.agent_cert_wrapper import AgentCertWrapper
 from matrix_gui.core.utils.spki_utils import verify_spki_pin
@@ -11,6 +11,9 @@ from matrix_gui.core.utils import crypto_utils
 from matrix_gui.core.connector_bus import ConnectorBus
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.modules.net.connector.interfaces.base_connector import BaseConnector
+
+class WSSTrustError(ConnectionError):
+    """A terminal peer-identity failure, distinct from a temporary outage."""
 
 def _write_temp_pem(data: str, suffix=".pem"):
     """
@@ -87,13 +90,13 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
         # Authenticate the peer before sending the signed hello.
         peer_cert = ws.sock.getpeercert(binary_form=True)
         if not peer_cert:
-            raise ConnectionError("WSS peer did not present a certificate")
+            raise WSSTrustError("WSS peer did not present a certificate")
         ok, actual_pin = verify_spki_pin(
             peer_cert,
             cert_adapter.server_spki_pin,
         )
         if not ok:
-            raise ConnectionError(
+            raise WSSTrustError(
                 "WSS SPKI mismatch: "
                 f"expected {cert_adapter.server_spki_pin}, got {actual_pin}"
             )
@@ -115,6 +118,15 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
         return ws
 
     except Exception as e:
+        code = ("WSS_TRUST_FAILED" if isinstance(e, (WSSTrustError, ssl.SSLError)) else
+                "WSS_DENIED" if isinstance(e, WebSocketBadStatusException) and e.status_code in {401, 403} else
+                "WSS_UNAVAILABLE" if isinstance(e, WebSocketBadStatusException) and
+                    (e.status_code in {408, 429} or (type(e.status_code) is int and 500 <= e.status_code <= 599)) else
+                "WSS_REJECTED" if isinstance(e, WebSocketBadStatusException) else
+                "WSS_CONNECT_TIMEOUT" if isinstance(e, (socket.timeout, TimeoutError, WebSocketTimeoutException)) else
+                "WSS_UNAVAILABLE" if isinstance(e, OSError) else "WSS_CONFIGURATION_INVALID")
+        ConnectorBus.get(session_id).emit("channel.failure", session_id=session_id,
+            channel=agent.get("universal_id"), error_code=code)
         if ws is not None:
             try:
                 ws.close()

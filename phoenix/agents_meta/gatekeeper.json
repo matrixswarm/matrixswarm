@@ -1,5 +1,15 @@
 {
     "name": "gatekeeper",
+    "description": "Monitors authentication logs for SSH logins and reports source addresses and location information.",
+    "keywords": [
+        "ssh",
+        "authentication",
+        "logs",
+        "alerts"
+    ],
+    "groups": [
+        "security"
+    ],
     "universal_id": "gatekeeper",
     "constraints": [],
     "config": {

@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 from rsync_boy.factory.ssh_transport import SSHTransport, parse_ssh_profile
+from rsync_boy.factory.filesystem.storage_runner import storage_operation
 
 
 _SAFE_PREFIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -69,6 +70,9 @@ class RsyncSnapshotJob:
 
     def _rsync_options(self, job, latest_exists):
         options = ["-a", "--numeric-ids", "--partial"]
+        if job.get("source_ssh_sudo", False):
+            # Only a pull job can enable this fixed remote sender command.
+            options.append("--rsync-path=sudo -n -- rsync")
         if job["preserve_hard_links"]:
             options.append("-H")
         if job["preserve_acls"]:
@@ -89,7 +93,7 @@ class RsyncSnapshotJob:
             f"[FILESYSTEM][{self.job_id}] Pushing snapshot "
             f"{job['source_path']} -> {snapshot_path}"
         )
-        transport.run(f"mkdir -p -- {shlex.quote(job['remote_path'])}")
+        storage_operation({"action": "prepare_root", "snapshot_root": job["remote_path"]}, transport)
         if transport.path_exists(snapshot_path) or transport.path_exists(staging_path):
             raise RuntimeError(f"Snapshot already exists: {snapshot_path}")
         transport.run(f"mkdir -- {shlex.quote(staging_path)}")
@@ -98,6 +102,12 @@ class RsyncSnapshotJob:
             options = self._rsync_options(job, transport.path_exists(latest_path))
             source = job["source_path"].rstrip("/") + "/"
             transport.rsync(source, staging_path.rstrip("/") + "/", options)
+            storage_operation({"action": "secure_staging", "snapshot_root": job["remote_path"],
+                               "snapshot_prefix": job["snapshot_prefix"], "snapshot": snapshot_name}, transport)
+
+            for reserved in ("snapshot.manifest.json", ".rsync-boy.inventory.jsonl"):
+                target = shlex.quote(staging_path + "/" + reserved)
+                transport.run(f"test ! -e {target} && test ! -L {target}")
 
             manifest_path = self._write_manifest(
                 job, snapshot_name, started, time.time()
@@ -107,6 +117,8 @@ class RsyncSnapshotJob:
                 staging_path.rstrip("/") + "/snapshot.manifest.json",
                 ["-a"],
             )
+            if job["verify_manifest"]:
+                storage_operation({"action": "seal", "staging": staging_path}, transport)
 
             root = shlex.quote(job["remote_path"])
             staging = shlex.quote(f"{snapshot_name}.partial")
@@ -126,6 +138,8 @@ class RsyncSnapshotJob:
                 f"rm -rf -- {shlex.quote(staging_path)}",
                 check=False,
             )
+            if manifest_path:
+                os.unlink(manifest_path)
             raise
 
     def _pull_snapshot(self, transport, job, snapshot_name, started):
@@ -149,8 +163,12 @@ class RsyncSnapshotJob:
             )
             source = job["source_path"].rstrip("/") + "/"
             transport.rsync_from(source, str(staging_path) + os.sep, options)
-            os.chmod(staging_path, 0o700)
+            storage_operation({"action": "secure_staging", "snapshot_root": str(root),
+                               "snapshot_prefix": job["snapshot_prefix"], "snapshot": snapshot_name})
             os.utime(staging_path)
+            if any(os.path.lexists(staging_path / name) for name in
+                   ("snapshot.manifest.json", ".rsync-boy.inventory.jsonl")):
+                raise ValueError("Source contains reserved RsyncBoy manifest names")
 
             manifest_path = self._write_manifest(
                 job, snapshot_name, started, time.time()
@@ -158,6 +176,8 @@ class RsyncSnapshotJob:
             local_manifest = staging_path / "snapshot.manifest.json"
             shutil.copyfile(manifest_path, local_manifest)
             os.chmod(local_manifest, 0o600)
+            if job["verify_manifest"]:
+                storage_operation({"action": "seal", "staging": str(staging_path)})
 
             os.replace(staging_path, snapshot_path)
             if os.path.lexists(pending_latest):
@@ -171,6 +191,8 @@ class RsyncSnapshotJob:
                 shutil.rmtree(staging_path)
             if os.path.lexists(pending_latest):
                 pending_latest.unlink()
+            if manifest_path:
+                os.unlink(manifest_path)
             raise
 
     @staticmethod
@@ -189,6 +211,11 @@ class RsyncSnapshotJob:
 
     def _validate_and_normalize_cfg(self, cfg: dict) -> dict:
         source_via_ssh = bool(cfg.get("source_via_ssh", False))
+        source_ssh_sudo = cfg.get("source_ssh_sudo", False)
+        if not isinstance(source_ssh_sudo, bool):
+            raise ValueError("config.source_ssh_sudo must be true or false")
+        if source_ssh_sudo and not source_via_ssh:
+            raise ValueError("config.source_ssh_sudo requires pulling the source through SSH")
         source_path = str(cfg.get("source_path") or "").strip()
         remote_path = str(cfg.get("remote_path") or "").strip().rstrip("/")
         prefix = str(cfg.get("snapshot_prefix") or self.job_id).strip()
@@ -227,15 +254,13 @@ class RsyncSnapshotJob:
             remote_path = os.path.abspath(remote_path)
             if os.path.lexists(remote_path) and os.path.islink(remote_path):
                 raise ValueError("config.remote_path must not be a symbolic link")
-            os.makedirs(remote_path, mode=0o700, exist_ok=True)
-            if hasattr(os, "geteuid") and os.stat(remote_path).st_uid != os.geteuid():
-                raise ValueError("config.remote_path must be owned by the MatrixOS user")
-            os.chmod(remote_path, 0o700)
+            storage_operation({"action": "prepare_root", "snapshot_root": remote_path})
         else:
             source_path = os.path.abspath(source_path)
 
         return {
             "source_via_ssh": source_via_ssh,
+            "source_ssh_sudo": source_ssh_sudo,
             "source_path": source_path,
             "remote_path": remote_path,
             "snapshot_prefix": prefix,
@@ -244,13 +269,16 @@ class RsyncSnapshotJob:
             "preserve_hard_links": bool(cfg.get("preserve_hard_links", True)),
             "preserve_acls": bool(cfg.get("preserve_acls", True)),
             "preserve_xattrs": bool(cfg.get("preserve_xattrs", True)),
+            "verify_manifest": bool(cfg.get("verify_manifest", False)),
             "remote_prune": {"keep_days": keep_days},
         }
 
     def _write_manifest(self, job, snapshot_name, started, finished):
         manifest = {
             "job_id": self.job_id,
+            "backup_definition_hash": self.ctx.get("definition_hash"),
             "transfer_mode": "pull_from_ssh" if job["source_via_ssh"] else "push_to_ssh",
+            "source_ssh_sudo": job.get("source_ssh_sudo", False),
             "source_path": job["source_path"],
             "remote_path": job["remote_path"],
             "snapshot": snapshot_name,
@@ -274,29 +302,16 @@ class RsyncSnapshotJob:
         keep_days = job["remote_prune"]["keep_days"]
         if keep_days <= 0:
             return
-        # Validation above constrains root and prefix before this destructive
-        # retention command is assembled.
-        root = shlex.quote(job["remote_path"])
-        pattern = shlex.quote(f"{job['snapshot_prefix']}_????????_??????")
-        transport.run(
-            f"find {root} -mindepth 1 -maxdepth 1 -type d "
-            f"-name {pattern} -mtime +{keep_days} -exec rm -rf -- {{}} +"
-        )
+        outcome = storage_operation({"action": "prune", "snapshot_root": job["remote_path"],
+                                     "snapshot_prefix": job["snapshot_prefix"], "keep_days": keep_days}, transport)
+        if outcome.get("prune_deferred"):
+            self.log(f"[FILESYSTEM][{self.job_id}] Retention deferred while a restore drill holds the snapshot lock")
 
     def _prune_local(self, job):
         keep_days = job["remote_prune"]["keep_days"]
         if keep_days <= 0:
             return
-        root = Path(job["remote_path"])
-        pattern = re.compile(
-            rf"^{re.escape(job['snapshot_prefix'])}_\d{{8}}_\d{{6}}$"
-        )
-        cutoff = time.time() - (keep_days * 86400)
-        for candidate in root.iterdir():
-            if (
-                pattern.fullmatch(candidate.name)
-                and candidate.is_dir()
-                and not candidate.is_symlink()
-                and candidate.stat().st_mtime < cutoff
-            ):
-                shutil.rmtree(candidate)
+        outcome = storage_operation({"action": "prune", "snapshot_root": job["remote_path"],
+                                     "snapshot_prefix": job["snapshot_prefix"], "keep_days": keep_days})
+        if outcome.get("prune_deferred"):
+            self.log(f"[FILESYSTEM][{self.job_id}] Retention deferred while a restore drill holds the snapshot lock")

@@ -3,6 +3,7 @@ from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.config.boot.globals import get_sessions
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
+import re
 
 class OutboundDispatcher:
     """
@@ -105,7 +106,8 @@ class OutboundDispatcher:
                          packet: Packet,
                          security_sig=True,
                          security_encryption=True,
-                         security_target_universal_id=None):
+                         security_target_universal_id=None,
+                         delivery_id=None):
         """
         Event handler for outbound.message
 
@@ -120,6 +122,16 @@ class OutboundDispatcher:
         @param security_encryption: Whether to encrypt the payload.
         @param security_target_universal_id: UID of the intended recipient.
         """
+        ctx = None
+        if delivery_id is not None and (not isinstance(delivery_id, str)
+                or not re.fullmatch(r"[a-f0-9]{32}", delivery_id)):
+            return
+        def failed():
+            if delivery_id is not None and ctx and getattr(ctx, "bus", None):
+                ctx.bus.emit("channel.delivery", session_id=self._session_id,
+                    channel=(self._resolved_channel or {}).get("universal_id"),
+                    delivery_id=delivery_id, state="failed", http_status=None,
+                    error_code="EGRESS_QUEUE_FAILED")
         try:
             ctx = self._get_ctx()
             if ctx is None:
@@ -129,15 +141,18 @@ class OutboundDispatcher:
             dep = ctx.group.get("deployment", {}) if ctx else {}
             if not dep:
                 print("[OutboundDispatcher][_handle_outbound] no deployment set, aborting sending packet.")
+                failed()
                 return
 
             launcher = self._get_launcher()
             if not launcher:
                 print("[OutboundDispatcher][_handle_outbound] no connection_launcher set, aborting sending packet.")
+                failed()
                 return
 
             if not self._resolved_channel:
                 print("[OutboundDispatcher][_handle_outbound] a resolved channel has not been set, aborting sending packet.")
+                failed()
                 return
 
             # Matrix Signing & Encryption - Inner Packet
@@ -152,7 +167,9 @@ class OutboundDispatcher:
 
             uid = self._resolved_channel.get("universal_id")
 
-            launcher.launch(uid, packet=packet, fire_catapult=True)
+            if launcher.launch(uid, packet=packet, fire_catapult=True, delivery_id=delivery_id) is None:
+                failed()
 
         except Exception as e:
+            failed()
             emit_gui_exception_log("OutboundDispatcher._handle_outbound", e)

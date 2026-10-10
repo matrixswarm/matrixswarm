@@ -1,7 +1,15 @@
 {
     "name": "storm_crow",
+    "description": "Watches configured weather alerts and forwards relevant warnings to the swarm.",
+    "keywords": [
+        "weather",
+        "alerts",
+        "monitoring"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "storm-crow-1",
-    "description": "Watches for server weather alerts for your area.",
     "constraints": [
 
     ],

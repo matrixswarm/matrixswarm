@@ -1,5 +1,14 @@
 {
   "name": "mcp_reflex_probe",
+  "description": "Runs a single signed probe to check the MCP Reflex gateway.",
+  "keywords": [
+    "mcp",
+    "diagnostics",
+    "probe"
+  ],
+  "groups": [
+    "ai"
+  ],
   "universal_id": "mcp-reflex-probe-1",
   "constraints": [
     {"packet_signing": {"in": true, "out": true}},

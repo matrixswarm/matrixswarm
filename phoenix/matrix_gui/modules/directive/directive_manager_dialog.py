@@ -17,6 +17,7 @@ from matrix_gui.modules.vault.ui.dump_vault_popup import DumpVaultPopup
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
 from matrix_gui.swarm_workspace.workspace_manager import WorkspaceManagerDialog
 from matrix_gui.swarm_workspace.swarm_workspace import SwarmWorkspaceDialog
+from matrix_gui.swarm_workspace.agent_catalog import agent_catalog_root
 
 
 class DirectiveManagerDialog(QDialog):
@@ -118,8 +119,7 @@ class DirectiveManagerDialog(QDialog):
                                     f"Workspace {uuid[:8]} not found in vault.")
                 return
 
-            base_dir = Path(__file__).resolve().parents[2]
-            agents_root = str(base_dir / "agents_meta")
+            agents_root = str(agent_catalog_root())
 
             dlg = SwarmWorkspaceDialog(agents_root, workspace)
             dlg.exec()
@@ -334,7 +334,7 @@ class DirectiveManagerDialog(QDialog):
 
             # 4. Launch workspace editor ONCE
             from matrix_gui.swarm_workspace.swarm_workspace import SwarmWorkspaceDialog
-            dlg = SwarmWorkspaceDialog(agents_root, workspace_data)
+            dlg = SwarmWorkspaceDialog(str(agent_catalog_root()), workspace_data)
             dlg.exec()
 
             # 5. Save updated workspaces

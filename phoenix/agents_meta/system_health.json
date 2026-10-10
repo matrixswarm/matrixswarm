@@ -1,5 +1,15 @@
 {
     "name": "system_health",
+    "description": "Monitors CPU, memory, disk and other system resources and reports structured health metrics.",
+    "keywords": [
+        "system",
+        "metrics",
+        "monitoring",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "system-health-1",
     "constraints": [],
     "config": {

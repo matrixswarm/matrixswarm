@@ -24,15 +24,19 @@ class _Ticket:
 class QtBridgeDispatcher(QObject):
     requested = pyqtSignal(object)
 
-    def __init__(self, backend: object):
+    def __init__(self, backend: object, *, timeout_seconds: int = 125):
         super().__init__()
+        if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 125:
+            raise ValueError("Invalid Qt dispatch timeout")
+        self._timeout = timeout_seconds
         self._backend = backend
         self.requested.connect(self._execute, Qt.ConnectionType.QueuedConnection)
 
     def call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         ticket = _Ticket(method=method, params=params)
+        ticket.deadline = time.monotonic() + self._timeout
         self.requested.emit(ticket)
-        if not ticket.done.wait(timeout=125):
+        if not ticket.done.wait(timeout=self._timeout):
             ticket.cancelled.set()
             raise TimeoutError("Phoenix did not answer the bridge request in time")
         if ticket.error is not None:

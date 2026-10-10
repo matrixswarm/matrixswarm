@@ -1,5 +1,15 @@
 {
     "name": "log_watcher",
+    "description": "Collects configured log sources and reports observed events for monitoring and investigation.",
+    "keywords": [
+        "logs",
+        "collectors",
+        "monitoring",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "triclops-1",
     "constraints": [
         {

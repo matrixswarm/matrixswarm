@@ -1,5 +1,14 @@
 {
     "name": "matrix",
+    "description": "Starts the swarm, establishes its chain of trust and routes commands between agents.",
+    "keywords": [
+        "swarm",
+        "routing",
+        "authority"
+    ],
+    "groups": [
+        "core"
+    ],
     "universal_id": "matrix",
     "constraints": [
         {

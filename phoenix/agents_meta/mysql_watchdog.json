@@ -1,5 +1,16 @@
 {
     "name": "mysql_watchdog",
+    "description": "Monitors MySQL or MariaDB availability, attempts service recovery and reports failures.",
+    "keywords": [
+        "database",
+        "mysql",
+        "service",
+        "availability",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "mysql-red-phone",
     "constraints": [],
     "config": {

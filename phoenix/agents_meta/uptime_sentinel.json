@@ -1,5 +1,14 @@
 {
     "name": "uptime_sentinel",
+    "description": "Checks configured endpoint availability and sends alerts with a cooldown between repeats.",
+    "keywords": [
+        "availability",
+        "network",
+        "alerts"
+    ],
+    "groups": [
+        "monitoring"
+    ],
     "universal_id": "uptime-pinger-1",
 
     "constraints": [

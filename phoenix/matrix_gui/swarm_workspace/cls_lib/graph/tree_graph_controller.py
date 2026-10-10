@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QGraphicsLineItem, QMessageBox, QMenu
 from PyQt6.QtCore import QPointF
 from PyQt6.QtGui import QPen, QColor
 from matrix_gui.swarm_workspace.autoplant import autoplant
+from matrix_gui.swarm_workspace.agent_catalog import agent_catalog_root
 from PyQt6.QtCore import QTimer
 class TreeGraphController:
     """
@@ -614,8 +615,7 @@ class TreeGraphController:
     # (helpers)
     def _load_meta(self, name):
         import json
-        from pathlib import Path
-        path = Path(__file__).resolve().parents[2] / "agents_meta" / f"{name}.json"
+        path = agent_catalog_root() / f"{name}.json"
         return json.loads(path.read_text(encoding="utf-8"))
 
     def _spawn(self, meta):

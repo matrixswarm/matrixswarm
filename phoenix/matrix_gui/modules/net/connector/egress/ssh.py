@@ -133,7 +133,7 @@ class SSHConnector(BaseConnector):
         self._sftp, used_sudo = open_inbox_sftp(self._client, self.inbox, timeout=15)
         if used_sudo:
             print("[SSHConnector] Inbox delivery is using passwordless sudo SFTP.")
-        self._emit_status("connected", self.host, self.port)
+        self._emit_status(getattr(self, "_connected_status", "connected"), self.host, self.port)
 
     def _secure_envelope(self, packet, transport_id):
         packet_data = packet.get_packet() if hasattr(packet, "get_packet") else packet
