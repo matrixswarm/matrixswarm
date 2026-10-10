@@ -69,8 +69,9 @@ class PublicReleaseSecurityTests(unittest.TestCase):
         self.assertIn("ctx_ssl.check_hostname = False", https_source)
         self.assertNotIn("load_verify_locations", https_source)
         self.assertNotIn('"CA root": cert_adapter.ca_root_cert', https_source)
+        self.assertIn("class HTTPSTrustError(ConnectionError):", https_source)
         self.assertIn(
-            'raise ConnectionError("HTTPS peer did not present a certificate")',
+            'raise HTTPSTrustError("HTTPS peer did not present a certificate")',
             https_source,
         )
         self.assertLess(

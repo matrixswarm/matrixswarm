@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "matrixos"))
 from core.python_core.class_lib.crypto.symmetric_encryption.aes.aes import AESHandlerBytesShim
 from core.python_core.class_lib.inotify_events.jedi_event_flow import JediEventFlow
+from core.python_core.agent_progress import AgentProgress, failure_reason, path_target
 
 
 class TripwireStartupTests(unittest.TestCase):
@@ -37,7 +38,11 @@ class TripwireStartupTests(unittest.TestCase):
         class BootFixture:
             def __init__(self):
                 self.tree_node = {"config": fixture.config}
-                self.path_resolution = {"static_comm_path_resolved": str(fixture.root)}
+                self.path_resolution = {
+                    "static_comm_path_resolved": str(fixture.root),
+                    "comm_path_resolved": str(fixture.root),
+                }
+                self.command_line_args = {"universal_id": "tripwire-fixture"}
                 self.log = fixture.log
                 self.check_for_thread_poke = fixture.register_beacon
                 self.running = True
@@ -52,6 +57,7 @@ class TripwireStartupTests(unittest.TestCase):
             "os": SimpleNamespace(path=os.path, sep=os.sep, makedirs=os.makedirs),
             "JediEventFlow": JediEventFlow, "AESHandlerBytesShim": AESHandlerBytesShim,
             "interruptible_sleep": Mock(),
+            "AgentProgress": AgentProgress, "failure_reason": failure_reason, "path_target": path_target,
         }
         exec(compile(ast.Module(body=[cls], type_ignores=[]), str(source), "exec"), scope)
         self.Agent = scope["Agent"]

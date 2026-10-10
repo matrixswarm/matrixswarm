@@ -24,10 +24,11 @@ class VaultCapabilitySessionTests(unittest.TestCase):
         self.dialog = VaultUnlockDialog()
         self.addCleanup(self.dialog.deleteLater)
 
-    def test_optional_section_is_static_and_all_three_choices_are_off(self):
+    def test_optional_section_is_static_and_all_four_choices_are_off(self):
         self.assertFalse(self.dialog.optional_capabilities.isHidden())
         choices = self.dialog.optional_capabilities.findChildren(QCheckBox)
-        self.assertEqual(3, len(choices))
+        self.assertEqual(4, len(choices))
+        self.assertIn(self.dialog.ai_mode_checkbox, choices)
         self.assertTrue(all(not item.isChecked() for item in choices))
         self.assertFalse(hasattr(self.dialog, "capabilities_toggle"))
         self.assertFalse(hasattr(self.dialog, "llm_record_mode_checkbox"))

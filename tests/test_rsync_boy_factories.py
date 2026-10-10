@@ -1,4 +1,7 @@
+import base64
+import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -293,6 +296,7 @@ class _FakeTransport:
         self.commands = []
         self.rsync_calls = []
         self.script_calls = []
+        self.storage_requests = []
         self.uploaded_contents = []
 
     def __enter__(self):
@@ -308,7 +312,19 @@ class _FakeTransport:
     def run_script(self, script, **kwargs):
         self.script_calls.append((script, kwargs))
         stdout = kwargs.get("stdout")
-        if hasattr(stdout, "write"):
+        if script.startswith(b"python3 - <<'RSYNC_BOY_HELPER'\n"):
+            payload = re.search(rb"sys.stdin = .*base64.b64decode\('([^']+)'\)", script)
+            if payload is None:
+                raise AssertionError("Storage helper request is missing its encoded JSON")
+            request = json.loads(base64.b64decode(payload.group(1)))
+            self.storage_requests.append(request)
+            replies = {
+                "prepare_root": {"prepared": True},
+                "secure_staging": {"secured": True},
+                "prune": {"pruned": 0},
+            }
+            output = json.dumps(replies[request["action"]]).encode("utf-8")
+        elif hasattr(stdout, "write"):
             stdout.write(b"complete remote dump")
             output = None
         else:
@@ -403,6 +419,10 @@ class FilesystemSnapshotJobTests(unittest.TestCase):
             publish = "\n".join(command for command, _ in transport.commands)
             self.assertIn("mv -- site_20260913_100229.partial site_20260913_100229", publish)
             self.assertIn(".latest.new latest", publish)
+            self.assertEqual(
+                ["prepare_root", "secure_staging", "prune"],
+                [request["action"] for request in transport.storage_requests],
+            )
 
     def test_root_remote_destination_is_rejected(self):
         with tempfile.TemporaryDirectory() as source:

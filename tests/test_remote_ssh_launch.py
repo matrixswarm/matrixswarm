@@ -723,6 +723,9 @@ class RemoteSSHLaunchTests(unittest.TestCase):
                 self.info = {"pid": pid, "cmdline": cmdline}
                 self._environment = environment or {}
 
+            def create_time(self):
+                return 1757460600.0
+
             def environ(self):
                 return dict(self._environment)
 

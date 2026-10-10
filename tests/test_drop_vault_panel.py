@@ -20,7 +20,9 @@ from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from matrix_gui.core.panel.custom_panels.drop_vault.drop_vault import DropVault, _expire_clipboard
 from matrix_gui.core.panel.custom_panels.drop_vault.local_files import FileJob, MAX_BYTES
-from test_drop_vault_store import Persistence, DropStore, load_agent_class, IdentityObject, CHUNK_BYTES, upload
+from test_drop_vault_store import (
+    Persistence, DropStore, load_agent_class, initialize_progress, IdentityObject, CHUNK_BYTES, upload,
+)
 
 
 class Bus:
@@ -55,6 +57,7 @@ class PanelTests(unittest.TestCase):
         cls = load_agent_class()
         self.agent = cls.__new__(cls)
         self.agent.command_line_args = {"universal_id": "drop-a"}
+        initialize_progress(self.agent, self.temp.name)
         self.agent.get_matrix_universal_id = lambda: "matrix"
         self.agent._rpc_role = "hive.rpc"
         self.agent.store = self.store

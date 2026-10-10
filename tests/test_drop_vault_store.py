@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "matrixos"))
 sys.path.insert(0, str(ROOT / "matrixos/agents/python_core"))
 from core.python_core.mixin.encrypted_state import EncryptedStateMixin, EncryptedStateError
+from core.python_core.agent_progress import AgentProgress, REASONS, failure_reason
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
 from drop_vault.store import DropStore, DropError, CHUNK_BYTES, MAX_OBJECT_BYTES
 
@@ -54,9 +55,20 @@ def load_agent_class():
     cls = next(item for item in tree.body if isinstance(item, ast.ClassDef) and item.name == "Agent")
     cls.bases = []
     scope = dict(IdentityObject=IdentityObject, DropError=DropError, re=re,
-                 hashlib=hashlib, traceback=traceback, time=time)
+                 hashlib=hashlib, traceback=traceback, time=time,
+                 AgentProgress=AgentProgress, REASONS=REASONS, failure_reason=failure_reason)
     exec(compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])), str(path), "exec"), scope)
     return scope["Agent"]
+
+
+def initialize_progress(agent, root):
+    agent.path_resolution = {"comm_path_resolved": str(root)}
+    agent.progress = AgentProgress(agent, {
+        "inbox_setup": (None, 120),
+        **{"inbox_" + operation: (None, 120) for operation in
+           ("list", "read", "begin", "chunk", "commit", "cancel", "delete")},
+        "inbox_cleanup": (30, 120), "inbox_reply": (None, 30),
+    })
 
 
 class StoreTests(unittest.TestCase):
@@ -237,9 +249,12 @@ class StoreTests(unittest.TestCase):
 
 class ProtocolTests(unittest.TestCase):
     def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
         cls = load_agent_class()
         self.agent = cls.__new__(cls)
         self.agent.command_line_args = {"universal_id": "drop-a"}
+        initialize_progress(self.agent, temporary.name)
         self.agent.get_matrix_universal_id = lambda: "matrix"
         self.agent._rpc_role = "hive.rpc"
         self.agent.store = Mock()

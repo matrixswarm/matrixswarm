@@ -164,8 +164,9 @@ class DashboardControlTests(unittest.TestCase):
         controls.enabled_checkbox.setChecked(True)
         controls.swarms_checkbox.setChecked(True)
         controls.railgun_checkbox.setChecked(True)
-        controls.deployment_scope.topLevelItem(0).setCheckState(2, Qt.CheckState.Checked)
-        controls.deployment_scope.topLevelItem(1).setCheckState(3, Qt.CheckState.Checked)
+        columns = {operation: column for column, operation in enumerate(controls.operation_checkboxes, 1)}
+        controls.deployment_scope.topLevelItem(0).setCheckState(columns["swarms.list"], Qt.CheckState.Checked)
+        controls.deployment_scope.topLevelItem(1).setCheckState(columns["railgun.launch"], Qt.CheckState.Checked)
         controls.save_policy()
         saved = authority.patch_calls[0][1]["permissions"]
         self.assertEqual(["alpha-on-host-a"], saved["swarms.list"]["deployment_ids"])
