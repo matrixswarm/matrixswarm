@@ -124,7 +124,9 @@ class PhoenixControlPanel(QWidget):
 
             # Wire events
             EventBus.on("vault.unlocked", self.on_vault_unlocked)
-            EventBus.on("vault.update", self.on_vault_update)
+            # vault.update requests a write before the singleton publishes it.
+            # Refresh only after the committed state is available to read().
+            EventBus.on("vault.core.update", self.on_vault_update)
 
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.__init__", e)
@@ -220,6 +222,9 @@ class PhoenixControlPanel(QWidget):
             vault = VaultCoreSingleton.get().read()
             deployments = vault.get("deployments", {})
 
+            selected_id = self.deployment_selector.currentData()
+            previous_ids = {self.deployment_selector.itemData(i)
+                            for i in range(self.deployment_selector.count())}
             self.deployment_selector.clear()
 
             # A universe may be deployed repeatedly under the same friendly
@@ -256,18 +261,23 @@ class PhoenixControlPanel(QWidget):
                 )
 
             if choices:
-                self.deployment_selector.setCurrentIndex(0)
+                current_ids = {dep_id for dep_id, _ in choices}
+                if selected_id in current_ids and not (current_ids - previous_ids):
+                    self.deployment_selector.setCurrentIndex(
+                        self.deployment_selector.findData(selected_id))
+                else:
+                    self.deployment_selector.setCurrentIndex(0)
 
         except Exception as e:
             emit_gui_exception_log("PhoenixControlPanel.refresh_deployments", e)
 
     def on_vault_update(self, **kwargs):
-        """Handle a ``vault.update`` bus event.
+        """Refresh after the vault publishes a committed update.
 
         Parameters
         ----------
         **kwargs
-            ``data`` – the fresh vault dict shoved in by the emitter.
+            Ignored; the current snapshot is read from the vault singleton.
         """
         try:
             self.refresh_deployments()
@@ -375,4 +385,3 @@ class PhoenixControlPanel(QWidget):
     def open_directive_manager(self):
         dlg = DirectiveManagerDialog()
         dlg.exec()
-

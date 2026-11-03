@@ -87,7 +87,7 @@ class TerminalModeWindowTests(unittest.TestCase):
         panel = PhoenixControlPanel()
         self.addCleanup(panel.deleteLater)
         self.addCleanup(EventBus.off, "vault.unlocked", panel.on_vault_unlocked)
-        self.addCleanup(EventBus.off, "vault.update", panel.on_vault_update)
+        self.addCleanup(EventBus.off, "vault.core.update", panel.on_vault_update)
         self.assertEqual("AI Mode", panel.terminal_btn.text())
         self.assertFalse(panel.terminal_btn.icon().isNull())
         with patch("matrix_gui.modules.access_control.access_control_dialog.AccessControlDialog") as dialog:
