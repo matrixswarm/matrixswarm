@@ -217,7 +217,11 @@ Each read uses a fresh request ID and correlation nonce, verifies the saved
 Log Streamer sender, and checks deployment, session, generation and boot before
 processing or disclosing evidence. Matrix-signed broadcasts may refresh the
 tree; unbound/old trees cannot replace it. Tree names/relationships are projected
-without config/vault fields. Tree freshness and truncation remain explicit.
+without config/vault fields. Tree freshness and truncation remain explicit. When Matrix supplies a valid
+current-boot spawn status, the compact report includes its flip-trip flag,
+count and check time. A fresh Matrix broadcast can also display a warning in
+the inspection tab, but only while agent inventory is permitted. An inspection
+is still a bounded snapshot, not a continuous AI alert subscription.
 The MCP compact report preserves the binding and states any omitted tree nodes.
 Missing process/work/log permissions do not cause automatic privilege grants.
 

@@ -7,6 +7,7 @@ remain unchanged; unreadable evidence stays an explicit coverage limit.
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+import math
 
 from core.python_core.swarm_diagnostics import BOOT, IDENTIFIER, identifier, agents_snapshot, log_snapshot
 from core.python_core.swarm_processes import get_all_swarm_agent_info
@@ -23,7 +24,7 @@ class DiagnosticSnapshotError(ValueError):
 
 
 def tree_snapshot(root, boot):
-    """Matrix projects identities/relationships only, never config or vaults."""
+    """Project identities and bounded Matrix spawn status, never config or vaults."""
     result = {"runtime_id": boot, "state": "unavailable", "nodes": [],
               "observed_at": datetime.now(timezone.utc).isoformat(), "truncated": False}
     if not isinstance(root, dict):
@@ -40,7 +41,15 @@ def tree_snapshot(root, boot):
             name = node.get("name")
             if not isinstance(name, str) or not IDENTIFIER.fullmatch(name):
                 name = uid
-            result["nodes"].append({"agent_id": uid, "parent_id": parent, "name": name})
+            projected = {"agent_id": uid, "parent_id": parent, "name": name}
+            status = node.get("agent_status")
+            if isinstance(status, dict) and isinstance(status.get("spawn"), dict):
+                spawn = status["spawn"]
+                count, flipping, checked = spawn.get("count"), spawn.get("flip_tripping"), status.get("checked_at")
+                if (type(count) is int and 0 <= count <= 100000 and type(flipping) is bool
+                        and type(checked) in (int, float) and math.isfinite(checked) and 0 < checked <= 4102444800):
+                    projected["matrix_spawn"] = {"count": count, "flip_tripping": flipping, "checked_at": checked}
+            result["nodes"].append(projected)
             if len(children) > 256:
                 raise ValueError("Invalid tree")
             stack.extend((child, uid) for child in reversed(children))

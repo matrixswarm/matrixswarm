@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import base64
 import json
+import math
 import re
 import threading
 import time
@@ -147,6 +148,7 @@ class SessionDiagnostics(QObject):
         self.closed, self.ctx = False, None
         self.connected = threading.Event()
         self.pending, self.tree = {}, []
+        self._reported_flips = set()
         self.ingress_error, self.connection_readiness = None, None
         self.tree_coverage = {"state": "not_received", "observed_at": None,
                               "source": None, "truncated": False}
@@ -394,14 +396,32 @@ class SessionDiagnostics(QObject):
                     children = node.get("children", [])
                     if not isinstance(children, list) or len(children) > 256:
                         return
-                    nodes.append({"agent_id": uid, "parent_id": parent,
-                                  "name": _safe_message(node.get("name") or uid)[:128]})
+                    projected = {"agent_id": uid, "parent_id": parent,
+                                 "name": _safe_message(node.get("name") or uid)[:128]}
+                    status = node.get("agent_status")
+                    if isinstance(status, dict) and isinstance(status.get("spawn"), dict):
+                        spawn = status["spawn"]
+                        count, flipping, checked = spawn.get("count"), spawn.get("flip_tripping"), status.get("checked_at")
+                        if (type(count) is int and 0 <= count <= 100000 and type(flipping) is bool
+                                and type(checked) in (int, float) and math.isfinite(checked) and 0 < checked <= 4102444800):
+                            projected["matrix_spawn"] = {"count": count, "flip_tripping": flipping, "checked_at": checked}
+                    nodes.append(projected)
                     stack.extend((child, uid) for child in reversed(children))
                 previous_boot = self.runtime_id
                 self.runtime_id = boot
                 try:
                     self._set_tree(nodes, {"state": "available", "observed_at": stamp.isoformat(),
                                    "source": "matrix_broadcast", "truncated": bool(stack)})
+                    now = time.time()
+                    active = {node["agent_id"] for node in self.tree
+                              if node.get("matrix_spawn", {}).get("flip_tripping") is True
+                              and -10 <= now - node["matrix_spawn"]["checked_at"] <= 120}
+                    if (self.connection_readiness or {}).get("state") == "ready":
+                        new = active - self._reported_flips
+                        self._reported_flips = active
+                        parent = self.parent()
+                        if new and parent is not None and hasattr(parent, "matrix_tree_warning"):
+                            parent.matrix_tree_warning(self, self.tree, self.tree_coverage)
                 except ValueError:
                     self.runtime_id = previous_boot
                     raise

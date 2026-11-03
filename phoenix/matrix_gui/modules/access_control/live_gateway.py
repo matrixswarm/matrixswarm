@@ -389,6 +389,9 @@ class LiveGateway(QObject):
                             "lease": lease, "session_id": rows[0]["session_id"]})
                     except (PermissionError, RuntimeError, TimeoutError):
                         pass  # Revocation/lock cleanup owns an ended lease.
+                from phoenix_terminal.swarm_inspection import DiagnosticReadError
+                if isinstance(error, DiagnosticReadError):
+                    raise DiagnosticReadError(f"{error} The hive may be down or unreachable, or the connection may be misconfigured; this check cannot determine the cause.") from None
                 raise
         return result
 
@@ -400,6 +403,20 @@ class LiveGateway(QObject):
                 lease = self.broker._operation_lease(record, method, params["deployment_id"])
             self.evidence_ready.emit((lease, params["deployment_id"], deepcopy(result)))
         return result
+
+    def matrix_tree_warning(self, session, tree, coverage):
+        """Display verified Matrix warnings only under an agent-inventory grant."""
+        with self.broker._lock:
+            for request_id, grant in tuple(self.broker.grants.items()):
+                if grant.connection_id != session.connection_id:
+                    continue
+                lease = _Lease(self.broker, request_id, ("agents.list",), session.target.deployment["id"])
+                if lease() and session.runtime_id and (session.readiness() or {}).get("state") == "ready":
+                    self.evidence_ready.emit((lease, session.target.deployment["id"], {
+                        "status": "Matrix reported flip-tripping; inspect the affected agent logs.",
+                        "agent_tree": deepcopy(tree), "agent_tree_coverage": deepcopy(coverage),
+                        "session_binding": session.binding()}))
+                break
 
     def _show_evidence(self, event):
         try:
@@ -414,8 +431,23 @@ class LiveGateway(QObject):
                     return
                 def display():
                     if binding is not None:
-                        row[5].setText("Live Phoenix AI session — read only. "
-                            f"Verified swarm boot: {binding['runtime_id']}; no native agent panel actions.")
+                        import time
+                        warnings = []
+                        coverage = result.get("agent_tree_coverage", {})
+                        if coverage.get("state") == "available":
+                            now = time.time()
+                            for node in result.get("agent_tree", []):
+                                spawn = node.get("matrix_spawn", {})
+                                checked = spawn.get("checked_at")
+                                if (spawn.get("flip_tripping") is True and type(checked) in (int, float)
+                                        and -10 <= now - checked <= 120):
+                                    warnings.append(node["agent_id"])
+                        if warnings:
+                            row[5].setText("⚠ Matrix reports flip-tripping: " + ", ".join(warnings[:8])
+                                + (f" and {len(warnings) - 8} more" if len(warnings) > 8 else ""))
+                        else:
+                            row[5].setText("Live Phoenix AI session — read only. "
+                                f"Verified swarm boot: {binding['runtime_id']}; no native agent panel actions.")
                     elif result.get("connection_readiness", {}).get("state") in {"waiting", "retrying"}:
                         ready = result["connection_readiness"]
                         row[5].setText("Live Phoenix AI session — read only. "
