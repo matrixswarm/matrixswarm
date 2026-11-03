@@ -1,5 +1,5 @@
 from .base_editor import BaseEditor
-from PyQt6.QtWidgets import ( QWidget, QLabel, QComboBox, QDoubleSpinBox, QFormLayout, QMessageBox
+from PyQt6.QtWidgets import ( QWidget, QLabel, QComboBox, QDoubleSpinBox, QFormLayout, QMessageBox, QSpinBox
 )
 from .mixin.service_roles_mixin import ServiceRolesMixin
 class Oracle(BaseEditor, ServiceRolesMixin):
@@ -34,9 +34,16 @@ class Oracle(BaseEditor, ServiceRolesMixin):
         self.response_mode.addItems(["terse", "verbose", "creative"])
         self._select_saved_choice(self.response_mode, cfg.get("response_mode", "terse"))
 
+        self.max_input_chars = QSpinBox()
+        self.max_input_chars.setRange(1000, 1000000)
+        self.max_input_chars.setSingleStep(10000)
+        self._load_saved_number(self.max_input_chars, cfg.get("max_input_chars", 200000))
+        self.max_input_chars.setToolTip("Requests above this limit are rejected; messages are never silently removed. Model token limits also apply.")
+
         openai_layout.addRow("Model:", self.model)
         openai_layout.addRow("Temperature:", self.temperature)
         openai_layout.addRow("Response Mode:", self.response_mode)
+        openai_layout.addRow("Maximum input characters:", self.max_input_chars)
 
         self.layout.addRow(QLabel("⚙️ OpenAI Configuration"))
         self.layout.addRow(openai_box)
@@ -52,6 +59,7 @@ class Oracle(BaseEditor, ServiceRolesMixin):
             "model": self.model,
             "temperature": self.temperature,
             "response_mode": self.response_mode,
+            "max_input_chars": self.max_input_chars,
             "roles_list": self.roles_list,
         }
 
@@ -63,6 +71,7 @@ class Oracle(BaseEditor, ServiceRolesMixin):
             model = self._saved_choice(self.model, "Model")
             response_mode = self._saved_choice(self.response_mode, "Response mode")
             temperature = self._saved_number(self.temperature, "Temperature")
+            max_input_chars = self._saved_number(self.max_input_chars, "Maximum input characters")
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid Configuration", str(exc))
             return
@@ -73,6 +82,7 @@ class Oracle(BaseEditor, ServiceRolesMixin):
             "model": model,
             "temperature": temperature,
             "response_mode": response_mode,
+            "max_input_chars": max_input_chars,
             "service-manager": self._service_manager_with_roles(roles)
         })
 

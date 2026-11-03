@@ -1,0 +1,1 @@
+"""LifeSignal Phoenix panel."""
