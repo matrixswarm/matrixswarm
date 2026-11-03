@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import ssl
@@ -10,6 +11,7 @@ import stat
 import sys
 import time
 from collections import deque
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -48,6 +50,8 @@ def _public_url(value: str) -> str:
     try:
         parts = urlsplit(value)
         host = parts.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
         if parts.port:
             host = f"{host}:{parts.port}"
         return urlunsplit((parts.scheme, host, parts.path or "/", "", ""))
@@ -98,6 +102,9 @@ class Agent(BootAgent):
         self._session.headers.update({"User-Agent": "MatrixSwarm-SiteSentinel/1.0"})
         self._condition_state: dict[str, dict] = {}
         self._log_offsets: dict[str, tuple[int, int]] = {}
+        self._parsed_logs: set[str] = set()
+        self._traffic_rejected_until = 0.0
+        self._traffic_coverage_state = None
         self._traffic_events: deque[dict] = deque()
         self._warned_missing_logs = False
         self._last_summary = 0.0
@@ -152,10 +159,18 @@ class Agent(BootAgent):
                 top_text = ", ".join(
                     f"{item['ip']}={item['rpm']:.1f}rpm" for item in top
                 ) or "none"
+                coverage = traffic.get("coverage", {})
+                traffic_state = coverage.get("state", "unavailable")
+                traffic_text = (
+                    f"{traffic['total_rpm']:.1f}rpm"
+                    if traffic_state in {"available", "partial"} else traffic_state
+                )
                 self.log(
                     f"[SITE-SENTINEL][SUMMARY] healthy={healthy}/{len(observations)} "
                     f"load={pressure['load_1m']:.2f} cpu={pressure['cpu_pct']:.1f}% "
-                    f"traffic={traffic.get('total_rpm', 0):.1f}rpm top={top_text}"
+                    f"traffic={traffic_text} coverage={traffic_state} "
+                    f"logs={coverage.get('readable_logs', 0)}/{coverage.get('configured_logs', 0)} "
+                    f"empty={coverage.get('empty_logs', 0)} top={top_text}"
                 )
         except Exception as exc:
             self.log("[SITE-SENTINEL] Monitoring cycle failed", error=exc, level="ERROR")
@@ -196,39 +211,59 @@ class Agent(BootAgent):
             "url": _public_url(url), "ok": False, "transport_ok": False,
             "content_ok": True, "assets_ok": True, "status": "ERR",
             "elapsed_ms": 0, "latency_warning": False, "failed_assets": [],
+            "phase": "request", "body_complete": False,
+            "observed_at_utc": datetime.now(timezone.utc).isoformat(),
         }
-        if urlsplit(url).scheme not in {"http", "https"}:
-            result["error"] = "URL must use http or https"
+        try:
+            parts = urlsplit(url)
+            valid_url = parts.scheme in {"http", "https"} and bool(parts.hostname)
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            result["error"] = "InvalidURL"
             return result
         started = time.monotonic()
         try:
-            response = self._session.get(
-                url, timeout=self.timeout, allow_redirects=True, headers=headers
-            )
-            elapsed_ms = int((time.monotonic() - started) * 1000)
-            result.update({
-                "status": response.status_code,
-                "elapsed_ms": elapsed_ms,
-                "transport_ok": 200 <= response.status_code < 400,
-                "latency_warning": elapsed_ms >= self.latency_warning_ms,
-                "server": str(response.headers.get("server", ""))[:100],
-                "cloudflare_ray": str(response.headers.get("cf-ray", ""))[:100],
-            })
-            body = response.text[:2_000_000]
-            if expect:
-                result["content_ok"] = expect.casefold() in body.casefold()
-            if check_assets and result["transport_ok"] and self.max_assets:
-                failed = self._check_page_assets(response.url, body, headers)
-                result["failed_assets"] = failed
-                result["assets_ok"] = not failed
-            result["ok"] = (
-                result["transport_ok"]
-                and result["content_ok"]
-                and result["assets_ok"]
-            )
+            # Capture headers before reading the body: a read timeout can occur
+            # after Apache has already logged a successful HTTP status.
+            with self._session.get(
+                url, timeout=self.timeout, allow_redirects=True, headers=headers, stream=True
+            ) as response:
+                result.update({
+                    "status": response.status_code,
+                    "transport_ok": 200 <= response.status_code < 400,
+                    "server": str(response.headers.get("server", ""))[:100],
+                    "cloudflare_ray": str(response.headers.get("cf-ray", ""))[:100],
+                    "phase": "response_body",
+                })
+                body = response.text[:2_000_000]
+                elapsed_ms = int((time.monotonic() - started) * 1000)
+                result.update(body_complete=True, elapsed_ms=elapsed_ms,
+                              latency_warning=elapsed_ms >= self.latency_warning_ms)
+                if expect:
+                    result["content_ok"] = expect.casefold() in body.casefold()
+                if check_assets and result["transport_ok"] and self.max_assets:
+                    result["phase"] = "assets"
+                    failed = self._check_page_assets(response.url, body, headers)
+                    result["failed_assets"] = failed
+                    result["assets_ok"] = not failed
+                result["ok"] = (
+                    result["transport_ok"]
+                    and result["content_ok"]
+                    and result["assets_ok"]
+                )
+                result["phase"] = "complete"
         except requests.RequestException as exc:
             result["elapsed_ms"] = int((time.monotonic() - started) * 1000)
             result["error"] = type(exc).__name__
+            # Exception text may contain authenticated URLs; publish types only.
+            chain, seen = [], set()
+            cause = exc
+            while cause is not None and id(cause) not in seen and len(chain) < 4:
+                seen.add(id(cause))
+                chain.append(type(cause).__name__)
+                cause = cause.__cause__ or cause.__context__
+            result["error_chain"] = chain
         return result
 
     def _check_page_assets(self, base_url, body, headers):
@@ -277,7 +312,9 @@ class Agent(BootAgent):
 
     def _collect_traffic(self):
         if not self.traffic_enabled:
-            return {"severity": "INFO", "reasons": [], "total_rpm": 0, "top_ips": []}
+            return {"severity": "INFO", "reasons": [], "total_rpm": 0, "top_ips": [],
+                    "coverage": {"state": "disabled", "configured_logs": len(self.access_logs),
+                                 "readable_logs": 0, "empty_logs": 0}}
         token = self.progress.begin("traffic_read")
         targets, failures = [], []
         try:
@@ -293,6 +330,8 @@ class Agent(BootAgent):
     def _read_traffic(self, targets, failures):
         now = time.time()
         found_log = False
+        readable_logs = empty_logs = parsed_lines = rejected_lines = 0
+        validated_logs = 0
         for index, raw_path in enumerate(self.access_logs, 1):
             path = Path(raw_path)
             try:
@@ -309,19 +348,28 @@ class Agent(BootAgent):
                     inode = int(details.st_ino)
                     prior = self._log_offsets.get(raw_path)
                     if prior is None:
+                        self._parsed_logs.discard(raw_path)
                         stream.seek(0, os.SEEK_END)  # Preserve first-read tail semantics.
                     else:
                         old_inode, offset = prior
                         if old_inode != inode or details.st_size < offset:
                             offset = 0
+                            self._parsed_logs.discard(raw_path)
                         stream.seek(offset)
                         for line in stream:
                             parsed = parse_access_line(line, prefer_forwarded_ip=self.prefer_forwarded_ip)
                             if parsed:
+                                parsed_lines += 1
+                                self._parsed_logs.add(raw_path)
                                 parsed["ts"] = now
                                 self._traffic_events.append(parsed)
+                            elif line.strip():
+                                rejected_lines += 1
                     self._log_offsets[raw_path] = (inode, stream.tell())
                 found_log = True
+                readable_logs += 1
+                empty_logs += details.st_size == 0
+                validated_logs += raw_path in self._parsed_logs and details.st_size > 0
                 targets.append(path_target("access_log", index, raw_path, "readable"))
             except (OSError, ValueError) as exc:
                 reason = "INVALID_CONFIGURATION" if isinstance(exc, ValueError) else failure_reason(exc)
@@ -342,7 +390,7 @@ class Agent(BootAgent):
         cutoff = now - self.traffic_window
         while self._traffic_events and self._traffic_events[0]["ts"] < cutoff:
             self._traffic_events.popleft()
-        return summarize_traffic(
+        result = summarize_traffic(
             self._traffic_events,
             window_sec=self.traffic_window,
             top_n=self.top_n_ips,
@@ -354,6 +402,53 @@ class Agent(BootAgent):
             unique_path_warning=self.unique_path_warning,
             error_ratio_warning=self.error_ratio_warning,
         )
+        if rejected_lines:
+            self._traffic_rejected_until = now + self.traffic_window
+        if not found_log:
+            coverage_state = "unavailable"
+        elif empty_logs == readable_logs:
+            coverage_state = "empty"
+        elif not validated_logs:
+            coverage_state = "unverified"
+        elif failures or empty_logs or validated_logs < readable_logs or now < self._traffic_rejected_until:
+            coverage_state = "partial"
+        else:
+            coverage_state = "available"
+        result["coverage"] = {
+            "state": coverage_state, "configured_logs": len(self.access_logs),
+            "readable_logs": readable_logs, "empty_logs": empty_logs,
+            "validated_logs": validated_logs, "parsed_lines": parsed_lines,
+            "rejected_lines": rejected_lines,
+        }
+        signature = (coverage_state, readable_logs, empty_logs, validated_logs)
+        if signature != self._traffic_coverage_state:
+            self._traffic_coverage_state = signature
+            self.log(
+                f"[SITE-SENTINEL][TRAFFIC] coverage={coverage_state} "
+                f"readable={readable_logs}/{len(self.access_logs)} empty={empty_logs} "
+                f"validated={validated_logs} rejected_lines={rejected_lines}. "
+                "Rates cover only parsed configured logs; check each site's actual access-log destination.",
+                level="INFO" if coverage_state == "available" else "WARNING",
+            )
+        return result
+
+    @staticmethod
+    def _probe_evidence(metrics):
+        """Bounded diagnostics; omit bodies, headers, credentials and queries."""
+        evidence = {}
+        for name in ("public", "origin"):
+            probe = metrics.get(name)
+            if not isinstance(probe, dict):
+                continue
+            row = {key: probe[key] for key in (
+                "status", "phase", "observed_at_utc", "elapsed_ms", "error", "error_chain",
+                "body_complete", "transport_ok", "content_ok", "assets_ok",
+            ) if key in probe}
+            assets = probe.get("failed_assets", [])
+            row["failed_assets"] = [str(asset)[:240] for asset in assets[:2]]
+            row["failed_assets_omitted"] = max(0, len(assets) - 2)
+            evidence[name] = row
+        return " evidence=" + json.dumps(evidence, ensure_ascii=True, separators=(",", ":")) if evidence else ""
 
     def _system_pressure(self, traffic):
         cpu_pct = float(psutil.cpu_percent(interval=None))
@@ -363,6 +458,15 @@ class Agent(BootAgent):
         load_per_cpu = load_1m / cpu_count
         severity = traffic.get("severity", "INFO")
         reasons = list(traffic.get("reasons", []))
+        coverage = traffic.get("coverage", {})
+        if self.traffic_enabled and coverage.get("state") != "available":
+            if severity == "INFO":
+                severity = "WARNING"
+            reasons.append(
+                f"traffic coverage {coverage.get('state', 'unavailable')}: "
+                f"readable={coverage.get('readable_logs', 0)}/{coverage.get('configured_logs', 0)}, "
+                f"empty={coverage.get('empty_logs', 0)}; total site traffic is unverified"
+            )
         if (
             cpu_pct >= self.cpu_critical_pct
             or memory_pct >= self.memory_critical_pct
@@ -395,6 +499,7 @@ class Agent(BootAgent):
 
     def _evaluate_condition(self, key, severity, reason, metrics):
         issue = severity in {"WARNING", "CRITICAL"}
+        evidence = self._probe_evidence(metrics)
         state = self._condition_state.setdefault(
             key, {"active": False, "failures": 0, "recoveries": 0, "severity": "INFO"}
         )
@@ -404,7 +509,7 @@ class Agent(BootAgent):
             if state["failures"] < self.failure_threshold:
                 self.log(
                     f"[SITE-SENTINEL][VERIFY] {key} {reason} "
-                    f"({state['failures']}/{self.failure_threshold})",
+                    f"({state['failures']}/{self.failure_threshold}){evidence}",
                     level="WARNING",
                 )
                 return
@@ -412,10 +517,12 @@ class Agent(BootAgent):
                 state["active"] = True
                 state["severity"] = severity
                 self.log(
-                    f"[SITE-SENTINEL][{severity}] {key}: {reason}",
+                    f"[SITE-SENTINEL][{severity}] {key}: {reason}{evidence}",
                     level="CRITICAL" if severity == "CRITICAL" else "WARNING",
                 )
-                self._send_status(key, reason, severity, metrics, status=reason)
+                self._send_status(key, reason + evidence, severity, metrics, status=reason)
+            elif evidence:
+                self.log(f"[SITE-SENTINEL][OBSERVATION] {key}: {reason}{evidence}", level="WARNING")
             return
 
         state["failures"] = 0
@@ -425,8 +532,8 @@ class Agent(BootAgent):
         if state["recoveries"] >= self.recovery_threshold:
             old_severity = state["severity"]
             state.update({"active": False, "recoveries": 0, "severity": "INFO"})
-            self.log(f"[SITE-SENTINEL][RECOVERY] {key} recovered from {old_severity}.")
-            self._send_status(key, "Health checks recovered.", "INFO", metrics, status="RECOVERED")
+            self.log(f"[SITE-SENTINEL][RECOVERY] {key} recovered from {old_severity}.{evidence}")
+            self._send_status(key, "Health checks recovered." + evidence, "INFO", metrics, status="RECOVERED")
 
     def _send_status(self, service, details, severity, metrics, status="ISSUE"):
         endpoints = self.get_nodes_by_role(self.report_role)

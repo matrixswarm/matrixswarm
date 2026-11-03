@@ -86,9 +86,12 @@ class SiteSentinel(BaseEditor, ListEditorMixin):
         self.access_logs.setMaximumHeight(80)
         self.access_logs.setToolTip(
             "Use existing access-log files on the deployment server, one per line. "
-            "Ubuntu Apache commonly uses /var/log/apache2/access.log. "
+            "Use each monitored site's configured Apache CustomLog or nginx access_log destination. "
+            "Virtual hosts may use separate files such as /var/log/apache2/example.com-access.log; "
+            "the default /var/log/apache2/access.log may exist but remain empty. "
             "Each configured file must be readable by the swarm account; "
-            "remove paths for web servers that are not installed."
+            "remove paths for web servers that are not installed. "
+            "The first read starts at the end; traffic remains unverified until a new entry is parsed."
         )
         self.ignored_ips = QPlainTextEdit()
         self.ignored_ips.setPlainText("\n".join(traffic_cfg.get("ignored_ips", [])))

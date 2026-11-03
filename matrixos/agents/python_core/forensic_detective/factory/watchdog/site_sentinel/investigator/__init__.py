@@ -25,9 +25,14 @@ class Investigator:
                 "be serving an error template, stale cache, or incomplete deployment."
             )
         elif status == "SITE_UNAVAILABLE":
-            summary = (
-                "Both public and origin evidence indicate unavailability; this is "
-                "unlikely to be a single transient CDN edge failure."
+            if isinstance(metrics.get("origin"), dict):
+                summary = "The configured public and origin probes failed their checks."
+            else:
+                summary = "The public probe failed; no origin probe evidence was supplied."
+            summary += (
+                " Review each probe's HTTP status, error type, phase and timing. "
+                "A body-read failure can occur after HTTP 200; these observations "
+                "alone do not establish the cause or a site-wide outage."
             )
         else:
             summary = f"Site Sentinel confirmed a critical condition: {status}."
