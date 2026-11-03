@@ -12,8 +12,18 @@ from openai import OpenAI
 from core.python_core.boot_agent import BootAgent
 from core.python_core.agent_progress import AgentProgress, failure_reason
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from oracle.prompt_assembly import PromptAssembly
 
-MAX_TOKENS = 12000  # safely below the 8k-ish window
+DEFAULT_MAX_INPUT_CHARS = 200_000
+MAX_INPUT_CHARS = 1_000_000
+
+
+def input_limit(value):
+    """Bound input size independently of any model-specific token limit."""
+    try:
+        return max(1000, min(MAX_INPUT_CHARS, int(value)))
+    except (TypeError, ValueError, OverflowError):
+        return DEFAULT_MAX_INPUT_CHARS
 
 class Agent(BootAgent):
     """
@@ -40,6 +50,7 @@ class Agent(BootAgent):
             self.AGENT_VERSION = "2.0"
 
             self._cfg_lock = threading.Lock()
+            self._prompt_assembly = PromptAssembly()
 
             config = self.tree_node.get("config", {})
             openai = config.get("openai", {}) or config
@@ -48,6 +59,7 @@ class Agent(BootAgent):
             self.model = config.get("model", "gpt-5.6-terra")
             self.temperature = config.get("temperature",0)
             self.response_mode = config.get("response_mode", "terse")
+            self.max_input_chars = input_limit(config.get("max_input_chars", DEFAULT_MAX_INPUT_CHARS))
             self.client = OpenAI(api_key=self.api_key)
 
             self.dump_incoming_prompts = bool(config.get("dump_incoming_prompts", False))
@@ -88,6 +100,17 @@ class Agent(BootAgent):
             packet,
             identity
         )
+
+    def cmd_prompt_fragment(self, content, packet, identity: IdentityObject = None):
+        """Assemble bounded chunks from one verified agent before invoking Oracle."""
+        if not isinstance(identity, IdentityObject) or not identity.has_verified_identity():
+            return
+        try:
+            request = self._prompt_assembly.accept(identity.get_sender_uid(), content)
+            if request is not None:
+                self._spawn_service_thread(self._cmd_msg_prompt_worker, request, packet, identity)
+        except ValueError as exc:
+            self.log(f'[ORACLE][FRAGMENT] Rejected: {exc}', level='WARNING')
 
     def cmd_label_clusters(self, content, packet, identity: IdentityObject = None):
         self._spawn_service_thread(
@@ -176,67 +199,70 @@ class Agent(BootAgent):
             self.log(f"[ORACLE] Received {len(messages)} chat chunks (query_id={query_id}).")
             self.log(f"[ORACLE] Response mode: {response_mode}")
 
-            # ---- Truncation safeguard ----
-            total_chars = sum(len(m.get("content", "")) for m in messages)
-            if total_chars > 12000:
-                self.log(f"[ORACLE] ✂️ Truncating oversized prompt ({total_chars} chars).")
-                messages = messages[:1] + messages[-5:]
-
-
+            # Never silently remove messages: reject inputs exceeding the configured limit.
             json_response = bool(content.get("json_response", False))
-            if json_response:
-                system_note = {
-                    "role": "system",
-                    "content": (
-                        "Return ONLY valid JSON. Do not include prose or explanations. "
-                        "Respond with a single JSON array or object that can be parsed directly."
-                    ),
-                }
-                # prepend our instruction
-                messages.insert(0, system_note)
-
             try:
-                with self._cfg_lock:
-                    client = self.client
-                    model = self.model
-                    temperature = self.temperature
+                total_chars = sum(len(json.dumps(m.get("content", ""), ensure_ascii=False)) for m in messages)
+            except (TypeError, AttributeError):
+                total_chars = self.max_input_chars + 1
+            if total_chars > self.max_input_chars:
+                error = f"Oracle input exceeds configured limit of {self.max_input_chars} characters."
+                self.log(f"[ORACLE][INPUT_LIMIT] {error} (query_id={query_id})", level="WARNING")
+                response = json.dumps({"error": "input_too_large", "message": error}) if json_response else error
+            else:
+                if json_response:
+                    system_note = {
+                        "role": "system",
+                        "content": (
+                            "Return ONLY valid JSON. Do not include prose or explanations. "
+                            "Respond with a single JSON array or object that can be parsed directly."
+                        ),
+                    }
+                    # prepend our instruction
+                    messages.insert(0, system_note)
 
                 try:
+                    with self._cfg_lock:
+                        client = self.client
+                        model = self.model
+                        temperature = self.temperature
 
-                    self.dump_messages_check(messages)
-
-                    request = {
-                        "model": model,
-                        "messages": messages,
-                        "timeout": 30,
-                    }
-                    if not model.startswith(("gpt-5", "gpt-6")):
-                        request["temperature"] = temperature
-                    with self.progress.attempt("llm_chat"):
-                        response = client.chat.completions.create(
-                            **request
-                        ).choices[0].message.content.strip()
-                except TimeoutError:
-                    self.log("[ORACLE][TIMEOUT] OpenAI call exceeded 30s, aborting.")
-                    return
-                except Exception as e:
-                    self.log("[ORACLE][ERROR] LLM failure", error=e)
-                    return
-
-
-                if json_response:
                     try:
-                        json.loads(response)
-                        self.log("[ORACLE][JSON] Valid JSON output produced.")
-                    except Exception as je:
-                        self.log(f"[ORACLE][JSON][WARN] Model returned non-JSON: {je}")
-                        import re
-                        match = re.search(r'(\[.*\]|\{.*\})', response, re.S)
-                        response = match.group(1) if match else "[]"
 
-            except Exception as e:
-                self.log("[ORACLE][FATAL] chat completion crashed.", error=e)
-                response = "[]"
+                        self.dump_messages_check(messages)
+
+                        request = {
+                            "model": model,
+                            "messages": messages,
+                            "timeout": 30,
+                        }
+                        if not model.startswith(("gpt-5", "gpt-6")):
+                            request["temperature"] = temperature
+                        with self.progress.attempt("llm_chat"):
+                            response = client.chat.completions.create(
+                                **request
+                            ).choices[0].message.content.strip()
+                    except TimeoutError:
+                        self.log("[ORACLE][TIMEOUT] OpenAI call exceeded 30s, aborting.")
+                        response = json.dumps({"error": "oracle_timeout"}) if json_response else "Oracle request timed out."
+                    except Exception as e:
+                        self.log("[ORACLE][ERROR] LLM failure", error=e)
+                        response = json.dumps({"error": "oracle_request_failed"}) if json_response else "Oracle request failed."
+
+
+                    if json_response:
+                        try:
+                            json.loads(response)
+                            self.log("[ORACLE][JSON] Valid JSON output produced.")
+                        except Exception as je:
+                            self.log(f"[ORACLE][JSON][WARN] Model returned non-JSON: {je}")
+                            import re
+                            match = re.search(r'(\[.*\]|\{.*\})', response, re.S)
+                            response = match.group(1) if match else "[]"
+
+                except Exception as e:
+                    self.log("[ORACLE][FATAL] chat completion crashed.", error=e)
+                    response = "[]"
 
             if use_callback:
                 self.log(f"[ORACLE] ✅ Completed analysis for Phoenix.")
@@ -400,6 +426,8 @@ class Agent(BootAgent):
             new_mode = cfg.get("response_mode", self.response_mode)
             new_temperature = cfg.get("temperature", self.temperature)
             new_dump_flag = bool(cfg.get("dump_incoming_prompts", getattr(self, "dump_incoming_prompts", False)))
+
+            self.max_input_chars = input_limit(cfg.get("max_input_chars", self.max_input_chars))
 
             # --- API key reload ---
             if new_key != self.api_key:

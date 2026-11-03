@@ -125,15 +125,27 @@ def session_evidence_context(source, result):
             raise ValueError("Missing tree observation")
         seen, projected = set(), []
         for node in tree:
-            if not isinstance(node, dict) or set(node) != {"agent_id", "parent_id", "name"}:
+            if (not isinstance(node, dict) or not {"agent_id", "parent_id", "name"}.issubset(node)
+                    or set(node) - {"agent_id", "parent_id", "name", "matrix_spawn"}):
                 raise ValueError("Invalid live tree node")
             uid = agent_identifier(node["agent_id"])
             if (uid in seen or node["parent_id"] is not None and node["parent_id"] not in seen
                     or not isinstance(node["name"], str) or len(node["name"]) > 128):
                 raise ValueError("Invalid live tree identity")
             seen.add(uid)
-            projected.append({"agent_id": uid, "parent_id": node["parent_id"],
-                              "name": _safe_message(node["name"])[:128]})
+            item = {"agent_id": uid, "parent_id": node["parent_id"],
+                    "name": _safe_message(node["name"])[:128]}
+            if "matrix_spawn" in node:
+                import math
+                spawn = node["matrix_spawn"]
+                if (not isinstance(spawn, dict) or set(spawn) != {"count", "flip_tripping", "checked_at"}
+                        or type(spawn["count"]) is not int or not 0 <= spawn["count"] <= 100000
+                        or type(spawn["flip_tripping"]) is not bool
+                        or type(spawn["checked_at"]) not in (int, float)
+                        or not math.isfinite(spawn["checked_at"]) or not 0 < spawn["checked_at"] <= 4102444800):
+                    raise ValueError("Invalid Matrix spawn status")
+                item["matrix_spawn"] = dict(spawn)
+            projected.append(item)
         result["agent_tree"] = projected
         result["agent_tree_coverage"] = {"state": coverage["state"], "observed_at": observed,
                                         "source": coverage["source"], "truncated": coverage["truncated"]}

@@ -15,6 +15,16 @@ class PhoenixSplash(QWidget):
         self.setWindowModality(Qt.WindowModality.NonModal)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.logo = QPixmap("matrix_gui/theme/matrixswarm_logo.png")
+        screen = QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen else None
+        max_width = min(700, int(available.width() * 0.75)) if available else 700
+        max_height = min(700, int(available.height() * 0.75)) if available else 700
+        if self.logo.width() > max_width or self.logo.height() > max_height:
+            self.logo = self.logo.scaled(
+                max_width, max_height,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
         self.setFixedSize(self.logo.width(), self.logo.height())
         self.setStyleSheet("background: black;")
         self.font = QFont("Consolas", 10)

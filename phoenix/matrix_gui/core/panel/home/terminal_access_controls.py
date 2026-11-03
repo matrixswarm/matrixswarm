@@ -150,7 +150,7 @@ class TerminalAccessControls(QGroupBox):
 
         self.refresh_from_vault()
         if self._access_mode:
-            explanation.setText("Choose what an AI connection may request. Live diagnostic reads require Connect for the same deployment. Saving revokes current approvals; open AI access separately and approve the requesting client in Phoenix.")
+            explanation.setText("Choose what an AI connection may request. Connect opens a read-only session and verifies the hive's signed reply; it does not launch a deployment. Enable Connect and the desired agent/log reads for the same deployment. Saving revokes current approvals; open AI access separately and approve the requesting client in Phoenix.")
             self.enabled_checkbox.setText("Allow AI access requests for this Vault")
             self.connect_checkbox.setText("Prepare opening a live read-only Phoenix AI session (does not boot a swarm)")
             self.swarms_checkbox.setText("Prepare read-only inventory of the connected live swarm")

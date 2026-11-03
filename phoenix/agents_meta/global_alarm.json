@@ -1,0 +1,14 @@
+{
+  "name": "global_alarm",
+  "description": "Provisional — QC testing needed. Schedules personal reminders and routes each message to a swarm alert service role.",
+  "keywords": ["alarm", "calendar", "reminders", "schedule", "telegram", "discord", "email"],
+  "groups": ["communication", "automation"],
+  "universal_id": "global-alarm-1",
+  "constraints": [{"packet_signing": {"in": true, "out": true}}, {"persistent_state": null}],
+  "config": {
+    "interval_sec": 5,
+    "alert_role": "hive.alert",
+    "ui": {"agent_tree": {"emoji": "⏰"}, "panel": ["global_alarm.global_alarm"]},
+    "service-manager": [{"role": ["hive.global_alarm.get@cmd_get_alarms", "hive.global_alarm.update@cmd_update_alarms"], "scope": ["parent", "any"]}]
+  }
+}

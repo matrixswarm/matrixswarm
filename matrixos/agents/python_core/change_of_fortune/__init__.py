@@ -1,0 +1,1 @@
+"""Change of Fortune agent."""

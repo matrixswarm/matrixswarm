@@ -105,6 +105,12 @@ See [AUTHORS.md](AUTHORS.md) for the complete authorship and architecture acknow
 - **Discord:** [Join the Hive](https://discord.gg/CyngHqDmku)
 - **X/Twitter:** [@matrixswarm](https://x.com/matrixswarm)
 
+## Support MatrixSwarm
+
+If you would like to support the project, you can contribute through [Ko-fi](https://ko-fi.com/matrixswarm) or send Bitcoin to:
+
+`bc1qasqk5xn9j7cdddmeclxddzvym2sdv7d8g3xrtz`
+
 ## License
 
 MatrixSwarm is licensed under the GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later). See [LICENSE](LICENSE).

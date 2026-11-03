@@ -1,0 +1,55 @@
+{
+  "name": "promise_keeper",
+  "description": "Provisional — QC testing needed. Watches public offers, prices and terms for material changes.",
+  "keywords": [
+    "offers",
+    "prices",
+    "warranty",
+    "terms",
+    "watch"
+  ],
+  "groups": [
+    "monitoring",
+    "communication"
+  ],
+  "universal_id": "promise-keeper-1",
+  "constraints": [
+    {
+      "packet_signing": {
+        "in": true,
+        "out": true
+      }
+    },
+    {
+      "persistent_state": null
+    }
+  ],
+  "config": {
+    "oracle_role": "hive.oracle",
+    "alert_role": "hive.alert",
+    "ui": {
+      "agent_tree": {
+        "emoji": "📜"
+      },
+      "panel": [
+        "promise_keeper.promise_keeper"
+      ]
+    },
+    "service-manager": [
+      {
+        "role": [
+          "hive.promise_keeper.get@cmd_get_sources",
+          "hive.promise_keeper.update@cmd_update_sources",
+          "hive.promise_keeper.resume@cmd_resume_source",
+          "hive.promise_keeper.retry@cmd_retry_source",
+          "hive.promise_keeper.capture@cmd_get_capture",
+          "hive.promise_keeper.clear_history@cmd_clear_history"
+        ],
+        "scope": [
+          "parent",
+          "any"
+        ]
+      }
+    ]
+  }
+}

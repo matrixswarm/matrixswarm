@@ -1,0 +1,55 @@
+{
+  "name": "change_of_fortune",
+  "description": "Provisional — QC testing needed. Watches public pages for releases and important announcements.",
+  "keywords": [
+    "release",
+    "announcements",
+    "support",
+    "watch",
+    "alerts"
+  ],
+  "groups": [
+    "monitoring",
+    "communication"
+  ],
+  "universal_id": "change-of-fortune-1",
+  "constraints": [
+    {
+      "packet_signing": {
+        "in": true,
+        "out": true
+      }
+    },
+    {
+      "persistent_state": null
+    }
+  ],
+  "config": {
+    "oracle_role": "hive.oracle",
+    "alert_role": "hive.alert",
+    "ui": {
+      "agent_tree": {
+        "emoji": "🔔"
+      },
+      "panel": [
+        "change_of_fortune.change_of_fortune"
+      ]
+    },
+    "service-manager": [
+      {
+        "role": [
+          "hive.change_of_fortune.get@cmd_get_sources",
+          "hive.change_of_fortune.update@cmd_update_sources",
+          "hive.change_of_fortune.resume@cmd_resume_source",
+          "hive.change_of_fortune.retry@cmd_retry_source",
+          "hive.change_of_fortune.capture@cmd_get_capture",
+          "hive.change_of_fortune.clear_history@cmd_clear_history"
+        ],
+        "scope": [
+          "parent",
+          "any"
+        ]
+      }
+    ]
+  }
+}

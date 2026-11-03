@@ -1,5 +1,6 @@
 """Small-model MCP audit view of the broker's validated three-layer report."""
 import json
+from datetime import datetime
 
 from .diagnostic_cards import CARDS, finding_order
 from .swarm_inspection import public_diagnostic_page
@@ -133,6 +134,15 @@ def compact_inspection(deployment_id, document):
     if "session_binding" in report:
         result["session_binding"] = report["session_binding"]
     if "agent_tree" in report:
+        observed = datetime.fromisoformat(report["observed_at"]).timestamp()
+        matrix_warnings = [{"agent_id": node["agent_id"], **node["matrix_spawn"],
+                            "fresh": -10 <= observed - node["matrix_spawn"]["checked_at"] <= 120}
+                           for node in report["agent_tree"]
+                           if node.get("matrix_spawn", {}).get("flip_tripping") is True]
+        result["matrix_status_missing"] = sum("matrix_spawn" not in node for node in report["agent_tree"])
+        result["matrix_flip_warnings"] = matrix_warnings[:32]
+        result["matrix_flip_warnings_omitted"] = len(matrix_warnings) - len(result["matrix_flip_warnings"])
+        result["reporting_guidance"] += " Report all Matrix flip-trip warnings with their checked_at timestamps and freshness; they are observations, not proof of a cause. Missing Matrix status does not imply health."
         result["agent_tree"] = []
         result["agent_tree_coverage"] = {**report["agent_tree_coverage"], "nodes_omitted": len(report["agent_tree"])}
     def append_bounded(key, items, limit, budget):
@@ -164,6 +174,9 @@ def compact_inspection(deployment_id, document):
         if result.get("agent_tree"):
             result["agent_tree"].pop()
             result["agent_tree_coverage"]["nodes_omitted"] += 1
+        elif result.get("matrix_flip_warnings"):
+            result["matrix_flip_warnings"].pop()
+            result["matrix_flip_warnings_omitted"] += 1
         elif result["other_findings"]:
             result["other_findings"].pop()
             coverage["other_findings_omitted"] += 1

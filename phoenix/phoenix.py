@@ -20,6 +20,7 @@ Attributes:
 
 """
 import sys, time, builtins, inspect, json, pprint
+from pathlib import Path
 
 from matrix_gui.core.startup_policy import (
     close_on_minimize_or_sleep_enabled,
@@ -161,8 +162,8 @@ class PhoenixCockpit(QMainWindow):
         self.status_bar.setFixedHeight(24)
 
         # Window Icon
-        logo_path = "matrix_gui/theme/main_panel_logo.png"
-        self.setWindowIcon(QIcon(logo_path))
+        logo_path = Path(__file__).resolve().parent / "matrix_gui" / "theme" / "main_panel_logo_v2.png"
+        self.setWindowIcon(QIcon(str(logo_path)))
 
         # status bar
         self.status_vault = QLabel("Vault: 🔒")

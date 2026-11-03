@@ -24,6 +24,7 @@
     "config": {
         "model": "gpt-5.6-terra",
         "response_mode": "terse",
+        "max_input_chars": 200000,
         "ui": {
             "agent_tree": {
                 "emoji": "\ud83d\udd2e"
