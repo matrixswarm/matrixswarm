@@ -8,7 +8,7 @@ from PyQt6 import sip
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QPushButton, QWidget,
-    QGraphicsScene, QGraphicsView, QMessageBox, QSplitter, QDialog, QLabel
+    QGraphicsScene, QGraphicsView, QMessageBox, QSplitter, QDialog, QLabel, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QTimer
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
@@ -133,10 +133,12 @@ class SwarmWorkspaceDialog(QDialog):
             # --- main layout ---
             layout = QVBoxLayout(self)
             layout.addLayout(top)
-            layout.addWidget(splitter)
+            # Give extra window height to the workspace, not the status row.
+            layout.addWidget(splitter, 1)
             status_row = QHBoxLayout()
             self.save_status = QLabel("Ready…")
             self.save_status.setAccessibleName("Workspace save status")
+            self.save_status.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.retry_save_btn = QPushButton("Retry Save")
             self.retry_save_btn.setAutoDefault(False)
             self.retry_save_btn.hide()
@@ -327,4 +329,3 @@ class SwarmWorkspaceDialog(QDialog):
             super().reject()
         else:
             self.close()
-
