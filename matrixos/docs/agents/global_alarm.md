@@ -1,5 +1,7 @@
 # Global Alarm
 
+**Status: Provisional — QC testing needed.**
+
 Global Alarm schedules personal reminder messages and queues them to agents
 advertising each reminder's alert service role. Alarms are managed in Phoenix and saved in the agent's
 encrypted persistent state. Phoenix may be closed while the MatrixOS universe

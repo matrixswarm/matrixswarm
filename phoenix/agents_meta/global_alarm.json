@@ -1,6 +1,6 @@
 {
   "name": "global_alarm",
-  "description": "Schedules personal reminders and routes each message to a swarm alert service role.",
+  "description": "Provisional — QC testing needed. Schedules personal reminders and routes each message to a swarm alert service role.",
   "keywords": ["alarm", "calendar", "reminders", "schedule", "telegram", "discord", "email"],
   "groups": ["communication", "automation"],
   "universal_id": "global-alarm-1",
