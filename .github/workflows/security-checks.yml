@@ -24,7 +24,8 @@ jobs:
 
       - name: Install security-test dependencies
         # Harvester's isolated SSH worker needs the real transport dependency.
-        run: python -m pip install -r phoenix_test_terminal/requirements.txt -e "./phoenix_terminal[mcp]"
+        # Oracle's mocked tests import the SDK; keep its pin aligned with matrixos/requirements.txt.
+        run: python -m pip install -r phoenix_test_terminal/requirements.txt -e "./phoenix_terminal[mcp]" "openai==1.108.1"
 
       - name: Compile Python sources
         run: python -m compileall -q matrixos phoenix phoenix_terminal

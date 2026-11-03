@@ -7,12 +7,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import time
 from PyQt6.QtCore import QObject, QCoreApplication
-from matrix_gui.modules.access_control.session_diagnostics import SessionDiagnostics
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'phoenix'))
 sys.path.insert(0, str(ROOT / 'phoenix_terminal'))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+from matrix_gui.modules.access_control.session_diagnostics import SessionDiagnostics
 from matrix_gui.modules.access_control.live_gateway import LiveGateway, SUPPORTED
 from phoenix_terminal.swarm_inspection import DiagnosticReadError
 
