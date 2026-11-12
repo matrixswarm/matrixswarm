@@ -38,10 +38,10 @@ class PluginGuard(PhoenixPanelInterface):
         ...
         self._update_queue = deque()
         self._update_lock = QMutex()
-        self._update_timer = QTimer()
+        self._update_timer = QTimer(self)
         self._update_timer.setInterval(50)          # 20 fps drain rate
         self._update_timer.timeout.connect(self._drain_updates)
-        self._update_timer.start()
+        self._timers.append(self._update_timer)
         self.setLayout(self._build_layout())
         self.auto_scroll = True
         self.output_box.setOpenExternalLinks(False)
@@ -128,9 +128,13 @@ class PluginGuard(PhoenixPanelInterface):
 
     def _on_show(self):
         """Optional hook for when the panel becomes visible."""
+        self._update_timer.start()
         # Immediately refresh button state and request status sync
         QTimer.singleShot(200, self._sync_button_states)
         print("[PLUGIN-GUARD] 🌐 Panel shown — refreshing status...")
+
+    def _on_hide(self):
+        self._update_timer.stop()
 
     # === Button Actions ===
     def _show_plugins(self):

@@ -1,11 +1,59 @@
 # Authored by Daniel F MacDonald and ChatGPT aka The Generals
-import time, os, secrets
+import time, os, secrets, copy, re
 from core.python_core.agent_factory.reaper.reaper_factory import make_reaper_node
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from core.python_core.lifecycle_fence import GENERATION_ENV
+from core.python_core.reap_revision import (read_reap_authorization, reap_mutation, commit_reap_mutation,
+                                            defer_reap_side_effect, ReapTransactionError)
 class ReapStatusHandlerMixin:
     # ============================================================
     #  Matrix Handlers
     # ============================================================
+    def cmd_reap_authorize(self, content, packet, identity: IdentityObject = None):
+        """Answer a fresh Reaper challenge from Matrix's current tree."""
+        try:
+            reaper_uid = self.meta.get("swarm_state", {}).get("reserved_agent_ids", {}).get("reaper")
+            if (not reaper_uid or not isinstance(identity, IdentityObject)
+                    or not identity.has_verified_identity() or identity.get_sender_uid() != reaper_uid):
+                return
+            if not isinstance(content, dict):
+                return
+            uid, stage = content.get("universal_id"), content.get("stage")
+            transaction_id, nonce = content.get("transaction_id"), content.get("nonce")
+            stages = {"shutdown_probe", "restart_start", "restart_wait", "restart_escalate", "restart_cleanup",
+                      "delete_start", "delete_escalate", "delete_cleanup"}
+            if (not isinstance(uid, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", uid)
+                    or stage not in stages or not isinstance(transaction_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", transaction_id)
+                    or not isinstance(nonce, str) or not re.fullmatch(r"[0-9a-f]{64}", nonce)):
+                return
+            try:
+                state, _ = read_reap_authorization(self._runtime_comm_fd, public_key=self.matrix_pub,
+                    universe=self.command_line_args["universe"], boot_id=self.path_resolution["reboot_uuid"],
+                    generation=os.environ.get(GENERATION_ENV))
+                target = state["targets"].get(uid)
+            except Exception:
+                state, target = None, None
+            operation = target.get("op") if isinstance(target, dict) else None
+            valid_op = (operation in ("shutdown_restart", "shutdown_delete") if stage == "shutdown_probe"
+                        else operation == ("shutdown_restart" if stage.startswith("restart_") else "shutdown_delete"))
+            authorized = bool(isinstance(target, dict) and target.get("locked") is True and valid_op
+                              and target.get("transaction_id") == transaction_id and target.get("stage") == stage)
+            snapshot = copy.deepcopy(target.get("target_snapshot")) if authorized and stage != "shutdown_probe" else None
+            if authorized and stage != "shutdown_probe" and (not isinstance(snapshot, list) or len(snapshot) > 1024):
+                authorized = False
+                snapshot = None
+            response = {"handler": "cmd_reap_authorization", "content": {"universal_id": uid, "stage": stage,
+                        "transaction_id": transaction_id, "nonce": nonce, "authorized": authorized,
+                        "target_snapshot": snapshot, "revision": state["revision"] if authorized else None}}
+            reply = self.get_delivery_packet("standard.command.packet")
+            reply.set_data(response)
+            if not self.pass_packet(reply, reaper_uid):
+                self.log("[REAPER-AUTH] Could not deliver challenge response.", level="ERROR")
+        except Exception as exc:
+            self.log("[REAPER-AUTH] Challenge failed.", error=exc, level="ERROR")
+
+    @reap_mutation
     def cmd_reap_status(self, content, packet, identity: IdentityObject = None):
         """
         Entry-point for every status packet emitted by the **Reaper** agent.
@@ -40,7 +88,9 @@ class ReapStatusHandlerMixin:
         try:
 
             reaper_uid = self.meta.get("swarm_state", {}).get("reserved_agent_ids", {}).get("reaper")
-            if not self.verify_identity(identity, [reaper_uid]):
+            if (not reaper_uid or not isinstance(identity, IdentityObject)
+                    or not identity.has_verified_identity() or identity.get_sender_uid() != reaper_uid):
+                self.log("[REAP-STATUS] A verified Reaper identity is required.", level="ERROR")
                 return
 
             uid = content.get("universal_id")
@@ -55,12 +105,20 @@ class ReapStatusHandlerMixin:
                 return
 
             lifecycle = node.setdefault("lifecycle_status", {})
+            current_stage = lifecycle.get("op_stage")
+            if (not lifecycle.get("transaction_id") or content.get("transaction_id") != lifecycle.get("transaction_id")
+                    or stage != current_stage
+                    or not isinstance(result, dict) or type(result.get("success")) is not bool):
+                self.log(f"[REAP-STATUS] Refusing stale or invalid result for {uid} at {stage}.")
+                return
             lifecycle["reap_result"] = result
             lifecycle["reported_stage"] = stage  # ← what reaper claims it was doing
+            # Every stage must carry its own success; a previous successful
+            # probe must never authorize a later failed cleanup or restart.
+            lifecycle["success"] = result["success"]
             lifecycle["last_checked"] = time.time()
 
             # Don't overwrite Matrix's op_stage here.
-            current_stage = lifecycle.get("op_stage")
 
             # Choose handler based on op type, not on reaper’s stage
             callback_info = lifecycle.get("agent_status_callback", {})
@@ -71,12 +129,23 @@ class ReapStatusHandlerMixin:
             handler = getattr(self, f"_on_reaper_status_{op}")
             handler(uid, stage, result, callback_info)
 
-            self.save_agent_tree_master()
+            if not self.save_agent_tree_master():
+                raise ReapTransactionError("Could not save Reaper status")
+            commit_reap_mutation(self)
 
         except Exception as e:
             self.log(error=e, block="main_try")
+            raise
 
     def _assassin_manager(self):
+        now = time.time()
+        if self._last_assassin_run + 20 > now:
+            return
+        self._last_assassin_run = now
+        return self._guarded_assassin_manager()
+
+    @reap_mutation
+    def _guarded_assassin_manager(self):
         """
         Opportunistic sweeper that */
         every ~20 sec* hunts for nodes stuck in destructive lifecycle stages
@@ -93,11 +162,6 @@ class ReapStatusHandlerMixin:
         Returns:
             None
         """
-        now = time.time()
-        if self._last_assassin_run + 20 > now:
-            return  # too soon, skip
-        self._last_assassin_run = now
-
         tp = self.get_agent_tree_master()
         if not tp:
             self.log("[ASSASSIN] No tree loaded.")
@@ -119,7 +183,8 @@ class ReapStatusHandlerMixin:
             ):
                 targets.append({
                     "universal_id": uid,
-                    "op_stage": stage
+                    "op_stage": stage,
+                    "transaction_id": node.get("lifecycle_status", {}).get("transaction_id")
                 })
                 self.log(f"[ASSASSIN] current stage is '{stage}'")
 
@@ -149,8 +214,11 @@ class ReapStatusHandlerMixin:
                 parent_universal_id=self.get_matrix_universal_id(),
                 matrix_priv_obj=self.matrix_priv_obj,
             )
-            self.save_agent_tree_master()
-            self.delegate_tree_to_agent(self.command_line_args['universal_id'], self.tree_path_dict)
+            if not self.save_agent_tree_master():
+                raise ReapTransactionError("Could not save Reaper creation")
+            commit_reap_mutation(self)
+            defer_reap_side_effect(self, lambda: self.delegate_tree_to_agent(
+                self.command_line_args['universal_id'], self.tree_path_dict))
 
 
             self.log(f"[ASSASSIN] Reaper {reaper_id} deployed. Waiting for boot.")
@@ -165,12 +233,22 @@ class ReapStatusHandlerMixin:
         payload = {"handler": "cmd_reap_agents", "content": {"targets": targets}}
         pk = self.get_delivery_packet("standard.command.packet")
         pk.set_data(payload)
-        if self.pass_packet(pk, reaper_id):
-            self.log(f"[ASSASSIN] Dispatching {len(targets)} targets to {reaper_id}")
-        else:
-            self.log("[ASSASSIN] Failed to deliver packet to reaper.")
+        def dispatch():
+            if self.pass_packet(pk, reaper_id):
+                self.log(f"[ASSASSIN] Dispatching {len(targets)} targets to {reaper_id}")
+            else:
+                self.log("[ASSASSIN] Failed to deliver packet to reaper.")
+        defer_reap_side_effect(self, dispatch)
 
     def _reaper_transaction_watcher(self, force=False, tick_window=2):
+        now = time.time()
+        if not force and now - getattr(self, "_last_reaper_watch_tick", 0) < tick_window:
+            return
+        self._last_reaper_watch_tick = now
+        return self._guarded_reaper_transaction_watcher(force, tick_window)
+
+    @reap_mutation
+    def _guarded_reaper_transaction_watcher(self, force=False, tick_window=2):
         """Periodically scan active transactions and promote stages when quorum met.
         This is intentionally simple: gather txn nodes, check reported_stage counts
         and node success/state, and call the existing _transaction_checkpoint when
@@ -193,15 +271,11 @@ class ReapStatusHandlerMixin:
         """
         try:
 
-            now = time.time()
-            last = self.meta.get("_last_reaper_watch", 0)
-            if not force and (now - last) < tick_window:
-                return
-            self.meta["_last_reaper_watch"] = now
-
             tp = self.get_agent_tree_master()
             if not tp:
                 return
+            before_tree = copy.deepcopy(tp.root)
+            before_meta = copy.deepcopy(self.meta)
 
             # Build a set of transactions to inspect
             tx_map = {}
@@ -231,6 +305,13 @@ class ReapStatusHandlerMixin:
             # For each transaction, evaluate each checkpoint in order
             #self.log(f"[WATCHER][TRACE] tx_map={len(tx_map)} active transactions found")
             for trans_id, tx_nodes in tx_map.items():
+
+                # Completion keeps transaction metadata for diagnostics. A
+                # completed restart also retains the last Reaper report, so
+                # it must not be considered for that checkpoint again.
+                if all(n.get("lifecycle_status", {}).get("op_stage") == "_complete_callback"
+                       for _, n in tx_nodes):
+                    continue
 
                 thawed = False
                 for uid, n in tx_nodes:
@@ -279,9 +360,14 @@ class ReapStatusHandlerMixin:
                         self._transaction_checkpoint(trans_id, expected, None, next_stage)
                         break
 
+            if tp.root != before_tree or self.meta != before_meta:
+                if not self.save_agent_tree_master():
+                    raise ReapTransactionError("Could not save Reaper watcher state")
+                commit_reap_mutation(self)
 
         except Exception as e:
             self.log(error=e, level="ERROR", block="_reaper_transaction_watcher")
+            raise
 
     # ============================================================
     #  RESTART FLOW
@@ -350,7 +436,12 @@ class ReapStatusHandlerMixin:
                 n_life.setdefault("reported_stage", n_life.get("reported_stage", ""))
                 n_life.setdefault("last_checked", n_life.get("last_checked", time.time()))
 
-            if result.get("success"):
+            target_snapshot = result.get("target_snapshot")
+            if result.get("success") and (not isinstance(target_snapshot, list) or len(target_snapshot) > 1024):
+                lifecycle["success"] = False
+                self.log(f"[SHUTDOWN_PROBE] {uid} returned no valid target snapshot.")
+            elif result.get("success"):
+                lifecycle["reap_target"] = copy.deepcopy(target_snapshot)
                 lifecycle["success"] = True
                 lifecycle["op_stage"] = f"_{stage}"
             else:
@@ -387,6 +478,7 @@ class ReapStatusHandlerMixin:
         return [(uid, n) for uid, n in tp.nodes.items()
                 if n.get("lifecycle_status", {}).get("transaction_id") == trans_id]
 
+    @reap_mutation
     def _transaction_checkpoint(self, trans_id, expected_stage, mid_stage, next_stage):
         """
         Promote an entire transaction from *expected_stage* → *next_stage*
@@ -406,6 +498,16 @@ class ReapStatusHandlerMixin:
 
             total = len(tx_nodes)
             ready = []
+            allowed_states = {
+                "shutdown_probe": {"alive", "dead", "already_dead"},
+                "delete_start": {"alive", "dead", "already_dead"},
+                "delete_escalate": {"terminated"},
+                "delete_cleanup": {"cleaned"},
+                "restart_start": {"alive", "dead", "pod_cleared"},
+                "restart_wait": {"pod_cleared"},
+                "restart_escalate": {"terminated"},
+                "restart_cleanup": {"cleaned"},
+            }.get(expected_stage, set())
 
             # Anyone that has either reported or sits underscored is ready
             for uid, n in tx_nodes:
@@ -420,7 +522,9 @@ class ReapStatusHandlerMixin:
                 if not success:
                     self.log(f"[WATCHER][DEBUG] {uid} not successful")
 
-                if (reported == expected_stage or op_now == f"_{expected_stage}") and success:
+                result = life.get("reap_result", {})
+                state = result.get("state") if isinstance(result, dict) else None
+                if (reported == expected_stage or op_now == f"_{expected_stage}") and success is True and state in allowed_states:
                     ready.append(uid)
 
             if len(ready) < total:
@@ -436,9 +540,11 @@ class ReapStatusHandlerMixin:
                 if op_stage.startswith("_complete_callback"):
                     return
                 life["op_stage"] = next_stage
+                life["success"] = False
                 life["last_checked"] = time.time()
 
-            self.save_agent_tree_master()
+            if not self.save_agent_tree_master():
+                raise ReapTransactionError("Could not save checkpoint")
 
             self.log(f"[CHECKPOINT] txn {trans_id}: quorum met → {expected_stage} → {next_stage}")
 
@@ -468,8 +574,12 @@ class ReapStatusHandlerMixin:
                 elif op_type in local_map:
                     local_map[op_type](tx_nodes, trans_id=trans_id)
 
+            if not self.save_agent_tree_master():
+                raise ReapTransactionError("Could not save completed checkpoint")
+            commit_reap_mutation(self)
         except Exception as e:
             self.log(error=e, level="ERROR", block="_transaction_checkpoint")
+            raise
 
         return True
 

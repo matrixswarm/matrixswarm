@@ -31,17 +31,19 @@ class RegistryStore(VaultStore):
         This handles store rejection; it does not turn the event-driven vault
         writer into a synchronous durable transaction.
         """
-        data = self.get_data()
-        previous = deepcopy(data)
-        data[ns] = deepcopy(obj_dict)
-        accepted = False
-        try:
-            accepted = self.commit()
-            return accepted
-        finally:
-            if not accepted:
-                # root.patch may replace the section when validation fails.
-                live = self.get_data()
-                live.clear()
-                live.update(previous)
-            self._buffer = self.get_data()
+        with self._edit_lock():
+            if self._write_busy():
+                return False
+            data = self.get_data()
+            previous = deepcopy(data)
+            data[ns] = deepcopy(obj_dict)
+            accepted = False
+            try:
+                accepted = self.commit()
+                return accepted
+            finally:
+                if not accepted:
+                    live = self.get_data()
+                    live.clear()
+                    live.update(previous)
+                self._buffer = self.get_data()

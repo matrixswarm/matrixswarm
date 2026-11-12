@@ -195,6 +195,7 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.panel.paste.toPlainText(), "retained draft")
         self.assertIn("1 MiB", self.panel.status.text())
         self.panel.paste.setPlainText("x" * (MAX_BYTES + 1))
+        self.assertEqual(self.panel.paste.lineWrapMode(), self.panel.paste.LineWrapMode.NoWrap)
         self.panel.send_text.click()
         self.assertIn("1 MiB", self.panel.status.text())
         self.assertEqual(self.panel.bus.queue, [])
@@ -213,6 +214,11 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(completed, [])
         self.assertEqual(len(errors), 1)
         self.assertEqual(self.store.listing()["total_items"], 0)
+        self.panel.paste.setPlainText("short draft")
+        self.assertEqual(self.panel.paste.lineWrapMode(), self.panel.paste.LineWrapMode.WidgetWidth)
+        self.panel.paste.setPlainText("x" * (64 * 1024 + 1))
+        self.panel.paste.clear()
+        self.assertEqual(self.panel.paste.lineWrapMode(), self.panel.paste.LineWrapMode.WidgetWidth)
 
     def test_production_https_and_ssh_chunk_wrappers_fit_perimeter_guard(self):
         from Crypto.PublicKey import RSA

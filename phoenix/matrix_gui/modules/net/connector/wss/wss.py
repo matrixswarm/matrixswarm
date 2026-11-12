@@ -1,4 +1,4 @@
-import os, ssl, json, time
+import os, ssl, json, time, uuid
 import threading
 import tempfile
 import socket
@@ -11,9 +11,12 @@ from matrix_gui.core.utils.spki_utils import verify_spki_pin
 from matrix_gui.core.utils import crypto_utils
 from Crypto.PublicKey import RSA
 from matrix_gui.core.connector_bus import ConnectorBus
-from matrix_gui.modules.net.connector.interfaces.connector_base import BaseConnector
+from matrix_gui.modules.net.connector.interfaces.base_connector import BaseConnector
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
+
+HELLO_PROTOCOL = "matrixswarm.hello.v2"
+HELLO_MAX_BYTES = 16384
 
 def write_temp_pem(data: str, suffix=".pem"):
     fd, path = tempfile.mkstemp(suffix=suffix)
@@ -45,14 +48,22 @@ def establish_ws_connection(host, port, agent, deployment, session_id, timeout=5
         key_path = write_temp_pem(cert_adapter.key)
         ca_path = write_temp_pem(cert_adapter.ca_root_cert)
     except Exception as e:
+        for path in (cert_path, key_path, ca_path):
+            try:
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                print("[WSSConnector] Temporary certificate cleanup failed")
         print(f"[WSSConnector] ❌ Failed to write temp PEMs: {e}")
         return None
 
+    ws = None
     try:
         url = f"wss://{host}:{port}/ws"
         ws = create_connection(
             url,
             timeout=timeout,
+            subprotocols=[HELLO_PROTOCOL],
             sslopt={
                 "certfile": cert_path,
                 "keyfile": key_path,
@@ -70,34 +81,76 @@ def establish_ws_connection(host, port, agent, deployment, session_id, timeout=5
             ws.close()
             raise ConnectionError(f"SPKI mismatch: expected {cert_adapter.server_spki_pin}, got {actual_pin}")
 
+        if ws.getsubprotocol() != HELLO_PROTOCOL:
+            raise ConnectionError("WSS server did not negotiate the required v2 handshake")
+        challenge_frame = ws.recv()
+        if not isinstance(challenge_frame, str) or len(challenge_frame.encode("utf-8")) > HELLO_MAX_BYTES:
+            raise ConnectionError("Invalid WSS server challenge")
+        try:
+            challenge = json.loads(challenge_frame)
+        except (TypeError, ValueError) as exc:
+            raise ConnectionError("Invalid WSS server challenge") from exc
+        token = challenge.get("challenge") if isinstance(challenge, dict) else None
+        if (not isinstance(challenge, dict) or challenge.get("type") != "hello_challenge"
+                or challenge.get("protocol") != HELLO_PROTOCOL
+                or challenge.get("agent") != agent.get("universal_id")
+                or not isinstance(token, str) or len(token) != 64
+                or any(c not in "0123456789abcdef" for c in token)):
+            raise ConnectionError("Invalid WSS server challenge")
+
         # Build hello
         hello = {
             "type": "hello",
+            "protocol": HELLO_PROTOCOL,
+            "challenge": token,
             "session_id": session_id,
             "agent": agent.get("universal_id"),
-            "ts": int(time.time())
+            "ts": int(time.time()),
+            "nonce": uuid.uuid4().hex,
         }
 
         # Load signing key from deployment if present
         priv_pem = deployment.get("certs", {}).get(agent.get("universal_id"), {}).get("signing", {}).get("remote_privkey")
 
 
-        if priv_pem:
-            priv_key = RSA.import_key(priv_pem.encode())
-            hello["sig"] = crypto_utils.sign_data(hello, priv_key)
+        if not priv_pem:
+            raise ValueError("Missing WSS hello signing key")
+        priv_key = RSA.import_key(priv_pem.encode())
+        hello["sig"] = crypto_utils.sign_data(hello, priv_key)
 
         ws.send(json.dumps(hello))
+        receipt_frame = ws.recv()
+        if not isinstance(receipt_frame, str) or len(receipt_frame.encode("utf-8")) > HELLO_MAX_BYTES:
+            raise ConnectionError("Invalid WSS hello receipt")
+        try:
+            receipt = json.loads(receipt_frame)
+        except (TypeError, ValueError) as exc:
+            raise ConnectionError("Invalid WSS hello receipt") from exc
+        if (not isinstance(receipt, dict) or receipt.get("type") != "hello_accepted"
+                or receipt.get("protocol") != HELLO_PROTOCOL
+                or receipt.get("agent") != agent.get("universal_id")
+                or receipt.get("session_id") != session_id
+                or receipt.get("challenge") != token):
+            raise ConnectionError("Invalid WSS hello receipt")
         ws.settimeout(None)
         return ws
 
     except Exception as e:
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
         print(f"[WSSConnector][{agent.get('universal_id')}] connect error: {e}")
 
 
     finally:
         for p in [cert_path, key_path, ca_path]:
-            if p and os.path.exists(p):
-                os.remove(p)
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except OSError:
+                print("[WSSConnector] Temporary certificate cleanup failed")
         print(
             f"[CERT_LOADER][WSS] 🧹 Cleaned up "
             f"{cert_path}, {key_path}, {ca_path}"

@@ -337,9 +337,7 @@ class DirectiveManagerDialog(QDialog):
             dlg = SwarmWorkspaceDialog(str(agent_catalog_root()), workspace_data)
             dlg.exec()
 
-            # 5. Save updated workspaces
-            vcs.patch("workspaces", vcs.data["workspaces"])
-            print("[SWARM WORKSPACE] Saved.")
+            # The workspace editor persists its own confirmed changes.
 
         except Exception as e:
             emit_gui_exception_log("DirectiveManagerDialog._open_swarm_workspace", e)
@@ -386,8 +384,7 @@ class DirectiveManagerDialog(QDialog):
                     data = json.load(f)
 
             # Remember the folder for the next load
-            vault_data["last_directive_load_path"] = os.path.dirname(path)
-            vcs.patch("last_directive_load_path", vault_data["last_directive_load_path"])
+            vcs.patch("last_directive_load_path", os.path.dirname(path))
 
             # Show directive in the editor
             self.editor.setPlainText(json.dumps(data, indent=2))
@@ -434,14 +431,22 @@ class DirectiveManagerDialog(QDialog):
         uid = f"directive_{uuid.uuid4().hex[:6]}"
 
         # --- Store in live vault ---
-        directives[uid] = {
+        record = {
             "label": label.strip(),
             "json": directive,
             "directive_hash": hval,
         }
 
-        # Persist to vault (store handles commit + validation)
-        dir_store.commit()
+        try:
+            saved = dir_store.update_directive(uid, record)
+        except Exception as error:
+            emit_gui_exception_log("DirectiveManagerDialog.save_to_vault", error)
+            saved = False
+        if not saved:
+            QMessageBox.warning(self, "Directive Save Failed",
+                                "The directive was not saved. Fix the vault write problem and retry. "
+                                "Your directive remains in the editor.")
+            return
 
         QMessageBox.information(self, "Saved", f"Directive '{label}' saved to vault.")
         self.refresh_lists()

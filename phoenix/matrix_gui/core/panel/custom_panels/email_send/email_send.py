@@ -611,6 +611,7 @@ class EmailSend(PhoenixPanelInterface):
             self._load_saved_recipients()
         except Exception as e:
             print(f"[EMAIL PANEL][ERROR] Failed to save recipient: {e}")
+            QMessageBox.warning(self, "Recipient Not Saved", str(e))
 
     def _delete_current_recipient(self):
         """Delete selected 'To' address from vault list."""
@@ -627,6 +628,7 @@ class EmailSend(PhoenixPanelInterface):
             self._load_saved_recipients()
         except Exception as e:
             print(f"[EMAIL PANEL][ERROR] Failed to delete recipient: {e}")
+            QMessageBox.warning(self, "Recipient Not Deleted", str(e))
 
     def _on_connection_selected(self, index):
         """Auto-fill SMTP fields when user selects a connection."""

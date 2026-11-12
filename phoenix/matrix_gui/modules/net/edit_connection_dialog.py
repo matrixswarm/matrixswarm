@@ -4,7 +4,7 @@ from matrix_gui.modules.net.connection_types.providers.registry import CONNECTIO
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.modules.net.connection_types.editors.registry import CONNECTION_EDITOR_REGISTRY
 
-def edit_connection_dialog(parent, default_proto="https", data:dict=None, conn_id=None, new_conn=False):
+def edit_connection_dialog(parent, default_proto="https", data:dict=None, conn_id=None, new_conn=False, on_save=None):
     """
     ALWAYS returns:
         (conn_id, data_dict)
@@ -30,6 +30,7 @@ def edit_connection_dialog(parent, default_proto="https", data:dict=None, conn_i
                 return (None, None)
 
         dlg = QDialog(parent)
+        result_value = [(None, None)]
         dlg.setWindowTitle(f"Edit {proto.upper()} Connection")
 
         provider = CONNECTION_PROVIDER_REGISTRY.get(proto)
@@ -75,14 +76,23 @@ def edit_connection_dialog(parent, default_proto="https", data:dict=None, conn_i
             # ID stays serial
             new_id = new_data["serial"]
 
-            dlg.result = (new_id, new_data)
+            if on_save is not None:
+                try:
+                    if not on_save(new_id, new_data):
+                        return
+                except Exception as e:
+                    emit_gui_exception_log("edit_connection_dialog.save", e)
+                    QMessageBox.warning(dlg, "Connection Save Failed", "The change was not saved. Fix the vault problem and retry, or cancel to discard it.")
+                    return
+
+            result_value[0] = (new_id, new_data)
             dlg.accept()
 
         btns.accepted.connect(on_ok)
 
         # --- CANCEL handler ---
         def on_cancel():
-            dlg.result = (None, None)  # Always provide tuple
+            result_value[0] = (None, None)
             dlg.reject()  # SAFE: triggers close
 
         btns.rejected.connect(on_cancel)
@@ -90,8 +100,6 @@ def edit_connection_dialog(parent, default_proto="https", data:dict=None, conn_i
         # --- HANDLE WINDOW X BUTTON (titlebar close) ---
         def closeEvent(event):
             # If user clicks X without OK/Cancel
-            if not hasattr(dlg, "result"):
-                dlg.result = (None, None)
             event.accept()  # required or window won't close
 
         dlg.closeEvent = closeEvent
@@ -99,7 +107,8 @@ def edit_connection_dialog(parent, default_proto="https", data:dict=None, conn_i
         dlg.exec()
 
         # FORCE EXACT RETURN FORMAT:
-        return getattr(dlg, "result", (None, None))
+        return result_value[0]
 
     except Exception as e:
         emit_gui_exception_log("edit_connection_dialog", e)
+        return (None, None)

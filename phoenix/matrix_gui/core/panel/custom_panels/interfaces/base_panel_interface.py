@@ -89,16 +89,19 @@ class PhoenixPanelInterface(QWidget, metaclass=PanelABCMeta):
 
     # --- Unified Safety Helpers ---
     def _safe_disconnect_all(self):
-        """Stops timers, detaches signals, clears references."""
+        """Stop timers and detach signals; child timers remain reusable on reopen."""
         try:
             self._disconnect_signals()
-            for t in getattr(self, "_timers", []):
+        except Exception as e:
+            print(f"[{self.__class__.__name__}] signal cleanup failed: {e}")
+        finally:
+            self._connected = False
+        for t in getattr(self, "_timers", []):
+            try:
                 if t.isActive():
                     t.stop()
-                t.deleteLater()
-            self._timers.clear()
-        except Exception as e:
-            print(f"[{self.__class__.__name__}] cleanup failed: {e}")
+            except RuntimeError as e:
+                print(f"[{self.__class__.__name__}] timer cleanup failed: {e}")
 
     # --- Abstract Required Interface ---
     @abstractmethod

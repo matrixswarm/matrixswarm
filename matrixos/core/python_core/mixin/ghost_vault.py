@@ -2,11 +2,13 @@ import json
 import base64
 import os
 import hashlib
+import stat
 import tempfile
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from core.python_core.safe_paths import open_beneath, write_file_at
 
 
 def generate_agent_keypair():
@@ -46,7 +48,7 @@ def _safe_pem(k):
                                encryption_algorithm=serialization.NoEncryption()).decode()
     return k
 
-def encrypt_vault(payload_dict, output_path=None):
+def encrypt_vault(payload_dict, output_path=None, *, output_dir_fd=None):
 
     try:
 
@@ -78,13 +80,25 @@ def encrypt_vault(payload_dict, output_path=None):
         }
 
         # Save if path provided
-        vault_path = output_path or tempfile.NamedTemporaryFile(delete=False, mode='w', suffix=".vault", prefix="agent_ghost_").name
-        with open(vault_path, "w", encoding="utf-8") as f:
-            json.dump(vault, f)
+        if output_dir_fd is not None:
+            if not output_path:
+                raise ValueError("A vault filename is required with an anchored directory")
+            vault_name = os.path.basename(output_path)
+            if not vault_name or vault_name in (".", ".."):
+                raise ValueError("Invalid vault filename")
+            write_file_at(output_dir_fd, vault_name, json.dumps(vault).encode("utf-8"), mode=0o600)
+            # The child must inherit output_dir_fd. This keeps the vault tied
+            # to the opened pod even if an ancestor is renamed or replaced.
+            vault_path = f"/proc/self/fd/{output_dir_fd}/{vault_name}"
+        else:
+            vault_path = output_path or tempfile.NamedTemporaryFile(delete=False, mode='w', suffix=".vault", prefix="agent_ghost_").name
+            with open(vault_path, "w", encoding="utf-8") as f:
+                json.dump(vault, f)
 
         return {
             "key_b64": base64.b64encode(key).decode(),
-            "vault_path": vault_path
+            "vault_path": vault_path,
+            "vault_dir_fd": output_dir_fd,
         }
 
     except Exception as e:
@@ -93,6 +107,7 @@ def encrypt_vault(payload_dict, output_path=None):
 
 def decrypt_vault(log=None):
 
+    directory_fd = None
     try:
         vault_path = os.getenv("VAULTFILE")
         symkey_b64 = os.getenv("SYMKEY")
@@ -100,8 +115,29 @@ def decrypt_vault(log=None):
             raise RuntimeError("[GHOST-VAULT] Missing VAULTFILE or SYMKEY.")
 
         key = base64.b64decode(symkey_b64)
-        with open(vault_path, "r", encoding="utf-8") as f:
-            vault = json.load(f)
+        pinned = os.getenv("MATRIX_VAULT_DIR_FD")
+        if pinned is not None:
+            directory_fd = int(pinned)
+            if directory_fd < 3 or not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+                raise ValueError("Invalid pinned vault directory")
+            vault_name = os.path.basename(vault_path)
+            if vault_path != f"/proc/self/fd/{directory_fd}/{vault_name}":
+                raise ValueError("Invalid pinned vault path")
+            fd = open_beneath(directory_fd, vault_name, os.O_RDONLY | os.O_NONBLOCK)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ValueError("Unsafe pinned vault")
+                vault_identity = (info.st_dev, info.st_ino)
+                with os.fdopen(fd, "r", encoding="utf-8") as f:
+                    fd = -1
+                    vault = json.load(f)
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+        else:
+            with open(vault_path, "r", encoding="utf-8") as f:
+                vault = json.load(f)
 
         cipher = AES.new(key, AES.MODE_GCM, nonce=base64.b64decode(vault["nonce"]))
         decrypted = cipher.decrypt_and_verify(
@@ -165,21 +201,40 @@ def decrypt_vault(log=None):
                 password=None,
             )
 
-        os.remove(vault_path)
+        if pinned is not None:
+            current = os.stat(vault_name, dir_fd=directory_fd, follow_symlinks=False)
+            if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != vault_identity:
+                raise ValueError("Pinned vault changed before cleanup")
+            os.unlink(vault_name, dir_fd=directory_fd)
+        else:
+            os.remove(vault_path)
 
     except Exception as e:
 
         raise RuntimeError(f"[VAULT][ERROR] Final trust unpack failed: {e}")
+    finally:
+        if directory_fd is not None and directory_fd >= 3 and os.getenv("MATRIX_VAULT_CLOSE_DIR_FD") == "1":
+            try:
+                os.close(directory_fd)
+            except OSError:
+                pass
 
     return payload_dict
 
-def build_encrypted_spawn_env(payload_dict, output_path=None):
-    result = encrypt_vault(payload_dict, output_path)
-    return {
+def build_encrypted_spawn_env(payload_dict, output_path=None, *, output_dir_fd=None):
+    result = encrypt_vault(payload_dict, output_path, output_dir_fd=output_dir_fd)
+    env = {
         **os.environ,
         "SYMKEY": result["key_b64"],
         "VAULTFILE": result["vault_path"]
     }
+    if result["vault_dir_fd"] is None:
+        env.pop("MATRIX_VAULT_DIR_FD", None)
+        env.pop("MATRIX_VAULT_CLOSE_DIR_FD", None)
+    else:
+        env["MATRIX_VAULT_DIR_FD"] = str(result["vault_dir_fd"])
+        env["MATRIX_VAULT_CLOSE_DIR_FD"] = "1"
+    return env
 
 
 def sign_pubkey_registry(self, pubkey_path):

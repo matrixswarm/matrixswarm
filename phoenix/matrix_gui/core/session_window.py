@@ -32,7 +32,7 @@ from matrix_gui.core.panel.inject_agent_panel import InjectAgentPanel
 from matrix_gui.core.panel.multiplexer_panel import MultiplexerPanel
 from matrix_gui.core.panel.universe_teardown_dialog import UniverseTeardownDialog
 from matrix_gui.core.panel.control_bar import ControlBar
-from matrix_gui.modules.vault.services.vault_connection_singleton import VaultConnectionSingleton
+from matrix_gui.modules.vault.services.vault_connection_singleton import VaultConnectionSingleton, SerializedConnection
 from matrix_gui.modules.directive.deploy_dialog import DeployDialog
 from matrix_gui.core.startup_policy import configure_startup_policy, install_print_gate
 from matrix_gui.core.utils.session_embedding import (
@@ -150,7 +150,7 @@ def run_session(session_id, conn, debug_output=False):
         win.start_pipe_timer()
 
         wid = prepare_embedded_session_window(win)
-        conn.send({"type": "window_ready", "session_id": session_id, "win_id": wid})
+        win.conn.send({"type": "window_ready", "session_id": session_id, "win_id": wid})
         # Show only after the cockpit supplies the native container parent.
         # Both Qt processes must agree on child coordinates before layout runs.
 
@@ -162,7 +162,7 @@ def run_session(session_id, conn, debug_output=False):
             emit_gui_exception_log("[SESSION][FATAL] Exception in session loop", e)
         finally:
             try:
-                conn.send({"type": "exit", "session_id": session_id})
+                win.conn.send({"type": "exit", "session_id": session_id})
             except Exception as inner:
                 print(f"[SESSION][FATAL] Failed to signal exit: {inner}")
 
@@ -205,9 +205,9 @@ class SessionWindow(QMainWindow):
             #showing status bar
             self._blink_in_progress = False
 
-            self.conn = conn
+            self.conn = SerializedConnection(conn)
             self.session_id = session_id
-            self.vault_singleton = VaultConnectionSingleton.get(dep_id=deployment_id, conn=conn)
+            self.vault_singleton = VaultConnectionSingleton.get(dep_id=deployment_id, conn=self.conn)
             self.vault_singleton.load(deployment)
 
             self.cockpit_id = cockpit_id
@@ -337,6 +337,10 @@ class SessionWindow(QMainWindow):
         """
         if not self.conn:
             return
+        # A worker may be awaiting a specific vault response. Do not consume
+        # its reply from the GUI timer or block the event loop waiting for it.
+        if not self.vault_singleton._lock.acquire(blocking=False):
+            return
         try:
             queued = self.vault_singleton.take_deferred_messages()
             while queued or self.conn.poll():
@@ -353,6 +357,8 @@ class SessionWindow(QMainWindow):
         except (EOFError, OSError):
             print(f"[SESSION][PIPE] Lost pipe for {self.session_id}")
             self._pipe_timer.stop()
+        finally:
+            self.vault_singleton._lock.release()
 
     def _send_heartbeat(self):
         """
@@ -925,6 +931,7 @@ class SessionWindow(QMainWindow):
                     bus=self.bus,
                     conn=self.conn,
                     deployment=self.deployment,
+                    vault_connection=self.vault_singleton,
                     parent=self
                 )
             self._replace_panel.launch()

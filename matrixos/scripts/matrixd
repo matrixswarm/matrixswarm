@@ -17,7 +17,7 @@ import hashlib
 import argparse
 import psutil
 import re
-import shutil
+import secrets
 
 from pathlib import Path
 from Crypto.Cipher import AES
@@ -26,6 +26,9 @@ from Crypto.PublicKey import RSA
 from core.python_core.utils.boot_guard import validate_universe_id,  enforce_single_matrix_instance
 from core.python_core.tree_parser import TreeParser
 from core.python_core.core_spawner import CoreSpawner
+from core.python_core.reuse_cleanup import validate_agent_ids, validate_directive_tree, cleanup_universe, remove_directive_and_key, cleanup_with_directive_and_key
+from core.python_core.lifecycle_fence import LifecycleFence
+from core.python_core.safe_paths import trusted_shared_agent_root, trusted_shared_core_root
 from core.python_core.mixin.ghost_vault import generate_agent_keypair
 from core.python_core.utils.crypto_utils import generate_aes_key
 from core.python_core.class_lib.packet_delivery.packet.standard.general.json.packet import Packet
@@ -111,26 +114,82 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
         raise ValueError(
             "[matrixd] Boot is Railgun-only; --directive-stdin is required."
         )
-    runtime_universe_path = Path(base) / "universes" / "runtime" / universe / "latest"
-
-    runtime_universe_path.mkdir(parents=True, exist_ok=True)
-
-    if not runtime_universe_path.exists():
-        raise RuntimeError(f"[FATAL] Runtime path not found: {runtime_universe_path}")
-
     validate_universe_id(universe)
-    if not reboot:
-        enforce_single_matrix_instance(universe)
-    os.environ["UNIVERSE_ID"] = universe
-
     bundle, swarm_key = read_boot_envelope()
     directive = decrypt_directive_bundle(bundle, swarm_key)
     print("[BOOT] Railgun envelope decrypted in memory; no boot files created")
 
+    directive_agent_ids = validate_directive_tree(directive)
     tp = TreeParser.load_tree_direct(directive)
     if not tp:
         print("[FATAL] Invalid directive structure")
         return
+
+    # Never retire channels from a malformed or partially rejected directive.
+    active_agent_ids = validate_agent_ids(tp.nodes.keys())
+    if active_agent_ids != directive_agent_ids:
+        raise ValueError("[BOOT][ABORT] Directive agent tree changed during parsing")
+    # Fail before stopping a healthy swarm if shared Python import roots are
+    # missing or writable by a swarm account.
+    for validate in (lambda: trusted_shared_core_root(base),
+                     lambda: trusted_shared_agent_root(base, "python")):
+        tree_fd = validate()
+        if tree_fd is None:
+            raise RuntimeError("[BOOT][ABORT] Administrator-controlled source tree is missing")
+        os.close(tree_fd)
+
+    fence = LifecycleFence(base, universe)
+    generation = secrets.token_hex(16)
+    with fence.exclusive():
+        previous = fence.read_state()
+        if previous["state"] in ("STARTING", "STOPPING"):
+            raise RuntimeError("[BOOT][ABORT] Incomplete lifecycle operation requires administrator recovery")
+        target_paths = get_all_swarm_agent_info(universe=universe, base=base)
+        _assert_processes_visible(universe, target_paths)
+        if previous["state"] == "STOPPED" and target_paths:
+            raise RuntimeError("[BOOT][ABORT] Stop legacy or untracked agents before starting a fenced universe")
+        if not reboot:
+            # The legacy singleton check exits the process directly. It must
+            # run before changing the state so a rejected duplicate boot does
+            # not leave the running generation marked STOPPING.
+            enforce_single_matrix_instance(universe)
+        fence.write_state("STOPPING", previous["generation"] or generation, previous["boot_id"])
+        try:
+            spawner, pod_path, matrix_uuid, fingerprint = _boot_universe_fenced(universe, args, base, python_exec, reboot,
+                verbose, debug, rug_pull, swarm_key, directive, tp, active_agent_ids, fence, generation)
+        except BaseException:
+            # Leave a non-active state for explicit recovery if startup fails.
+            try:
+                current = fence.read_state()
+                fence.write_state("STOPPING", current["generation"] or generation, current["boot_id"])
+            except Exception:
+                pass
+            raise
+    # A new Matrix agent must not begin spawning while the boot lock is held.
+    # If the boot process dies before this release, pipe EOF stops the child.
+    try:
+        spawner.release_pending_gate()
+        spawner.wait_until_ready(timeout=30)
+    except BaseException:
+        spawner.close_ready_pipe()
+        # Do not claim a failed/early-exit child is online. If still the same
+        # active generation, fence and stop it; preserve data on any failure.
+        try:
+            with fence.exclusive(expected_generation=generation):
+                state = fence.read_state()
+                fence.write_state("STOPPING", generation, state["boot_id"])
+                if _kill_universe_fenced(base, universe, preserve_boot=state["boot_id"]):
+                    fence.write_state("STOPPED", None, state["boot_id"])
+        except Exception:
+            pass
+        raise
+    print(f"[✅] Matrix deployed at: {pod_path}")
+    print(f"[🧠] Swarm online :: {matrix_uuid} :: fingerprint: {fingerprint}")
+
+
+def _boot_universe_fenced(universe, args, base, python_exec, reboot, verbose, debug, rug_pull,
+                          swarm_key, directive, tp, active_agent_ids, fence, generation):
+    os.environ["UNIVERSE_ID"] = universe
 
     print(f"[REBOOT] 💣 Full MIRV deployment initiated: {universe}")
     target_paths = get_all_swarm_agent_info(universe=universe, base=base)
@@ -139,16 +198,22 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
         raise RuntimeError(
             f"[REBOOT][ABORT] Prior '{universe}' agents survived shutdown."
         )
-
-    rejected_nodes=    tp.get_rejected_nodes()
-    if rejected_nodes:
-        print(f"[RECOVERY] ⚠️ Removed duplicate nodes: {rejected_nodes}")
+    remaining = get_all_swarm_agent_info(universe=universe, base=base)
+    _assert_processes_visible(universe, remaining)
+    if remaining:
+        raise RuntimeError(
+            f"[REBOOT][ABORT] Prior '{universe}' agents appeared after shutdown."
+        )
 
     MATRIX_UUID = directive.get("universal_id", "matrix")
 
     print(f"{universe}, {base}, ")
 
-    cp = CoreSpawner(universe, base, python_site=base, detected_python=python_exec, booting=True, args=args)
+    cp = CoreSpawner(universe, base, python_site=base, detected_python=python_exec, booting=True, args=args,
+                     active_agent_ids=active_agent_ids)
+    cp.lifecycle_generation = generation
+    boot_id = str(cp.pm.reboot_uuid)
+    fence.write_state("STARTING", generation, boot_id)
     cp.set_matrix_universal_id(MATRIX_UUID)
     cp.set_protect_memory(getattr(args, "protect_memory", False))
 
@@ -232,6 +297,7 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
 
     matrix_node['children'] = []
     new_uuid, pod_path = cp.create_runtime()
+    fence.write_state("ACTIVE", generation, boot_id)
     cp.spawn_agent(
         universe=universe,
         spawner="site_boot",
@@ -239,10 +305,11 @@ def boot_universe(universe: str, args, base="/matrix", python_exec=sys.executabl
         agent_name=matrix_node.get("name") or "matrix",
         spawn_uuid=new_uuid,
         tree_node=matrix_node,
+        defer_gate=True,
+        require_ready=True,
     )
 
-    print(f"[✅] Matrix deployed at: {pod_path}")
-    print(f"[🧠] Swarm online :: {MATRIX_UUID} :: fingerprint: {hashlib.sha256(matrix_pub.encode()).hexdigest()[:12]}")
+    return cp, pod_path, MATRIX_UUID, hashlib.sha256(matrix_pub.encode()).hexdigest()[:12]
 
 def main():
     parser = argparse.ArgumentParser()
@@ -289,6 +356,11 @@ def main():
         if name == "inspect":
             diagnostic.add_argument("--expected-agents", default="")
     kill = sub.add_parser("kill")
+    recover = sub.add_parser("lifecycle-recover", help="Recover an interrupted lifecycle operation after verifying the universe is stopped")
+    recover.add_argument("--universe", required=True)
+    recover.add_argument("--base", default="/matrix")
+    recover.add_argument("--confirm-stopped", action="store_true", required=True,
+                         help="Confirm that legacy and non-cooperating agents were stopped")
     kill.add_argument(
         "--universe",
         help=(
@@ -331,6 +403,8 @@ def main():
             debug=args.debug,
             rug_pull=args.rug_pull
         )
+    elif args.cmd == "lifecycle-recover":
+        recover_lifecycle(args.base, args.universe, confirmed=args.confirm_stopped)
     elif args.cmd == "list":
         list_universes(args.base, json_output=args.json)
     elif args.cmd in {"agents", "logs", "inspect"}:
@@ -507,76 +581,118 @@ def discover_universes(base="/matrix"):
     return universes
 
 
-def _remove_exact_file(path, label):
-    """Unlink one exact file or symlink; never recurse or expand a pattern."""
-    if not path.exists() and not path.is_symlink():
-        print(f"[DELETE] No {label} present: {path}")
-        return True
-    if path.is_dir() and not path.is_symlink():
-        print(f"[DELETE][ERROR] Refusing directory where {label} was expected: {path}")
-        return False
+def _assert_procfs_visibility():
+    """Refuse procfs hidepid modes, which may omit PIDs without errors."""
     try:
-        path.unlink()
-        print(f"[DELETE] Removed {label}: {path}")
-        return True
-    except OSError as exc:
-        print(f"[DELETE][ERROR] Could not remove {label} {path}: {exc}")
-        return False
+        mountinfo = Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+        seen = False
+        for line in mountinfo.splitlines():
+            fields = line.split()
+            if len(fields) < 10 or fields[4] != "/proc" or "-" not in fields:
+                continue
+            separator = fields.index("-")
+            if fields[separator + 1] != "proc":
+                continue
+            seen = True
+            options = (fields[5] + "," + fields[separator + 3]).split(",")
+            if any(option.startswith("hidepid=") and option != "hidepid=0" for option in options):
+                raise RuntimeError("Restricted procfs hides processes; universe state is uncertain")
+        if not seen:
+            raise RuntimeError("Cannot verify procfs visibility")
+    except (OSError, IndexError, ValueError) as exc:
+        raise RuntimeError("Cannot verify procfs visibility") from exc
 
 
-def _remove_universe_tree(root, universe, label):
-    """Remove one validated universe tree without following a root symlink."""
-    target = root / universe
-    if target.parent.absolute() != root.absolute():
-        print(f"[CLEANUP][ERROR] Refusing path outside {root}: {target}")
-        return False
-    if not target.exists() and not target.is_symlink():
-        print(f"[CLEANUP] No {label} tree present: {target}")
-        return True
-    try:
-        if target.is_symlink() or target.is_file():
-            target.unlink()
-        else:
-            shutil.rmtree(target)
-        print(f"[CLEANUP] Removed {label} tree: {target}")
-        return True
-    except OSError as exc:
-        print(f"[CLEANUP][ERROR] Could not remove {label} tree {target}: {exc}")
-        return False
-
-
-def _prune_old_boots(root):
-    """Preserve the newest boot while removing older boot directories."""
-    if not root.is_dir():
-        print(f"[CLEANUP] No boot tree present: {root}")
-        return True
-
-    boots = sorted(
-        (
-            child for child in root.iterdir()
-            if child.name not in {"latest", "persistent"}
-            and child.is_dir()
-            and not child.is_symlink()
-        ),
-        key=lambda path: path.name,
-    )
-    ok = True
-    for old in boots[:-1]:
+def _assert_processes_visible(universe, known_agents):
+    """Fail closed when a live process cannot be inspected for its job label."""
+    _assert_procfs_visibility()
+    known_pids = {item.get("pid") for item in known_agents}
+    for proc in psutil.process_iter(["pid", "cmdline", "status", "ppid"]):
         try:
-            shutil.rmtree(old)
-            print(f"[CLEANUP] Removed old boot: {old}")
-        except OSError as exc:
-            print(f"[CLEANUP][ERROR] Could not remove old boot {old}: {exc}")
-            ok = False
-    return ok
+            info = proc.info
+            cmdline = info.get("cmdline")
+            if info.get("status") == psutil.STATUS_ZOMBIE:
+                continue
+            if cmdline is None:
+                raise RuntimeError(f"Cannot inspect process {info.get('pid')}; universe state is uncertain")
+            if not cmdline:
+                if info.get("ppid") == 2 or info.get("pid") == 2:
+                    continue
+                raise RuntimeError(f"Cannot establish identity of process {info.get('pid')}")
+            for index, arg in enumerate(cmdline):
+                is_job = (arg == "--job" and index + 1 < len(cmdline) and cmdline[index + 1].startswith(universe + ":"))
+                is_job = is_job or arg.startswith("--job=" + universe + ":")
+                if is_job and info.get("pid") not in known_pids:
+                    raise RuntimeError("Unrecognized or uninspectable universe process")
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.AccessDenied as exc:
+            raise RuntimeError("Cannot inspect all processes; universe state is uncertain") from exc
+
+
+def recover_lifecycle(base, universe, confirmed=False):
+    """Explicitly recover even a partial state, never the stable lock inode."""
+    validate_universe_id(universe)
+    if os.geteuid() != 0 or not confirmed:
+        raise PermissionError("Lifecycle recovery requires root and --confirm-stopped")
+    fence = LifecycleFence(base, universe)
+    with fence.exclusive():
+        _assert_procfs_visibility()
+        try:
+            previous_boot = fence.read_state()["boot_id"]
+        except Exception:
+            previous_boot = None
+        # An inaccessible process makes this global observation incomplete;
+        # proceeding would risk cleaning underneath a surviving agent.
+        for proc in psutil.process_iter(["pid", "cmdline", "status", "ppid"]):
+            try:
+                info = proc.info
+                cmdline = info.get("cmdline")
+                if info.get("status") == psutil.STATUS_ZOMBIE:
+                    continue
+                if cmdline is None:
+                    raise RuntimeError(f"Cannot inspect process {info.get('pid')}")
+                if not cmdline:
+                    if info.get("ppid") == 2 or info.get("pid") == 2:
+                        continue
+                    raise RuntimeError(f"Cannot establish identity of process {info.get('pid')}")
+                for index, arg in enumerate(cmdline):
+                    if arg == "--job" and index + 1 < len(cmdline) and cmdline[index + 1].startswith(universe + ":"):
+                        raise RuntimeError("Universe still has a live or pending agent")
+                    if arg.startswith("--job=" + universe + ":"):
+                        raise RuntimeError("Universe still has a live or pending agent")
+            except psutil.NoSuchProcess:
+                continue
+            except psutil.AccessDenied as exc:
+                raise RuntimeError("Cannot inspect all processes; lifecycle recovery refused") from exc
+        fence.write_state("STOPPED", None, previous_boot)
+    print(f"[RECOVERY] Lifecycle reset to STOPPED for {universe}; lock inode preserved.")
 
 
 def kill_universe(base, universe, cleanup=False,
                   delete_directive_with_key=False):
     validate_universe_id(universe)
-    base_path = Path(base)
+    fence = LifecycleFence(base, universe)
+    with fence.exclusive():
+        previous = fence.read_state()
+        existing = get_all_swarm_agent_info(universe=universe, base=base)
+        _assert_processes_visible(universe, existing)
+        if previous["state"] == "STOPPED" and existing:
+            print("[KILL][ABORT] Untracked legacy agents require the prior shutdown procedure.")
+            return False
+        generation = previous["generation"] or secrets.token_hex(16)
+        fence.write_state("STOPPING", generation, previous["boot_id"])
+        ok = _kill_universe_fenced(base, universe, cleanup, delete_directive_with_key,
+                                    preserve_boot=previous["boot_id"])
+        if ok:
+            removed_all = cleanup and delete_directive_with_key
+            fence.write_state("STOPPED", None, None if removed_all else previous["boot_id"])
+        return ok
+
+
+def _kill_universe_fenced(base, universe, cleanup=False,
+                          delete_directive_with_key=False, preserve_boot=None):
     runtime_base = Path(base) / "universes" / "runtime" / universe
-    static_base = Path(base) / "universes" / "static" / universe
 
     print(f"[KILL] Target Universe: {universe}")
 
@@ -600,36 +716,26 @@ def kill_universe(base, universe, cleanup=False,
             "directive, key, runtime, and static data."
         )
         return False
+    remaining = get_all_swarm_agent_info(universe=universe, base=base)
+    _assert_processes_visible(universe, remaining)
+    if remaining:
+        print(f"[KILL][ABORT] New agents appeared in {universe}; preserving universe data.")
+        return False
 
     ok = True
 
-    if delete_directive_with_key:
-        directives_dir = base_path / "boot_directives"
-        directive_path = directives_dir / f"{universe}.enc.json"
-        key_path = directives_dir / "keys" / f"{universe}.key"
-        ok = _remove_exact_file(directive_path, "encrypted directive") and ok
-        ok = _remove_exact_file(key_path, "matching swarm key") and ok
-        if not ok:
-            print(
-                f"[KILL][ABORT] Directive/key removal for {universe} was "
-                "incomplete; preserving runtime and static data."
-            )
-            return False
-
-    if cleanup:
-        print(f"[SWARM-CLEANER] Running cleanup for universe '{universe}'...")
-        if delete_directive_with_key:
-            runtime_root = base_path / "universes" / "runtime"
-            static_root = base_path / "universes" / "static"
-            ok = _remove_universe_tree(
-                runtime_root, universe, "runtime"
-            ) and ok
-            ok = _remove_universe_tree(
-                static_root, universe, "static"
-            ) and ok
-        else:
-            ok = _prune_old_boots(runtime_base) and ok
-            ok = _prune_old_boots(static_base) and ok
+    try:
+        if delete_directive_with_key and cleanup:
+            cleanup_with_directive_and_key(base, universe)
+        elif delete_directive_with_key:
+            remove_directive_and_key(base, universe)
+        elif cleanup:
+            cleanup_universe(base, universe, preserve_boot=preserve_boot)
+    except Exception as exc:
+        print(f"[SWARM-CLEANER][ERROR] Cleanup incomplete: {exc}. "
+              "Some files may already have been removed; inspect directive, "
+              "key, runtime and static data before retrying.")
+        ok = False
 
     if ok:
         print(f"[KILL] Universe '{universe}' operation complete.")

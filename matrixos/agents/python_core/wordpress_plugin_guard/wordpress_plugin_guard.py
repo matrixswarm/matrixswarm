@@ -6,11 +6,125 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 import hashlib
 import shutil
 import json
+import stat
+import tempfile
+import threading
 import time
+from functools import wraps
+try:
+    import fcntl
+except ImportError:  # Windows test environments; MatrixOS runs on Linux.
+    fcntl = None
 from core.python_core.boot_agent import BootAgent
 from core.python_core.utils.swarm_sleep import interruptible_sleep
 from core.python_core.utils.crypto_utils import pem_fix
 from Crypto.PublicKey import RSA
+
+
+def _safe_component(value):
+    """Accept a single, non-special filename component from an RPC or manifest."""
+    if (not isinstance(value, str) or not value or value in (".", "..")
+            or "/" in value or "\\" in value or any(ord(c) < 32 for c in value)):
+        raise ValueError("Invalid plugin or site name")
+    return value
+
+
+def _serialize_manifest(method):
+    """Serialize scans and approvals across threads and POSIX agent processes."""
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        with self._manifest_lock:
+            outer = getattr(self, "_manifest_lock_depth", 0) == 0
+            fd = None
+            if outer and fcntl is not None:
+                directory = _safe_child(self.snapshot_root, self.site_id)
+                if not os.path.isdir(directory):
+                    if getattr(self, "read_only", False):
+                        raise FileNotFoundError("Read-only snapshot directory does not exist")
+                    os.makedirs(directory, mode=0o700, exist_ok=True)
+                # Linux supports flock on a read-only directory descriptor, so
+                # monitoring does not require creating a writable lockfile.
+                fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+                try:
+                    if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                        raise ValueError("Approval lock is not a directory")
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                except Exception:
+                    os.close(fd)
+                    raise
+            self._manifest_lock_depth = getattr(self, "_manifest_lock_depth", 0) + 1
+            try:
+                return method(self, *args, **kwargs)
+            finally:
+                self._manifest_lock_depth -= 1
+                if fd is not None:
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                    finally:
+                        os.close(fd)
+    return guarded
+
+
+def _safe_child(root, name):
+    """Reject links and paths that resolve outside the configured directory."""
+    name = _safe_component(name)
+    if os.path.islink(root):
+        raise ValueError("Refusing a linked managed directory")
+    base = os.path.realpath(root)
+    path = os.path.join(root, name)
+    if os.path.islink(path) or os.path.commonpath((base, os.path.realpath(path))) != base:
+        raise ValueError("Refusing a linked or out-of-scope plugin path")
+    return path
+
+
+def _raise_walk_error(error):
+    raise error
+
+
+def _read_baseline(path):
+    """Read a regular, well-formed baseline without following a final symlink."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "r", encoding="utf-8") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("Baseline is not a regular file")
+        baseline = json.load(stream)
+    if not isinstance(baseline, dict) or any(
+        not isinstance(name, str) or not isinstance(digest, str)
+        or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)
+        for name, digest in baseline.items()
+    ):
+        raise ValueError("Invalid plugin baseline")
+    return baseline
+
+
+def _atomic_write_json(path, payload):
+    directory = os.path.dirname(path)
+    fd, temporary = tempfile.mkstemp(prefix=".plugin-guard-", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        # Persist the rename before advancing a staged approval. MatrixOS runs
+        # on POSIX; directory fsync keeps the pending marker durable on power loss.
+        if os.name == "posix":
+            directory_fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _reject_linked_tree(root):
+    """Snapshotting must not read files through links inside a plugin."""
+    for directory, subdirs, files in os.walk(root, followlinks=False, onerror=_raise_walk_error):
+        for name in subdirs + files:
+            if os.path.islink(os.path.join(directory, name)):
+                raise ValueError("Refusing symbolic links inside plugin tree")
 
 """
 WordPress Plugin Guard Agent: Monitors the integrity of WordPress plugins
@@ -48,6 +162,7 @@ class Agent(BootAgent):
     """
     def __init__(self):
         super().__init__()
+        self._manifest_lock = threading.RLock()
         try:
             self.name = "wordpress_plugin_guard"
             cfg = self.tree_node.get("config", {})
@@ -58,7 +173,7 @@ class Agent(BootAgent):
             # Configurable paths
             self.plugin_dir = cfg.get("plugin_dir", "/var/www/html/wp-content/plugins")
             self.snapshot_root = cfg.get("snapshot_root", "/opt/swarm/guard/snapshots")
-            self.site_id = cfg.get("site_id", "site1")
+            self.site_id = _safe_component(cfg.get("site_id", "site1"))
             self.quarantine_dir = os.path.join(cfg.get("quarantine_dir", "/opt/quarantine/wp_plugins"), self.site_id)
 
             self._signing_keys = self.tree_node.get('config', {}).get('security', {}).get('signing', {})
@@ -94,6 +209,7 @@ class Agent(BootAgent):
 
         except Exception as e:
             self.log("[PLUGIN-GUARD][INIT]", error=e, level="CRITICAL")
+            raise
 
     def post_boot(self):
         self.log(f"{self.NAME} v{self.AGENT_VERSION} – watching the plugins, because someone has to.")
@@ -127,7 +243,8 @@ class Agent(BootAgent):
             str: The normalized plugin name.
         """
         # WP auto-updates append suffixes (e.g., akismet_1234 → akismet)
-        return folder.split("_")[0]
+        folder = _safe_component(folder)
+        return _safe_component(folder.split("_")[0] or folder)
 
     def _snapshot_plugin(self, plugin_folder, out_path):
         """
@@ -142,8 +259,9 @@ class Agent(BootAgent):
         Returns:
             dict: The generated manifest data.
         """
+        _reject_linked_tree(plugin_folder)
         manifest = {}
-        for root, dirs, files in os.walk(plugin_folder):
+        for root, dirs, files in os.walk(plugin_folder, onerror=_raise_walk_error):
             for fname in files:
                 fpath = os.path.join(root, fname)
                 rel = os.path.relpath(fpath, plugin_folder).replace("\\", "/")
@@ -151,13 +269,13 @@ class Agent(BootAgent):
         self._ensure_dir(os.path.dirname(out_path))
 
         def writer():
-            with open(out_path, "w") as f:
-                json.dump(manifest, f, indent=2)
+            _atomic_write_json(out_path, manifest)
 
         self._safe_write(out_path, writer)
 
         return manifest
 
+    @_serialize_manifest
     def _snapshot_all_plugins(self):
         """
         Refreshes baseline only for already tracked plugins.
@@ -166,30 +284,25 @@ class Agent(BootAgent):
         out_dir = os.path.join(self.snapshot_root, self.site_id)
         self._ensure_dir(out_dir)
 
-        tracked = {f[:-5] for f in os.listdir(out_dir) if f.endswith(".json")}
-        for folder in os.listdir(self.plugin_dir):
-            fpath = os.path.join(self.plugin_dir, folder)
+        manifest = self._load_manifest()
+        tracked = manifest["tracked_plugins"]
+        refreshed = 0
+        for plugin, approval in list(tracked.items()):
+            fpath = _safe_child(self.plugin_dir, plugin)
             if not os.path.isdir(fpath):
                 continue
-            norm_name = self._normalize_folder_name(folder)
-            if norm_name not in tracked:
-                self.log(f"[PLUGIN-GUARD][SNAPSHOT] Skipping untracked plugin {folder}", level="INFO")
-                continue
-            manifest_path = os.path.join(out_dir, f"{norm_name}.json")
-            self._snapshot_plugin(fpath, manifest_path)
+            norm = self._normalize_folder_name(plugin)
+            if (not isinstance(approval, dict) or approval.get("normalized") != norm
+                    or approval.get("manifest_file") != f"{norm}.json"):
+                raise ValueError("Invalid tracked plugin approval")
+            out_path = _safe_child(out_dir, f"{norm}.json")
+            _read_baseline(out_path)
+            self._begin_approval(plugin, norm)
+            self._snapshot_plugin(fpath, out_path)
+            self._finish_approval(plugin, norm)
+            refreshed += 1
 
-
-            manifest = self._load_manifest()
-            tracked = manifest["tracked_plugins"].keys()
-            for plugin in tracked:
-                fpath = os.path.join(self.plugin_dir, plugin)
-                if not os.path.isdir(fpath):
-                    continue
-                norm = self._normalize_folder_name(plugin)
-                out_path = os.path.join(self.snapshot_root, self.site_id, f"{norm}.json")
-                self._snapshot_plugin(fpath, out_path)
-
-        self.log(f"[PLUGIN-GUARD] Refreshed snapshot for {len(tracked)} tracked plugins at site {self.site_id}")
+        self.log(f"[PLUGIN-GUARD] Refreshed snapshot for {refreshed} tracked plugins at site {self.site_id}")
 
 
 
@@ -207,17 +320,17 @@ class Agent(BootAgent):
         """
         out_dir = os.path.join(self.snapshot_root, self.site_id)
         norm_name = self._normalize_folder_name(folder)
-        manifest_path = os.path.join(out_dir, f"{norm_name}.json")
-        fpath = os.path.join(self.plugin_dir, folder)
+        manifest_path = _safe_child(out_dir, f"{norm_name}.json")
+        fpath = _safe_child(self.plugin_dir, folder)
 
         if not os.path.exists(manifest_path):
             return False, "New or unknown plugin — never trusted."
 
-        with open(manifest_path, "r") as f:
-            baseline = json.load(f)
+        baseline = _read_baseline(manifest_path)
 
+        _reject_linked_tree(fpath)
         current = {}
-        for root, dirs, files in os.walk(fpath):
+        for root, dirs, files in os.walk(fpath, onerror=_raise_walk_error):
             for fname in files:
                 rel = os.path.relpath(os.path.join(root, fname), fpath).replace("\\", "/")
                 current[rel] = self._sha256_file(os.path.join(root, fname))
@@ -231,6 +344,7 @@ class Agent(BootAgent):
         return True, "Clean"
 
     # === Core Scan ===
+    @_serialize_manifest
     def _scan_plugins(self):
         """
         The main scan logic. Iterates through all plugins, compares against manifests,
@@ -241,6 +355,9 @@ class Agent(BootAgent):
         Also quarantines if enforcement is enabled.
         """
         manifest = self._load_manifest()
+        pending_approvals = manifest.get("pending_approvals", {})
+        if not isinstance(pending_approvals, dict):
+            raise ValueError("Invalid pending approval state")
         try:
             # refresh persisted states first
             self.block_new = bool(manifest.get("block_new", self.block_new))
@@ -269,8 +386,11 @@ class Agent(BootAgent):
                     changed = True
 
             if changed:
-                self._save_manifest(manifest)
-                self.log(f"[PLUGIN-GUARD][CLEANUP] Manifest pruned of stale entries.", level="INFO")
+                if getattr(self, "read_only", False):
+                    self.log("[PLUGIN-GUARD][READONLY] Stale entries ignored for this scan; manifest unchanged.", level="INFO")
+                else:
+                    self._save_manifest(manifest)
+                    self.log(f"[PLUGIN-GUARD][CLEANUP] Manifest pruned of stale entries.", level="INFO")
 
         except Exception as e:
             self.log("[PLUGIN-GUARD] Failed to list plugin dir", error=e)
@@ -284,19 +404,83 @@ class Agent(BootAgent):
             snapshots = {f[:-5] for f in os.listdir(out_dir)
                          if f.endswith(".json") and not f.startswith(".")}
 
-            # Map normalized names to actual folders
-            current_plugins = {
-                self._normalize_folder_name(f): f
-                for f in entries
-                if os.path.isdir(os.path.join(self.plugin_dir, f))
-            }
+            # Keep every folder: normalized names can collide during updates.
+            # Do not silently ignore a linked plugin, which could hide a change.
+            current_plugins = []
+            for folder in entries:
+                path = os.path.join(self.plugin_dir, folder)
+                if os.path.islink(path):
+                    self.log(f"[PLUGIN-GUARD][DIR-AUDIT] Linked plugin entry rejected: {folder}", level="WARN")
+                    if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"linked:{folder}"):
+                        self.drop_alert({"plugin": folder, "path": path, "reason": "Linked plugin entry cannot be inspected safely.", "action": "linked_plugin", "enforce": self.enforce, "timestamp": int(time.time())})
+                    continue
+                if os.path.isdir(path):
+                    current_plugins.append((self._normalize_folder_name(folder), folder))
+
+            normalized_counts = {}
+            for norm, _folder in current_plugins:
+                normalized_counts[norm] = normalized_counts.get(norm, 0) + 1
 
             # === Step 1: Check each folder on disk ===
-            for norm, folder in current_plugins.items():
+            for norm, folder in current_plugins:
                 fpath = os.path.join(self.plugin_dir, folder)
-                manifest_path = os.path.join(out_dir, f"{norm}.json")
+                if norm in pending_approvals:
+                    self.log(f"[PLUGIN-GUARD][DIR-AUDIT] Plugin approval incomplete: {folder}", level="WARN")
+                    if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"pending:{folder}"):
+                        self.drop_alert({"plugin": folder, "path": fpath, "reason": "Plugin approval did not complete; review or retry before trusting it.", "action": "pending_approval", "enforce": self.enforce, "timestamp": int(time.time())})
+                    continue
+                if normalized_counts[norm] > 1 and norm in snapshots:
+                    self.log(f"[PLUGIN-GUARD][DIR-AUDIT] Ambiguous plugin baseline: {folder}", level="WARN")
+                    if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"collision:{folder}"):
+                        self.drop_alert({"plugin": folder, "path": fpath, "reason": "Multiple plugin folders share one baseline; review before trusting or removing either.", "action": "baseline_collision", "enforce": self.enforce, "timestamp": int(time.time())})
+                    continue
+                try:
+                    manifest_path = _safe_child(out_dir, f"{norm}.json")
+                    has_baseline = os.path.lexists(manifest_path)
+                    if has_baseline:
+                        _read_baseline(manifest_path)
+                except (ValueError, OSError, UnicodeError):
+                    self.log(f"[PLUGIN-GUARD][DIR-AUDIT] Unsafe plugin baseline: {folder}", level="ERROR")
+                    if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"unsafe-baseline:{folder}"):
+                        self.drop_alert({"plugin": folder, "path": fpath, "reason": "Baseline is invalid, unreadable, linked, or outside the snapshot directory.", "action": "unsafe_baseline", "enforce": self.enforce, "timestamp": int(time.time())})
+                    # A broken baseline is not proof that the plugin is bad.
+                    # Leave it in place for operator review, even in enforce mode.
+                    continue
 
-                if not os.path.exists(manifest_path):
+                approval = manifest.get("tracked_plugins", {}).get(folder)
+                if has_baseline and (not isinstance(approval, dict)
+                                     or approval.get("normalized") != norm
+                                     or approval.get("manifest_file") != f"{norm}.json"):
+                    self.log(f"[PLUGIN-GUARD][DIR-AUDIT] Baseline has no matching approval: {folder}", level="WARN")
+                    if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"unregistered-baseline:{folder}"):
+                        self.drop_alert({"plugin": folder, "path": fpath, "reason": "Baseline exists without approval for this exact folder; review before trusting or removing it.", "action": "unregistered_baseline", "enforce": self.enforce, "timestamp": int(time.time())})
+                    continue
+
+                if has_baseline:
+                    try:
+                        clean, reason = self._compare_plugin(folder)
+                    except (ValueError, OSError, UnicodeError) as exc:
+                        self.log(f"[PLUGIN-GUARD][SCAN] Could not verify {folder}", error=exc, level="ERROR")
+                        if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"unverifiable:{folder}"):
+                            self.drop_alert({"plugin": folder, "path": fpath, "reason": "Plugin integrity could not be verified; review before taking action.", "action": "integrity_unverifiable", "enforce": self.enforce, "timestamp": int(time.time())})
+                        continue
+                    if not clean:
+                        # Only a completed comparison can justify enforcement.
+                        verified_change = reason == "Plugin files were changed since last trusted baseline."
+                        action = "plugin_modified" if verified_change else "integrity_unverifiable"
+                        if verified_change and self.enforce and not getattr(self, "read_only", False):
+                            try:
+                                self._quarantine(folder, fpath)
+                                action = "auto_quarantine"
+                            except Exception as exc:
+                                self.log(f"[PLUGIN-GUARD][ENFORCE] Failed to quarantine {folder}", error=exc, level="ERROR")
+                                action = "quarantine_failed"
+                        self.log(f"[PLUGIN-GUARD][SCAN] {folder}: {action}", level="WARN")
+                        if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"integrity:{folder}:{action}"):
+                            self.drop_alert({"plugin": folder, "path": fpath, "reason": reason, "action": action, "enforce": self.enforce, "timestamp": int(time.time())})
+                    continue
+
+                if not has_baseline:
                     info = {
                         "plugin": folder,
                         "path": fpath,
@@ -308,7 +492,7 @@ class Agent(BootAgent):
                     self.log(f"[PLUGIN-GUARD][DIR-AUDIT] 🚨 Untrusted plugin detected: {folder}", level="WARN")
 
                     # prioritize block-new over enforce, but never both
-                    if self.block_new and not getattr(self, "_suppress_alerts", False):
+                    if self.block_new and not getattr(self, "read_only", False) and not getattr(self, "_suppress_alerts", False):
                         try:
                             shutil.rmtree(fpath)
                             self.log(f"[PLUGIN-GUARD][BLOCK] ❌ Deleted untracked plugin {folder} instantly.",
@@ -326,7 +510,7 @@ class Agent(BootAgent):
                             self.log(f"[PLUGIN-GUARD][BLOCK][ERROR] Failed to delete {folder}: {be}", level="ERROR")
 
 
-                    elif self.enforce:
+                    if self.enforce and not getattr(self, "read_only", False):
 
                         try:
 
@@ -358,15 +542,19 @@ class Agent(BootAgent):
                                 self.drop_alert(alert_info)
 
                     else:
-                        self.log(f"[PLUGIN-GUARD][BLOCK] No enforcement active; leaving {folder} in place.", level="INFO")
+                        self.log(f"[PLUGIN-GUARD][BLOCK] Enforcement inactive or read-only; leaving {folder} in place.", level="INFO")
 
                     if not getattr(self, "_suppress_alerts", False) and self.should_alert(folder):
                         self.drop_alert(info)
 
-                    if self.enforce:
-                        self._quarantine(folder, fpath)
-
-
+            present_norms = {norm for norm, _folder in current_plugins}
+            for norm, plugin in pending_approvals.items():
+                _safe_component(norm)
+                _safe_component(plugin)
+                if norm not in present_norms:
+                    self.log(f"[PLUGIN-GUARD][DIR-AUDIT] Approval incomplete for missing plugin: {plugin}", level="WARN")
+                    if not getattr(self, "_suppress_alerts", False) and self.should_alert(f"pending:{plugin}"):
+                        self.drop_alert({"plugin": plugin, "reason": "Plugin approval did not complete and its folder is missing; review before retrying.", "action": "pending_approval", "enforce": self.enforce, "timestamp": int(time.time())})
 
             # === Step 2: Check for deleted plugins (manifest exists but no folder) ===
             for snap in snapshots:
@@ -385,6 +573,7 @@ class Agent(BootAgent):
             self.log("[PLUGIN-GUARD] Failed to list plugin dir", error=e)
             return
 
+    @_serialize_manifest
     def cmd_toggle_block(self, content, packet, identity=None):
         req = packet.get("content", {})
         enable = bool(req.get("block_new", not self.block_new))
@@ -432,9 +621,13 @@ class Agent(BootAgent):
             folder (str): The name of the plugin folder.
             fpath (str): The full path to the plugin to be moved.
         """
+        if getattr(self, "read_only", False):
+            raise PermissionError("Plugin guard is in read-only mode")
+        self._ensure_dir(self.quarantine_dir)
+        qpath = _safe_child(self.quarantine_dir, f"{_safe_component(folder)}_{int(time.time())}")
+        if os.path.lexists(qpath):
+            raise FileExistsError("Quarantine destination already exists")
         try:
-            self._ensure_dir(self.quarantine_dir)
-            qpath = os.path.join(self.quarantine_dir, f"{folder}_{int(time.time())}")
             shutil.move(fpath, qpath)
             self.log(f"[PLUGIN-GUARD] Quarantined {folder} → {qpath}")
         except Exception as e:
@@ -442,11 +635,14 @@ class Agent(BootAgent):
             self.log(f"[PLUGIN-GUARD][QUARANTINE][FAIL] Move failed: {e}; attempting fallback copy → {fallback}",
                      level="ERROR")
             try:
-                shutil.copytree(fpath, fallback)
+                # Preserve links rather than copying arbitrary targets outside
+                # the plugin when rename fails across filesystems.
+                shutil.copytree(fpath, fallback, symlinks=True)
                 shutil.rmtree(fpath)
                 self.log(f"[PLUGIN-GUARD][QUARANTINE] Fallback succeeded: copied to {fallback}", level="WARN")
             except Exception as final_e:
                 self.log(f"[PLUGIN-GUARD][QUARANTINE][FATAL] Fallback copy also failed: {final_e}", level="CRITICAL")
+                raise RuntimeError(f"Could not quarantine plugin {folder}") from final_e
 
     def should_alert(self, key):
         """
@@ -553,6 +749,7 @@ class Agent(BootAgent):
             token=token
         )
 
+    @_serialize_manifest
     def cmd_enforce(self, content, packet, identity=None):
         """
         RPC command to toggle enforcement mode on or off.
@@ -606,6 +803,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log("[PLUGIN-GUARD][ERROR] cmd_enforce failed", error=e)
 
+    @_serialize_manifest
     def cmd_snapshot_plugin(self, content, packet, identity=None):
         """
         Approve and snapshot a single plugin folder (like 'git add <plugin>').
@@ -622,39 +820,61 @@ class Agent(BootAgent):
                 self.log("[PLUGIN-GUARD] No plugin specified for approval", level="WARN")
                 return
 
-            fpath = os.path.join(self.plugin_dir, plugin)
+            plugin = _safe_component(plugin)
+            fpath = _safe_child(self.plugin_dir, plugin)
             if not os.path.isdir(fpath):
                 self.log(f"[PLUGIN-GUARD] Plugin {plugin} not found on disk", level="WARN")
                 return
 
             norm_name = self._normalize_folder_name(plugin)
-            fpath = os.path.join(self.plugin_dir, norm_name)
 
             out_dir = os.path.join(self.snapshot_root, self.site_id)
             self._ensure_dir(out_dir)
             norm_name = self._normalize_folder_name(plugin)
-            manifest_path = os.path.join(out_dir, f"{norm_name}.json")
+            manifest_path = _safe_child(out_dir, f"{norm_name}.json")
 
+            self._begin_approval(plugin, norm_name)
             self._snapshot_plugin(fpath, manifest_path)
+            self._finish_approval(plugin, norm_name)
             self.log(f"[PLUGIN-GUARD][SNAPSHOT] Approved plugin {plugin} → {manifest_path}")
 
-            manifest = self._load_manifest()
-            self._register_plugin(manifest, plugin, norm_name)
-
-
-            # --- Cleanup: remove from untracked if present ---
-            if plugin in manifest.get("untracked_plugins", {}):
-                del manifest["untracked_plugins"][plugin]
-            if norm_name in manifest.get("untracked_plugins", {}):
-                del manifest["untracked_plugins"][norm_name]
-            self._save_manifest(manifest)
-
             self._cmd_list_alert_status(session_id, token, return_handler)
+        except (ValueError, OSError) as exc:
+            self.log("[PLUGIN-GUARD][SNAPSHOT] Rejected or failed to snapshot plugin", error=exc, level="ERROR")
         finally:
             self._suppress_alerts = False
 
     def _manifest_path(self):
-        return os.path.join(self.snapshot_root, self.site_id, ".manifest.json")
+        return _safe_child(os.path.join(self.snapshot_root, self.site_id), ".manifest.json")
+
+    @_serialize_manifest
+    def _begin_approval(self, plugin, norm):
+        """Persist an unresolved marker before changing a shared baseline."""
+        plugin, norm = _safe_component(plugin), _safe_component(norm)
+        manifest = self._load_manifest()
+        pending = manifest.setdefault("pending_approvals", {})
+        if not isinstance(pending, dict):
+            raise ValueError("Invalid pending approval state")
+        if norm in pending and pending[norm] != plugin:
+            raise ValueError("Another plugin has a pending approval for this baseline")
+        for other, approval in manifest.get("tracked_plugins", {}).items():
+            if other != plugin and isinstance(approval, dict) and approval.get("normalized") == norm:
+                raise ValueError("Another tracked plugin uses this baseline")
+        pending[norm] = plugin
+        self._save_manifest(manifest)
+
+    @_serialize_manifest
+    def _finish_approval(self, plugin, norm):
+        """Publish trust only after its baseline has been saved successfully."""
+        manifest = self._load_manifest()
+        pending = manifest.get("pending_approvals")
+        if not isinstance(pending, dict) or pending.get(norm) != plugin:
+            raise ValueError("Pending plugin approval changed during snapshot")
+        self._register_plugin(manifest, plugin, norm)
+        manifest.setdefault("untracked_plugins", {}).pop(plugin, None)
+        manifest["untracked_plugins"].pop(norm, None)
+        del pending[norm]
+        self._save_manifest(manifest)
 
     def _load_manifest(self):
 
@@ -668,7 +888,10 @@ class Agent(BootAgent):
         }
 
         if os.path.exists(path):
-            with open(path, "r") as f:
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(fd, "r", encoding="utf-8") as f:
+                if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                    raise ValueError("Plugin manifest is not a regular file")
                 data = json.load(f)
             if "untracked_plugins" not in data:
                 data["untracked_plugins"] = {}
@@ -676,6 +899,8 @@ class Agent(BootAgent):
                 data["block_new"] = False
             if "enforce" not in data:
                 data["enforce"] = False
+            if not isinstance(data.get("pending_approvals", {}), dict):
+                raise ValueError("Invalid pending approval state")
             return data
 
         return r
@@ -686,9 +911,10 @@ class Agent(BootAgent):
 
         self._safe_write(
             path,
-            lambda: json.dump(manifest, open(path, "w"), indent=2)
+            lambda: _atomic_write_json(path, manifest)
         )
 
+    @_serialize_manifest
     def cmd_snapshot_untracked(self, content, packet, identity=None):
         """
         Approve and snapshot all untracked plugin folders (like 'git add .').
@@ -702,27 +928,40 @@ class Agent(BootAgent):
 
             out_dir = os.path.join(self.snapshot_root, self.site_id)
             self._ensure_dir(out_dir)
-            tracked = {f[:-5] for f in os.listdir(out_dir) if f.endswith(".json")}
-
+            tracked = self._load_manifest().get("tracked_plugins", {})
+            if not isinstance(tracked, dict):
+                raise ValueError("Invalid tracked plugin state")
             approved = []
-            manifest = self._load_manifest()
+            skipped = []
+            candidates = []
+            counts = {}
             for folder in os.listdir(self.plugin_dir):
-                fpath = os.path.join(self.plugin_dir, folder)
+                path = os.path.join(self.plugin_dir, folder)
+                if os.path.islink(path):
+                    skipped.append(folder)
+                    continue
+                fpath = _safe_child(self.plugin_dir, folder)
                 if not os.path.isdir(fpath):
                     continue
                 norm_name = self._normalize_folder_name(folder)
-                if norm_name in tracked:
+                candidates.append((folder, norm_name, fpath))
+                counts[norm_name] = counts.get(norm_name, 0) + 1
+            for folder, norm_name, fpath in candidates:
+                if folder in tracked:
                     continue
-                manifest_path = os.path.join(out_dir, f"{norm_name}.json")
+                if counts[norm_name] > 1:
+                    skipped.append(folder)
+                    self.log(f"[PLUGIN-GUARD][SNAPSHOT] Ambiguous plugin baseline; skipped {folder}", level="WARN")
+                    continue
+                manifest_path = _safe_child(out_dir, f"{norm_name}.json")
+                self._begin_approval(folder, norm_name)
                 self._snapshot_plugin(fpath, manifest_path)
+                self._finish_approval(folder, norm_name)
                 approved.append(folder)
                 self.log(f"[PLUGIN-GUARD][SNAPSHOT] Approved new plugin {folder} → {manifest_path}")
 
-                self._register_plugin(manifest, folder, norm_name)
-                self._save_manifest(manifest)
-
             self._broadcast_output(
-                {"approved_plugins": approved, "snapshot_done": True},
+                {"approved_plugins": approved, "skipped_plugins": skipped, "snapshot_done": True},
                 handler=return_handler,
                 session_id=session_id,
                 token=token
@@ -730,6 +969,7 @@ class Agent(BootAgent):
         finally:
             self._suppress_alerts = False
 
+    @_serialize_manifest
     def cmd_snapshot_plugins(self, content, packet, identity=None):
         """
         RPC command to refresh snapshot of all *tracked* plugins.
@@ -755,6 +995,7 @@ class Agent(BootAgent):
             token=token
         )
 
+    @_serialize_manifest
     def cmd_disapprove_plugin(self, content, packet, identity=None):
         """
         Remove a plugin from tracked list.
@@ -774,14 +1015,16 @@ class Agent(BootAgent):
                 self.log("[PLUGIN-GUARD] No plugin specified for disapproval", level="WARN")
                 return
 
+            plugin = _safe_component(plugin)
+
             manifest = self._load_manifest()
             tracked = manifest.get("tracked_plugins", {})
             untracked = manifest.get("untracked_plugins", {})
 
             # --- Drop from tracked
             if plugin in tracked:
-                norm = tracked[plugin]["normalized"]
-                manifest_file = os.path.join(self.snapshot_root, self.site_id, f"{norm}.json")
+                norm = _safe_component(tracked[plugin]["normalized"])
+                manifest_file = _safe_child(os.path.join(self.snapshot_root, self.site_id), f"{norm}.json")
                 if os.path.exists(manifest_file):
                     os.remove(manifest_file)
                 del tracked[plugin]
@@ -801,11 +1044,14 @@ class Agent(BootAgent):
             self._suppress_alerts = False
 
 
+    @_serialize_manifest
     def cmd_quarantine_plugin(self, content, packet, identity=None):
         """
         Move a plugin (tracked or untracked) directly to quarantine.
         """
         try:
+            if getattr(self, "read_only", False):
+                raise PermissionError("Plugin guard is in read-only mode")
             req = packet.get("content", {})
             plugin = req.get("plugin")
             session_id = req.get("session_id", "none")
@@ -816,13 +1062,16 @@ class Agent(BootAgent):
                 self.log("[PLUGIN-GUARD] No plugin specified for quarantine", level="WARN")
                 return
 
-            fpath = os.path.join(self.plugin_dir, plugin)
+            plugin = _safe_component(plugin)
+            fpath = _safe_child(self.plugin_dir, plugin)
             if not os.path.isdir(fpath):
                 self.log(f"[PLUGIN-GUARD][QUARANTINE] Plugin {plugin} not found in plugins directory.", level="WARN")
                 return
 
             self._ensure_dir(self.quarantine_dir)
-            qpath = os.path.join(self.quarantine_dir, f"{plugin}_{int(time.time())}")
+            qpath = _safe_child(self.quarantine_dir, f"{plugin}_{int(time.time())}")
+            if os.path.lexists(qpath):
+                raise FileExistsError("Quarantine destination already exists")
 
             try:
                 shutil.move(fpath, qpath)
@@ -844,11 +1093,14 @@ class Agent(BootAgent):
         except Exception as e:
             self.log("[PLUGIN-GUARD][ERROR] cmd_quarantine_plugin failed", error=e)
 
+    @_serialize_manifest
     def cmd_delete_quarantined_plugin(self, content, packet, identity=None):
         """
         Permanently delete a quarantined plugin folder.
         """
         try:
+            if getattr(self, "read_only", False):
+                raise PermissionError("Plugin guard is in read-only mode")
             req = packet.get("content", {})
             plugin = req.get("plugin")
             session_id = req.get("session_id", "none")
@@ -859,7 +1111,7 @@ class Agent(BootAgent):
                 self.log("[PLUGIN-GUARD] No plugin specified for deletion.", level="WARN")
                 return
 
-            qpath = os.path.join(self.quarantine_dir, plugin)
+            qpath = _safe_child(self.quarantine_dir, plugin)
             if not os.path.isdir(qpath):
                 self.log(f"[PLUGIN-GUARD][DELETE] Plugin {plugin} not found in quarantine.", level="WARN")
                 return
@@ -884,51 +1136,44 @@ class Agent(BootAgent):
         except Exception as e:
             self.log("[PLUGIN-GUARD][ERROR] cmd_delete_quarantined_plugin failed", error=e)
 
+    @_serialize_manifest
     def cmd_restore_plugin(self, content, packet, identity=None):
         """
         Move a quarantined plugin back to the active plugins directory.
         """
         self._suppress_alerts = True
         try:
+            if getattr(self, "read_only", False):
+                raise PermissionError("Plugin guard is in read-only mode")
             req = packet.get("content", {})
             plugin = req.get("plugin")
             session_id = req.get("session_id", "none")
             token = req.get("token", str(int(time.time())))
             return_handler = req.get("return_handler", "plugin_guard.panel.update")
 
-            qsrc = os.path.join(self.quarantine_dir, plugin)
+            plugin = _safe_component(plugin)
+            qsrc = _safe_child(self.quarantine_dir, plugin)
             if not os.path.exists(qsrc):
                 self.log(f"[PLUGIN-GUARD][RESTORE] Plugin {plugin} not found in quarantine.", level="WARN")
                 return
 
-            dst = os.path.join(self.plugin_dir, plugin.split("_")[0])
+            dst = _safe_child(self.plugin_dir, self._normalize_folder_name(plugin))
+            if os.path.lexists(dst):
+                raise FileExistsError("Restore destination already exists")
+            if not os.path.isdir(qsrc):
+                raise ValueError("Quarantined plugin is not a directory")
+            norm_name = self._normalize_folder_name(plugin)
+            manifest_path = _safe_child(os.path.join(self.snapshot_root, self.site_id), f"{norm_name}.json")
+            self._begin_approval(norm_name, norm_name)
             shutil.move(qsrc, dst)
             self.log(f"[PLUGIN-GUARD][RESTORE] Restored {plugin} → {dst}")
 
             # --- Auto-trust restored plugin ---
-            norm_name = self._normalize_folder_name(plugin)
-            manifest_path = os.path.join(self.snapshot_root, self.site_id, f"{norm_name}.json")
-            fpath = os.path.join(self.plugin_dir, plugin)
+            fpath = dst
 
             if os.path.isdir(fpath):
                 self._snapshot_plugin(fpath, manifest_path)
-
-                manifest = self._load_manifest()
-                manifest["tracked_plugins"][norm_name] = {
-                    "normalized": norm_name,
-                    "manifest_file": f"{norm_name}.json",
-                    "approved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "approved_by": "commander",
-                }
-
-                if plugin in manifest["tracked_plugins"]:
-                    del manifest["tracked_plugins"][plugin]
-
-                # clear any lingering untracked record
-                if norm_name in manifest.get("untracked_plugins", {}):
-                    del manifest["untracked_plugins"][norm_name]
-
-                self._save_manifest(manifest)
+                self._finish_approval(norm_name, norm_name)
                 self.log(f"[PLUGIN-GUARD][RESTORE] Auto-trusted {plugin} after restore.")
 
             self._cmd_list_alert_status(session_id, token, return_handler)
@@ -957,6 +1202,7 @@ class Agent(BootAgent):
         except Exception as e:
             self.log(error=e, block="cmd_list_alert_status")
 
+    @_serialize_manifest
     def _cmd_list_alert_status(self, session_id="none", token=None, return_handler="plugin_guard.panel.update"):
         """
         Internal version of cmd_list_alert_status so other commands can trigger a full panel refresh.
@@ -967,16 +1213,57 @@ class Agent(BootAgent):
         manifest = self._load_manifest()
         tracked = list(manifest["tracked_plugins"].keys())
         untracked_meta = manifest["untracked_plugins"]
+        pending_approvals = manifest.get("pending_approvals", {})
+        if not isinstance(pending_approvals, dict):
+            raise ValueError("Invalid pending approval state")
 
         tracked_clean, tracked_alerts, untracked = [], {}, []
 
-        for folder in os.listdir(self.plugin_dir):
+        entries = os.listdir(self.plugin_dir)
+        baseline_names = {f[:-5] for f in os.listdir(out_dir) if f.endswith(".json") and not f.startswith(".")}
+        normalized_counts = {}
+        for folder in entries:
+            path = os.path.join(self.plugin_dir, folder)
+            if not os.path.islink(path) and os.path.isdir(path):
+                try:
+                    norm = self._normalize_folder_name(folder)
+                except ValueError:
+                    continue
+                normalized_counts[norm] = normalized_counts.get(norm, 0) + 1
+
+        for folder in entries:
             fpath = os.path.join(self.plugin_dir, folder)
+            if os.path.islink(fpath):
+                tracked_alerts[folder] = {"reason": "Linked plugin entry cannot be inspected safely."}
+                continue
             if not os.path.isdir(fpath):
                 continue
 
+            try:
+                norm = self._normalize_folder_name(folder)
+            except ValueError:
+                tracked_alerts[folder] = {"reason": "Plugin name is invalid and cannot be inspected safely."}
+                continue
+
+            if norm in pending_approvals:
+                tracked_alerts[folder] = {"reason": "Plugin approval did not complete; review or retry before trusting it."}
+                continue
+
+            if normalized_counts.get(norm, 0) > 1 and norm in baseline_names:
+                tracked_alerts[folder] = {"reason": "Multiple plugin folders share one baseline; review before trusting either."}
+                continue
+
             if folder in tracked:
-                ok, reason = self._compare_plugin(folder)
+                approval = manifest["tracked_plugins"].get(folder)
+                if (not isinstance(approval, dict) or approval.get("normalized") != norm
+                        or approval.get("manifest_file") != f"{norm}.json"):
+                    tracked_alerts[folder] = {"reason": "Plugin approval metadata is invalid; review before trusting it."}
+                    continue
+                try:
+                    ok, reason = self._compare_plugin(folder)
+                except (OSError, ValueError, UnicodeError) as exc:
+                    self.log(f"[PLUGIN-GUARD][SCAN] Could not verify {folder}", error=exc, level="ERROR")
+                    ok, reason = False, "Plugin integrity could not be verified."
                 if ok:
                     tracked_clean.append(folder)
                 else:
@@ -1002,7 +1289,14 @@ class Agent(BootAgent):
                     "first_seen": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "alerted": True,
                 }
-                self._save_manifest(manifest)
+                if not getattr(self, "read_only", False):
+                    self._save_manifest(manifest)
+
+        for norm, plugin in pending_approvals.items():
+            _safe_component(norm)
+            _safe_component(plugin)
+            if plugin not in tracked_alerts and plugin not in tracked_clean:
+                tracked_alerts[plugin] = {"reason": "Plugin approval did not complete; review or retry before trusting it."}
 
         quarantined = []
         if os.path.exists(self.quarantine_dir):
@@ -1105,6 +1399,7 @@ class Agent(BootAgent):
             os.makedirs(path, exist_ok=True)
         except Exception as e:
             self.log(f"[PLUGIN-GUARD][ERROR] Failed to create dir: {path} – {e}", level="ERROR")
+            raise
 
     def _register_plugin(self, manifest, plugin, norm_name):
         manifest["tracked_plugins"][plugin] = {
@@ -1126,7 +1421,7 @@ class Agent(BootAgent):
         """
         if self.read_only:
             self.log(f"[PLUGIN-GUARD][READONLY] 🔒 Write skipped for {path} (read-only mode)", level="WARN")
-            return
+            raise PermissionError("Plugin guard is in read-only mode")
 
         try:
             return write_func(*args, **kwargs)
@@ -1141,6 +1436,7 @@ class Agent(BootAgent):
                 "enforce": self.enforce,
                 "timestamp": int(time.time())
             })
+            raise
         except OSError as oe:
             msg = f"💾 OS error while writing {path}: {oe.strerror}"
             self.log(f"[PLUGIN-GUARD][IO] {msg}", level="ERROR")
@@ -1152,6 +1448,7 @@ class Agent(BootAgent):
                 "enforce": self.enforce,
                 "timestamp": int(time.time())
             })
+            raise
         except Exception as e:
             msg = f"⚠️ Unexpected error while writing {path}: {e}"
             self.log(f"[PLUGIN-GUARD][IO] {msg}", level="ERROR")
@@ -1163,6 +1460,7 @@ class Agent(BootAgent):
                 "enforce": self.enforce,
                 "timestamp": int(time.time())
             })
+            raise
 
     # === Worker ===
     def worker(self, config=None, identity=None):

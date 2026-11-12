@@ -12,6 +12,10 @@ import fnmatch
 import inspect
 import copy
 import queue
+import stat
+import re
+import psutil
+from contextlib import contextmanager
 from enum import Enum
 from pathlib import Path
 from core.python_core.class_lib.service.service_endpoint import ServiceEndpoint
@@ -19,6 +23,9 @@ from core.python_core.class_lib.packet_delivery.interfaces.base_packet import Ba
 from core.python_core.mixin.ghost_rider_ultra import GhostRiderUltraMixin
 from core.python_core.class_lib.time_utils.heartbeat_checker import check_heartbeats
 from core.python_core.core_spawner import CoreSpawner
+from core.python_core.lifecycle_fence import LifecycleFence, GENERATION_ENV
+from core.python_core.safe_paths import runtime_directory, static_directory, child_directory, open_beneath, write_file_at
+from core.python_core.class_lib.file_system.file_system_builder import FileSystemBuilder
 from core.python_core.mixin.identity_registry import IdentityRegistryMixin
 from core.python_core.class_lib.file_system.find_files_with_glob import  FileFinderGlob
 from core.python_core.class_lib.processes.duplicate_job_check import  DuplicateProcessCheck
@@ -93,6 +100,15 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         self.path_resolution = payload["path_resolution"]
         self.command_line_args = payload["args"]
         self.tree_node = payload["tree_node"]
+        self._source_sha256 = payload.get("source_sha256")
+        # Keep this agent's communication directory pinned for its lifetime.
+        # Thread beacons and control operations must not follow a later path
+        # replacement into a different directory.
+        with runtime_directory(self.path_resolution["install_path"], self.command_line_args["universe"],
+                               self.path_resolution["reboot_uuid"], "comm") as comm_root_fd:
+            self._runtime_comm_root_fd = os.dup(comm_root_fd)
+            with child_directory(comm_root_fd, self.command_line_args["universal_id"]) as comm_fd:
+                self._runtime_comm_fd = os.dup(comm_fd)
         self.matrix_universal_id = str(
             self.command_line_args.get("matrix") or "matrix"
         )
@@ -132,7 +148,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
         self.debug = DebugConfig()
 
-        self.logger = Logger(self.path_resolution["static_comm_path_resolved"], "logs", "agent.log")
+        with static_directory(self.path_resolution["install_path"], self.command_line_args["universe"],
+                              self.path_resolution["reboot_uuid"], "comm",
+                              child=self.command_line_args["universal_id"], create_child=True) as comm_fd:
+            with child_directory(comm_fd, "logs", create=True) as log_fd:
+                self.logger = Logger(self.path_resolution["static_comm_path_resolved"], "logs", "agent.log", directory_fd=log_fd)
 
         # Arm encrypted logging before emitting any agent record. Previously
         # the memory-boundary status was written as one plaintext JSON line,
@@ -252,7 +272,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             # kick the chair out
             ppath = os.path.join(self.path_resolution["pod_path_resolved"], "run")
             try:
-                os.unlink(ppath)
+                with runtime_directory(self.path_resolution["install_path"], self.command_line_args["universe"],
+                                       self.path_resolution["reboot_uuid"], "pod",
+                                       child=self.command_line_args["install_name"]) as pod_fd:
+                    os.unlink("run", dir_fd=pod_fd)
                 print(f"[RUG-PULL] 🪓 Deleted {ppath}")
                 self.log(f"[RUG-PULL] 🪓 Deleted {ppath}")
 
@@ -547,25 +570,77 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
     def send_message(self, message):
         self.log(f"[SEND] {json.dumps(message)}")
 
+    @contextmanager
+    def _own_comm_zone(self, name, *, create=False):
+        with child_directory(self._runtime_comm_fd, name, create=create) as fd:
+            yield fd
+
+    @contextmanager
+    def _child_comm_zone(self, universal_id, name, *, create=False):
+        with child_directory(self._runtime_comm_root_fd, universal_id, create=create) as agent_fd:
+            with child_directory(agent_fd, name, create=create) as fd:
+                yield fd
+
+    @staticmethod
+    def _regular_marker_exists(directory_fd, name):
+        try:
+            fd = open_beneath(directory_fd, name, os.O_PATH | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            return False
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError(f"Unsafe control marker: {name}")
+            return True
+        finally:
+            os.close(fd)
+
+    @staticmethod
+    def _regular_entry_identity(directory_fd, name):
+        fd = open_beneath(directory_fd, name, os.O_PATH | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError(f"Unsafe channel entry: {name}")
+            return info.st_dev, info.st_ino
+        finally:
+            os.close(fd)
+
+    @classmethod
+    def _unlink_received_entry(cls, directory_fd, name, identity):
+        try:
+            if cls._regular_entry_identity(directory_fd, name) == identity:
+                os.unlink(name, dir_fd=directory_fd)
+                return True
+        except FileNotFoundError:
+            pass
+        return False
+
     def directive_watcher(self):
         """
         Periodically checks if this agent's agent_tree.json exists or was modified.
         If missing or updated, sends a request to Matrix (or parent) to re-delegate it.
         """
-        directive_path = os.path.join(self.path_resolution["comm_path_resolved"], "directive", "agent_tree.json")
-
         while self.running:
             try:
-                if not os.path.exists(directive_path):
-                    self.log("[TREE-WATCH] agent_tree.json missing — requesting from parent.")
-                    self.request_agent_tree()
-                else:
-                    current_mtime = os.path.getmtime(directive_path)
-                    if current_mtime != self.last_tree_mtime:
-                        if self.debug.is_enabled():
-                            self.log("[TREE-WATCH] Detected update to agent_tree.json")
-
-                        self.last_tree_mtime = current_mtime
+                with self._own_comm_zone("directive", create=True) as directive_fd:
+                    try:
+                        fd = open_beneath(directive_fd, "agent_tree.json", os.O_PATH | os.O_NOFOLLOW)
+                    except FileNotFoundError:
+                        self.log("[TREE-WATCH] agent_tree.json missing — requesting from parent.")
+                        self.request_agent_tree()
+                    else:
+                        try:
+                            info = os.fstat(fd)
+                            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                                raise ValueError("Unsafe directive file")
+                            current_mtime = info.st_mtime
+                        finally:
+                            os.close(fd)
+                        if current_mtime != self.last_tree_mtime:
+                            if self.debug.is_enabled():
+                                self.log("[TREE-WATCH] Detected update to agent_tree.json")
+                            self.last_tree_mtime = current_mtime
 
             except Exception as e:
                 self.log("[TREE-WATCH][ERROR]", error=e)
@@ -610,16 +685,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         if self.debug.is_enabled():
                             self.log(f"[ENFORCE] {self.command_line_args['universal_id']} is primary for job {job_label}.")
 
-                    path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
-
-                    count, _ = FileFinderGlob.find_files_with_glob(path, pattern="die")
-                    if count > 0:
-                        self.running = False
-                        self.log(f"[ENFORCE] die.cookie ingested — going down easy...")
-
-                    if self.running:
-                        count, _ = FileFinderGlob.find_files_with_glob(path, pattern="punji")
-                        if count > 0:
+                    with self._own_comm_zone("incoming") as incoming_fd:
+                        if self._regular_marker_exists(incoming_fd, "die"):
+                            self.running = False
+                            self.log(f"[ENFORCE] die.cookie ingested — going down easy...")
+                        if self.running and self._regular_marker_exists(incoming_fd, "punji"):
                             self.running = False
                             self.log(f"[ENFORCE] hit punji — exiting...")
 
@@ -702,21 +772,58 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             self.thread_registry["packet_listener"]["active"] = True
             self.start_dynamic_throttle()
             self.post_boot()
+            self._publish_ready_marker()
+            ready_fd = os.environ.pop("MATRIX_BOOT_READY_FD", None)
+            if ready_fd is not None:
+                descriptor = int(ready_fd)
+                try:
+                    os.write(descriptor, b"1")
+                except OSError:
+                    # The supervising boot process disappeared; do not leave
+                    # an unacknowledged agent running with partial startup.
+                    self.running = False
+                    os._exit(1)
+                finally:
+                    os.close(descriptor)
             self.monitor_threads()
 
             #clear you're own punji file
             punji_file = os.path.join(self.path_resolution['comm_path'], self.command_line_args['universal_id'], 'incoming', 'punji')
             try:
-                if os.path.exists(punji_file):
-                    os.remove(punji_file)
-                    self.log(f"[BOOT] Cleared punji: {punji_file}")
-                else:
-                    self.log(f"[BOOT] No punji file to remove at: {punji_file}")
+                with self._own_comm_zone("incoming") as incoming_fd:
+                    if self._regular_marker_exists(incoming_fd, "punji"):
+                        os.unlink("punji", dir_fd=incoming_fd)
+                        self.log(f"[BOOT] Cleared punji: {punji_file}")
+                    else:
+                        self.log(f"[BOOT] No punji file to remove at: {punji_file}")
             except Exception as e:
                 self.log(f"[BOOT] Failed to remove punji: {punji_file}", error=e)
 
         except Exception as e:
+            self.running = False
+            ready_fd = os.environ.pop("MATRIX_BOOT_READY_FD", None)
+            if ready_fd is not None:
+                try:
+                    os.close(int(ready_fd))
+                except (OSError, ValueError):
+                    pass
             self.log(error=e, block="main-try")
+
+    def _publish_ready_marker(self):
+        """Publish process-bound readiness only after post_boot succeeds."""
+        if not self.running:
+            raise RuntimeError("Agent stopped before readiness")
+        sha = self._source_sha256
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+            raise ValueError("Missing or invalid authenticated source hash")
+        pid = os.getpid()
+        started = psutil.Process(pid).create_time()
+        marker = {"universal_id": self.command_line_args["universal_id"],
+                  "pid": pid, "process_started_at": started, "source_sha256": sha}
+        with runtime_directory(self.path_resolution["install_path"], self.command_line_args["universe"],
+                               self.path_resolution["reboot_uuid"], "pod",
+                               child=self.command_line_args["install_name"]) as pod_fd:
+            write_file_at(pod_fd, "ready.json", json.dumps(marker).encode("utf-8"), mode=0o600, durable=True)
 
     """The main operational loop for the agent, intended to be overridden.
     This method is called repeatedly by the _throttled_worker_wrapper.
@@ -764,9 +871,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         After processing, the packet file is deleted.
         """
         self.log("Monitoring incoming packets...")
-        incoming_path = os.path.join(self.path_resolution["comm_path_resolved"], "incoming")
-        os.makedirs(incoming_path, exist_ok=True)
-        last_dir_mtime = os.path.getmtime(incoming_path)
+        with self._own_comm_zone("incoming", create=True) as incoming_fd:
+            self._packet_listener_anchored(incoming_fd)
+
+    def _packet_listener_anchored(self, incoming_fd):
+        last_dir_mtime = os.fstat(incoming_fd).st_mtime_ns
         #TOP TRY
         try:
 
@@ -774,10 +883,13 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             ra = self.get_reception_agent("file.json_file", new=True, football=football)
             ra.set_location({"path": self.path_resolution["comm_path"]}) \
                 .set_address([self.command_line_args["universal_id"]]) \
-                .set_drop_zone({"drop": "incoming"})
+                .set_drop_zone({"drop": "incoming"}) \
+                .set_directory_fd(incoming_fd)
 
         except Exception as e:
             self.log(error=e, block="top_try")
+            self.running = False
+            return
 
         while self.running:
 
@@ -786,15 +898,16 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                 self._emit_beacon_packet_listener()
 
-                current_dir_mtime = os.path.getmtime(incoming_path)
+                current_dir_mtime = os.fstat(incoming_fd).st_mtime_ns
                 if current_dir_mtime != last_dir_mtime:
                     last_dir_mtime = current_dir_mtime
 
-                    for fname in os.listdir(incoming_path):
+                    for fname in os.listdir(incoming_fd):
                         #dynamic config packet
                         try:
                             if not fname.startswith("pk_") or not fname.endswith(".json"):
                                 continue
+                            identity_at_read = self._regular_entry_identity(incoming_fd, fname)
 
                             pk = self.get_delivery_packet("standard.command.packet", new=True)
                             pk2 = self.get_delivery_packet("standard.general.json.packet", new=True)
@@ -804,10 +917,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                        .set_packet(pk) \
                                        .receive()
 
-                            fpath = os.path.join(incoming_path, fname)  # get the file's path
-
                             try:
-                                os.remove(fpath)
+                                self._unlink_received_entry(incoming_fd, fname, identity_at_read)
                             except Exception as e:
                                 pass
 
@@ -856,8 +967,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
                         except Exception as e:
                             self.log(f"Failed to process {fname}", error=e)
-                            if fpath and os.path.isfile(fpath):
-                                os.remove(fpath)
                             continue
 
             except Exception as loop_error:
@@ -875,6 +984,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             interruptible_sleep(self, 2)
 
+        ra.close()
+
     def save_directive(self, path: dict, node_tree :dict, football:Football):
         """
         Encrypt and deliver the directive tree using a structured path dictionary.
@@ -886,18 +997,25 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             "name": filename (e.g., 'agent_tree_master.json')
         }
         """
+        ra = None
         try:
 
             pk1 = self.get_delivery_packet("standard.tree.packet", new=True)
             pk1.set_data(node_tree)
             ra = self.get_delivery_agent("file.json_file", new=True, football=football)
-            ra.set_location({"path": path["path"]}) \
-                .set_identifier(path['name']) \
+            ra.set_location({"path": path["path"]})
+            if os.path.normpath(path["path"]) == os.path.normpath(self.path_resolution["comm_path"]):
+                ra.set_location_fd(self._runtime_comm_root_fd)
+            ra.set_identifier(path['name']) \
                 .set_metadata({"atomic": True}) \
                 .set_address([path["address"]]) \
                 .set_drop_zone({"drop": path["drop"]}) \
                 .set_packet(pk1) \
                 .deliver()
+
+            if ra.get_error_success():
+                self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] {ra.get_error_success_msg()}")
+                return False
 
             if self.encryption_enabled:
                 if self.debug.is_enabled():
@@ -911,8 +1029,15 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as e:
             self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌", error=e, block="main_try")
             return False
+        finally:
+            close = getattr(ra, "close", None)
+            if callable(close):
+                close()
 
-    def load_directive(self, path :dict, football:Football):
+    def load_directive(self, path :dict, football:Football, *, directory_fd=None):
+        receiver = None
+        zone_context = None
+        zone_entered = False
         try:
 
             if ENCRYPTION_CONFIG.is_enabled():
@@ -920,13 +1045,22 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             pk1 = self.get_delivery_packet("standard.tree.packet", new=True)
 
-            packet = self.get_reception_agent("file.json_file", football=football) \
-                .set_location({"path": path["path"]}) \
-                .set_identifier(path["name"]) \
+            receiver = self.get_reception_agent("file.json_file", football=football)
+            receiver.set_location({"path": path["path"]})
+            address = path.get("address")
+            if (directory_fd is None and hasattr(self, "_runtime_comm_fd") and
+                    os.path.normpath(path["path"]) == os.path.normpath(self.path_resolution["comm_path"]) and
+                    address in (self.command_line_args["universal_id"], [self.command_line_args["universal_id"]])):
+                zone_context = self._own_comm_zone(path["drop"])
+                directory_fd = zone_context.__enter__()
+                zone_entered = True
+            receiver.set_identifier(path["name"]) \
                 .set_address(path["address"]) \
                 .set_packet(pk1) \
-                .set_drop_zone({"drop": path["drop"]}) \
-                .receive()
+                .set_drop_zone({"drop": path["drop"]})
+            if directory_fd is not None:
+                receiver.set_directory_fd(directory_fd)
+            packet = receiver.receive()
 
             if packet is None:
                 raise ValueError("Failed to receive data from reception agent.")
@@ -938,6 +1072,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as e:
             self.log(f"[BOOT][DUMP-TREE-DELIVERY-ERROR] ❌", error=e, block="main_try")
             return TreeParser.load_tree_direct({})
+        finally:
+            close = getattr(receiver, "close", None)
+            if callable(close):
+                close()
+            if zone_entered:
+                zone_context.__exit__(None, None, None)
 
 
     def _throttled_worker_wrapper(self):
@@ -953,11 +1093,14 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             method, allowing for on-the-fly configuration changes.
         """
         self.log("Throttled worker wrapper engaged.")
+        with self._own_comm_zone("config", create=True) as config_fd:
+            self._throttled_worker_anchored(config_fd)
+
+    def _throttled_worker_anchored(self, config_fd):
         config_path = os.path.join(self.path_resolution["comm_path_resolved"], "config")
-        os.makedirs(config_path, exist_ok=True)
         fpath=None
         identity=None
-        last_dir_mtime = os.path.getmtime(config_path)
+        last_dir_mtime = os.fstat(config_fd).st_mtime_ns
         last_worker_cycle_execution = 0
         try:
 
@@ -965,10 +1108,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             ra = self.get_reception_agent("file.json_file", new=True, football=football)
             ra.set_location({"path": self.path_resolution["comm_path"]}) \
                 .set_address([self.command_line_args["universal_id"]]) \
-                .set_drop_zone({"drop": "config"})
+                .set_drop_zone({"drop": "config"}) \
+                .set_directory_fd(config_fd)
 
         except Exception as e:
             self.log(f"Failed to process", error=e, block="main_try")
+            return
 
         # Optional pre-hook (called ONCE before loop)
         if hasattr(self, "worker_pre"):
@@ -981,9 +1126,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         while self.running:
 
             try:
-                # Wait for a signal from the throttler thread before proceeding.
-                # This call will block until an item is available in the queue.
-                self.throttle_queue.get()
+                # Wake periodically so shutdown cannot strand this non-daemon
+                # thread after the throttle producer has stopped.
+                try:
+                    self.throttle_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
 
                 config={}
                 _config = {} #temp config
@@ -993,14 +1141,15 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                     #ON EXECUTION, THIS WILL SCOOP UP ALL THE CONFIG PACKETS
                     #BUT  ONLY SEND THE LAST ONE TO THE WORKER METHOD
                     #AND DELETE THE REST OF THE PACKETS
-                    current_dir_mtime = os.path.getmtime(config_path)
+                    current_dir_mtime = os.fstat(config_fd).st_mtime_ns
                     if current_dir_mtime != last_dir_mtime:
                         last_dir_mtime = current_dir_mtime
 
-                        for fname in os.listdir(config_path):
+                        for fname in os.listdir(config_fd):
 
                             if not fname.endswith(".json"):
                                 continue
+                            identity_at_read = self._regular_entry_identity(config_fd, fname)
 
                             #get json packet
                             pk1 = self.get_delivery_packet("standard.general.json.packet", new=True)
@@ -1019,7 +1168,7 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                             if self.debug.is_enabled():
                                 self.log(f"config: path: {fpath} {config}")
 
-                            os.remove(fpath)
+                            self._unlink_received_entry(config_fd, fname, identity_at_read)
 
                             identity = ra.get_identity()
 
@@ -1027,8 +1176,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                                 config = _config.copy()
 
                 except Exception as e:
-                    if fpath and os.path.isfile(fpath):
-                        os.remove(fpath)
                     self.log(f"config {config}", error=e)
 
                 #AVOID SPAMMING LOGS
@@ -1049,6 +1196,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             interruptible_sleep(self, 1)
 
+        ra.close()
+
         # Optional post-hook (called ONCE after loop exits)
         if hasattr(self, "worker_post"):
             try:
@@ -1063,9 +1212,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         Returns an emit() function that writes a heartbeat file no more often than
         emit_to_file_interval seconds. File name encodes timeout/sleep info.
         """
-        poke_dir = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto")
-        os.makedirs(poke_dir, exist_ok=True)
-
         wake_due = int(time.time() + sleep_for) if sleep_for else 0
         timeout_val = timeout if timeout else 0
         sleep_val = sleep_for if sleep_for else 0
@@ -1078,11 +1224,8 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 return
 
             filename = f"poke.{thread_token}.{timeout_val}.{sleep_val}.{wake_due}"
-            poke_path = os.path.join(poke_dir, filename)
-
-            # create/truncate empty file
-            with open(poke_path, "w"):
-                pass
+            with self._own_comm_zone("hello.moto", create=True) as poke_fd:
+                write_file_at(poke_fd, filename, b"")
 
             last_emit[0] = now
             if self.debug.is_enabled():
@@ -1091,13 +1234,13 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         return emit
 
     def emit_dead_poke(self, thread_name, error_msg):
-        path = os.path.join(self.path_resolution["comm_path_resolved"], "hello.moto", f"poke.{thread_name}")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({
+        with self._own_comm_zone("hello.moto", create=True) as poke_fd:
+            data = {
                 "status": "dead",
                 "last_seen": time.time(),
                 "error": error_msg
-            }, f, indent=2)
+            }
+            write_file_at(poke_fd, f"poke.{thread_name}", json.dumps(data, indent=2).encode("utf-8"))
 
     def get_load(self):
         if hasattr(os, "getloadavg"):
@@ -1364,8 +1507,6 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         last_tree_mtime = 0
         tree = None  # Initial tree holder
 
-        tree_path_resolved = os.path.join(self.path_resolution['comm_path'], self.command_line_args["universal_id"], "directive", "agent_tree.json")
-
         tree_path = {
             "path": self.path_resolution["comm_path"],
             "address": self.command_line_args["universal_id"],
@@ -1383,28 +1524,35 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                 if self.debug.is_enabled():
                     print(f"[SPAWN] Checking for delegated children of {self.command_line_args['universal_id']}")
 
-                if not os.path.exists(tree_path_resolved):
-                    interruptible_sleep(self, 5)
-                    continue
+                with self._own_comm_zone("directive", create=True) as directive_fd:
+                    try:
+                        fd = open_beneath(directive_fd, "agent_tree.json", os.O_PATH | os.O_NOFOLLOW)
+                    except FileNotFoundError:
+                        interruptible_sleep(self, 5)
+                        continue
+                    try:
+                        info = os.fstat(fd)
+                        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                            raise ValueError("Unsafe agent directive")
+                        mtime = info.st_mtime_ns
+                        directive_identity = (info.st_dev, info.st_ino)
+                    finally:
+                        os.close(fd)
+                    if mtime != last_tree_mtime:
+                        football = self.get_football(type=self.FootballType.CATCH)
+                        tp = self.load_directive(tree_path, football=football, directory_fd=directive_fd)
+                        self._service_manager_services = getattr(tp, "_service_manager_services", [])
 
-                mtime = os.path.getmtime(tree_path_resolved)
-                if mtime != last_tree_mtime:
+                        if not tp or not hasattr(tp, "root") or not isinstance(tp.root, dict):
+                            self.log("[SPAWN] Corrupt or invalid tree — deleting and re-requesting.")
+                            self._unlink_received_entry(directive_fd, "agent_tree.json", directive_identity)
+                            continue
 
-                    football = self.get_football(type=self.FootballType.CATCH)
-                    tp = self.load_directive(tree_path, football=football)
-                    self._service_manager_services = getattr(tp, "_service_manager_services", [])
-
-                    if not tp or not hasattr(tp, "root") or not isinstance(tp.root, dict):
-                        self.log("[SPAWN] Corrupt or invalid tree — deleting and re-requesting.")
-                        os.remove(tree_path_resolved)
-                        continue  # Will retry in next loop
-
-                    self.is_agent_tree_loaded = True
-
-                    tree = tp.root
-                    last_tree_mtime = mtime
-                    if self.debug.is_enabled():
-                        self.log(f"[SPAWN] Tree updated from disk.")
+                        self.is_agent_tree_loaded = True
+                        tree = tp.root
+                        last_tree_mtime = mtime
+                        if self.debug.is_enabled():
+                            self.log(f"[SPAWN] Tree updated from disk.")
 
                 if not tree:
                     print(f"[SPAWN][ERROR] Could not load tree for {self.command_line_args['universal_id']}")
@@ -1427,8 +1575,12 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         continue
 
                     # Skip if die token exists
-                    die_file = os.path.join(self.path_resolution['comm_path'], node.get("universal_id"), 'incoming', 'die')
-                    if os.path.exists(die_file):
+                    try:
+                        with self._child_comm_zone(node.get("universal_id"), "incoming") as incoming_fd:
+                            die_exists = self._regular_marker_exists(incoming_fd, "die")
+                    except FileNotFoundError:
+                        die_exists = False
+                    if die_exists:
                         self.log(f"[SPAWN-BLOCKED] {node.get('universal_id')} has die file.")
                         interruptible_sleep(self, 3)
                         continue
@@ -1447,15 +1599,20 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
                         #once the agent carries out it's mission it drops the mission.complete file and the process goes, and continues forever, and ever, and ever.
                         is_cron_job_and_time_to_awake=False
                         if node.get("is_cron_job", False):
-                            mission_complete_file= os.path.join(self.path_resolution['comm_path'], node.get("universal_id"), 'hello.moto', 'mission.complete')
-                            if os.path.exists(mission_complete_file):
-                                last_run_time = os.path.getmtime(mission_complete_file)
-                                interval = node.get("cron_interval_sec", 3600)
-                                if (time.time() - last_run_time) >= interval:
-                                    self.log(f"[CRON] Interval met for {node.get('universal_id')}. Removing die cookie to trigger next run.")
-                                    os.remove(mission_complete_file)
-                                else:
-                                    is_cron_job_and_time_to_awake=True
+                            try:
+                                with self._child_comm_zone(node.get("universal_id"), "hello.moto") as hello_fd:
+                                    if self._regular_marker_exists(hello_fd, "mission.complete"):
+                                        identity = self._regular_entry_identity(hello_fd, "mission.complete")
+                                        info = os.stat("mission.complete", dir_fd=hello_fd, follow_symlinks=False)
+                                        interval = node.get("cron_interval_sec", 3600)
+                                        if (time.time() - info.st_mtime) >= interval:
+                                            self.log(f"[CRON] Interval met for {node.get('universal_id')}. Removing completion marker.")
+                                            if not self._unlink_received_entry(hello_fd, "mission.complete", identity):
+                                                is_cron_job_and_time_to_awake = True
+                                        else:
+                                            is_cron_job_and_time_to_awake=True
+                            except FileNotFoundError:
+                                pass
 
                         #if not a cronjob, enter; if is a cronjob and it's time to awake from slumber then
                         if not is_cron_job_and_time_to_awake:
@@ -1482,7 +1639,11 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         try:
 
             # Skip if recent heartbeat is alive, all pokes are alive or sleeping
-            result = check_heartbeats(self.path_resolution['comm_path'], universal_id)
+            try:
+                with self._child_comm_zone(universal_id, "hello.moto") as hello_fd:
+                    result = check_heartbeats(self.path_resolution['comm_path'], universal_id, directory_fd=hello_fd)
+            except FileNotFoundError:
+                result = {"meta": {"error_success": 1, "error": f"hello.moto missing for {universal_id}"}, "threads": {}}
             meta = result["meta"]
             threads = result["threads"]
 
@@ -1501,42 +1662,39 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
 
             if safe_to_continue:
                 # defense, encase stray poke got inside hello.moto directory, which would initiate a phantom status, leading to stale poke file, leading to reboot
-                ss = os.path.join(self.path_resolution['comm_path'], universal_id, 'hello.moto')
-                for f in Path(ss).glob("poke.*"):
-                    try:
-                        f.unlink()
-                    except Exception as e:
-                        pass
+                try:
+                    with self._child_comm_zone(universal_id, "hello.moto") as hello_fd:
+                        for name in os.listdir(hello_fd):
+                            if name.startswith("poke."):
+                                identity = self._regular_entry_identity(hello_fd, name)
+                                self._unlink_received_entry(hello_fd, name, identity)
+                except FileNotFoundError:
+                    pass
 
                 # 1. Check the process list for agent with cmd line --job {universe=universe, defaults to ai}:{spawner=parent agent, obviously this agent}:{universal_id=agent getting spawned}:{agent_name=actual agent being spawned comm/<agent><agent>}
                 #   for active propess in memroy
-                punji_dir = os.path.join(self.path_resolution['comm_path'], universal_id, 'incoming')
-                punji_file = os.path.join(punji_dir, 'punji')
                 matches = find_jobs_by_prefix(universe, universal_id, match_mode="exact")
                 # job_prefix = f"{universe}:{universal_id}"
                 # no matches - assumed no agent in memory
                 if not matches:
-                    clear_to_spawn = True
                     try:
                         # make sure the punji file is deleted, because if not, and it exists next iteration then it will restart a take-down
-                        os.remove(punji_file)
-                    except Exception as e:
-                        if self.debug.is_enabled():
-                            self.log(error=e, block="main_try")
+                        with self._child_comm_zone(universal_id, "incoming") as incoming_fd:
+                            if self._regular_marker_exists(incoming_fd, "punji"):
+                                identity = self._regular_entry_identity(incoming_fd, "punji")
+                                self._unlink_received_entry(incoming_fd, "punji", identity)
+                    except FileNotFoundError:
+                        pass
+                    clear_to_spawn = True
 
                 # 2. If the punji file exists that means singleton_enforcement didn't shut down the agent, it had 20secs(spawn_manager sleep interval * 1) to do so(bottom of this function interruptible_sleep(self, 20))
-                elif not os.path.exists(punji_file):
-                    try:
-                        os.makedirs(punji_dir, exist_ok=True)
-                        Path(punji_file).write_text("ouch")
-                        self.log(f"[BOOT][PUNJI] Dropped punji for {universal_id}")
-                    except Exception as e:
-                        self.log(f"[BOOT][PUNJI][WARN] Could not drop punji file for {universal_id}", error=e)
-
-                # 3. we've been locked up for a while now, time we blow the coop, 40secs(spawn_manager sleep interval *2) is long enough
                 else:
-
-                    self.log(reeeeeeebeeeengaaaaa(matches))
+                    with self._child_comm_zone(universal_id, "incoming", create=True) as incoming_fd:
+                        if not self._regular_marker_exists(incoming_fd, "punji"):
+                            write_file_at(incoming_fd, "punji", b"ouch")
+                            self.log(f"[BOOT][PUNJI] Dropped punji for {universal_id}")
+                        else:
+                            self.log(reeeeeeebeeeengaaaaa(matches))
 
         except Exception as e:
             self.log(error=e, block="main_try")
@@ -1594,6 +1752,22 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         return {}
 
     def spawn_agent_direct(self, universe, spawner, universal_id, agent_name, tree_node, keychain=None):
+        # Acquire before constructing CoreSpawner: construction and channel,
+        # pod, and identity setup all write into the universe.
+        try:
+            if universe != self.command_line_args.get("universe"):
+                raise RuntimeError("Spawn universe does not match the owning agent")
+            expected = os.environ.get(GENERATION_ENV)
+            fence = LifecycleFence(self.path_resolution["install_path"], universe)
+            with fence.shared(expected):
+                if fence.read_state()["boot_id"] != self.path_resolution["reboot_uuid"]:
+                    raise RuntimeError("Agent boot does not match the active universe")
+                return self._spawn_agent_direct_fenced(universe, spawner, universal_id, agent_name, tree_node, keychain)
+        except Exception as exc:
+            self.log(f"[SPAWN-ERROR] Lifecycle fence refused spawn of {universal_id}: {exc}")
+            return None
+
+    def _spawn_agent_direct_fenced(self, universe, spawner, universal_id, agent_name, tree_node, keychain=None):
 
         try:
 
@@ -1622,20 +1796,14 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
             cp.set_debug(self.debug.is_enabled())
             cp.set_rug_pull(self.rug_pull)
 
-            try:
-                #SAVE IDENTITY FILE to comm/{universal_id}/codex
-                identity={"identity": tree_node.get("vault",{}).get("identity", {}), "sig": tree_node.get("vault",{}).get("sig", {})}
-
-                dir = os.path.join(self.path_resolution["comm_path"], universal_id, "codex")
-
-                os.makedirs(dir, exist_ok=True)
-                fpath = os.path.join(dir, "signed_public_key.json")
-                with open(fpath, "w", encoding="utf-8") as f:
-                    json.dump(identity, f, indent=2)
-                    f.close()
-
-            except Exception as e:
-                self.log(error=e, block='write_signed_public_key')
+            identity={"identity": tree_node.get("vault",{}).get("identity", {}), "sig": tree_node.get("vault",{}).get("sig", {})}
+            with runtime_directory(cp.pm.base, cp.pm.universe, cp.pm.reboot_uuid,
+                                   "comm", child=universal_id) as comm_fd:
+                with child_directory(comm_fd, "codex", create=True) as codex_fd:
+                    FileSystemBuilder().process_item_fd(codex_fd, {
+                        "name": "signed_public_key.json", "type": "f",
+                        "content": identity, "atomic": True,
+                    })
 
 
             try:
@@ -1674,18 +1842,28 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         Returns:
             bool: True if delivery was successful, False otherwise.
         """
+        da = None
         try:
-
-            codex_path = os.path.join(self.path_resolution["comm_path"], target_uid, "codex", "signed_public_key.json")
-            if not os.path.exists(codex_path):
-                self.log(f"[PASS-PACKET] ❌ No public key found for {target_uid}. Aborting send.")
-                return False
-
+            with self._child_comm_zone(target_uid, "codex") as codex_fd:
+                fd = open_beneath(codex_fd, "signed_public_key.json", os.O_RDONLY | os.O_NONBLOCK)
+                try:
+                    info = os.fstat(fd)
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise ValueError("Unsafe target identity file")
+                    with os.fdopen(fd, "r", encoding="utf-8") as file:
+                        fd = -1
+                        identity_vault = json.load(file)
+                finally:
+                    if fd >= 0:
+                        os.close(fd)
             football = self.get_football(type=self.FootballType.PASS)
-            football.load_identity_file(universal_id=target_uid)
+            if not football.load_identity_file(vault=identity_vault, universal_id=target_uid):
+                self.log(f"[PASS-PACKET][FAIL] Invalid target identity for {target_uid}.", level="ERROR")
+                return False
             da = self.get_delivery_agent("file.json_file", football=football, new=True)
-            da.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([target_uid]) \
+            da.set_location({"path": self.path_resolution["comm_path"]})
+            da.set_location_fd(self._runtime_comm_root_fd)
+            da.set_address([target_uid]) \
                 .set_drop_zone({"drop": drop_zone}) \
                 .set_packet(packet) \
                 .deliver()
@@ -1701,6 +1879,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as e:
             self.log(f"Failed during pass_packet to {target_uid}", error=e, level="ERROR")
             return False
+        finally:
+            close = getattr(da, "close", None)
+            if callable(close):
+                close()
 
     def catch_packet(self, filename, drop_zone="incoming"):
         """
@@ -1716,18 +1898,21 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         Returns:
             dict: The decrypted packet content, or None on failure.
         """
+        ra = None
         try:
             football = self.get_football(type=self.FootballType.CATCH)
             ra = self.get_reception_agent("file.json_file", new=True, football=football)
 
             packet_obj = self.get_delivery_packet("standard.command.packet")  # A generic packet to hold the data
 
-            packet = ra.set_location({"path": self.path_resolution["comm_path"]}) \
-                .set_address([self.command_line_args["universal_id"]]) \
-                .set_drop_zone({"drop": drop_zone}) \
-                .set_identifier(filename) \
-                .set_packet(packet_obj) \
-                .receive()
+            with self._own_comm_zone(drop_zone) as zone_fd:
+                packet = ra.set_location({"path": self.path_resolution["comm_path"]}) \
+                    .set_address([self.command_line_args["universal_id"]]) \
+                    .set_drop_zone({"drop": drop_zone}) \
+                    .set_directory_fd(zone_fd) \
+                    .set_identifier(filename) \
+                    .set_packet(packet_obj) \
+                    .receive()
 
             if packet is None or ra.get_error_success() != 0:
                 self.log(f"Failed to receive packet {filename}: {ra.get_error_success_msg()}", level="ERROR")
@@ -1738,6 +1923,10 @@ class BootAgent(PacketFactoryMixin, PacketDeliveryFactoryMixin, PacketReceptionF
         except Exception as e:
             self.log(f"Failed during catch_packet for {filename}", error=e, level="ERROR")
             return None
+        finally:
+            close = getattr(ra, "close", None)
+            if callable(close):
+                close()
 
     def verify_identity(self, identity: IdentityObject, allowed_uids: list[str]) -> bool:
         """Centralized identity gatekeeper for secure handlers."""

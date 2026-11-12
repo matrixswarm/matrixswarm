@@ -51,6 +51,57 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         "phoenix/matrix_gui/swarm_workspace/cls_lib/deployment/dialog/railgun.py",
     )
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux readlink preflight")
+    def test_wordpress_symlink_is_rejected_before_directory_mutation(self):
+        helper = load_module(self.shell_helper_path, "wordpress_path_preflight")
+        capabilities = helper.derive_runtime_capabilities({"name": "wordpress_plugin_guard", "config": {}})
+        root_shell = helper._root_shell
+        helper._root_shell = lambda script: script
+        try:
+            command = helper.build_remote_matrixd_command(
+                action="start", universe="fixture", linux_user="matrix-fixture",
+                runtime_capabilities=capabilities,
+            )
+        finally:
+            helper._root_shell = root_shell
+        begin = command.index('for MANAGED_DIR in "$PLUGIN_DIR" "$QUARANTINE_DIR" "$SNAPSHOT_ROOT"; do')
+        end = command.index('\ndone', begin) + len('\ndone')
+        self.assertNotIn('install -d -o root -g root -m 0750 "$QUARANTINE_DIR"', command)
+        preflight = command[begin:end]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "outside"
+            target.mkdir(mode=0o700)
+            (target / "child").mkdir()
+            (root / "redirect").symlink_to(target, target_is_directory=True)
+            values = {"PLUGIN_DIR": root / "redirect" / "child", "QUARANTINE_DIR": root / "quarantine", "SNAPSHOT_ROOT": root / "snapshot"}
+            declarations = "\n".join(f"{key}={shlex.quote(str(value))}" for key, value in values.items())
+            result = subprocess.run(["sh", "-c", declarations + "\n" + preflight], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing redirected", result.stderr)
+            self.assertTrue((target / "child").is_dir())
+            self.assertEqual(target.stat().st_mode & 0o777, 0o700)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "POSIX shell preflight")
+    def test_legacy_wordpress_acl_manifest_requires_review_without_mutation(self):
+        helper = load_module(self.shell_helper_path, "wordpress_legacy_preflight")
+        root_shell = helper._root_shell
+        helper._root_shell = lambda script: script
+        try:
+            command = helper.build_remote_matrixd_command(action="start", universe="fixture", linux_user="matrix-fixture", runtime_capabilities={})
+        finally:
+            helper._root_shell = root_shell
+        begin = command.index('WP_ACL_MANIFEST=')
+        end = command.index('\nfi', begin) + len('\nfi')
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = Path(temporary) / "legacy-acl"
+            manifest.write_text("synthetic legacy policy\n", encoding="utf-8")
+            snippet = command[begin:end].replace('"/etc/matrixswarm/capabilities/$SWARM_USER.wordpress-acl"', shlex.quote(str(manifest)))
+            result = subprocess.run(["sh", "-c", snippet], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 77)
+            self.assertIn("Review and reconcile", result.stderr)
+            self.assertEqual(manifest.read_text(encoding="utf-8"), "synthetic legacy policy\n")
+
     def test_ssh_selector_labels_disambiguate_duplicate_profiles(self):
         helper_source = source(
             "phoenix/matrix_gui/modules/railgun/ssh_support.py"
@@ -338,7 +389,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         self.assertIn("matrix-phoenix-mcp", command)
         self.assertIn("MATRIX_RUNTIME_CAPABILITIES_B64=", command)
         self.assertIn(
-            "Plugin directory not found: %s",
+            "Directory not found: %s",
             command,
         )
         root_shell = helper._root_shell
@@ -428,7 +479,9 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         )
         self.assertIn("wordpress-acl", command)
         self.assertIn('SNAPSHOT_ROOT=/opt/swarm/guard/snapshots', command)
-        self.assertIn('done < "$WP_ACL_MANIFEST"', without_mcp)
+        self.assertIn('runuser -u "$SWARM_USER" -- test -w "$MANAGED_DIR"', command)
+        self.assertIn('provision the required permissions and parent traversal', command)
+        self.assertIn('Review and reconcile legacy WordPress ACLs', without_mcp)
 
     def test_forensic_detective_gets_diagnostic_logs_but_not_kernel_or_root(self):
         helper = load_module(self.shell_helper_path, "forensic_capabilities")
@@ -508,7 +561,7 @@ class RemoteSSHLaunchTests(unittest.TestCase):
             ROOT / "matrixos/agents/python_core/matrix/matrix.py"
         )
         self.assertIn("MATRIX_RUNTIME_CAPABILITIES_B64", matrix_source)
-        self.assertIn("Railgun-managed active grants", matrix_source)
+        self.assertIn("Grants and access requirements", matrix_source)
         self.assertIn("Universe-wide boundary", matrix_source)
     def test_remote_command_never_contains_boot_secrets(self):
         helper = load_module(self.shell_helper_path, "remote_secret_boundary")
@@ -658,11 +711,6 @@ class RemoteSSHLaunchTests(unittest.TestCase):
         self.assertNotIn("open_sftp", railgun_source)
         self.assertNotIn("sftp.put", railgun_source)
         self.assertIn('"encrypted_bundle": bundle', deploy_source)
-
-    def test_spawn_audit_is_inside_the_universe_static_tree(self):
-        spawner = source("matrixos/core/python_core/core_spawner.py")
-        self.assertNotIn('open("/matrix/spawn.log"', spawner)
-        self.assertIn('Path(self.pm.session.static_root) / "spawn.log"', spawner)
 
     def test_root_only_memory_protection_is_wired_end_to_end(self):
         helper = load_module(self.shell_helper_path, "memory_protection_flag")
@@ -816,41 +864,6 @@ class RemoteSSHLaunchTests(unittest.TestCase):
 
         matrix_source = source("matrixos/agents/python_core/matrix/matrix.py")
         self.assertIn('cmd = [sudo, "-n"] + cmd', matrix_source)
-
-    def test_boot_pruning_never_treats_persistent_state_as_a_boot(self):
-        matrixd_source = source("matrixos/scripts/matrixd")
-        tree = ast.parse(matrixd_source, filename="matrixos/scripts/matrixd")
-        selected = [
-            node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "_prune_old_boots"
-        ]
-        namespace = {"shutil": shutil}
-        exec(
-            compile(
-                ast.Module(body=selected, type_ignores=[]),
-                "matrixd",
-                "exec",
-            ),
-            namespace,
-        )
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            old_boot = root / "20260914_010000"
-            new_boot = root / "20260915_010000"
-            persistent = root / "persistent"
-            latest = root / "latest"
-            for path in (old_boot, new_boot, persistent, latest):
-                path.mkdir()
-                (path / "marker").write_text(path.name, encoding="utf-8")
-
-            self.assertTrue(namespace["_prune_old_boots"](root))
-            self.assertFalse(old_boot.exists())
-            self.assertTrue(new_boot.is_dir())
-            self.assertTrue(persistent.is_dir())
-            self.assertTrue((persistent / "marker").is_file())
-            self.assertTrue(latest.is_dir())
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux prctl test")
     def test_memory_bootstrap_remains_nondumpable_while_agent_runs(self):

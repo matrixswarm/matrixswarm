@@ -34,14 +34,52 @@ import json
 import base64
 import uuid
 import shutil
+import stat
 import subprocess
+import fcntl
+import select
 import traceback
+import psutil
 from datetime import datetime
 from class_lib.file_system.file_system_builder import FileSystemBuilder
 from core.python_core.path_manager import PathManager
+from core.python_core.lifecycle_fence import GENERATION_ENV
+from core.python_core.reuse_cleanup import require_directory, prepare_reused_runtime, purge_runtime_paths, validate_reuse_paths, validate_agent_ids
+from core.python_core.safe_paths import runtime_directory, static_directory, read_agent_source, child_directory, write_file_at, append_file_at, trusted_shared_agent_root, trusted_shared_core_root, trusted_agent_import_root
 from core.python_core.class_lib.logging.logger import Logger
 from core.python_core.mixin.core_spawn_secure import CoreSpawnerSecureMixin
 from core.python_core.mixin.ghost_vault import build_encrypted_spawn_env
+
+
+def _publish_boot_record(path, record):
+    """Publish complete boot metadata without exposing a partial JSON file."""
+    path = Path(path)
+    try:
+        existing = path.lstat()
+    except FileNotFoundError:
+        existing_mode = None
+    else:
+        if not stat.S_ISREG(existing.st_mode):
+            raise ValueError(f"Unsafe existing boot record: {path}")
+        existing_mode = stat.S_IMODE(existing.st_mode)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    created = False
+    try:
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                     existing_mode if existing_mode is not None else 0o666)
+        created = True
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            if existing_mode is not None:
+                os.fchmod(file.fileno(), existing_mode)
+            json.dump(record, file, indent=4)
+        os.replace(temporary, path)
+    finally:
+        if created:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
 
 class CoreSpawner(CoreSpawnerSecureMixin):
     """
@@ -51,7 +89,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
     It prepares the agent's filesystem, sets up secure communication channels,
     and launches the agent process with a secure, encrypted environment.
     """
-    def __init__(self, universe, base_path, reboot_uuid=None, python_site=None, detected_python=None, booting=False, args=None):
+    def __init__(self, universe, base_path, reboot_uuid=None, python_site=None, detected_python=None, booting=False, args=None, active_agent_ids=None):
         """
         Initializes the CoreSpawner instance.
 
@@ -76,6 +114,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         self.debug = False
         self.rug_pull = False
         self.protect_memory = False
+        self.lifecycle_generation = os.environ.get(GENERATION_ENV)
         self.matrix_universal_id = "matrix"
 
         self.python_site=python_site
@@ -105,35 +144,40 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         else:
 
             universe_root = Path(base_path) / "universes" / "runtime" / universe
+            universe_exists = require_directory(universe_root, missing_ok=True)
 
             # if neither option set args.reboot_id or not args.reboot_new
             if not args.reboot_id and not args.reboot_new:
 
 
                 # try to reuse latest
-                candidates = [
-                    p.name for p in universe_root.iterdir()
-                    if p.is_dir() and p.name.replace("_", "").isdigit()
-                ]
+                candidates = []
+                for path in universe_root.iterdir() if universe_exists else ():
+                    if path.name.replace("_", "").isdigit():
+                        require_directory(path)
+                        candidates.append(path.name)
 
                 if candidates:
                     latest_uuid = sorted(candidates)[-1]
+                    validate_reuse_paths(base_path, universe, latest_uuid)
+                    retired, signals = prepare_reused_runtime(base_path, universe, latest_uuid, active_agent_ids or ())
                     self.pm = PathManager(universe, base_path, reboot_uuid=latest_uuid, mode="reuse")
-                    self._cleanup()  # remove incoming/die and/or incoming/punji
+                    if retired:
+                        print(f"[SPAWNER] Retired obsolete agent channels to {retired}")
+                    if signals:
+                        print(f"[SPAWNER] Retired old agent signals to {signals}")
                     print(f"[SPAWNER] ♻️ Reusing latest reboot_uuid: {latest_uuid}")
-                    # clean old pods before continuing
-                    pod_path = Path(self.pm.session.runtime_pod_path)
-                    if pod_path.exists():
-                        for pod in pod_path.iterdir():
-                            if pod.is_dir():
-                                shutil.rmtree(pod, ignore_errors=True)
-                        print(f"[SPAWNER] 🧹 Cleared stale pods in {pod_path}")
 
             #reuse a given reboot_uuid
             elif args.reboot_id:
 
+                validate_reuse_paths(base_path, universe, args.reboot_id)
+                retired, signals = prepare_reused_runtime(base_path, universe, args.reboot_id, active_agent_ids or ())
                 self.pm = PathManager(universe, base_path, reboot_uuid=args.reboot_id, mode="resume")
-                self._cleanup()  # remove incoming/die and/or incoming/punji
+                if retired:
+                    print(f"[SPAWNER] Retired obsolete agent channels to {retired}")
+                if signals:
+                    print(f"[SPAWNER] Retired old agent signals to {signals}")
                 print(f"[SPAWNER] Resuming reboot UUID: {args.reboot_id}")
 
 
@@ -145,76 +189,19 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             # handle --clean
             if args.clean:
                 print("[SPAWNER] Cleaning runtime directories…")
-                for key in ["runtime_comm", "runtime_pod"]:
-                    path = Path(self.pm.resolve(key))
-                    if path.exists():
-                        shutil.rmtree(path, ignore_errors=True)
-                        print(f"[SPAWNER] Removed {path}")
+                purge_runtime_paths(base_path, universe, self.pm.reboot_uuid)
                 print("[SPAWNER] Runtime purge complete (static preserved)")
 
     def _cleanup(self):
-        # --- Nuke old logs on reboot ---
-        log_root = Path(self.pm.session.static_comm_path)
-        if log_root.exists():
-            for agent_dir in log_root.iterdir():
-                if not agent_dir.is_dir():
-                    continue
-                log_dir = agent_dir / "logs"
-                if log_dir.exists():
-                    shutil.rmtree(log_dir, ignore_errors=True)
-            print(f"[SPAWNER] Purged old logs in {log_root}")
-
         # clean old pods before continuing
         pod_path = Path(self.pm.session.runtime_pod_path)
-        if pod_path.exists():
+        if require_directory(pod_path, missing_ok=True):
             for pod in pod_path.iterdir():
+                if pod.is_symlink():
+                    raise ValueError(f"Unsafe link in reused pod directory: {pod}")
                 if pod.is_dir():
-                    shutil.rmtree(pod, ignore_errors=True)
+                    shutil.rmtree(pod)
             print(f"[SPAWNER] Cleared stale pods in {pod_path}")
-
-        # ALSO clean old die/hello.moto signals
-        comm_path = Path(self.pm.session.runtime_comm_path)
-        if comm_path.exists():
-            for agent_dir in comm_path.iterdir():
-                if not agent_dir.is_dir():
-                    continue
-                incoming = agent_dir / "incoming"
-                hello = agent_dir / "hello.moto"
-                spawn = agent_dir / "spawn"
-                directive = agent_dir / "directive"
-
-                # remove die cookies
-                if incoming.exists():
-                    for file in incoming.iterdir():
-                        try:
-                            file.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-
-                if spawn.exists():
-                    for spawn in spawn.iterdir():
-                        try:
-                            spawn.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-
-                # clear out old pokes and signals
-                if hello.exists():
-                    for poke in hello.iterdir():
-                        try:
-                            poke.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-
-                if directive.exists():
-                    for agent_tree in directive.iterdir():
-                        try:
-                            agent_tree.unlink(missing_ok=True)
-                        except Exception:
-                            pass
-
-            print(f"[SPAWNER] Cleared stale incoming + hello.moto + spawn signals in {comm_path}")
-
 
     def set_keys(self, key_dict: dict):
         """
@@ -313,33 +300,31 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             str: The absolute path to the agent's base communication directory.
         """
         base = ""
+        validate_agent_ids((universal_id,))
         try:
             base = os.path.join(self.pm.resolve("runtime_comm"), universal_id)
 
-            os.makedirs(base, exist_ok=True)
-
             fsb = FileSystemBuilder()
-            # Always process the default file_spec
-            fsb.process_selection(base, self.default_comm_file_spec)
-
-            # Process any special requirements from the agent's directive
-            if file_spec:
-                fsb.process_selection(base, file_spec)
-            if agent_directive:
-                fs_node = agent_directive if isinstance(agent_directive, dict) else {}
-                folders = fs_node.get("folders", [])
-                if folders:
-                    fsb.process_selection(base, folders)
-
-                files = fs_node.get("files", {})
-                for name, content in files.items():
-                    item = {"name": name, "type": "f", "content": content}
-                    fsb.process_item(base, item)
+            with runtime_directory(self.pm.base, self.pm.universe, self.pm.reboot_uuid,
+                                   "comm", child=universal_id, create_child=True) as directory_fd:
+                fsb.process_selection_fd(directory_fd, self.default_comm_file_spec)
+                if file_spec:
+                    fsb.process_selection_fd(directory_fd, file_spec)
+                if agent_directive:
+                    fs_node = agent_directive if isinstance(agent_directive, dict) else {}
+                    folders = fs_node.get("folders", [])
+                    if folders:
+                        fsb.process_selection_fd(directory_fd, folders)
+                    files = fs_node.get("files", {})
+                    for name, content in files.items():
+                        item = {"name": name, "type": "f", "content": content}
+                        fsb.process_item_fd(directory_fd, item)
 
             print('comm_channel creation: end')
         except Exception as e:
             tb = traceback.format_exc()
             print(f"[ensure_comm_channel] Unhandled exception during spawn of {tb}: {e}")
+            raise
         return base
 
     def create_runtime(self):
@@ -357,7 +342,9 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         """
         new_uuid = f"{str(uuid.uuid4())}"
         pod_path = os.path.join(self.pm.resolve("runtime_pod"), new_uuid)
-        os.makedirs(pod_path, exist_ok=True)
+        with runtime_directory(self.pm.base, self.pm.universe, self.pm.reboot_uuid,
+                               "pod", child=new_uuid, create_child=True):
+            pass
         return new_uuid, pod_path
 
     def destroy_runtime(self, uuid):
@@ -396,7 +383,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         except (FileNotFoundError, json.JSONDecodeError):
             return False, None
 
-    def spawn_agent(self, universe, spawner, universal_id, agent_name, spawn_uuid, tree_node=None):
+    def spawn_agent(self, universe, spawner, universal_id, agent_name, spawn_uuid, tree_node=None, defer_gate=False, require_ready=False):
         """
         The main method to spawn a new agent process.
 
@@ -429,6 +416,14 @@ class CoreSpawner(CoreSpawnerSecureMixin):
         """
 
         logger=None
+        process = None
+        gate_open = False
+        pod_context = None
+        pod_fd = None
+        run_fd = None
+        import_fd = None
+        ready_read = None
+        ready_write = None
         try:
 
             lang = tree_node.get("lang", "python") if tree_node else "python"
@@ -442,7 +437,10 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             ext = ext_map.get(lang, "py")
 
             site_paths= self.pm.full_resolution(universal_id, spawn_uuid, lang=lang, ext=ext)
-            logger = Logger(site_paths["static_comm_resolved"], "logs", "agent.log")
+            with static_directory(self.pm.base, self.pm.universe, self.pm.reboot_uuid,
+                                  "comm", child=universal_id, create_child=True) as comm_fd:
+                with child_directory(comm_fd, "logs", create=True) as log_fd:
+                    logger = Logger(site_paths["static_comm_resolved"], "logs", "agent.log", directory_fd=log_fd)
 
             if self._keychain.get("encryption_enabled"):
                 logger.set_encryption_key(self._keychain["swarm_key"])
@@ -450,28 +448,35 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             # Keep the audit trail inside the universe-owned static tree.  A
             # least-privilege swarm account must never need write access to the
             # shared /matrix installation root.
-            spawn_audit_path = Path(self.pm.session.static_root) / "spawn.log"
-            with open(spawn_audit_path, "a", encoding="utf-8") as f:
-                f.write(f"{datetime.now().isoformat()} :: {universal_id} → {agent_name}\n")
+            with static_directory(self.pm.base, self.pm.universe, self.pm.reboot_uuid) as static_fd:
+                append_file_at(static_fd, "spawn.log", f"{datetime.now().isoformat()} :: {universal_id} → {agent_name}\n".encode())
 
             #ensure the runtime pod path is created
             spawn_path = site_paths["runtime_pod_resolved"]
-            os.makedirs(spawn_path, exist_ok=True)
+            pod_context = runtime_directory(self.pm.base, self.pm.universe, self.pm.reboot_uuid,
+                                            "pod", child=spawn_uuid, create_child=True)
+            pod_fd = pod_context.__enter__()
 
             site_root_path = self.pm.resolve("site_root")
             source_path = self.pm.resolve("agent_resolved", lang=lang, agent_name=agent_name, ext=ext)
+
+            # Agents put SITE_ROOT and AGENT_PATH on sys.path. Every directory
+            # they can import from must therefore remain administrator-owned.
+            for validator in (lambda: trusted_shared_core_root(site_root_path),
+                              lambda: trusted_shared_agent_root(site_root_path, lang)):
+                tree = validator()
+                if tree is None:
+                    raise RuntimeError("Administrator-controlled source tree is missing")
+                os.close(tree)
+            import_fd = trusted_agent_import_root(site_root_path, lang, agent_name)
 
             # Integrity Check: Use embedded source or load from file and verify hash
             if tree_node and "src_embed" in tree_node:
                 src_bytes = base64.b64decode(tree_node["src_embed"])
                 logger.log(f"[SPAWN] Using embedded agent source for {agent_name}.")
-            elif os.path.exists(source_path):
-                 with open(source_path, "rb") as f:
-                    src_bytes = f.read()
-                 logger.log(f"[SPAWN] ✅ Found source for {agent_name} at {source_path}")
             else:
-                logger.log(f"[SPAWN-FAIL] Agent source not found at expected path: {source_path}")
-                raise RuntimeError(f"[SPAWN-FAIL] Missing agent source: {source_path}")
+                src_bytes = read_agent_source(site_root_path, lang, agent_name, ext)
+                logger.log(f"[SPAWN] ✅ Found source for {agent_name} at {source_path}")
 
             real_hash = hashlib.sha256(src_bytes).hexdigest()
             expected_hash = tree_node.get("hash_bang") if tree_node else None
@@ -503,9 +508,29 @@ class CoreSpawner(CoreSpawnerSecureMixin):
             # Write the verified source to a runnable file in the pod
             run_path = os.path.join(spawn_path, "run")
             vault_path = os.path.join(spawn_path, "vault")
-            file_content = src_bytes.decode("utf-8")  # Now a string
-            with open(run_path, "w", encoding="utf-8") as f:
-                f.write(file_content)
+            src_bytes.decode("utf-8")  # fail before publishing non-Python source
+            write_file_at(pod_fd, "run", src_bytes, mode=0o600)
+            # Executing a regular file descriptor does not prevent in-place
+            # rewrites. A sealed memfd fixes the exact bytes verified above.
+            if not sys.platform.startswith("linux") or not hasattr(os, "memfd_create"):
+                raise RuntimeError("Sealed agent execution requires Linux memfd support")
+            run_fd = os.memfd_create("matrix-agent", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+            view = memoryview(src_bytes)
+            while view:
+                count = os.write(run_fd, view)
+                if count <= 0:
+                    raise OSError("Failed writing sealed agent source")
+                view = view[count:]
+            os.lseek(run_fd, 0, os.SEEK_SET)
+            # Linux UAPI constants may be absent from Python's fcntl module.
+            seals = 0x0008 | 0x0004 | 0x0002 | 0x0001
+            fcntl.fcntl(run_fd, getattr(fcntl, "F_ADD_SEALS", 1033), seals)
+            if fcntl.fcntl(run_fd, getattr(fcntl, "F_GET_SEALS", 1034)) & seals != seals:
+                raise RuntimeError("Failed to seal agent source")
+            with os.fdopen(os.dup(run_fd), "rb") as sealed:
+                if hashlib.sha256(sealed.read()).hexdigest() != real_hash:
+                    raise RuntimeError("Sealed agent source failed integrity verification")
+            os.lseek(run_fd, 0, os.SEEK_SET)
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
             logger.log(f"[SPAWN-MGR] Spawning: {universal_id} ({agent_name})")
@@ -545,6 +570,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     "protect_memory": int(self.protect_memory),
                 },
                 "tree_node": tree_node,
+                "source_sha256": real_hash,
                 "secure_keys": {
                     "pub": self._keychain["pub"],
                     "priv": self._keychain["priv"]
@@ -568,7 +594,7 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     return obj
 
             payload = sanitize_for_json(payload)
-            env = build_encrypted_spawn_env(payload, vault_path)
+            env = build_encrypted_spawn_env(payload, vault_path, output_dir_fd=pod_fd)
 
 
             env.update({
@@ -577,6 +603,11 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                 "PYTHON_SITE": self.python_site,
                 "PYTHONPATH": os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
             })
+            env["MATRIX_AGENT_RUN_FD"] = str(run_fd)
+            if import_fd is not None:
+                env["MATRIX_AGENT_IMPORT_FD"] = str(import_fd)
+            if self.lifecycle_generation:
+                env[GENERATION_ENV] = self.lifecycle_generation
 
             # --- Launch Process ---
             python_exec = self.python_exec or "python3"
@@ -599,32 +630,109 @@ class CoreSpawner(CoreSpawnerSecureMixin):
                     f"{universe}:{universal_id}",
                 ]
             else:
-                cmd = [python_exec, run_path, "--job", f"{universe}:{universal_id}"]
+                fd_launcher = os.path.join(site_root_path, "core", "python_core", "fd_launcher.py")
+                cmd = [python_exec, fd_launcher, "--job", f"{universe}:{universal_id}"]
+            # Keep the child inert until its identity has been published. If
+            # this process dies, the pipe closes and the launcher exits.
+            env["MATRIX_GATED_COMMAND"] = json.dumps(cmd)
+            env["MATRIX_AGENT_RUN_PATH"] = run_path
+            gate_launcher = os.path.join(site_root_path, "core", "python_core", "gated_launcher.py")
+            gate_cmd = [python_exec, gate_launcher, "--job", f"{universe}:{universal_id}"]
+            if require_ready:
+                ready_read, ready_write = os.pipe2(os.O_CLOEXEC)
+                env["MATRIX_BOOT_READY_FD"] = str(ready_write)
             kwargs = {"preexec_fn": os.setsid} if os.name == "posix" else {}
             process = subprocess.Popen(
-                cmd,
+                gate_cmd,
                 stdout=subprocess.DEVNULL if not self.verbose else None,
                 stderr=subprocess.DEVNULL if not self.verbose else None,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE,
                 env=env,
+                pass_fds=(pod_fd, run_fd) + ((import_fd,) if import_fd is not None else ()) + ((ready_write,) if ready_write is not None else ()),
                 **kwargs
             )
+            if ready_write is not None:
+                os.close(ready_write)
+                ready_write = None
+            try:
+                process_started_at = psutil.Process(process.pid).create_time()
+            except (psutil.Error, OSError):
+                process_started_at = None
 
             # --- Record Keeping ---
             spawn_record = {
                 "uuid": spawn_uuid, "universal_id": universal_id, "agent_name": agent_name,
                 "parent": spawner, "timestamp": timestamp, "pid": process.pid
             }
-            spawn_dir = os.path.join(site_paths["runtime_comm_resolved"], "spawn")
-            os.makedirs(spawn_dir, exist_ok=True)
-            with open(os.path.join(spawn_dir, f"{timestamp}_{spawn_uuid}.spawn"), "w", encoding="utf-8") as f:
-                json.dump(spawn_record, f, indent=2)
-            with open(os.path.join(spawn_path, "boot.json"), "w", encoding="utf-8") as f:
-                json.dump({"universal_id": universal_id, "boot_time": timestamp, "pid": process.pid, "cmd": cmd}, f, indent=4)
+            with runtime_directory(self.pm.base, self.pm.universe, self.pm.reboot_uuid,
+                                   "comm", child=universal_id) as comm_fd:
+                with child_directory(comm_fd, "spawn", create=True) as spawn_fd:
+                    write_file_at(spawn_fd, f"{timestamp}_{spawn_uuid}.spawn", json.dumps(spawn_record, indent=2).encode())
+            boot_record = {"universal_id": universal_id, "boot_time": timestamp, "pid": process.pid,
+                           "cmd": cmd, "source_sha256": real_hash}
+            if process_started_at is not None:
+                boot_record["process_started_at"] = process_started_at
+            write_file_at(pod_fd, "boot.json", json.dumps(boot_record, indent=2).encode(), durable=True)
+
+            if defer_gate:
+                self._pending_gate = process
+            else:
+                process.stdin.write(b"1")
+                process.stdin.flush()
+                process.stdin.close()
+            gate_open = True
+            if ready_read is not None:
+                self._ready_fd = ready_read
+                ready_read = None
 
             logger.log(f"[SPAWN-LOG] Spawn recorded for PID {process.pid}")
 
         except Exception as e:
+            if process is not None and not gate_open:
+                if process.stdin is not None:
+                    process.stdin.close()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
             raise RuntimeError(f"[SPAWN-FAIL] Unhandled exception during spawn of {agent_name}: {e}")
+        finally:
+            if ready_read is not None:
+                os.close(ready_read)
+            if ready_write is not None:
+                os.close(ready_write)
+            if logger is not None:
+                logger.close()
+            if run_fd is not None:
+                os.close(run_fd)
+            if import_fd is not None:
+                os.close(import_fd)
+            if pod_fd is not None:
+                pod_context.__exit__(None, None, None)
 
         return process.pid, cmd
+
+    def release_pending_gate(self):
+        process = self._pending_gate
+        try:
+            process.stdin.write(b"1")
+            process.stdin.flush()
+        finally:
+            process.stdin.close()
+            self._pending_gate = None
+
+    def wait_until_ready(self, timeout=30):
+        fd, self._ready_fd = self._ready_fd, None
+        try:
+            readable, _, _ = select.select([fd], [], [], timeout)
+            if not readable or os.read(fd, 1) != b"1":
+                raise RuntimeError("Matrix did not report successful startup")
+        finally:
+            os.close(fd)
+
+    def close_ready_pipe(self):
+        fd = getattr(self, "_ready_fd", None)
+        if fd is not None:
+            self._ready_fd = None
+            os.close(fd)

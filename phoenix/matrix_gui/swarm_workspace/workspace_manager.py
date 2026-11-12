@@ -29,7 +29,6 @@ class WorkspaceManagerDialog(QDialog):
         self.vcs = vcs
         self.vault_data = vcs.data
         self.vault_data.setdefault("workspaces", {})
-        vcs.patch("workspaces", self.vault_data["workspaces"])
 
         self.workspaces = self.vault_data["workspaces"]
 

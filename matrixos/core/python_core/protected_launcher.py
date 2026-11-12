@@ -22,6 +22,10 @@ def _protect_process_memory():
 def main():
     # Apply the boundary before reading or decrypting any agent boot material.
     _protect_process_memory()
+    if os.environ.get("MATRIX_AGENT_RUN_FD"):
+        from fd_launcher import run_agent
+        run_agent(set_script_path=False)
+        return
     agent_path = os.environ.pop(RUN_PATH_ENV, "")
     if not agent_path or not os.path.isfile(agent_path):
         raise RuntimeError("Protected agent run path is missing or invalid")

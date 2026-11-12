@@ -382,7 +382,7 @@ class DeployDialog(QtWidgets.QDialog):
             self.output.append(f"[ACCOUNT] Universe runs as {linux_user}\n")
             grants = describe_runtime_capabilities(runtime_capabilities)
             self.output.append(
-                f"[ACCOUNT] Railgun-managed active grants: {len(grants)}\n"
+                f"[ACCOUNT] Grants and access requirements: {len(grants)}\n"
             )
             for grant in grants:
                 self.output.append(f"[ACCOUNT]   {grant}\n")

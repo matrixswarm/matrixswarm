@@ -227,17 +227,16 @@ class RegistryManagerDialog(QDialog):
             editor = (editor_class(new_conn=True, terminal_mode=True)
                       if self.terminal_mode and class_name == "matrix_ssh"
                       else editor_class(new_conn=True))
-            if not editor.exec():
-                return
+            def save_entry():
+                serial = editor.get_serial()
+                data = editor.serialize()
+                data["path"] = editor.get_directory_path()
+                self._stamp_record(data, class_name, serial, created=True)
+                namespace = deepcopy(self.registry_store.get_namespace(class_name))
+                namespace[serial] = data
+                return self._commit_namespace(class_name, namespace)
 
-            serial = editor.get_serial()
-            data = editor.serialize()
-            data["path"] = editor.get_directory_path()
-            self._stamp_record(data, class_name, serial, created=True)
-
-            namespace = deepcopy(self.registry_store.get_namespace(class_name))
-            namespace[serial] = data
-            if not self._commit_namespace(class_name, namespace):
+            if not editor.exec(on_save=save_entry):
                 return
             self._populate_tabs()
         except Exception as error:
@@ -266,16 +265,16 @@ class RegistryManagerDialog(QDialog):
                       if self.terminal_mode and class_name == "matrix_ssh"
                       else editor_class(new_conn=False))
             editor._load_data(current)
-            if not editor.exec():
-                return
+            def save_entry():
+                updated = editor.serialize()
+                updated["path"] = editor.get_directory_path()
+                merge_record_metadata(current, updated)
+                self._stamp_record(updated, class_name, serial)
+                candidate = deepcopy(self.registry_store.get_namespace(class_name))
+                candidate[serial] = updated
+                return self._commit_namespace(class_name, candidate)
 
-            updated = editor.serialize()
-            updated["path"] = editor.get_directory_path()
-            # Keep creation/version metadata while advancing modification time.
-            merge_record_metadata(current, updated)
-            self._stamp_record(updated, class_name, serial)
-            namespace[serial] = updated
-            if not self._commit_namespace(class_name, namespace):
+            if not editor.exec(on_save=save_entry):
                 return
             self._populate_tabs()
         except Exception as error:
@@ -310,7 +309,8 @@ class RegistryManagerDialog(QDialog):
             QMessageBox.warning(
                 self, "Registry Save Failed",
                 "The registry change was not accepted. Your previous registry "
-                "state has been restored. Review the entry and try again.",
+                "state has been restored. Fix the vault problem and retry, "
+                "or cancel the editor to discard the change.",
             )
             return False
         return True

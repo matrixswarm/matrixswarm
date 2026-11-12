@@ -131,9 +131,9 @@ class TerminalRecordFieldsTests(unittest.TestCase):
             _commit_namespace=lambda name, data: commits.append(deepcopy(data)) or True,
             _populate_tabs=Mock(), _stamp_record=RegistryManagerDialog._stamp_record)
 
-        def accept(editor):
+        def accept(editor, on_save):
             self.select_target(editor)
-            return 1
+            return on_save()
 
         with patch.object(matrix_ssh, "fields_visible", return_value=True), \
              patch.object(matrix_ssh.MatrixSSH, "exec", accept):

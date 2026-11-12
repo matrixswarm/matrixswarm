@@ -36,6 +36,8 @@ import shlex
 import shutil
 from Crypto.PublicKey import RSA
 import subprocess
+import threading
+import stat
 
 # Assuming self.matrix_priv is currently a string with PEM content:
 from core.python_core.boot_agent import BootAgent
@@ -50,6 +52,16 @@ from core.python_core.class_lib.directive.boot_directive_info import BootDirecti
 from core.python_core.class_lib.time_utils.heartbeat_checker import check_heartbeats
 from core.python_core.utils.analyze_spawn_records import analyze_spawn_records
 from core.python_core.utils.swarm_sleep import interruptible_sleep
+from core.python_core.safe_paths import runtime_directory, child_directory, open_beneath
+from core.python_core.swarm_processes import get_all_swarm_agent_info
+from core.python_core.reap_revision import (reap_mutation, note_reap_save_attempt, note_reap_save_success,
+                                             commit_reap_mutation, defer_reap_side_effect, defer_reap_abort)
+
+
+class HotswapChallengeError(ValueError):
+    """A source command has no valid challenge for this Matrix process."""
+
+
 class Agent(BootAgent, ReapStatusHandlerMixin):
     """The root agent and central authority of the MatrixSwarm.
     As the first agent spawned by the bootloader, the Matrix agent acts as
@@ -57,6 +69,10 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
     chain of trust, spawning all top-level agents defined in the directive,
     and serving as a central hub for critical commands and state information.
     """
+    commit_reap_mutation = commit_reap_mutation
+    defer_reap_side_effect = defer_reap_side_effect
+    defer_reap_abort = defer_reap_abort
+
     def __init__(self):
         """Initializes the root of the swarm.
         This method is the first to run after the bootloader. It decrypts the
@@ -70,6 +86,11 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         try:
             self.AGENT_VERSION = "2.0.0"
             self._agent_tree_master = None
+            self._hotswap_lock = threading.Lock()
+            self._hotswap_pending = set()
+            self._hotswap_transfers = {}
+            self._hotswap_closed = {}
+            self._hotswap_challenges = {}
 
             self.boot_directive_info = BootDirectiveInfo(self.security_box)
 
@@ -78,9 +99,12 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
             try:
                 #{"boot_directives_path": config["boot_directives"], "boot_directive_filename": directive_file, "boot_directive_encrypted":is_directive_encrypted, "boot_directive_swarm_key": boot_directive_swarm_key}
-                self.log(f"boot directive path: {self.security_box.get('boot_directives_path',{})}")
-                self.log(f"boot directive filename: {self.security_box.get('boot_directive_filename',{})}")
-                self.log(f"boot directive encrypted: {bool(self.security_box.get('boot_directive_encrypted',{}))}")
+                if 'boot_directive_encrypted' in self.security_box:
+                    self.log(f"boot directive path: {self.security_box.get('boot_directives_path', {})}")
+                    self.log(f"boot directive filename: {self.security_box.get('boot_directive_filename', {})}")
+                    self.log(f"boot directive encrypted: {bool(self.security_box['boot_directive_encrypted'])}")
+                else:
+                    self.log("boot directive: legacy file metadata not supplied")
                 self.log(f"agent install path: {self.path_resolution['agent_path']}")
                 self.log(f"install path: {self.path_resolution['install_path']}")
 
@@ -214,7 +238,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 raise ValueError("invalid capability grant list")
 
             self.log(
-                f"[PRIVILEGES] Railgun-managed active grants: {len(grants)}"
+                f"[PRIVILEGES] Grants and access requirements: {len(grants)}"
             )
             if not grants:
                 self.log("[PRIVILEGES]   none — unprivileged universe account")
@@ -399,6 +423,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         except Exception as e:
             self.log(error=e, block="main_try", level="ERROR")
 
+    @reap_mutation
     def _cmd_delete_agent(self, content, packet, identity: IdentityObject = None):
         """Initiates deletion of a target agent and its subtree.
         Marks all nodes for deletion and sets up lifecycle callback metadata.
@@ -469,12 +494,14 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 self.log(f"[DELETE] No valid subtree found for {target_id}.")
                 return
 
-            self.save_agent_tree_master()
+            if not self.save_agent_tree_master():
+                raise RuntimeError("Delete state could not be saved")
+            self.commit_reap_mutation()
 
             parent_node = tp.find_parent_of(target_id)
             parent_id = parent_node.get("universal_id") if parent_node else None
             if parent_id:
-                self.delegate_tree_to_agent(parent_id, self.tree_path_dict)
+                self.defer_reap_side_effect(lambda: self.delegate_tree_to_agent(parent_id, self.tree_path_dict))
                 return
 
             self.log(f"[DELETE] 🧨 Marked {len(kill_list)} agents for deletion: {kill_list}")
@@ -482,211 +509,462 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         except Exception as e:
             self.log("[DELETE][ERROR] Failed to mark agents for deletion.", error=e)
 
+    @reap_mutation
     def _delete_complete_callback(self, tx_nodes, trans_id=None):
-        """Unlock, finalize, delegate, and report delete completion to Phoenix."""
+        """Publish completion only after the tree and authorization map commit."""
         tp = self.get_agent_tree_master()
-
+        notices = []
         for uid, _ in tx_nodes:
-            try:
-                node = tp.get_node(uid)
-                if not node:
-                    continue
-
-                # Lifecycle + callback info
-                life = node.get("lifecycle_status", {})
-                cb_info = life.get("agent_status_callback", {}) or {}
-
-                # --- Unlock and mark completion ---
-                life.pop("locked", None)
-                life["op_stage"] = "_complete_callback"
-                life["last_checked"] = time.time()
-
-                # --- Remove node physically ---
-                tp._remove_node_and_children(uid)
-                self.log(f"[DELETE][FINALIZE] {uid} purged from tree.")
-
-                # --- Delegate parent slice back ---
-                parent_node = tp.find_parent_of(uid)
-                if parent_node:
-                    parent_id = parent_node.get("universal_id")
-                    self.delegate_tree_to_agent(parent_id, self.tree_path_dict)
-                    self.log(f"[DELETE][FINALIZE] delegated parent {parent_id}")
-
-                # --- Send callback to Phoenix ---
-                if cb_info:
-
-                    confirm_payload = {
-                        "universal_id": uid,
-                        "stage": "delete_complete",
-                        "result": {"success": True, "error": None},
-                        "callback_data": cb_info,
-                        "token": cb_info.get("token"),
-                        "session_id": cb_info.get("session_id"),
-                    }
-
-                    self.crypto_reply(
-                        response_handler=cb_info.get("response_handler", "delete_agent.result"),
-                        payload=confirm_payload,
-                        session_id=cb_info.get("session_id"),
-                        token=cb_info.get("token"),
-                        rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc"),
-                    )
-
-                    self.log(f"[DELETE][CALLBACK] Sent delete_complete for {uid}")
-
-                else:
-                    self.log("[DELETE][CALLBACK] No callback data found for node.")
-
-            except Exception as e:
-                self.log(error=e, block="_delete_complete_callback")
-
-        self.save_agent_tree_master()
+            node = tp.get_node(uid)
+            if not node:
+                continue
+            life = node.get("lifecycle_status", {})
+            cb_info = copy.deepcopy(life.get("agent_status_callback", {}) or {})
+            parent = tp.find_parent_of(uid)
+            parent_id = parent.get("universal_id") if parent else None
+            tp._remove_node_and_children(uid)
+            notices.append((uid, parent_id, cb_info))
+        if not self.save_agent_tree_master():
+            raise RuntimeError("Could not durably save delete completion")
         tp.reparse()
+        self.commit_reap_mutation()
+        for uid, parent_id, cb_info in notices:
+            if parent_id:
+                self.defer_reap_side_effect(lambda parent_id=parent_id: self.delegate_tree_to_agent(parent_id, self.tree_path_dict))
+            if cb_info:
+                payload = {"universal_id": uid, "stage": "delete_complete",
+                           "result": {"success": True, "error": None}, "callback_data": cb_info,
+                           "token": cb_info.get("token"), "session_id": cb_info.get("session_id")}
+                self.defer_reap_side_effect(lambda cb_info=cb_info, payload=payload: self.crypto_reply(
+                    response_handler=cb_info.get("response_handler", "delete_agent.result"), payload=payload,
+                    session_id=cb_info.get("session_id"), token=cb_info.get("token"),
+                    rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc")))
         if trans_id:
-            self._delegate_transaction_parent(tx_nodes, trans_id)
+            self.defer_reap_side_effect(lambda: self._delegate_transaction_parent(tx_nodes, trans_id))
 
+    @reap_mutation
     def _restart_complete_callback(self, tx_nodes, trans_id=None):
-        """Unlock, finalize, delegate, and report restart completion to Phoenix."""
+        """Unlock and acknowledge only after durable lifecycle commit."""
         tp = self.get_agent_tree_master()
-
+        notices = []
         for uid, _ in tx_nodes:
-            try:
-                node = tp.get_node(uid)
-                if not node:
-                    continue
-
-                life = node.get("lifecycle_status", {})
-                cb_info = life.get("agent_status_callback", {}) or {}
-
-                # Unlock node and stamp lifecycle
-                life.pop("locked", None)
-                life["op_stage"] = "_complete_callback"
-                life["last_checked"] = time.time()
-
-                # Re-delegate parent
-                parent_node = tp.find_parent_of(uid)
-                if parent_node:
-                    parent_id = parent_node.get("universal_id")
-                    self.delegate_tree_to_agent(parent_id, self.tree_path_dict)
-                    self.log(f"[RESTART][FINALIZE] delegated parent {parent_id}")
-
-                # --- Build secure confirmation back to Phoenix ---
-                if cb_info:
-
-                    confirm_payload = {
-                        "universal_id": uid,
-                        "stage": "restart_complete",
-                        "result": {"success": True, "error": None},
-                        "callback_data": cb_info,
-                        "token": cb_info.get("token"),
-                        "session_id": cb_info.get("session_id"),
-                    }
-
-                    self.crypto_reply(
-                        response_handler=cb_info.get("response_handler", "restart_dialog.result"),
-                        payload=confirm_payload,
-                        session_id=cb_info.get("session_id"),
-                        token=cb_info.get("token"),
-                        rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc"),
-                    )
-
-                else:
-                    self.log("[RESTART][CALLBACK] No callback data found for node.")
-
-            except Exception as e:
-                self.log(error=e, block="_restart_complete_callback")
-
-        self.save_agent_tree_master()
+            node = tp.get_node(uid)
+            if not node:
+                continue
+            life = node.get("lifecycle_status", {})
+            cb_info = copy.deepcopy(life.get("agent_status_callback", {}) or {})
+            life.pop("locked", None)
+            life["op_stage"] = "_complete_callback"
+            life["last_checked"] = time.time()
+            parent = tp.find_parent_of(uid)
+            notices.append((uid, parent.get("universal_id") if parent else None, cb_info))
+        if not self.save_agent_tree_master():
+            raise RuntimeError("Could not durably save restart completion")
+        self.commit_reap_mutation()
+        for uid, parent_id, cb_info in notices:
+            if parent_id:
+                self.defer_reap_side_effect(lambda parent_id=parent_id: self.delegate_tree_to_agent(parent_id, self.tree_path_dict))
+            if cb_info:
+                payload = {"universal_id": uid, "stage": "restart_complete",
+                           "result": {"success": True, "error": None}, "callback_data": cb_info,
+                           "token": cb_info.get("token"), "session_id": cb_info.get("session_id")}
+                self.defer_reap_side_effect(lambda cb_info=cb_info, payload=payload: self.crypto_reply(
+                    response_handler=cb_info.get("response_handler", "restart_dialog.result"), payload=payload,
+                    session_id=cb_info.get("session_id"), token=cb_info.get("token"),
+                    rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc")))
         if trans_id:
-            self._delegate_transaction_parent(tx_nodes, trans_id)
+            self.defer_reap_side_effect(lambda: self._delegate_transaction_parent(tx_nodes, trans_id))
 
-    def _cmd_hotswap_agent(self, content, packet, identity:IdentityObject=None):
-        """
-        Hot-swap an agent's Python source or in-memory tree entry.
-        content:
-          {
-            "target_universal_id": "gatekeeper",
-            "source_payload": {"payload": "<b64>", "sha256": "..."},
-            "meta": {...},
-            "update_tree": bool,     # -> update only agent_tree_master
-            "update_source": bool,   # -> persist to disk under <site_root>/agents/
-            "restart": bool
-          }
-        """
+    @staticmethod
+    def _hotswap_metadata(content):
+        if not isinstance(content, dict):
+            raise ValueError("Invalid hotswap request.")
+        session, token, uid = content.get("session_id"), content.get("token"), content.get("target_universal_id")
+        size, count, sha = content.get("size"), content.get("count"), content.get("sha256")
+        if (not isinstance(session, str) or not session or len(session) > 128
+                or not isinstance(token, str) or len(token) != 32
+                or any(c not in "0123456789abcdef" for c in token)
+                or not isinstance(uid, str) or not uid or len(uid) > 128
+                or type(size) is not int or not 0 < size <= 524288 or type(count) is not int
+                or count != (size + 8191) // 8192 or not isinstance(sha, str) or len(sha) != 64
+                or any(c not in "0123456789abcdef" for c in sha)):
+            raise ValueError("Invalid hotswap transfer identity or metadata.")
+        return session, token, uid, size, count, sha
+
+    def _cmd_hotswap_challenge(self, content, packet, identity:IdentityObject=None):
+        """Issue a process-local challenge bound to one authenticated request."""
         try:
-            target_universal_id = content.get("target_universal_id")
+            session, token, uid, size, count, sha = self._hotswap_metadata(content)
+            key = (session, token)
+            metadata = (uid, size, count, sha)
+            with self._hotswap_lock:
+                entry = self._hotswap_challenges.get(key)
+                if entry is None:
+                    if len(self._hotswap_challenges) >= 4096:
+                        raise ValueError("Hotswap challenge capacity reached; restart Matrix before more hotswaps.")
+                    entry = {"challenge": secrets.token_hex(32), "metadata": metadata, "closed": False}
+                    self._hotswap_challenges[key] = entry
+                elif entry["metadata"] != metadata:
+                    raise ValueError("Conflicting hotswap challenge request.")
+                if entry["closed"]:
+                    return
+                challenge = entry["challenge"]
+            self.crypto_reply(response_handler="hotswap_agent.challenge", session_id=session, token=token,
+                              rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc"),
+                              payload={"session_id": session, "token": token, "target_universal_id": uid,
+                                       "size": size, "count": count, "sha256": sha, "challenge": challenge})
+        except Exception as exc:
+            self.log("[HOTSWAP] Challenge request rejected.", error=exc, level="ERROR")
+            if isinstance(content, dict) and isinstance(content.get("session_id"), str) and isinstance(content.get("token"), str):
+                message = str(exc) if isinstance(exc, ValueError) else "Hotswap challenge failed."
+                self._send_hotswap_result(content.get("target_universal_id"), "error", message,
+                                          content["session_id"], content["token"])
+
+    def _check_hotswap_challenge_locked(self, content, *, allow_closed=False):
+        session, token, uid, size, count, sha = self._hotswap_metadata(content)
+        entry = self._hotswap_challenges.get((session, token))
+        challenge = content.get("challenge")
+        if (entry is None or entry["metadata"] != (uid, size, count, sha)
+                or not isinstance(challenge, str) or not secrets.compare_digest(entry["challenge"], challenge)
+                or (entry["closed"] and not allow_closed)):
+            raise HotswapChallengeError("Hotswap challenge is missing, stale, or already used.")
+        return entry
+
+    def _cmd_hotswap_transfer(self, content, packet, identity:IdentityObject=None):
+        """Assemble independently authenticated chunks without relaxing packet limits."""
+        session = content.get("session_id") if isinstance(content, dict) else None
+        token = content.get("token") if isinstance(content, dict) else None
+        uid = content.get("target_universal_id") if isinstance(content, dict) else None
+        key = (session, token)
+        complete = None
+        error = None
+        valid_key = False
+        challenge_valid = False
+        acknowledge = False
+        try:
+            if (not isinstance(session, str) or not session or len(session) > 128
+                    or not isinstance(token, str) or len(token) != 32
+                    or any(c not in "0123456789abcdef" for c in token)
+                    or not isinstance(uid, str) or not uid or len(uid) > 128):
+                raise ValueError("Invalid hotswap transfer identity.")
+            valid_key = True
+            size, count, sha, kind = content.get("size"), content.get("count"), content.get("sha256"), content.get("kind")
+            if (type(size) is not int or not 0 < size <= 524288 or type(count) is not int
+                    or count != (size + 8191) // 8192 or not isinstance(sha, str) or len(sha) != 64
+                    or any(c not in "0123456789abcdef" for c in sha) or kind not in ("chunk", "commit")):
+                raise ValueError("Invalid hotswap transfer metadata.")
+            with self._hotswap_lock:
+                self._check_hotswap_challenge_locked(content, allow_closed=True)
+                challenge_valid = True
+            data = None
+            if kind == "chunk":
+                index, encoded = content.get("index"), content.get("data")
+                if type(index) is not int or not 0 <= index < count or not isinstance(encoded, str) or len(encoded) > 10924:
+                    raise ValueError("Invalid hotswap source chunk.")
+                data = base64.b64decode(encoded, validate=True)
+                expected = min(8192, size - index * 8192)
+                if len(data) != expected:
+                    raise ValueError("Invalid hotswap source chunk length.")
+            with self._hotswap_lock:
+                now = time.monotonic()
+                challenge_entry = self._check_hotswap_challenge_locked(content, allow_closed=True)
+                challenge_valid = True
+                if challenge_entry["closed"] and key not in self._hotswap_closed:
+                    return
+                if key in self._hotswap_closed:
+                    closed = self._hotswap_closed[key]
+                    if (kind == "commit" and closed.get("metadata") == (uid, size, count, sha)):
+                        acknowledge = True
+                    else:
+                        return
+                if acknowledge:
+                    transfer = None
+                else:
+                    transfer = self._hotswap_transfers.get(key)
+                if not acknowledge and transfer is None:
+                    if len(self._hotswap_transfers) >= 8:
+                        raise ValueError("Too many hotswap transfers are already in progress.")
+                    transfer = {"uid": uid, "size": size, "count": count, "sha": sha,
+                                "parts": {}, "committed": False, "created": now}
+                    # Email ingress/egress may each poll on multi-second
+                    # intervals; keep the bounded transfer alive long enough
+                    # for sequential acknowledged chunks on slower links.
+                    timer = threading.Timer(3600, self._expire_hotswap_transfer, args=(key, now))
+                    timer.daemon = True
+                    transfer["timer"] = timer
+                    self._hotswap_transfers[key] = transfer
+                    timer.start()
+                elif not acknowledge and (transfer["uid"], transfer["size"], transfer["count"], transfer["sha"]) != (uid, size, count, sha):
+                    raise ValueError("Conflicting hotswap transfer metadata.")
+                if not acknowledge and kind == "commit":
+                    transfer["committed"] = True
+                elif not acknowledge:
+                    old = transfer["parts"].get(index)
+                    if old is not None and old != data:
+                        raise ValueError("Conflicting hotswap source chunk.")
+                    transfer["parts"][index] = data
+                if not acknowledge and transfer["committed"] and len(transfer["parts"]) == count:
+                    assembled = b"".join(transfer["parts"][i] for i in range(count))
+                    if len(assembled) != size or not secrets.compare_digest(hashlib.sha256(assembled).hexdigest(), sha):
+                        raise ValueError("Assembled hotswap source hash did not match.")
+                    transfer["timer"].cancel()
+                    del self._hotswap_transfers[key]
+                    challenge_entry["closed"] = True
+                    self._remember_hotswap_transfer_closed(key, metadata=(uid, size, count, sha))
+                    complete = {"target_universal_id": uid, "session_id": session, "token": token,
+                                "challenge": content.get("challenge"),
+                                "source_payload": {"payload": base64.b64encode(assembled).decode("ascii"), "sha256": sha}}
+                acknowledge = True
+        except Exception as exc:
+            error = str(exc) if isinstance(exc, ValueError) else "Hotswap transfer failed."
+            with self._hotswap_lock:
+                if valid_key and challenge_valid:
+                    old = self._hotswap_transfers.pop(key, None)
+                    if old:
+                        old["timer"].cancel()
+                    if challenge_valid:
+                        self._hotswap_challenges[key]["closed"] = True
+                        self._remember_hotswap_transfer_closed(key)
+        if error and valid_key and challenge_valid:
+            self._send_hotswap_result(uid, "error", error, session, token, challenge=content.get("challenge"))
+        elif acknowledge:
+            self._send_hotswap_ack(session, token, uid, sha, count, kind, content.get("index"), content.get("challenge"))
+            if complete is not None:
+                self._cmd_hotswap_agent(complete, packet, identity, _assembled=True)
+
+    def _expire_hotswap_transfer(self, key, created):
+        with self._hotswap_lock:
+            transfer = self._hotswap_transfers.get(key)
+            if transfer is None or transfer["created"] != created:
+                return
+            del self._hotswap_transfers[key]
+            self._hotswap_challenges[key]["closed"] = True
+            self._remember_hotswap_transfer_closed(key)
+        self._send_hotswap_result(transfer["uid"], "error", "Hotswap transfer was incomplete or expired.", key[0], key[1],
+                                  challenge=self._hotswap_challenges[key]["challenge"])
+
+    def _remember_hotswap_transfer_closed(self, key, metadata=None):
+        # The bounded process-lifetime challenge table caps this table too.
+        self._hotswap_closed[key] = {"metadata": metadata}
+
+    def _send_hotswap_ack(self, session, token, uid, sha, count, kind, index, challenge):
+        self.crypto_reply(response_handler="hotswap_agent.ack", session_id=session, token=token,
+                          rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc"),
+                          payload={"target_universal_id": uid, "sha256": sha, "count": count,
+                                   "kind": kind, "index": index, "challenge": challenge,
+                                   "session_id": session, "token": token})
+
+    @reap_mutation
+    def _cmd_hotswap_agent(self, content, packet, identity:IdentityObject=None, *, _assembled=False):
+        """Stage a signed, boot-scoped source override and restart one agent."""
+        target_universal_id = content.get("target_universal_id") if isinstance(content, dict) else None
+        session_id = content.get("session_id") if isinstance(content, dict) else None
+        token = content.get("token") if isinstance(content, dict) else None
+        pending = False
+        try:
             src = content.get("source_payload", {})
-            meta = content.get("meta", {})
-            update_tree = content.get("update_tree", False)
-            update_source = content.get("update_source", True)
-            restart_flag = content.get("restart", True)
-
-            if not target_universal_id or not src.get("payload"):
-                self.log("[HOTSWAP] ❌ Missing target_universal_id or payload.")
-                return
-
+            if (not isinstance(target_universal_id, str) or not target_universal_id
+                    or not isinstance(session_id, str) or not session_id or len(session_id) > 128
+                    or not isinstance(token, str) or not token or len(token) > 128
+                    or not isinstance(src, dict) or not isinstance(src.get("payload"), str)
+                    or not isinstance(src.get("sha256"), str)):
+                raise ValueError("Missing hotswap target, source, or reply identity.")
+            if len(src["payload"]) > (699052 if _assembled else 90000):
+                raise ValueError("Source exceeds the hotswap packet limit.")
+            try:
+                code = base64.b64decode(src["payload"], validate=True)
+                if not code or len(code) > (524288 if _assembled else 65536):
+                    raise ValueError("Source exceeds the hotswap packet limit.")
+                compile(code.decode("utf-8"), "<hotswap>", "exec")
+            except (ValueError, UnicodeError, SyntaxError) as exc:
+                raise ValueError("Source is not valid UTF-8 Python.") from exc
+            sha = hashlib.sha256(code).hexdigest()
+            if not secrets.compare_digest(sha, src["sha256"].lower()):
+                raise ValueError("Source hash did not match.")
+            if not _assembled:
+                _, _, _, claimed_size, _, claimed_sha = self._hotswap_metadata(content)
+                if len(code) != claimed_size or sha != claimed_sha:
+                    raise ValueError("Source does not match the challenged request.")
+                with self._hotswap_lock:
+                    challenge = self._check_hotswap_challenge_locked(content)
+                    # Consume before any state mutation; retries cannot stage
+                    # the same signed request twice in this process.
+                    challenge["closed"] = True
             if target_universal_id == self.command_line_args.get('universal_id'):
-                self.log("[HOTSWAP][ERROR] Can't hotswap Matrix.")
-                return
-
+                raise ValueError("Matrix cannot be hotswapped.")
             reaper_id = self.meta.get("swarm_state", {}).get("reserved_agent_ids", {}).get("reaper", False)
             if reaper_id and target_universal_id == reaper_id:
-                self.log("[HOTSWAP][ERROR] Don't fear The Reaper.")
-                return
-
+                raise ValueError("The Reaper cannot be hotswapped.")
             tp = self.get_agent_tree_master()
-            node = tp.get_node(target_universal_id)
+            node = tp.get_node(target_universal_id) if tp else None
             if not node:
-                self.log(f"[HOTSWAP] ❌ Unknown agent '{target_universal_id}'")
-                return
-
-            code = base64.b64decode(src["payload"]).decode("utf-8")
-            sha = src.get("sha256") or hashlib.sha256(code.encode()).hexdigest()
-
-            if update_source:
-                # Persist to disk under <site_root>/agents/<lang_core>/<agent>/<agent>.py
-                lang = node.get("lang", "python")
-                agent_name = node.get("name")
-                if not agent_name:
-                    self.log(f"[HOTSWAP] ❌ agent name is missing for '{target_universal_id}'")
-                    return
-                base = self.path_resolution["agent_path"]
-                target_dir = os.path.join(base, agent_name)
-                os.makedirs(target_dir, exist_ok=True)
-                target_file = os.path.join(target_dir, f"{agent_name}.py")
-
-                with open(target_file, "w", encoding="utf-8") as f:
-                    f.write(f"#!/usr/bin/env python3\n# HOTSWAP {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                    f.write(code)
-                self.log(f"[HOTSWAP] 💾 {target_universal_id} code written to {target_file}")
-
-            if update_tree:
-                # Update agent_tree_master’s copy of the code
-                node.setdefault("hotswap", {})["source_b64"] = src["payload"]
-                node["hotswap"]["sha256"] = sha
-                node["hotswap"]["timestamp"] = time.time()
-                node["hotswap"]["meta"] = meta
-                self.save_agent_tree_master()
-                self.log(f"[HOTSWAP] {target_universal_id} code stored in agent_tree_master.")
-
-            if restart_flag:
-                self.log(f"[HOTSWAP] 🔁 Restarting {target_universal_id} …")
-                self._cmd_restart_subtree({"target_universal_id": target_universal_id}, packet, identity)
-
-            # send confirmation back
-            confirm = {
-                "handler": "hotswap_agent.confirm",
-                "content": {
-                    "target_universal_id": target_universal_id,
-                    "sha256": sha,
-                    "message": f"Hotswap successful for {target_universal_id}"
-                }
-            }
-            #self._on_reaper_send_callback(target_universal_id, "hotswap_complete", confirm, {})
-
+                raise ValueError("The target agent no longer exists.")
+            if node.get("lang", "python") != "python":
+                raise ValueError("Hotswap currently supports Python agents only.")
+            if node.get("lifecycle_status", {}).get("locked"):
+                raise ValueError("The target is busy with another operation.")
+            for uid in tp.get_subtree_nodes(target_universal_id):
+                child = tp.get_node(uid)
+                if child and child.get("lifecycle_status", {}).get("locked"):
+                    raise ValueError("The target or its subtree is busy with another operation.")
+            with self._hotswap_lock:
+                if target_universal_id in self._hotswap_pending:
+                    raise ValueError("A hotswap for this agent is already pending.")
+                self._hotswap_pending.add(target_universal_id)
+                pending = True
+            started_at = time.time()
+            previous = self._hotswap_processes(target_universal_id)
+            old_values = {key: (key in node, copy.deepcopy(node.get(key))) for key in ("src_embed", "hash_bang")}
+            def restore_source():
+                for key, (existed, value) in old_values.items():
+                    if existed:
+                        node[key] = value
+                    else:
+                        node.pop(key, None)
+                try:
+                    return bool(self.save_agent_tree_master())
+                except Exception:
+                    return False
+            node["src_embed"] = src["payload"]
+            node["hash_bang"] = sha
+            try:
+                saved = bool(self.save_agent_tree_master())
+            except Exception:
+                saved = False
+            if not saved:
+                restored = restore_source()
+                detail = "The previous source was restored." if restored else "The saved state may have changed; inspect it before restarting."
+                raise ValueError(f"The source save could not be confirmed. {detail} No restart was requested.")
+            if not self._cmd_restart_subtree({"target_universal_id": target_universal_id}, packet, identity):
+                restored = restore_source()
+                detail = "The previous source was restored." if restored else "The saved state may have changed; inspect it before retrying."
+                raise ValueError(f"The restart could not be queued. {detail}")
+            worker = threading.Thread(target=self._wait_hotswap_start,
+                                      args=(target_universal_id, sha, session_id, token, started_at, previous),
+                                      kwargs={"challenge": content.get("challenge")},
+                                      daemon=True)
+            self.commit_reap_mutation()
+            def abort_hotswap():
+                with self._hotswap_lock:
+                    self._hotswap_pending.discard(target_universal_id)
+                self._send_hotswap_result(target_universal_id, "error",
+                                          "Hotswap authorization could not be committed; inspect the saved state before retrying.",
+                                          session_id, token, challenge=content.get("challenge"))
+            self.defer_reap_abort(abort_hotswap)
+            def start_hotswap_waiter():
+                try:
+                    worker.start()
+                except Exception as exc:
+                    with self._hotswap_lock:
+                        self._hotswap_pending.discard(target_universal_id)
+                    self.log("[HOTSWAP] Could not start readiness monitor.", error=exc, level="ERROR")
+                    self._send_hotswap_result(
+                        target_universal_id, "error",
+                        "The hotswap was committed, but its new agent could not be verified. Check the agent logs.",
+                        session_id, token, challenge=content.get("challenge"))
+            self.defer_reap_side_effect(start_hotswap_waiter)
+            pending = False  # worker owns the pending marker
         except Exception as e:
-            self.log(error=e, level="ERROR", block="_cmd_hotswap_agent")
+            self.log("[HOTSWAP] Request failed.", error=e, level="ERROR")
+            if pending:
+                with self._hotswap_lock:
+                    self._hotswap_pending.discard(target_universal_id)
+            if not isinstance(e, HotswapChallengeError) and isinstance(session_id, str) and isinstance(token, str):
+                message = str(e) if isinstance(e, ValueError) else "Hotswap failed; see Matrix logs."
+                self._send_hotswap_result(target_universal_id, "error", message, session_id, token,
+                                          challenge=content.get("challenge") if isinstance(content, dict) else None)
 
+    def _send_hotswap_result(self, uid, status, message, session_id, token, sha=None, challenge=None):
+        # Legacy Phoenix treats all `.confirm` messages as success.
+        handler = "hotswap_agent.confirm" if status == "success" else "hotswap_agent.error"
+        self.crypto_reply(response_handler=handler, session_id=session_id, token=token,
+                          rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc"),
+                          payload={"target_universal_id": uid, "status": status, "message": message,
+                                   "sha256": sha, "session_id": session_id, "token": token,
+                                   "challenge": challenge})
+
+    def _hotswap_processes(self, uid):
+        return {(entry["pid"], entry["process_started_at"]) for entry in
+                get_all_swarm_agent_info(self.command_line_args["universe"], base=self.path_resolution["install_path"])
+                if entry.get("universal_id") == uid and entry.get("pid") and entry.get("process_started_at")}
+
+    def _hotswap_running(self, uid, sha, requested_at, previous):
+        """Verify a new process and its own source-bound readiness marker."""
+        processes = self._hotswap_processes(uid)
+        if previous & processes:
+            return False
+        # psutil reports Linux process start times at kernel clock-tick
+        # granularity; a newly launched process can round slightly earlier
+        # than the request even though its heartbeat must still be newer.
+        candidates = {(pid, started) for pid, started in processes - previous if started >= requested_at - 1}
+        if not candidates:
+            return False
+        base = self.path_resolution["install_path"]
+        universe = self.command_line_args["universe"]
+        boot = self.path_resolution["reboot_uuid"]
+        with runtime_directory(base, universe, boot, "pod") as pod_root:
+            for name in os.listdir(pod_root):
+                try:
+                    with child_directory(pod_root, name) as pod:
+                        fd = open_beneath(pod, "boot.json", os.O_RDONLY | os.O_NONBLOCK)
+                        try:
+                            info = os.fstat(fd)
+                            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                                continue
+                            with os.fdopen(fd, "rb") as stream:
+                                fd = -1
+                                raw = stream.read(1024 * 1024 + 1)
+                            if len(raw) > 1024 * 1024:
+                                continue
+                            record = json.loads(raw)
+                            if not isinstance(record, dict):
+                                continue
+                        finally:
+                            if fd >= 0:
+                                os.close(fd)
+                        process = (record.get("pid"), record.get("process_started_at"))
+                        if record.get("universal_id") != uid or record.get("source_sha256") != sha or process not in candidates:
+                            continue
+                        ready_fd = open_beneath(pod, "ready.json", os.O_RDONLY | os.O_NONBLOCK)
+                        try:
+                            info = os.fstat(ready_fd)
+                            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                                    or info.st_mtime < requested_at or info.st_mtime > time.time()):
+                                continue
+                            with os.fdopen(ready_fd, "rb") as stream:
+                                ready_fd = -1
+                                raw = stream.read(4097)
+                            if len(raw) > 4096:
+                                continue
+                            ready = json.loads(raw)
+                        finally:
+                            if ready_fd >= 0:
+                                os.close(ready_fd)
+                        if ready == {"universal_id": uid, "pid": process[0],
+                                     "process_started_at": process[1], "source_sha256": sha}:
+                            # Recheck liveness after reading the marker.
+                            return process in self._hotswap_processes(uid)
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    continue
+        return False
+
+    def _wait_hotswap_start(self, uid, sha, session_id, token, requested_at, previous, timeout=240, challenge=None):
+        try:
+            deadline = time.monotonic() + timeout
+            while getattr(self, "running", False) and time.monotonic() < deadline:
+                try:
+                    if self._hotswap_running(uid, sha, requested_at, previous):
+                        self._send_hotswap_result(uid, "success", "New source is running. This override lasts only for the current universe boot.", session_id, token, sha, challenge)
+                        return
+                except Exception as exc:
+                    self.log("[HOTSWAP] Unable to verify restart yet.", error=exc)
+                time.sleep(1)
+            self._send_hotswap_result(uid, "error", "The source was saved for this boot, but the new agent did not report a verified start. Check the agent logs.", session_id, token, sha, challenge)
+        finally:
+            with self._hotswap_lock:
+                self._hotswap_pending.discard(uid)
+
+    @reap_mutation
     def _handle_replace_agent(self, content):
         old_id = content.get("target_universal_id")
         new_node = content.get("new_agent")
@@ -718,6 +996,9 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
         # Update existing node in-place instead of removing
         node = tp.get_node(old_id)
+        if node.get("lifecycle_status", {}).get("locked"):
+            self.log(f"[REPLACE] Agent '{old_id}' is locked by a lifecycle operation.")
+            return False
         ALLOWED_FIELDS = {"name", "app", "config", "filesystem", "directives"}
 
         updated = False
@@ -734,18 +1015,20 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             #self.log(f"[REPLACE] 💾 Tree backed up to: {backup_path}")
 
             # Save patched tree
-            self.save_agent_tree_master()
+            if not self.save_agent_tree_master():
+                raise RuntimeError("Replacement state could not be saved")
+            self.commit_reap_mutation()
 
             self.log(f"[REPLACE] 💾 Tree saved with updated agent '{old_id}'")
 
             # 🔁 Re-delegate the target agent
-            self.delegate_tree_to_agent(old_id, self.tree_path_dict)
+            self.defer_reap_side_effect(lambda: self.delegate_tree_to_agent(old_id, self.tree_path_dict))
             self.log(f"[REPLACE] 🔁 Delegated new agent_tree to {old_id}")
 
             # 🔁 Re-delegate the parent who spawns this agent
             parent_id = tp.find_parent_of(old_id)
             if parent_id["universal_id"]:
-                self.delegate_tree_to_agent(parent_id["universal_id"], self.tree_path_dict)
+                self.defer_reap_side_effect(lambda: self.delegate_tree_to_agent(parent_id["universal_id"], self.tree_path_dict))
                 self.log(f"[REPLACE] 🔁 Updated parent {parent_id['universal_id']} with patched child '{old_id}'")
             else:
                 self.log(f"[REPLACE] ⚠️ No parent found for '{old_id}', possible orphaned spawn chain.")
@@ -771,6 +1054,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         self.log(f"[REPLACE-VALIDATE] ❌ No source found at {entry_file}. Replace aborted.")
         return False
 
+    @reap_mutation
     def _cmd_update_agent(self, content, packet, identity:IdentityObject=None):
         """Handles the command to update a live agent's configuration.
 
@@ -805,11 +1089,14 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 self.log(f"[UPDATE_AGENT][ERROR] Agent '{uid}' not found.")
                 return
 
-            if "config" not in node or not isinstance(node["config"], dict):
-                node["config"] = {}
+            if node.get("lifecycle_status", {}).get("locked"):
+                self.log(f"[UPDATE_AGENT][ERROR] Agent '{uid}' is locked by a lifecycle operation.")
+                return
 
             updated = False
             if not push_live_config:
+                if "config" not in node or not isinstance(node["config"], dict):
+                    node["config"] = {}
                 for key, val in updates.items():
                     node["config"][key] = val
                     updated = True
@@ -821,18 +1108,23 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                     pk1 = self.get_delivery_packet("standard.general.json.packet")
                     pk1.set_data(updates)
 
-                    self.pass_packet(pk1, uid, "config")
+                    if not self.save_agent_tree_master():
+                        raise RuntimeError("Configuration state could not be saved")
+                    self.commit_reap_mutation()
+                    self.defer_reap_side_effect(lambda: self.pass_packet(pk1, uid, "config"))
 
                 except Exception as e:
                     self.log(error=e, block="main_try")
 
             if updated:
 
-                self.save_agent_tree_master()
+                if not self.save_agent_tree_master():
+                    raise RuntimeError("Updated configuration could not be saved")
+                self.commit_reap_mutation()
 
                 parent = tp.find_parent_of(uid)
                 if parent and parent.get("universal_id"):
-                    self.delegate_tree_to_agent(parent["universal_id"], self.tree_path_dict)
+                    self.defer_reap_side_effect(lambda: self.delegate_tree_to_agent(parent["universal_id"], self.tree_path_dict))
 
                 self.log(f"[UPDATE_AGENT] 🔁 Agent '{uid}' successfully updated and delegated.")
             elif not push_live_config:
@@ -842,66 +1134,20 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             self.log(error=e, block="main_try")
 
     def _cmd_replace_source(self, content, packet, identity=None):
-        """
-        Minimal source replacement for an agent. Called by GUI ReplaceAgentDialog.
-        Uses crypto_reply for secure callback to Phoenix.
-        """
-        try:
-            target_agent_name = content.get("target_agent_name")
-            payload = content.get("payload", {})
-
-            session_id = payload.get("session_id")
-            token = payload.get("token")
-            encoded = payload.get("source")
-            sha256_expected = payload.get("sha256")
-            return_handler = payload.get("return_handler")
-
-            if not target_agent_name or not encoded or not sha256_expected:
-                self.log("[REPLACE] ❌ Missing fields in replace request")
-                return
-
-            # Decode + verify
-            decoded = base64.b64decode(encoded).decode()
-            sha256_actual = hashlib.sha256(decoded.encode()).hexdigest()
-            if sha256_actual != sha256_expected:
-                self.log(
-                    f"[REPLACE] ❌ SHA mismatch for {target_agent_name} — expected {sha256_expected}, got {sha256_actual}")
-                return
-
-            # Write new source
-            agent_dir = os.path.join(self.path_resolution["agent_path"], target_agent_name)
-            os.makedirs(agent_dir, exist_ok=True)
-            agent_path = os.path.join(agent_dir, f"{target_agent_name}.py")
-            with open(agent_path, "w", encoding="utf-8") as f:
-                f.write(decoded)
-            self.log(f"[REPLACE] ✅ Source written to {agent_path}")
-
-            # --- Build callback payload ---
-            confirm_payload = {
-                "target_agent_name": target_agent_name,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "session_id": session_id,
-                "token": token,
-                "status": "success",
-                "sha256": sha256_actual,
-                "agent_dir": agent_dir,
-                "agent_name": f"{target_agent_name}.py",
-                "message": f"Source replaced at {agent_path}"
-            }
-
-            # --- Secure reply to Phoenix ---
-            self.crypto_reply(
-                response_handler=return_handler,
-                payload=confirm_payload,
-                session_id=session_id,
-                token=token,
-                rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc")
-            )
-
-            self.log(f"[REPLACE] 📡 Callback dispatched for {target_agent_name} (session={session_id})")
-
-        except Exception as e:
-            self.log("[REPLACE] ❌ Failed in cmd_replace_source", error=e, level="ERROR")
+        """Shared source updates must use Phoenix's administrative SSH path."""
+        payload = content.get("payload", {}) if isinstance(content, dict) else {}
+        if not isinstance(payload, dict):
+            payload = {}
+        message = "Server-wide source replacement requires the recorded administrative SSH profile in Phoenix."
+        self.log(f"[REPLACE] {message}")
+        session_id, token = payload.get("session_id"), payload.get("token")
+        if session_id and token:
+            # Older Phoenix versions treat every `.confirm` as success,
+            # regardless of status. Never send a failure on that channel.
+            self.crypto_reply(response_handler="replace_agent_source.error", session_id=session_id, token=token,
+                              rpc_role=self.tree_node.get("rpc_router_role", "hive.rpc"),
+                              payload={"target_agent_name": content.get("target_agent_name"), "status": "error",
+                                       "message": message, "session_id": session_id, "token": token})
 
     def _cmd_inject_agents(self, content, packet, identity:IdentityObject = None):
         """Handler for dynamically injecting a new agent or subtree into the swarm.
@@ -986,6 +1232,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         except Exception as e:
             self.log(error=e, block="main_try")
 
+    @reap_mutation
     def _handle_inject_agents(self, content, packet):
 
         parent = content.get("target_universal_id")
@@ -1040,6 +1287,19 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
             ret["status"] = "error"
             ret["message"] = f"Parent {parent} is deleted. Injection blocked."
             ret["error_code"] = 8
+            return ret
+
+        # Lifecycle state belongs exclusively to Matrix, never to an injected payload.
+        def contains_lifecycle_state(tree):
+            if not isinstance(tree, dict):
+                return False
+            if "lifecycle_status" in tree:
+                return True
+            return any(contains_lifecycle_state(child) for child in tree.get("children", []))
+
+        if subtree and contains_lifecycle_state(subtree):
+            ret.update(status="error", error_code=7,
+                       message="Injected agents cannot specify lifecycle status.")
             return ret
 
         # Scan subtree for any node with matrix identity
@@ -1112,6 +1372,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                                     "config": config,
                                     "push_live_config": True
                                 }, packet)
+                                self.commit_reap_mutation()
                             ret["status"] = "success"
                             ret["message"] = f"Agent already existed — config partially updated for {universal_id}"
                             return ret
@@ -1166,7 +1427,9 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
             if success:
 
-                self.save_agent_tree_master()
+                if not self.save_agent_tree_master():
+                    raise RuntimeError("Injected agent state could not be saved")
+                self.commit_reap_mutation()
 
                 # --- REMEDY ---
                 # After saving, the tree has new nodes with vaults.
@@ -1176,10 +1439,10 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 # --- END REMEDY ---
 
                 #delegate to parent agent
-                self.delegate_tree_to_agent(parent, self.tree_path_dict)
+                self.defer_reap_side_effect(lambda: self.delegate_tree_to_agent(parent, self.tree_path_dict))
 
                 for agent_id in tp.get_first_level_child_ids(parent):
-                    self.delegate_tree_to_agent(agent_id, self.tree_path_dict)
+                    self.defer_reap_side_effect(lambda agent_id=agent_id: self.delegate_tree_to_agent(agent_id, self.tree_path_dict))
 
                 ret["status"] = "success"
                 ret.setdefault("message", "Agent(s) injected successfully.")
@@ -1194,6 +1457,7 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
         return ret
 
+    @reap_mutation
     def _cmd_restart_subtree(self, content, packet, identity: IdentityObject = None):
         """
         Gracefully restarts an agent or its entire subtree.
@@ -1201,6 +1465,9 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         By default, restarts only the target agent.
         If content["restart_full_subtree"] = True, restarts the entire subtree.
         """
+        snapshots = {}
+        tp = None
+        marked = False
         try:
             target_universal_id = content.get("target_universal_id")
             confirm_response = bool(content.get("confirm_response", 0))
@@ -1211,18 +1478,18 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
 
             if not target_universal_id:
                 self.log("[RESTART][ERROR] Missing universal_id.")
-                return
+                return False
 
             tp = self.get_agent_tree_master()
             if not tp:
                 self.log("[RESTART][ERROR] Failed to load tree.")
-                return
+                return False
 
             for cid in tp.get_subtree_nodes(target_universal_id):  # skip the target itself
                 child = tp.get_node(cid)
                 if child and child.get("lifecycle_status", {}).get("locked"):
                     self.log(f"[RESTART][ABORT] {target_universal_id} has locked descendant '{cid}'. Aborting restart.")
-                    return
+                    return False
 
             # Scope
             recurse_children = False
@@ -1263,13 +1530,35 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 }
             }
 
+            for uid in ids:
+                node = tp.get_node(uid)
+                if node:
+                    snapshots[uid] = ("lifecycle_status" in node, copy.deepcopy(node.get("lifecycle_status")))
+            marked = True
             tp.mark_target_list(target_universal_id, mark, recurse_children=recurse_children)
-            self.save_agent_tree_master()
+            if not self.save_agent_tree_master():
+                raise RuntimeError("Restart state could not be saved")
+
+            self.commit_reap_mutation()
 
             self.log(f"[RESTART] ✅ Marked {len(ids)} agent(s) for restart (probe stage queued): {ids}")
+            return True
 
         except Exception as e:
             self.log(error=e, block="main_try", level="ERROR")
+            if marked and tp:
+                for uid, (existed, value) in snapshots.items():
+                    node = tp.get_node(uid)
+                    if node is not None:
+                        if existed:
+                            node["lifecycle_status"] = value
+                        else:
+                            node.pop("lifecycle_status", None)
+                try:
+                    self.save_agent_tree_master()
+                except Exception:
+                    pass
+            return False
 
     #checks everyone's tree against Matrix's agent_tree_master, using a hash of the agents tree
     #this also ensures services are updated for agents added and removed
@@ -1489,7 +1778,11 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 vault=self.tree_node['vault'],
                 universal_id=self.get_matrix_universal_id(),
             )
-            self.save_directive(self.tree_path_dict, data, football=football)
+            note_reap_save_attempt(self)
+            if not self.save_directive(self.tree_path_dict, data, football=football):
+                self.log("[TREE][ERROR] Agent tree could not be saved.")
+                return False
+            note_reap_save_success(self)
 
             if self.debug.is_enabled():
                 if self.encryption_enabled:
@@ -1497,50 +1790,55 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                 else:
                     self.log("[TREE] agent_tree_master saved.")
 
-            #deliver agent listing to gui
-            alert_role = self.tree_node.get("rpc_router_role", "hive.rpc")
-            if push_tree_home and alert_role:
-                remote_pub_pem = self._signing_keys.get("remote_pubkey")
-
-                # Isolated outbound copy. Scrubbing cannot mutate the master.
-                outbound_tree = copy.deepcopy(self._agent_tree_master.root)
-                self._strip_sensitive_fields(outbound_tree)
-
-                for ep in self.get_nodes_by_role(alert_role):
-                    relay_uid = ep.get_universal_id()
-                    alive_sessions = self.has_fresh_broadcast_flag(relay_uid)
-
-                    for sess in alive_sessions:
-                        data = {
-                            "handler": "agent_tree_master.update",
-                            "session_id": sess,
-                            "runtime_id": Path(self.path_resolution["comm_path"]).parent.name,
-                            "content": outbound_tree,
-                        }
-
-                        sealed = encrypt_with_ephemeral_aes(data, remote_pub_pem)
-
-                        content = {
-                            "serial": self._serial_num,
-                            "content": sealed,
-                            "timestamp": int(time.time()),
-                        }
-                        content["sig"] = sign_data(content, self._signing_key_obj)
-
-                        pk1 = self.get_delivery_packet("standard.command.packet")
-                        pk1.set_data({
-                            "handler": ep.get_handler(),
-                            "origin": self.command_line_args["universal_id"],
-                            "session_id": sess,
-                            "content": content,
-                        })
-                        self.pass_packet(pk1, relay_uid)
+            if push_tree_home:
+                self.defer_reap_side_effect(self._broadcast_agent_tree)
 
             return True
 
         except Exception as e:
             self.log("[TREE][ERROR] Failed to save agent_tree_master.", error=e)
             return False
+
+    def _broadcast_agent_tree(self):
+        """Publish an outbound tree only after the lifecycle commit."""
+        alert_role = self.tree_node.get("rpc_router_role", "hive.rpc")
+        if alert_role:
+            remote_pub_pem = self._signing_keys.get("remote_pubkey")
+
+            # Isolated outbound copy. Scrubbing cannot mutate the master.
+            outbound_tree = copy.deepcopy(self._agent_tree_master.root)
+            self._strip_sensitive_fields(outbound_tree)
+
+            for ep in self.get_nodes_by_role(alert_role):
+                relay_uid = ep.get_universal_id()
+                alive_sessions = self.has_fresh_broadcast_flag(relay_uid)
+
+                for sess in alive_sessions:
+                    data = {
+                        "handler": "agent_tree_master.update",
+                        "session_id": sess,
+                        "runtime_id": Path(self.path_resolution["comm_path"]).parent.name,
+                        "content": outbound_tree,
+                    }
+
+                    sealed = encrypt_with_ephemeral_aes(data, remote_pub_pem)
+
+                    content = {
+                        "serial": self._serial_num,
+                        "content": sealed,
+                        "timestamp": int(time.time()),
+                    }
+                    content["sig"] = sign_data(content, self._signing_key_obj)
+
+                    pk1 = self.get_delivery_packet("standard.command.packet")
+                    pk1.set_data({
+                        "handler": ep.get_handler(),
+                        "origin": self.command_line_args["universal_id"],
+                        "session_id": sess,
+                        "content": content,
+                    })
+                    self.pass_packet(pk1, relay_uid)
+
 
     def _strip_sensitive_fields(self, value):
         """Remove locally declared sensitive siblings from an outbound copy."""
@@ -1568,6 +1866,12 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
         return value
 
     def _perform_agent_consciousness_scan(self, time_delta_timeout=0, flip_threshold=3, flip_window=60):
+        if time.time() - self._last_consciousness_scan <= 20:
+            return
+        return self._perform_guarded_consciousness_scan(time_delta_timeout, flip_threshold, flip_window)
+
+    @reap_mutation
+    def _perform_guarded_consciousness_scan(self, time_delta_timeout=0, flip_threshold=3, flip_window=60):
         """
         Evaluates each agent's heartbeat (from poke files) and spawn history (flip-tripping).
         Stores results inside node["agent_status"]. Broadcasts updated tree to relays if live.
@@ -1681,11 +1985,11 @@ class Agent(BootAgent, ReapStatusHandlerMixin):
                     if self.has_fresh_broadcast_flag(ep.get_universal_id())
                 ]
 
-                if live_relays:
-                    self.save_agent_tree_master(push_tree_home=True)
-                else:
-                    if self.debug.is_enabled():
-                        self.log("[TREE] Skipped broadcast (no fresh relays)")
+                if not self.save_agent_tree_master(push_tree_home=bool(live_relays)):
+                    raise RuntimeError("Agent status could not be saved")
+                self.commit_reap_mutation()
+                if not live_relays and self.debug.is_enabled():
+                    self.log("[TREE] Skipped broadcast (no fresh relays)")
 
         except Exception as e:
             self.log(error=e, block="main_try")

@@ -117,7 +117,7 @@ class SSHKeyPassphraseTests(unittest.TestCase):
             "One-Time Server Password",
             "install_authorized_key",
             'updated["password"] = "None"',
-            "registry_store.commit()",
+            'registry_store.set_namespace("ssh", namespace)',
         ):
             self.assertIn(marker, installer)
         self.assertIn(

@@ -10,6 +10,17 @@ from matrix_gui.core.event_bus import EventBus
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
 from matrix_gui.modules.vault.vault_stores.phoenix_vault_core import PhoenixVaultCore as StoreCore
 
+
+class VaultSavedReopenRequired(RuntimeError):
+    """Disk commit succeeded but the live authority could not publish it."""
+
+
+class _TransformReservation:
+    """Distinguish a single detached transform from a queued workspace write."""
+    def __init__(self, section, callback):
+        self.section = section
+        self.callback = callback
+
 class VaultCoreSingleton:
     _instance = None
     _lock = threading.RLock()
@@ -50,6 +61,7 @@ class VaultCoreSingleton:
         self._workspace_queue = deque()
         self._workspace_active = None
         self._workspace_writer = None
+        self._transform_writer = None
 
         # Construction errors must propagate; never publish half an authority.
         self.store_core = StoreCore(self)
@@ -92,10 +104,15 @@ class VaultCoreSingleton:
 
     def get_section(self, key):
         """
-        Always return the live vault section.
-        Any edits to the returned dict are edits to the vault itself:** the REAL DEAL**.
+        Return the live vault section when idle, or a detached snapshot while
+        an asynchronous write is active or queued.
         """
-        return self.data.setdefault(key, {})
+        with self._lock:
+            # During a detached write, callers may inspect a snapshot but
+            # cannot mutate the live section through a newly acquired handle.
+            if self._workspace_active is not None or self._workspace_queue:
+                return deepcopy(self.data.get(key, {}))
+            return self.data.setdefault(key, {})
 
     def snapshot(self, key):
         """Return a deep copy of the vault section for read-only use."""
@@ -125,6 +142,71 @@ class VaultCoreSingleton:
             if candidate == self.data.get(key, {}):
                 return True
             return self.patch(key, candidate)
+
+    def transform_section_async(self, key, transform, callback):
+        """Persist a detached section transform without blocking the Qt thread.
+
+        ``transform(detached_section)`` returns ``(replacement, result)`` on
+        the writer thread. ``callback(result, error)`` runs on the Qt thread.
+        A submitted write is never cancelled or considered timed out.
+        """
+        from PyQt6.QtCore import QCoreApplication, QThread
+        app = QCoreApplication.instance()
+        if app is None or QThread.currentThread() != app.thread():
+            raise RuntimeError("Vault transforms must be requested on the GUI thread")
+        if not isinstance(key, str) or not key or not callable(transform) or not callable(callback):
+            raise ValueError("Invalid vault transform request")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The vault is closed")
+            if self.access_control.ai_mode and key != "access_control":
+                raise PermissionError("Vault mutation is blocked in AI Mode")
+            if self._workspace_active is not None or self._workspace_queue:
+                raise RuntimeError("The vault is busy saving another change")
+            snapshot = deepcopy(self.data)
+            if self._transform_writer is None:
+                from .vault_transform_writer import VaultTransformWriter
+                self._transform_writer = VaultTransformWriter(self._transform_written)
+            self._workspace_active = _TransformReservation(key, callback)
+            try:
+                self._transform_writer.submit(snapshot, self.password, str(self.vault_path), key, transform)
+            except Exception:
+                self._workspace_active = None
+                raise
+
+    def _transform_written(self, result, candidate, error):
+        with self._lock:
+            reservation = self._workspace_active
+            if not isinstance(reservation, _TransformReservation):
+                raise RuntimeError("Unexpected vault transform completion")
+            self._workspace_active = None
+            if error is None:
+                candidate, last_good = candidate
+                self.last_good = last_good
+                try:
+                    live = self.data.get(reservation.section)
+                    if isinstance(live, dict) and isinstance(candidate, dict):
+                        live.clear()
+                        live.update(candidate)
+                    else:
+                        self.data[reservation.section] = candidate
+                    if not self._closed:
+                        EventBus.emit("vault.core.update")
+                except Exception:
+                    # Disk was already replaced. Never report a failed save or
+                    # allow another write from potentially inconsistent RAM.
+                    self._closed = True
+                    try:
+                        self._access_control.close()
+                    except Exception:
+                        pass
+                    error = VaultSavedReopenRequired("The vault was saved, but its in-memory state could not be updated. Reopen the vault before saving again.")
+        try:
+            reservation.callback(result if error is None else None, error)
+        except Exception as exc:
+            logging.getLogger(__name__).error("Vault transform completion callback failed (%s)", type(exc).__name__)
+        finally:
+            self._start_workspace_write()
 
     def patch(self, key, value):
         """Single choke point — all mutations flow through here."""
@@ -193,6 +275,14 @@ class VaultCoreSingleton:
         self._start_workspace_write()
 
     def _start_workspace_write(self):
+        if self._closed:
+            while self._workspace_queue:
+                _, callback = self._workspace_queue.popleft()
+                try:
+                    callback(False)
+                except Exception as exc:
+                    logging.getLogger(__name__).error("Closed vault workspace callback failed (%s)", type(exc).__name__)
+            return
         if self._workspace_active is not None or not self._workspace_queue:
             return
         entry, callback = self._workspace_queue.popleft()

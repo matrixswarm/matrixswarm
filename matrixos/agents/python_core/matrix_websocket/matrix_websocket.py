@@ -7,6 +7,9 @@ sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 import ssl
 import time
+import hmac
+import re
+import secrets
 from core.python_core.utils.packet_freshness import packet_is_fresh
 import copy
 import threading
@@ -25,6 +28,11 @@ from core.python_core.utils import crypto_utils
 from core.python_core.class_lib.packet_delivery.utility.security.packet_size import guard_packet_size
 from core.python_core.class_lib.packet_delivery.utility.security.packet_security import wrap_packet_securely
 
+HELLO_PROTOCOL = "matrixswarm.hello.v2"
+HELLO_TIMEOUT = 5.0
+HELLO_MAX_BYTES = 16384
+SESSION_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+
 class Agent(BootAgent):
     """
     The Matrix WebSocket Agent, a specialized BootAgent for secure,
@@ -42,7 +50,6 @@ class Agent(BootAgent):
         AGENT_VERSION (str): The version of the agent.
         allowlist_ips (list): A list of IP addresses permitted to connect.
         port (int): The network port the WebSocket server listens on.
-        _websocket_clients (set): A set of active WebSocket connections.
         _sessions (dict): A dictionary mapping session IDs to connection data.
         loop (asyncio.AbstractEventLoop): The asyncio event loop running the server.
         websocket_ready (bool): A flag indicating if the WebSocket server is bound.
@@ -148,7 +155,6 @@ class Agent(BootAgent):
             self._cfg_lock = threading.Lock()
 
             self.port = config.get("port", 8765)
-            self._websocket_clients = set()
             self._sessions = {}
             self.loop = None
             self.websocket_ready = False
@@ -402,6 +408,7 @@ class Agent(BootAgent):
                         host="0.0.0.0",
                         port=self.port,
                         ssl=ssl_context,
+                        subprotocols=[HELLO_PROTOCOL],
                         ping_interval=None,
                         ping_timeout=None,
                     )
@@ -539,13 +546,14 @@ class Agent(BootAgent):
             await websocket.close(reason="Internal WebSocket exception")
 
         finally:
-            self._websocket_clients.discard(websocket)
             sid = None
             if hasattr(websocket, "session_id"):
                 sid = websocket.session_id
-                self._sessions.pop(sid, None)
-                self.update_broadcast_flag(session_id=sid, remove=True)
-            self.log(f"[WS][CLEANUP] Client '{sid}' removed. Active={len(self._websocket_clients)}")
+                current = self._sessions.get(sid)
+                if current is not None and current.get("ws") is websocket:
+                    self._sessions.pop(sid, None)
+                    self.update_broadcast_flag(session_id=sid, remove=True)
+            self.log(f"[WS][CLEANUP] Client '{sid}' removed. Active={len(self._sessions)}")
 
     async def _handle_handshake(self, websocket):
         """
@@ -567,12 +575,43 @@ class Agent(BootAgent):
         :rtype: str or None
         """
         try:
-            handshake = await asyncio.wait_for(websocket.recv(), timeout=5)
+            if websocket.subprotocol != HELLO_PROTOCOL:
+                await websocket.close(reason="v2 required")
+                return None
+
+            # The connection-local random challenge remains unique across
+            # process, host, cache and universe restarts.  The client signs it
+            # only after authenticating this server's SPKI pin.
+            agent_id = self.command_line_args["universal_id"]
+            challenge = secrets.token_hex(32)
+            deadline = time.monotonic() + HELLO_TIMEOUT
+            await asyncio.wait_for(websocket.send(json.dumps({
+                "type": "hello_challenge", "protocol": HELLO_PROTOCOL,
+                "agent": agent_id, "challenge": challenge,
+            })), timeout=HELLO_TIMEOUT)
+            handshake = await asyncio.wait_for(
+                websocket.recv(), timeout=max(0, deadline - time.monotonic())
+            )
+            if not isinstance(handshake, str) or len(handshake.encode("utf-8")) > HELLO_MAX_BYTES:
+                await websocket.close(reason="invalid hello")
+                return None
             hello = json.loads(handshake)
 
-            if hello.get("type") != "hello" or "session_id" not in hello:
+            if (not isinstance(hello, dict) or hello.get("type") != "hello"
+                    or hello.get("protocol") != HELLO_PROTOCOL
+                    or hello.get("agent") != agent_id
+                    or not isinstance(hello.get("session_id"), str)
+                    or SESSION_ID_PATTERN.fullmatch(hello["session_id"]) is None):
                 self.log("[WS][SESSION][WARN] Invalid hello packet, closing.")
                 await websocket.close(reason="invalid hello")
+                return None
+
+            supplied = hello.get("challenge")
+            if (not isinstance(supplied, str) or len(supplied) != 64
+                    or any(c not in "0123456789abcdef" for c in supplied)
+                    or not hmac.compare_digest(challenge, supplied)
+                    or time.monotonic() > deadline):
+                await websocket.close(reason="invalid challenge")
                 return None
 
             if "sig" not in hello:
@@ -580,11 +619,22 @@ class Agent(BootAgent):
                 return None
 
             try:
-                crypto_utils.verify_signed_payload(hello, hello["sig"], self._peer_pub_key)
+                if not crypto_utils.verify_signed_payload(hello, hello["sig"], self._peer_pub_key):
+                    raise ValueError("Signature verification failed")
                 self.log(f"[WS][HELLO] Signature Accepted")
             except Exception as e:
                 self.log(f"[WS][HELLO][DENY] Bad signature: {e}")
                 await websocket.close(reason="bad hello signature")
+                return None
+
+            # The random connection-local challenge provides replay defense;
+            # wall-clock freshness remains an independent existing policy.
+            if not packet_is_fresh(hello.get("ts"), window=120):
+                self.log("[WS][HELLO][DENY] Stale hello")
+                await websocket.close(reason="stale hello")
+                return None
+            if time.monotonic() > deadline:
+                await websocket.close(reason="hello expired")
                 return None
 
             sid = hello["session_id"]
@@ -597,6 +647,13 @@ class Agent(BootAgent):
 
             self.update_broadcast_flag(session_id=sid)
 
+            # A client must not report a connection until the server has
+            # authenticated the hello and bound its session.  TLS protects
+            # this receipt; its challenge prevents accepting a stale one.
+            await asyncio.wait_for(websocket.send(json.dumps({
+                "type": "hello_accepted", "protocol": HELLO_PROTOCOL,
+                "agent": agent_id, "session_id": sid, "challenge": challenge,
+            })), timeout=max(0, deadline - time.monotonic()))
             self.log(f"[WS][SESSION] Bound to session_id={sid}")
             return sid
 

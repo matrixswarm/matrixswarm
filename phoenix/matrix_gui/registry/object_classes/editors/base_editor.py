@@ -135,7 +135,7 @@ class BaseEditor(QWidget, metaclass=EditorABCMeta):
         """
         return False
 
-    def exec(self):
+    def exec(self, on_save=None):
         """Commander Edition — wrap the editor in a modal dialog with OK/Cancel."""
         dialog = QDialog()
         dialog.setWindowTitle(self.__class__.__name__)
@@ -160,6 +160,14 @@ class BaseEditor(QWidget, metaclass=EditorABCMeta):
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Invalid Entry", msg)
                 return
+            if on_save is not None:
+                try:
+                    if not on_save():
+                        return
+                except Exception:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "Save Failed", "The change was not saved. Fix the vault problem and retry, or cancel to discard this edit.")
+                    return
             dialog.accept()
 
         buttons.accepted.connect(on_ok)

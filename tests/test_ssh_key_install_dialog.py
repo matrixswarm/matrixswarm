@@ -51,7 +51,7 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
         self.namespace = {self.serial: deepcopy(self.profile)}
         self.store = mock.Mock()
         self.store.get_namespace.return_value = self.namespace
-        self.store.commit.return_value = True
+        self.store.set_namespace.return_value = True
         vault = mock.Mock()
         vault.get_store.return_value = self.store
 
@@ -113,7 +113,7 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
         self.install_client.close.assert_called_once()
         self.verify_client.close.assert_called_once()
         self.export.assert_called_once()
-        self.store.commit.assert_called_once()
+        self.store.set_namespace.assert_called_once()
         self.assertEqual("stale-password", self.namespace[self.serial]["password"])
         self.messages.critical.assert_not_called()
 
@@ -157,7 +157,7 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
         self.assertEqual("private_key", self.connect.call_args.args[0]["auth_type"])
         self.install_key.assert_not_called()
         self.export.assert_not_called()
-        self.store.commit.assert_not_called()
+        self.store.set_namespace.assert_not_called()
         self.assertEqual(self.profile, self.namespace[self.serial])
         error = self.messages.critical.call_args.args[2]
         self.assertIn("private_key", error)
@@ -173,7 +173,7 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
         self.install_key.assert_called_once()
         self.install_client.close.assert_called_once()
         self.export.assert_not_called()
-        self.store.commit.assert_not_called()
+        self.store.set_namespace.assert_not_called()
         self.assertEqual(self.profile, self.namespace[self.serial])
         self.assertIn("Verifying private-key login", self.messages.critical.call_args.args[2])
 
@@ -214,7 +214,7 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
             self.new_key.get_base64(), self.install_key.call_args.args[1].split()[1]
         )
         self.assertEqual(self.new_private.strip(), self.export.call_args.args[1])
-        self.store.commit.assert_not_called()
+        self.store.set_namespace.assert_not_called()
         self.assertEqual(self.profile, self.namespace[self.serial])
         self.assertEqual(self.new_private.strip(), self.dialog.installed_key_profile["private_key"])
         message = self.messages.information.call_args.args[2]
@@ -236,7 +236,7 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
                 self.connect.assert_not_called()
                 self.install_key.assert_not_called()
                 self.export.assert_not_called()
-                self.store.commit.assert_not_called()
+                self.store.set_namespace.assert_not_called()
 
     def test_login_profile_changes_are_revalidated_at_install_time(self):
         self._use_editor_key()
@@ -271,7 +271,7 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
         self.assertEqual(self.new_private, self.connect.call_args.args[0]["private_key"])
         self.assertIsNone(self.dialog.installed_key_profile)
         self.assertEqual(self.profile, self.namespace[self.serial])
-        self.store.commit.assert_not_called()
+        self.store.set_namespace.assert_not_called()
         self.export.assert_not_called()
 
     def test_editor_export_uses_editor_key_not_login_key(self):
@@ -279,7 +279,7 @@ class SSHKeyInstallDialogTests(unittest.TestCase):
         self.dialog._save_only()
         self.assertEqual(self.new_private.strip(), self.export.call_args.args[1])
         self.connect.assert_not_called()
-        self.store.commit.assert_not_called()
+        self.store.set_namespace.assert_not_called()
 
     def test_real_fingerprint_check_blocks_changed_live_host(self):
         with mock.patch.object(self.module, "probe_ssh_host_fingerprint",

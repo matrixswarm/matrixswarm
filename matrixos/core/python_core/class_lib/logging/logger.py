@@ -3,11 +3,13 @@ import os
 import json
 import base64
 import re
+import stat
 from datetime import datetime
 from pathlib import Path
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 from core.python_core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG
+from core.python_core.safe_paths import append_file_at, open_beneath, _component
 
 class Logger:
     """Structured agent logger with fail-closed secret redaction."""
@@ -89,12 +91,19 @@ class Logger:
             text,
         )
 
-    def __init__(self, log_path, logs="logs", file_name="agent.log", max_bytes=5_000_000, backup_count=5):
+    def __init__(self, log_path, logs="logs", file_name="agent.log", max_bytes=5_000_000, backup_count=5, *, directory_fd=None):
         if ENCRYPTION_CONFIG.is_enabled():
             swarm_key = ENCRYPTION_CONFIG.get_swarm_key()
             self._decoded_swarm_key = base64.b64decode(swarm_key) if swarm_key else b''
         self.default_log_file = os.path.join(log_path, logs, file_name)
-        os.makedirs(os.path.dirname(self.default_log_file), exist_ok=True)
+        self._anchored = directory_fd is not None
+        self._log_directory_fd = None
+        if directory_fd is None:
+            os.makedirs(os.path.dirname(self.default_log_file), exist_ok=True)
+        else:
+            _component(file_name)
+            self._log_directory_fd = os.dup(directory_fd)
+        self._log_file_name = file_name
 
         self.max_bytes = max_bytes
         self.backup_count = backup_count
@@ -169,15 +178,22 @@ class Logger:
                 else self.default_log_file
             )
 
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
-            # Check for rotation
-            if os.path.exists(path) and os.path.getsize(path) >= self.max_bytes:
-                self._rotate_logs(path)
-
             try:
-                with open(path, "a", encoding="utf-8") as f:
-                    f.write(output.rstrip() + "\n")  # force newline, strip extras
+                if self._anchored and (override_path or override_filename):
+                    raise ValueError("An anchored logger cannot override its directory")
+                if self._anchored and not (override_path and override_filename):
+                    if self._log_directory_fd is None:
+                        raise RuntimeError("Anchored logger is closed")
+                    if self._anchored_size(self._log_file_name) >= self.max_bytes:
+                        self._rotate_logs_anchored()
+                    append_file_at(self._log_directory_fd, self._log_file_name,
+                                   (output.rstrip() + "\n").encode("utf-8"))
+                else:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    if os.path.exists(path) and os.path.getsize(path) >= self.max_bytes:
+                        self._rotate_logs(path)
+                    with open(path, "a", encoding="utf-8") as f:
+                        f.write(output.rstrip() + "\n")
             except Exception as e:
                 print(f"[LOGGER][ERROR] Failed to write to {path}: {e}", flush=True)
 
@@ -203,6 +219,42 @@ class Logger:
             if src.exists():
                 src.rename(dst)
         base.rename(base.with_name(f"{base.stem}.1.log"))
+
+    def _anchored_size(self, name):
+        try:
+            fd = open_beneath(self._log_directory_fd, name, os.O_PATH | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            return 0
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError("Unsafe log file")
+            return info.st_size
+        finally:
+            os.close(fd)
+
+    def _rotate_logs_anchored(self):
+        base = Path(self._log_file_name)
+        for index in reversed(range(1, self.backup_count)):
+            source = f"{base.stem}.{index}.log"
+            target = f"{base.stem}.{index + 1}.log"
+            self._anchored_size(target)
+            if self._anchored_size(source):
+                os.rename(source, target, src_dir_fd=self._log_directory_fd, dst_dir_fd=self._log_directory_fd)
+        target = f"{base.stem}.1.log"
+        self._anchored_size(target)
+        os.rename(self._log_file_name, target, src_dir_fd=self._log_directory_fd, dst_dir_fd=self._log_directory_fd)
+
+    def close(self):
+        if self._log_directory_fd is not None:
+            os.close(self._log_directory_fd)
+            self._log_directory_fd = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except (AttributeError, OSError):
+            pass
 
     def _encrypt_line(self, line: str) -> str:
         nonce = get_random_bytes(12)
