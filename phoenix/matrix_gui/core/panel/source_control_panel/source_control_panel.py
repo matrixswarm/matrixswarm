@@ -1,13 +1,11 @@
 # Authored by Daniel F MacDonald and ChatGPT aka The Generals
 # SourceControlPanel: replace an agent’s source and optionally restart it.
 
-import os, base64, hashlib, time, json, shutil
 from PyQt6.QtWidgets import (
     QGroupBox, QVBoxLayout, QLabel, QComboBox,
-    QPushButton, QFileDialog, QCheckBox, QMessageBox
+    QPushButton, QMessageBox
 )
 from matrix_gui.core.emit_gui_exception_log import emit_gui_exception_log
-from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 
 class SourceControlPanel(QGroupBox):
     def __init__(self, session_id, bus, agent_tree=None, parent=None):
@@ -30,11 +28,6 @@ class SourceControlPanel(QGroupBox):
             self.replace_btn = QPushButton("♻️ Replace Source")
             self.replace_btn.clicked.connect(self._replace_source)
             layout.addWidget(self.replace_btn)
-
-            # Restart toggle
-            self.restart_checkbox = QCheckBox("Restart agent after replace")
-            self.restart_checkbox.setChecked(True)
-            layout.addWidget(self.restart_checkbox)
 
             self.setStyleSheet("""
                 QGroupBox {
@@ -85,50 +78,8 @@ class SourceControlPanel(QGroupBox):
             emit_gui_exception_log("SourceControlPanel._update_agent_list", e)
 
     def _replace_source(self):
-        try:
-            uid = self.agent_selector.currentText().strip()
-            if not uid:
-                QMessageBox.warning(self, "Missing Agent", "Select an agent to replace.")
-                return
-
-            file_name, _ = QFileDialog.getOpenFileName(self, "Select Replacement Source", "", "Python Files (*.py)")
-            if not file_name:
-                return
-
-            with open(file_name, "rb") as f:
-                code = f.read()
-                encoded = base64.b64encode(code).decode("utf-8")
-                file_hash = hashlib.sha256(code).hexdigest()
-
-            deploy_data = {
-                "name": uid,
-                "hotswap": True,
-                "config": {},
-                "filesystem": {},
-                "source_payload": {
-                    "payload": encoded,
-                    "sha256": file_hash
-                }
-            }
-
-            payload = {
-                "handler": "cmd_replace_source",
-                "timestamp": time.time(),
-                "content": {
-                    "target_universal_id": uid,
-                    "new_agent": deploy_data,
-                    "restart": self.restart_checkbox.isChecked()
-                }
-            }
-
-            # Emit outbound message to Matrix
-            pk = Packet()
-            pk.set_data(payload)
-            self.bus.emit("outbound.message", session_id=self.session_id,
-                          channel="outgoing.command", packet=pk)
-
-            QMessageBox.information(self, "Success",
-                                    f"Source replaced for {uid}\nSHA256: {file_hash[:12]}...")
-
-        except Exception as e:
-            emit_gui_exception_log("SourceControlPanel._replace_source", e)
+        QMessageBox.information(
+            self, "Replace Source",
+            "Use Replace Source on the session toolbar to publish the server-wide source "
+            "with this deployment's recorded administrator SSH profile."
+        )

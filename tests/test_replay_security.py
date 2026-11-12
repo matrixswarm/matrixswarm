@@ -101,7 +101,7 @@ class AuthenticatedPathTests(unittest.TestCase):
             def load_verify_locations(self, **kwargs): pass
         events = []
         async def serve(*args, **kwargs):
-            events.append("bind")
+            events.append(("bind", kwargs.get("subprotocols")))
             async def wait_closed(): pass
             return SimpleNamespace(wait_closed=wait_closed)
         start = method("matrixos/agents/python_core/matrix_websocket/matrix_websocket.py", "start_socket_loop", {
@@ -109,11 +109,12 @@ class AuthenticatedPathTests(unittest.TestCase):
             "asyncio": SimpleNamespace(new_event_loop=Loop, set_event_loop=lambda *a: None),
             "ssl": SimpleNamespace(SSLContext=lambda *a: Context(), PROTOCOL_TLS_SERVER=1, CERT_REQUIRED=2),
             "load_cert_chain_from_memory": lambda *a: None,
-            "websockets": SimpleNamespace(serve=serve)})
+            "websockets": SimpleNamespace(serve=serve),
+            "HELLO_PROTOCOL": "matrixswarm.hello.v2"})
         agent = SimpleNamespace(log=lambda *a, **k: None, _cert_pem="synthetic", _key_pem="synthetic",
             _ca_pem="synthetic", port=0, websocket_handler=None, running=True)
         start(agent)
-        self.assertEqual(["bind"], events)
+        self.assertEqual([("bind", ["matrixswarm.hello.v2"])], events)
         self.assertTrue(agent.running)
 
     def test_both_unwrappers_accept_fresh_authenticated_reencoding(self):

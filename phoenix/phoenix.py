@@ -21,6 +21,9 @@ Attributes:
 """
 import sys, time, builtins, inspect, json, pprint
 from pathlib import Path
+from matrix_gui.core.utils.qt_platform import configure_qt_platform
+
+configure_qt_platform()
 
 from matrix_gui.core.startup_policy import (
     close_on_minimize_or_sleep_enabled,
@@ -304,9 +307,11 @@ class PhoenixCockpit(QMainWindow):
         try:
             from matrix_gui.modules.access_control.gates import require_normal_mode
             require_normal_mode()  # Gate before any process or credential handoff.
-            from multiprocessing import Process, Pipe
-            parent_conn, child_conn = Pipe()
-            p = Process(
+            # Forking a running Qt application inherits its event loop and
+            # display connection. A fresh interpreter owns its own QApplication.
+            context = multiprocessing.get_context("spawn")
+            parent_conn, child_conn = context.Pipe()
+            p = context.Process(
                 target=run_session,
                 args=(session_id, child_conn, debug_output_enabled()),
             )
@@ -372,6 +377,14 @@ class PhoenixCockpit(QMainWindow):
 
         except Exception as e:
             emit_gui_exception_log("PhoenixCockpit.launch_session", e)
+            hint = ""
+            if sys.platform.startswith("linux") and QApplication.platformName().startswith("wayland"):
+                hint = " Enable XWayland and restart Phoenix, then try again."
+            QMessageBox.critical(
+                self, "Session Could Not Open",
+                "Phoenix could not open the session window." + hint
+                + " See the diagnostic log for details.",
+            )
         finally:
             if child_conn is not None:
                 child_conn.close()
@@ -539,6 +552,8 @@ class PhoenixCockpit(QMainWindow):
                         "target": target,
                         "data": data,
                     }
+                    if msg.get("request_id"):
+                        resp["request_id"] = msg["request_id"]
                     conn.send(resp)
                     print(f"[VAULT] 📤 Sent vault.response target='{target}' for {dep_id}")
                 except Exception as e:
@@ -574,6 +589,53 @@ class PhoenixCockpit(QMainWindow):
                     response["code"] = "CONTROL_UNAVAILABLE"
                 conn.send(response)
 
+            elif mtype == "vault.embedded_source.update":
+                from matrix_gui.modules.vault.embedded_source_update import (
+                    EmbeddedSourceUpdateError, embedded_source_transform,
+                )
+                from matrix_gui.modules.vault.services.vault_core_singleton import VaultSavedReopenRequired
+                dep_id, request_id = msg.get("dep_id"), msg.get("request_id")
+                response = {"type": "vault.embedded_source.response", "dep_id": dep_id,
+                            "request_id": request_id, "ok": False, "code": "INVALID_REQUEST"}
+
+                def embedded_saved(result, error):
+                    if error is None:
+                        response.update(ok=True, sha256=result)
+                        response.pop("code", None)
+                    elif isinstance(error, EmbeddedSourceUpdateError):
+                        response["code"] = str(error)
+                    elif isinstance(error, VaultSavedReopenRequired):
+                        response["code"] = "SAVED_REOPEN_REQUIRED"
+                    else:
+                        response["code"] = "SAVE_FAILED"
+                    try:
+                        session = next((item for item in self.session_processes
+                                        if item.get("conn") == conn), None)
+                        if session and session.get("deployment_id") == dep_id:
+                            conn.send(response)
+                    except (OSError, EOFError):
+                        # A closed session cannot undo a completed vault save.
+                        pass
+
+                try:
+                    session = next((item for item in self.session_processes
+                                    if item.get("conn") == conn), None)
+                    if not session or session.get("deployment_id") != dep_id:
+                        raise EmbeddedSourceUpdateError("INVALID_REQUEST")
+                    source_hash = msg.get("sha256")
+                    transform = embedded_source_transform(
+                        dep_id, msg.get("expected_bundle_hash"), msg.get("agent_id"),
+                        msg.get("source"), source_hash)
+                    VaultCoreSingleton.get().transform_section_async(
+                        "deployments", lambda section: (transform(section), source_hash), embedded_saved)
+                except EmbeddedSourceUpdateError as error:
+                    response["code"] = str(error)
+                    conn.send(response)
+                except Exception as error:
+                    print(f"[VAULT][EMBEDDED] Update refused ({type(error).__name__}).")
+                    response["code"] = "UPDATE_UNAVAILABLE"
+                    conn.send(response)
+
             elif mtype == "vault.update.requested":
 
                 dep_id = msg.get("dep_id")
@@ -585,7 +647,14 @@ class PhoenixCockpit(QMainWindow):
 
                 vcs = VaultCoreSingleton.get()
                 dep_store = vcs.get_store("deployments")
-                success = dep_store.update_dep(dep_id, patch)
+                try:
+                    success = dep_store.update_dep(dep_id, patch)
+                except Exception as error:
+                    emit_gui_exception_log("PhoenixCockpit.vault_update", error)
+                    success = False
+                if msg.get("request_id"):
+                    conn.send({"type": "vault.update.response", "dep_id": dep_id,
+                               "request_id": msg["request_id"], "ok": bool(success)})
                 if success:
                     print(f"[VAULT] ✅ Deployment '{dep_id}' patched with keys: {list(patch.keys())}")
                 else:

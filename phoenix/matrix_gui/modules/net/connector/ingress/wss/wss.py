@@ -1,5 +1,5 @@
 # Authored by Daniel F MacDonald and ChatGPT-5 aka The Generals
-import os, ssl, json, time, socket, tempfile
+import os, ssl, json, time, socket, tempfile, uuid
 from websocket import create_connection
 from Crypto.PublicKey import RSA
 
@@ -11,6 +11,9 @@ from matrix_gui.core.utils import crypto_utils
 from matrix_gui.core.connector_bus import ConnectorBus
 from matrix_gui.core.class_lib.packet_delivery.packet.standard.command.packet import Packet
 from matrix_gui.modules.net.connector.interfaces.base_connector import BaseConnector
+
+HELLO_PROTOCOL = "matrixswarm.hello.v2"
+HELLO_MAX_BYTES = 16384
 
 class WSSTrustError(ConnectionError):
     """A terminal peer-identity failure, distinct from a temporary outage."""
@@ -76,6 +79,7 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
         ws = create_connection(
             url,
             timeout=timeout,
+            subprotocols=[HELLO_PROTOCOL],
             sslopt={
                 "certfile": cert_path,
                 "keyfile": key_path,
@@ -103,17 +107,51 @@ def _establish_connection(host, port, agent, deployment, session_id, timeout=5):
 
         print("[WSSConnector] ✅ Server SPKI pin verified")
 
+        if ws.getsubprotocol() != HELLO_PROTOCOL:
+            raise WSSTrustError("WSS server did not negotiate the required v2 handshake")
+        challenge_frame = ws.recv()
+        if not isinstance(challenge_frame, str) or len(challenge_frame.encode("utf-8")) > HELLO_MAX_BYTES:
+            raise WSSTrustError("Invalid WSS server challenge")
+        try:
+            challenge = json.loads(challenge_frame)
+        except (TypeError, ValueError) as exc:
+            raise WSSTrustError("Invalid WSS server challenge") from exc
+        token = challenge.get("challenge") if isinstance(challenge, dict) else None
+        if (not isinstance(challenge, dict) or challenge.get("type") != "hello_challenge"
+                or challenge.get("protocol") != HELLO_PROTOCOL
+                or challenge.get("agent") != agent.get("universal_id")
+                or not isinstance(token, str) or len(token) != 64
+                or any(c not in "0123456789abcdef" for c in token)):
+            raise WSSTrustError("Invalid WSS server challenge")
+
         # signed hello
         hello = {
             "type": "hello",
+            "protocol": HELLO_PROTOCOL,
+            "challenge": token,
             "session_id": session_id,
             "agent": agent.get("universal_id"),
             "ts": int(time.time()),
+            "nonce": uuid.uuid4().hex,
         }
         priv_pem = deployment.get("certs", {}).get(agent.get("universal_id"), {}).get("signing", {}).get("remote_privkey")
         priv_key = RSA.import_key(priv_pem.encode())
         hello["sig"] = crypto_utils.sign_data(hello, priv_key)
         ws.send(json.dumps(hello))
+
+        receipt_frame = ws.recv()
+        if not isinstance(receipt_frame, str) or len(receipt_frame.encode("utf-8")) > HELLO_MAX_BYTES:
+            raise WSSTrustError("Invalid WSS hello receipt")
+        try:
+            receipt = json.loads(receipt_frame)
+        except (TypeError, ValueError) as exc:
+            raise WSSTrustError("Invalid WSS hello receipt") from exc
+        if (not isinstance(receipt, dict) or receipt.get("type") != "hello_accepted"
+                or receipt.get("protocol") != HELLO_PROTOCOL
+                or receipt.get("agent") != agent.get("universal_id")
+                or receipt.get("session_id") != session_id
+                or receipt.get("challenge") != token):
+            raise WSSTrustError("Invalid WSS hello receipt")
         ws.settimeout(60)
         return ws
 

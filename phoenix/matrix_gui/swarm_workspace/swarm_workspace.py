@@ -31,6 +31,7 @@ class SwarmWorkspaceDialog(QDialog):
             self.workspace_data = deepcopy(workspace_data or {})
             self._vault_core = VaultCoreSingleton.get()
             self._saving = False
+            self._save_error = False
             self._pending_entry = None
             self._saved_entry = None
             self._close_requested = False
@@ -246,8 +247,9 @@ class SwarmWorkspaceDialog(QDialog):
         self._ready_timer.stop()
         self._slow_save_timer.stop()
         self._saving = False
+        self._save_error = True
         self._close_requested = False
-        self.save_status.setText("Save failed — changes retained in editor; retry before closing")
+        self.save_status.setText("Save failed — retry, or close to discard unsaved changes")
         self.retry_save_btn.show()
 
     def _save_is_slow(self):
@@ -271,6 +273,7 @@ class SwarmWorkspaceDialog(QDialog):
         if not success:
             self._save_failed()
             return
+        self._save_error = False
         self._saved_entry = deepcopy(entry)
         # Never replace the live editor with an older completed snapshot.
         try:
@@ -288,28 +291,45 @@ class SwarmWorkspaceDialog(QDialog):
             self.close()
 
     def on_deploy_clicked(self):
-        tree, root_uid = self.controller.export_agent_tree()
-
-        resolver = ConstraintResolver()  # or ConstraintResolver if renamed
-        session = DeploymentSession(self, tree, root_uid, resolver)
-
-        builder = session.run(self.workspace_id)
-        if not builder:
-            QMessageBox.critical(
-                self,
-                "Deployment Blocked",
-                "Deployment was stopped due to missing required constraints.\n\n"
-                "Check the Agent Inspector for highlighted errors."
+        if self._saving or self._save_error:
+            QMessageBox.warning(
+                self, "Workspace Not Saved",
+                "Wait for the workspace save to finish, or resolve the vault save failure "
+                "and retry saving before deploying.",
             )
             return
-
-        #dlg = DeploymentViewer(builder, self)
-        #dlg.exec()
+        try:
+            tree, root_uid = self.controller.export_agent_tree()
+            resolver = ConstraintResolver()
+            session = DeploymentSession(self, tree, root_uid, resolver)
+            session.run(self.workspace_id)
+        except Exception as e:
+            emit_gui_exception_log("SwarmWorkspaceDialog.on_deploy_clicked", e)
+            QMessageBox.critical(
+                self, "Deployment Failed",
+                f"Could not start deployment ({type(e).__name__}). "
+                "Review the diagnostic log before retrying.",
+            )
 
 
     def closeEvent(self, event):
         if self._allow_close:
             event.accept()
+            return
+        if self._save_error and not self._saving:
+            choice = QMessageBox.warning(
+                self,
+                "Discard Unsaved Changes?",
+                "The workspace could not be saved to the vault. Closing now will "
+                "discard changes made since the last successful save.\n\n"
+                "Choose Cancel to keep the workspace open and retry saving.",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if choice == QMessageBox.StandardButton.Discard:
+                event.accept()
+            else:
+                event.ignore()
             return
         try:
             if not self._saving and self._snapshot_entry() == self._saved_entry:

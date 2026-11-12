@@ -148,7 +148,7 @@ class Agent(BootAgent):
                             # If heartbeat is stale, initiate respawn
                             try:
 
-                                self.spawn_agent_direct(
+                                result = self.spawn_agent_direct(
                                     universe=self.command_line_args.get("universe"),
                                     spawner=keychain["security_box"]["spawner"],
                                     universal_id=universal_id,
@@ -158,7 +158,11 @@ class Agent(BootAgent):
                                 )
 
 
-                                self.log(f"{universal_id} respawned successfully.")
+                                if result:
+                                    self.log(f"{universal_id} respawned successfully.")
+                                else:
+                                    self.log(f"{universal_id} respawn was not started; will retry.",
+                                             block="keep_alive", level="WARNING")
 
                             except Exception as e:
                                 self.log(f"failed to spawn agent", error=e, block="keep_alive", level="error")

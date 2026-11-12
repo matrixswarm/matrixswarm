@@ -24,6 +24,14 @@ class ReplaceAgentDialog(QDialog):
         row1.addWidget(btn_pick)
         layout.addLayout(row1)
 
+        warning = QLabel(
+            "This updates the server's shared source using this deployment's "
+            "recorded administrator SSH profile; running agents are not restarted. "
+            "Existing pinned hashes and clown-car embedded source copies are unchanged."
+        )
+        warning.setWordWrap(True)
+        layout.addWidget(warning)
+
         # Buttons
         row2 = QHBoxLayout()
         btn_ok = QPushButton("Deploy")

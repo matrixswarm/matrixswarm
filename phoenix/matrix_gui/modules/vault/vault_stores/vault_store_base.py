@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from contextlib import nullcontext
 
 class VaultStore(ABC):
     """
@@ -28,23 +29,34 @@ class VaultStore(ABC):
     # -------------------------
     # SAFE WRITE
     # -------------------------
+    def _edit_lock(self):
+        lock = getattr(self.root, "_lock", None)
+        return lock if hasattr(lock, "__enter__") else nullcontext()
+
+    def _write_busy(self):
+        return (getattr(self.root, "_workspace_active", None) is not None
+                or bool(getattr(self.root, "_workspace_queue", ())))
+
     def set_value(self, key, value):
-        self._buffer[key] = deepcopy(value)
+        with self._edit_lock():
+            if self._write_busy():
+                raise RuntimeError("The vault is busy saving another change")
+            self._buffer[key] = deepcopy(value)
 
     def delete(self, key):
-        if key not in self._buffer:
-            return False
-
-        if not self.allow_delete(key):
-            print(f"[STORE][{self.section_key}] ❌ Delete forbidden: {key}")
-            return False
-
-        if not self.allow_delete_relations(key):
-            print(f"[STORE][{self.section_key}] ❌ Reverse-dependency prevents delete: {key}")
-            return False
-
-        del self._buffer[key]
-        return True
+        with self._edit_lock():
+            if self._write_busy():
+                raise RuntimeError("The vault is busy saving another change")
+            if key not in self._buffer:
+                return False
+            if not self.allow_delete(key):
+                print(f"[STORE][{self.section_key}] ❌ Delete forbidden: {key}")
+                return False
+            if not self.allow_delete_relations(key):
+                print(f"[STORE][{self.section_key}] ❌ Reverse-dependency prevents delete: {key}")
+                return False
+            del self._buffer[key]
+            return True
 
     def allow_delete_relations(self, key):
         """
@@ -73,6 +85,26 @@ class VaultStore(ABC):
     # -------------------------
     # COMMIT
     # -------------------------
+    def commit_candidate(self, candidate):
+        """Validate and commit a detached section, restoring it on failure."""
+        with self._edit_lock():
+            if self._write_busy():
+                return False
+            previous = deepcopy(self.get_data())
+            live = self.get_data()
+            live.clear()
+            live.update(deepcopy(candidate))
+            accepted = False
+            try:
+                accepted = self.commit()
+                return accepted
+            finally:
+                if not accepted:
+                    live = self.get_data()
+                    live.clear()
+                    live.update(previous)
+                self._buffer = self.get_data()
+
     def commit(self):
         data_ref = self.get_data()  # live reference
         if not self.cross_validate():

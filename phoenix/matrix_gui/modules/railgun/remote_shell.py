@@ -298,9 +298,9 @@ def describe_runtime_capabilities(capabilities):
     wordpress = data["wordpress"]
     if wordpress:
         grants.extend((
-            f"READ/WRITE {wordpress['plugin_dir']}/**",
-            f"READ/WRITE {wordpress['quarantine_dir']}/**",
-            f"READ/WRITE {wordpress['snapshot_root']}/**",
+            f"REQUIRES operator-provisioned READ/WRITE {wordpress['plugin_dir']}/**",
+            f"REQUIRES operator-provisioned READ/WRITE {wordpress['quarantine_dir']}/**",
+            f"REQUIRES operator-provisioned READ/WRITE {wordpress['snapshot_root']}/**",
         ))
     if data["mcp_worker"]:
         grants.append("SUDO fixed matrix-mcp-launch wrapper (isolated account)")
@@ -539,6 +539,35 @@ def _root_shell(script):
     )
 
 
+def _lifecycle_provision_lines():
+    """Provision a stable lock inode without replacing an existing fence."""
+    return [
+        'LIFECYCLE_GID=$(getent group "$SWARM_USER" | cut -d: -f3)',
+        '[ -n "$LIFECYCLE_GID" ] || { echo "[MATRIX][ERROR] Swarm group is missing; provision the account first." >&2; exit 78; }',
+        'for PARENT in /matrix/universes /matrix/universes/lifecycle; do',
+        '  [ ! -L "$PARENT" ] || { echo "[MATRIX][ERROR] Symlinked lifecycle boundary: $PARENT" >&2; exit 77; }',
+        '  if [ ! -e "$PARENT" ]; then install -d -o root -g root -m 0711 "$PARENT"; fi',
+        '  [ -d "$PARENT" ] && [ "$(stat -c "%u:%g:%a" "$PARENT")" = "0:0:711" ] || '
+        '{ echo "[MATRIX][ERROR] Unsafe lifecycle boundary: $PARENT" >&2; exit 77; }',
+        'done',
+        'LIFECYCLE_DIR="/matrix/universes/lifecycle/$UNIVERSE"',
+        '[ ! -L "$LIFECYCLE_DIR" ] || { echo "[MATRIX][ERROR] Symlinked lifecycle directory." >&2; exit 77; }',
+        'if [ ! -e "$LIFECYCLE_DIR" ]; then install -d -o root -g "$LIFECYCLE_GID" -m 0750 "$LIFECYCLE_DIR"; fi',
+        '[ -d "$LIFECYCLE_DIR" ] && [ "$(stat -c "%u:%g:%a" "$LIFECYCLE_DIR")" = "0:$LIFECYCLE_GID:750" ] || '
+        '{ echo "[MATRIX][ERROR] Unsafe lifecycle directory." >&2; exit 77; }',
+        'LIFECYCLE_LOCK="$LIFECYCLE_DIR/lock"',
+        '[ ! -L "$LIFECYCLE_LOCK" ] || { echo "[MATRIX][ERROR] Symlinked lifecycle lock." >&2; exit 77; }',
+        'if [ ! -e "$LIFECYCLE_LOCK" ]; then',
+        '  if (set -C; umask 077; printf \'%s\' \'{"version":1,"state":"STOPPED","generation":null,"boot_id":null}\' > "$LIFECYCLE_LOCK") 2>/dev/null; then',
+        '    chown root:"$LIFECYCLE_GID" "$LIFECYCLE_LOCK"; chmod 0660 "$LIFECYCLE_LOCK"',
+        '  fi',
+        'fi',
+        '[ -f "$LIFECYCLE_LOCK" ] && [ ! -L "$LIFECYCLE_LOCK" ] && '
+        '[ "$(stat -c "%u:%g:%a:%h" "$LIFECYCLE_LOCK")" = "0:$LIFECYCLE_GID:660:1" ] || '
+        '{ echo "[MATRIX][ERROR] Unsafe lifecycle lock; refusing to replace it." >&2; exit 77; }',
+    ]
+
+
 def build_remote_matrixd_command(
     *,
     action,
@@ -630,6 +659,7 @@ def build_remote_matrixd_command(
 
     if action == "stop":
         lines.extend([
+            *_lifecycle_provision_lines(),
             # Root is the external control plane and can terminate a universe
             # that predates service-account isolation as well as a current one.
             f"{common_env} {matrixd} kill --universe {q_universe}",
@@ -641,11 +671,6 @@ def build_remote_matrixd_command(
     )
 
     lines.extend([
-        *(
-            [f"{common_env} {matrixd} kill --universe {q_universe}"]
-            if restart_requested
-            else []
-        ),
         # A service account's primary group is also its universe capability.
         # Refuse pre-existing shared groups, including users that share the
         # same numeric primary GID, rather than silently weakening isolation.
@@ -676,6 +701,12 @@ def build_remote_matrixd_command(
         "}",
         "provision_isolated_account \"$SWARM_USER\"",
         "SWARM_GROUP=$SWARM_USER",
+        *_lifecycle_provision_lines(),
+        *(
+            [f"{common_env} {matrixd} kill --universe {q_universe}"]
+            if restart_requested
+            else []
+        ),
         "for BOUNDARY_PATH in /matrix/universes /matrix/universes/runtime "
         "/matrix/universes/static \"/matrix/universes/runtime/$UNIVERSE\" "
         "\"/matrix/universes/static/$UNIVERSE\"; do",
@@ -853,56 +884,31 @@ def build_remote_matrixd_command(
         q_snapshot_root = quote_remote_argument(
             wordpress["snapshot_root"], "WordPress snapshot root"
         )
-        lines.append(
-            "install -d -o root -g root -m 0700 /etc/matrixswarm/capabilities"
-        )
-
     lines.extend([
-            # Revoke every path recorded by the previous Railgun deployment
-            # before applying this directive. The root-owned manifest contains
-            # paths only (never keys or directive data).
+            # Old recursive ACL grants cannot be safely revoked without knowing
+            # the ACL state that preceded them. Require explicit operator review.
             "WP_ACL_MANIFEST=\"/etc/matrixswarm/capabilities/$SWARM_USER.wordpress-acl\"",
-            "if [ -f \"$WP_ACL_MANIFEST\" ]; then",
-            "  command -v setfacl >/dev/null 2>&1 || { echo '[PLUGIN-GUARD][ERROR] setfacl/acl is required to revoke the prior policy.' >&2; exit 69; }",
-            "  command -v readlink >/dev/null 2>&1 || { echo '[PLUGIN-GUARD][ERROR] readlink is required to revoke the prior policy.' >&2; exit 69; }",
-            "  while IFS= read -r OLD_PATH; do",
-            "    [ -n \"$OLD_PATH\" ] || continue",
-            "    case \"$OLD_PATH\" in /var/www/*|/opt/quarantine/*|/opt/swarm/*) ;; *) continue ;; esac",
-            "    [ -e \"$OLD_PATH\" ] || continue",
-            "    OLD_REAL=$(readlink -f -- \"$OLD_PATH\")",
-            "    [ \"$OLD_REAL\" = \"$OLD_PATH\" ] || { echo '[PLUGIN-GUARD][ERROR] Refusing redirected prior ACL path.' >&2; exit 66; }",
-            "    if [ -d \"$OLD_PATH\" ]; then",
-            "      find \"$OLD_PATH\" -type f -exec setfacl -x \"u:$SWARM_USER\" {} + 2>/dev/null || true",
-            "      find \"$OLD_PATH\" -type d -exec setfacl -x \"u:$SWARM_USER\" {} + 2>/dev/null || true",
-            "      find \"$OLD_PATH\" -type d -exec setfacl -d -x \"u:$SWARM_USER\" {} + 2>/dev/null || true",
-            "    else",
-            "      setfacl -x \"u:$SWARM_USER\" \"$OLD_PATH\" 2>/dev/null || true",
-            "    fi",
-            "  done < \"$WP_ACL_MANIFEST\"",
-            "  rm -f \"$WP_ACL_MANIFEST\"",
+            "if [ -e \"$WP_ACL_MANIFEST\" ] || [ -L \"$WP_ACL_MANIFEST\" ]; then",
+            "  printf '[PLUGIN-GUARD][ERROR] Review and reconcile legacy WordPress ACLs recorded in %s before deployment.\\n' \"$WP_ACL_MANIFEST\" >&2",
+            "  exit 77",
             "fi",
     ])
 
     if wordpress:
         lines.extend([
-            "command -v setfacl >/dev/null 2>&1 || { echo '[PLUGIN-GUARD][ERROR] setfacl/acl package is required.' >&2; exit 69; }",
             "command -v readlink >/dev/null 2>&1 || { echo '[PLUGIN-GUARD][ERROR] readlink is required.' >&2; exit 69; }",
             f"PLUGIN_DIR={q_plugin_dir}",
             f"QUARANTINE_DIR={q_quarantine_dir}",
             f"SNAPSHOT_ROOT={q_snapshot_root}",
-            "[ -d \"$PLUGIN_DIR\" ] || { printf '[PLUGIN-GUARD][ERROR] Plugin directory not found: %s\\n' \"$PLUGIN_DIR\" >&2; exit 66; }",
-            "install -d -o root -g root -m 0750 \"$QUARANTINE_DIR\"",
-            "install -d -o root -g root -m 0750 \"$SNAPSHOT_ROOT\"",
             "for MANAGED_DIR in \"$PLUGIN_DIR\" \"$QUARANTINE_DIR\" \"$SNAPSHOT_ROOT\"; do",
+            "  [ -d \"$MANAGED_DIR\" ] || { printf '[PLUGIN-GUARD][ERROR] Directory not found: %s; provision it and its access before deployment.\\n' \"$MANAGED_DIR\" >&2; exit 66; }",
             "  REAL_MANAGED_DIR=$(readlink -f -- \"$MANAGED_DIR\")",
             "  [ \"$REAL_MANAGED_DIR\" = \"$MANAGED_DIR\" ] || { echo '[PLUGIN-GUARD][ERROR] Refusing redirected managed directory.' >&2; exit 66; }",
-            "  find \"$MANAGED_DIR\" -type d -exec setfacl -m \"u:$SWARM_USER:rwx,d:u:$SWARM_USER:rwx\" {} +",
-            "  find \"$MANAGED_DIR\" -type f -exec setfacl -m \"u:$SWARM_USER:rw-\" {} +",
+            "  if ! runuser -u \"$SWARM_USER\" -- test -r \"$MANAGED_DIR\" || ! runuser -u \"$SWARM_USER\" -- test -w \"$MANAGED_DIR\" || ! runuser -u \"$SWARM_USER\" -- test -x \"$MANAGED_DIR\"; then",
+            "    printf '[PLUGIN-GUARD][ERROR] %s cannot access %s; provision the required permissions and parent traversal before deployment.\\n' \"$SWARM_USER\" \"$MANAGED_DIR\" >&2",
+            "    exit 77",
+            "  fi",
             "done",
-            "WP_ACL_TMP=$(mktemp /etc/matrixswarm/capabilities/.wordpress-acl.XXXXXX)",
-            "printf '%s\\n%s\\n%s\\n' \"$PLUGIN_DIR\" \"$QUARANTINE_DIR\" \"$SNAPSHOT_ROOT\" > \"$WP_ACL_TMP\"",
-            "chown root:root \"$WP_ACL_TMP\" && chmod 0600 \"$WP_ACL_TMP\"",
-            "mv -f \"$WP_ACL_TMP\" \"$WP_ACL_MANIFEST\"",
         ])
 
     if capabilities["mcp_worker"]:

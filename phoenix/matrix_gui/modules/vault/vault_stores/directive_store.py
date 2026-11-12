@@ -28,7 +28,7 @@ class DirectiveStore(VaultStore):
         return True
 
     def update_directive(self, uid, patch):
-        data = self.get_data()
+        data = deepcopy(self.get_data())
         d = data.setdefault(uid, {})
         for k, v in patch.items():
             if isinstance(d.get(k), dict) and isinstance(v, dict):
@@ -36,11 +36,11 @@ class DirectiveStore(VaultStore):
             else:
                 d[k] = deepcopy(v)
 
-        return self.commit()
+        return self.commit_candidate(data)
 
     def delete_directive(self, uid):
-        data = self.get_data()
+        data = deepcopy(self.get_data())
         if uid in data:
             data.pop(uid)
-            return self.commit()
+            return self.commit_candidate(data)
         return False

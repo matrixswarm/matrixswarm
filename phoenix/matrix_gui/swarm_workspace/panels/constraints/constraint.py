@@ -3,9 +3,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QLabel, QComboBox, QMessageBox, QDialog, QDialogButtonBox,QSizePolicy
 )
 from PyQt6.QtCore import Qt
+from copy import deepcopy
 from .constraint_row_widget import ConstraintRowWidget
 from matrix_gui.registry.registry_manager import RegistryManagerDialog
 from matrix_gui.registry.object_classes import EDITOR_REGISTRY
+from matrix_gui.registry.terminal_fields import merge_record_metadata
 from matrix_gui.modules.vault.services.vault_core_singleton import VaultCoreSingleton
 class Constraint(QWidget):
     """
@@ -149,14 +151,24 @@ class Constraint(QWidget):
             editor = editor_cls(new_conn=False)
             editor._load_data(obj)
 
-            if editor.exec():
+            def save_entry():
                 updated = editor.serialize()
+                merge_record_metadata(obj, updated)
                 updated["class"] = cls
                 updated["path"] = editor.get_directory_path()
                 updated["serial"] = constraint["serial"]
 
-                ns[constraint["serial"]] = updated
-                registry_store.commit()
+                candidate = deepcopy(registry_store.get_namespace(cls))
+                candidate[constraint["serial"]] = updated
+                try:
+                    saved = registry_store.set_namespace(cls, candidate)
+                except Exception:
+                    saved = False
+                if not saved:
+                    QMessageBox.warning(self, "Registry Save Failed", "The change was not saved. Fix the vault problem and retry, or cancel to discard it.")
+                return saved
+
+            if editor.exec(on_save=save_entry):
                 constraint["met"] = True
                 self.load(self.agent, self.class_list)
             return

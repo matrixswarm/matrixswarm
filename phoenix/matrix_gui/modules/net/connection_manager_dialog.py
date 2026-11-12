@@ -103,6 +103,18 @@ class ConnectionManagerDialog(QtWidgets.QDialog):
         proto = self._current_proto()
         return proto, self.tables.get(proto)
 
+    def _save_connections(self, candidate):
+        try:
+            saved = VaultCoreSingleton.get().patch("connection_manager", candidate)
+        except Exception as error:
+            emit_gui_exception_log("ConnectionManagerDialog.save", error)
+            saved = False
+        if not saved:
+            QMessageBox.warning(self, "Connection Save Failed",
+                                "The change was not saved. Fix the vault problem and retry, "
+                                "or cancel the editor to discard it.")
+        return saved
+
     # -------------------------------------------------------------
     # DATA LOADING
     # -------------------------------------------------------------
@@ -172,16 +184,15 @@ class ConnectionManagerDialog(QtWidgets.QDialog):
                 return
 
             # Launch editor dialog
-            conn_id, data = edit_connection_dialog(self, default_proto=proto, data={}, new_conn=True)
+            def save_entry(conn_id, data):
+                cm = self._connection_manager()
+                cm.setdefault(data["proto"], {})[conn_id] = data
+                return self._save_connections(cm)
+
+            conn_id, data = edit_connection_dialog(self, default_proto=proto, data={}, new_conn=True, on_save=save_entry)
             if not conn_id or not data or not isinstance(data, dict):
                 return
 
-            new_proto = data["proto"]  # user might switch proto while editing
-
-            cm = self._connection_manager()
-            cm.setdefault(new_proto, {})[conn_id] = data
-
-            VaultCoreSingleton.get().patch("connection_manager", cm)
             self.reload_all()
 
         except Exception as e:
@@ -219,12 +230,18 @@ class ConnectionManagerDialog(QtWidgets.QDialog):
 
             try:
                 # Open editor
+                def save_entry(_new_id, updated):
+                    candidate = self._connection_manager()
+                    candidate[proto][conn_id] = updated
+                    return self._save_connections(candidate)
+
                 result = edit_connection_dialog(
                     self,
                     default_proto=existing.get("proto", proto),
                     data=existing,
                     conn_id=conn_id,
-                    new_conn=False
+                    new_conn=False,
+                    on_save=save_entry,
                 )
 
                 # Ensure the result is a tuple with two elements or handle it safely
@@ -239,11 +256,6 @@ class ConnectionManagerDialog(QtWidgets.QDialog):
             if not conn_id_new:
                 return
 
-            # Update the existing record in place
-            cm = self._connection_manager()
-            cm[proto][conn_id] = data
-
-            VaultCoreSingleton.get().patch("connection_manager", cm)
             self.reload_all()
 
         except Exception as e:
@@ -286,5 +298,5 @@ class ConnectionManagerDialog(QtWidgets.QDialog):
         cm = self._connection_manager()
         cm[proto].pop(conn_id, None)
 
-        VaultCoreSingleton.get().patch("connection_manager", cm)
-        self.reload_all()
+        if self._save_connections(cm):
+            self.reload_all()

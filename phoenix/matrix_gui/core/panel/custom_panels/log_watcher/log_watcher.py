@@ -29,7 +29,7 @@ class LogWatcher(PhoenixPanelInterface):
             self._pending_lines = deque()
             self._flush_timer = QTimer(self)
             self._flush_timer.timeout.connect(self._flush_output)
-            self._flush_timer.start(200)
+            self._flush_timer.setInterval(200)
             self._signals_connected = False
             self._timers.append(self._flush_timer)   # ⬅️ let the base class auto-clean it
         except Exception as e:
@@ -41,9 +41,9 @@ class LogWatcher(PhoenixPanelInterface):
         """Attach bus listeners."""
         try:
             if not self._signals_connected:
-                self._signals_connected=True
                 scoped = "inbound.verified.logwatch_panel.update"
                 self.bus.on(scoped, self._handle_output)
+                self._signals_connected=True
                 print("[LOGWATCH] 🎧 Connected to", scoped)
 
         except Exception as e:
@@ -51,7 +51,11 @@ class LogWatcher(PhoenixPanelInterface):
 
     def _disconnect_signals(self):
         """Detach bus listeners and clear any buffered lines."""
-        pass
+        if self._signals_connected:
+            try:
+                self.bus.off("inbound.verified.logwatch_panel.update", self._handle_output)
+            finally:
+                self._signals_connected = False
 
     def get_panel_buttons(self):
         """Provide toolbar buttons for this panel."""
@@ -106,17 +110,14 @@ class LogWatcher(PhoenixPanelInterface):
 
     # --- Event-specific overrides (optional hooks) ---
     def _on_show(self):
-        """Reset digest token when shown."""
-        #self._last_token = None
-        pass
+        self._flush_timer.start()
+
+    def _on_hide(self):
+        self._flush_timer.stop()
 
     def _on_close(self):
         try:
-            if self._signals_connected:
-                scoped = "inbound.verified.logwatch_panel.update"
-                self.bus.off(scoped, self._handle_output)
-                print("[LOGWATCH] 🔕 Disconnected from", scoped)
-                self._pending_lines.clear()
+            self._pending_lines.clear()
         except Exception as e:
             emit_gui_exception_log("LogWatcher._disconnect_signals", e)
 

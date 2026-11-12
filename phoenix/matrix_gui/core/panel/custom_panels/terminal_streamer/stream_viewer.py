@@ -2,7 +2,7 @@
 import uuid, time
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout,
-    QLineEdit, QListWidget, QTextEdit, QSplitter
+    QLineEdit, QListWidget, QTextEdit, QSplitter, QMessageBox
 )
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtCore import QMetaObject, Qt, pyqtSlot, QTimer
@@ -179,16 +179,18 @@ class StreamViewer(PhoenixPanelInterface):
                 return
 
             new_entry = {"cmd": cmd, "refresh": int(refresh)}
-            self.favorites.append(new_entry)
+            updated = self.favorites + [new_entry]
 
             # Use the vault singleton instead of direct deployment access
             vault = VaultConnectionSingleton.get()
-            vault.update_field("terminal_favorites", self.favorites)
+            vault.update_field("terminal_favorites", updated)
+            self.favorites = updated
 
             self._refresh_fav_list()
             print("[STREAM] ⭐ Favorite added and vault updated")
         except Exception as e:
             emit_gui_exception_log("StreamViewer._add_to_favorites", e)
+            QMessageBox.warning(self, "Favorite Not Saved", str(e))
 
     def _populate_from_favorite(self, item):
         try:
@@ -203,15 +205,18 @@ class StreamViewer(PhoenixPanelInterface):
         try:
             row = self.fav_list.currentRow()
             if 0 <= row < len(self.favorites):
-                self.favorites.pop(row)
+                updated = list(self.favorites)
+                updated.pop(row)
 
                 vault = VaultConnectionSingleton.get()
-                vault.update_field("terminal_favorites", self.favorites)
+                vault.update_field("terminal_favorites", updated)
+                self.favorites = updated
 
                 self._refresh_fav_list()
                 print("[STREAM] ❌ Favorite deleted and vault updated")
         except Exception as e:
             emit_gui_exception_log("StreamViewer._delete_favorite", e)
+            QMessageBox.warning(self, "Favorite Not Saved", str(e))
 
     def _edit_favorite(self):
         try:

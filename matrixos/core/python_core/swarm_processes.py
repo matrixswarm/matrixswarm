@@ -31,6 +31,12 @@ def get_all_swarm_agent_info(universe=None, base="/matrix"):
     protected_launcher = (
         Path(base_root) / "core" / "python_core" / "protected_launcher.py"
     ).as_posix()
+    gated_launcher = (
+        Path(base_root) / "core" / "python_core" / "gated_launcher.py"
+    ).as_posix()
+    fd_launcher = (
+        Path(base_root) / "core" / "python_core" / "fd_launcher.py"
+    ).as_posix()
 
     def extract_job(cmdline_parts):
         for index, value in enumerate(cmdline_parts):
@@ -105,7 +111,7 @@ def get_all_swarm_agent_info(universe=None, base="/matrix"):
             ):
                 direct_match = None
             approved_launcher = bool(
-                direct_match or protected_launcher in cmdline_parts
+                direct_match or protected_launcher in cmdline_parts or gated_launcher in cmdline_parts or fd_launcher in cmdline_parts
             )
             if not approved_launcher:
                 continue

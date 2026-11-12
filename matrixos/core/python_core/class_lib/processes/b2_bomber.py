@@ -1,8 +1,95 @@
 import os
 import time
 import signal
+import errno
+import math
+import select
 import psutil
 from core.python_core.class_lib.file_system.util.json_safe_write import JsonSafeWrite
+
+
+class ProcessIdentityUnavailable(RuntimeError):
+    """A process cannot be identified safely enough to signal."""
+
+
+class PinnedProcess:
+    """Bind signals to the observed process, rather than a reusable PID.
+
+    Linux pidfds make signaling atomic with respect to PID reuse. Where
+    unavailable, the same psutil Process instance rechecks PID/create-time
+    before signaling; that fallback cannot eliminate the final OS-level race.
+    """
+
+    def __init__(self, pid, started_at, expected_cmd=None):
+        if (type(pid) is not int or pid <= 0 or type(started_at) not in (int, float)
+                or not math.isfinite(started_at) or started_at <= 0):
+            raise ProcessIdentityUnavailable("missing or invalid process identity")
+        self.pid = pid
+        self.started_at = started_at
+        self.fd = None
+        try:
+            if hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"):
+                try:
+                    self.fd = os.pidfd_open(pid, 0)
+                except OSError as exc:
+                    if exc.errno not in (errno.ENOSYS, errno.EINVAL):
+                        raise
+            self.proc = psutil.Process(pid)
+            if self.proc.create_time() != started_at:
+                raise ProcessIdentityUnavailable("process creation time differs")
+            if expected_cmd is not None and self.proc.cmdline() != expected_cmd:
+                raise ProcessIdentityUnavailable("process command changed")
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+
+    def is_alive(self):
+        try:
+            if self.fd is not None:
+                # A pidfd becomes readable when the original task exits, even
+                # if another task has already received the same numeric PID.
+                poller = select.poll()
+                poller.register(self.fd, select.POLLIN)
+                return not bool(poller.poll(0))
+            if not self.proc.is_running():
+                return False
+            return self.proc.status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            return False
+        except Exception:
+            # Access denied and unexpected observation errors fail closed.
+            return True
+
+    def send_signal(self, signum):
+        if not self.is_alive():
+            return False
+        if self.fd is not None:
+            try:
+                signal.pidfd_send_signal(self.fd, signum, None, 0)
+            except ProcessLookupError:
+                return False
+        elif signum == signal.SIGTERM:
+            self.proc.terminate()
+        else:
+            self.proc.send_signal(signum)
+        return True
+
+    def kill(self):
+        if not self.is_alive():
+            return False
+        if self.fd is not None:
+            try:
+                signal.pidfd_send_signal(self.fd, signal.SIGKILL, None, 0)
+            except ProcessLookupError:
+                return False
+        else:
+            self.proc.kill()
+        return True
 
 class B2Bomber:
     """
@@ -47,8 +134,23 @@ class B2Bomber:
                 self.agents[tracker_id] = {
                     "pid": pid,
                     "universal_id": uid or tracker_id,
+                    "process_started_at": agent.get("process_started_at"),
+                    "process_ref": None,
+                    "identity_gone": False,
                     "details": {"cmd": (agent.get("details") or {}).get("cmd")}
                 }
+                record = self.agents[tracker_id]
+                try:
+                    record["process_ref"] = PinnedProcess(pid, record["process_started_at"])
+                except (psutil.NoSuchProcess, ProcessLookupError):
+                    record["identity_gone"] = True
+                except Exception as exc:
+                    record["identity_unverified"] = True
+                    self.log_info(f"[B2-BOMBER][WARN] Cannot safely pin PID {pid}: {type(exc).__name__}")
+
+                if record.get("identity_gone") or record.get("identity_unverified"):
+                    self.log_info(f"[B2-BOMBER][WARN] Skipping die cookie for unverified PID {pid}")
+                    continue
 
                 if not comm_root or not uid:
                     self.log_info(f"[B2-BOMBER][SKIP] Missing comm_path/universal_id for agent: {agent}")
@@ -82,7 +184,18 @@ class B2Bomber:
             return True
         except Exception as e:
             self.log_info(f"[B2-BOMBER][ERROR] Unexpected error checking PID {pid}: {e}")
+            return True
+
+    def _record_alive(self, record):
+        if record.get("identity_gone"):
             return False
+        ref = record.get("process_ref")
+        if ref is not None:
+            return ref.is_alive()
+        # With missing identity, a numeric PID can only be used to establish
+        # absence, never to authorize a signal to a possibly replaced process.
+        pid = record.get("pid")
+        return True if type(pid) is not int or pid <= 0 else self.is_pid_alive(pid)
 
     def wait_for_agents_shutdown(self, check_interval=2, timeout=10):
         """
@@ -91,21 +204,23 @@ class B2Bomber:
         Returns list of surviving agent dict entries (with universal_id and pid).
         """
         self.log_info(f"[B2-BOMBER] Waiting up to {timeout}s for agents to ingest die cookie.")
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + max(float(timeout), 0)
         survivors = []
 
         # Simplest alive check: pid existence; if you want hello.moto, caller can prefilter
         run=1
-        while time.time() <= deadline:
+        while True:
             survivors.clear()
             for tracker_id, info in list(self.agents.items()):
                 pid = info.get("pid")
                 uid = info.get("universal_id", tracker_id)
-                if pid and self.is_pid_alive(pid):
-                    survivors.append({"universal_id": uid, "pid": pid})
+                if self._record_alive(info):
+                    survivors.append(info)
                     self.log_info(f"[B2-BOMBER] 💣 Bombing Run {run} Agent {uid} (PID {pid}) still breathing...")
             if not survivors:
                 return []
+            if time.monotonic() >= deadline:
+                break
             time.sleep(check_interval)
             run+=1
 
@@ -115,94 +230,65 @@ class B2Bomber:
 
     def escalate_shutdown(self, survivors, grace_after_term=1,
                           grace_after_kill=2, dry_run=False):
-        """
-        Immediately attempt polite termination (SIGTERM / proc.terminate), wait `grace_after_term`,
-        then SIGKILL any remaining PIDs. No batching — level it.
-        """
+        """Signal only pinned individual processes; never a shared process group."""
         if not survivors:
-            self.log_info("[B2-BOMBER] No survivors to escalate.")
             return []
-
-        # First pass: SIGTERM (prefer process group on POSIX)
-        active = {}
-        for agent in survivors:
-            pid = agent.get("pid")
-            uid = agent.get("universal_id")
-            if not pid:
-                continue
-            try:
-                proc = psutil.Process(pid)
-                try:
-                    if os.name == "posix":
-                        try:
-                            pgid = os.getpgid(pid)
-                            if dry_run:
-                                self.log_info(f"[DRYRUN] Would SIGTERM process group {pgid} for {uid}")
-                            else:
-                                os.killpg(pgid, signal.SIGTERM)
-                                self.log_info(f"[B2-BOMBER][NUKE] ☢️  SIGTERM → {uid} (PGID {pgid})")
-                        except Exception:
-                            # fallback to pid
-                            if dry_run:
-                                self.log_info(f"[DRYRUN] Would SIGTERM PID {pid} for {uid}")
-                            else:
-                                os.kill(pid, signal.SIGTERM)
-                                self.log_info(f"[B2-BOMBER][MIRV] SIGTERM → {uid} (PID {pid})")
-                    else:
-                        if dry_run:
-                            self.log_info(f"[DRYRUN] Would terminate PID {pid} for {uid}")
-                        else:
-                            proc.terminate()
-                            self.log_info(f"[B2-BOMBER] terminate() → {uid} (PID {pid})")
-                except Exception as e:
-                    self.log_info(f"[B2-BOMBER][WARN] SIGTERM fallback for {uid}: {e}")
-                active[pid] = uid
-            except psutil.NoSuchProcess:
-                self.log_info(f"[B2-BOMBER] Already dead: {uid}")
-            except Exception as e:
-                self.log_info(f"[B2-BOMBER][ERROR] Failed to SIGTERM {uid} (PID {pid}): {e}")
-
-        # Wait a short grace period
-        time.sleep(grace_after_term)
-
-        # Second pass: SIGKILL any remaining
-        for pid, uid in list(active.items()):
-            if self.is_pid_alive(pid):
+        active = []
+        borrowed = []
+        try:
+            for supplied in survivors:
+                record = dict(supplied)
+                pid = record.get("pid")
+                ref = record.get("process_ref")
+                if ref is None and not record.get("identity_gone") and not record.get("identity_unverified"):
+                    try:
+                        ref = PinnedProcess(pid, record.get("process_started_at"))
+                        record["process_ref"] = ref
+                        borrowed.append(ref)
+                    except (psutil.NoSuchProcess, ProcessLookupError):
+                        record["identity_gone"] = True
+                    except Exception as exc:
+                        self.log_info(f"[B2-BOMBER][WARN] Refusing unverified PID {pid}: {type(exc).__name__}")
+                if not self._record_alive(record):
+                    continue
+                active.append(record)
+                if ref is None:
+                    continue
                 try:
                     if dry_run:
-                        self.log_info(f"[DRYRUN] Would SIGKILL PID {pid} for {uid}")
-                    else:
-                        if os.name == "posix":
-                            try:
-                                pgid = os.getpgid(pid)
-                                os.killpg(pgid, signal.SIGKILL)
-                                self.log_info(f"[B2-BOMBER] SIGKILL → {uid} (PGID {pgid})")
-                            except Exception:
-                                os.kill(pid, signal.SIGKILL)
-                                self.log_info(f"[B2-BOMBER] SIGKILL → {uid} (PID {pid})")
-                        else:
-                            proc = psutil.Process(pid)
-                            proc.kill()
-                            self.log_info(f"[B2-BOMBER] kill() → {uid} (PID {pid})")
-                except Exception as e:
-                    self.log_info(f"[B2-BOMBER][ERROR] Failed to SIGKILL {uid} (PID {pid}): {e}")
+                        self.log_info(f"[DRYRUN] Would SIGTERM pinned PID {pid}")
+                    elif ref.send_signal(signal.SIGTERM):
+                        self.log_info(f"[B2-BOMBER] SIGTERM → PID {pid}")
+                except (psutil.NoSuchProcess, ProcessLookupError):
+                    pass
+                except Exception as exc:
+                    self.log_info(f"[B2-BOMBER][WARN] SIGTERM failed for PID {pid}: {type(exc).__name__}")
 
-        # Do not report success until every tracked PID is actually gone. The
-        # caller may be about to remove boot material, so AccessDenied and
-        # slow process teardown must fail closed.
-        deadline = time.time() + max(float(grace_after_kill), 0)
-        remaining = []
-        while True:
-            remaining = [
-                {"universal_id": uid, "pid": pid}
-                for pid, uid in active.items()
-                if self.is_pid_alive(pid)
-            ]
-            if not remaining or time.time() >= deadline:
-                break
-            time.sleep(0.1)
+            if active and not dry_run:
+                time.sleep(max(float(grace_after_term), 0))
+            for record in active:
+                ref = record.get("process_ref")
+                if ref is None or not self._record_alive(record):
+                    continue
+                try:
+                    if dry_run:
+                        self.log_info(f"[DRYRUN] Would SIGKILL pinned PID {record.get('pid')}")
+                    elif ref.kill():
+                        self.log_info(f"[B2-BOMBER] SIGKILL → PID {record.get('pid')}")
+                except (psutil.NoSuchProcess, ProcessLookupError):
+                    pass
+                except Exception as exc:
+                    self.log_info(f"[B2-BOMBER][WARN] SIGKILL failed for PID {record.get('pid')}: {type(exc).__name__}")
 
-        return remaining
+            deadline = time.monotonic() + max(float(grace_after_kill), 0)
+            while True:
+                remaining = [record for record in active if self._record_alive(record)]
+                if not remaining or dry_run or time.monotonic() >= deadline:
+                    return remaining
+                time.sleep(0.1)
+        finally:
+            for ref in borrowed:
+                ref.close()
 
     def level_it(self, target_list, check_interval=2, timeout=30, dry_run=False):
         """
@@ -215,28 +301,22 @@ class B2Bomber:
             self.log_info("[B2-BOMBER][WARN] No targets provided.")
             return True
 
-        # 1) Drop die cookies for each target
-        self.pass_out_die_cookies(target_list, dry_run=dry_run)
-
-        # 2) Wait for graceful exit
-        survivors = self.wait_for_agents_shutdown(check_interval=check_interval, timeout=timeout)
-
-        # 3) If anybody survived, escalate immediately (no batches)
-        if survivors:
-            self.log_info("[B2-BOMBER][WARNING] Survivors detected — leveling now.")
-            survivors = self.escalate_shutdown(
-                survivors,
-                grace_after_term=1,
-                dry_run=dry_run,
-            )
+        try:
+            self.pass_out_die_cookies(target_list, dry_run=dry_run)
+            survivors = self.wait_for_agents_shutdown(check_interval=check_interval, timeout=timeout)
             if survivors:
-                self.log_info(
-                    "[B2-BOMBER][FATAL] Unable to stop: "
-                    f"{[s['universal_id'] for s in survivors]}"
-                )
-                return False
-        else:
-            self.log_info("[B2-BOMBER] All targets exited cleanly.")
-
-        self.log_info("[B2-BOMBER] Universe-wide carpet-bombing operation complete.")
-        return True
+                self.log_info("[B2-BOMBER][WARNING] Survivors detected — leveling now.")
+                survivors = self.escalate_shutdown(survivors, grace_after_term=1, dry_run=dry_run)
+                if survivors:
+                    self.log_info("[B2-BOMBER][FATAL] Unable to stop: "
+                                  f"{[s['universal_id'] for s in survivors]}")
+                    return False
+            else:
+                self.log_info("[B2-BOMBER] All targets exited cleanly.")
+            self.log_info("[B2-BOMBER] Universe-wide carpet-bombing operation complete.")
+            return True
+        finally:
+            for info in self.agents.values():
+                ref = info.get("process_ref")
+                if ref is not None:
+                    ref.close()

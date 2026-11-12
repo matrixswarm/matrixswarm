@@ -1,6 +1,9 @@
 import os
+import stat
 import time
-def check_heartbeats(comm_root, agent_id, time_delta_timeout=0):
+from core.python_core.safe_paths import open_beneath
+
+def check_heartbeats(comm_root, agent_id, time_delta_timeout=0, *, directory_fd=None):
     """
     Always return a dict:
     {
@@ -16,7 +19,7 @@ def check_heartbeats(comm_root, agent_id, time_delta_timeout=0):
     latest_delta = 0
 
     try:
-        files = [f for f in os.listdir(base) if f.startswith("poke.")]
+        files = [f for f in os.listdir(directory_fd if directory_fd is not None else base) if f.startswith("poke.")]
         for fname in files:
             parts = fname.split(".")
             if len(parts) < 5:
@@ -27,8 +30,18 @@ def check_heartbeats(comm_root, agent_id, time_delta_timeout=0):
             sleep_for = int(sleep_for) if sleep_for.isdigit() else 0
             wake_due = int(wake_due) if wake_due.isdigit() else 0
 
-            fpath = os.path.join(base, fname)
-            last_seen = os.path.getmtime(fpath)
+            if directory_fd is None:
+                fpath = os.path.join(base, fname)
+                last_seen = os.path.getmtime(fpath)
+            else:
+                fd = open_beneath(directory_fd, fname, os.O_PATH | os.O_NOFOLLOW)
+                try:
+                    info = os.fstat(fd)
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise ValueError(f"Unsafe heartbeat entry: {fname}")
+                    last_seen = info.st_mtime
+                finally:
+                    os.close(fd)
             last_seen_any = max(last_seen_any, last_seen)
 
             if wake_due and now < wake_due:

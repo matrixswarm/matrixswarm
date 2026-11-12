@@ -7,7 +7,9 @@ from pathlib import Path
 import re
 import time
 import uuid
+import weakref
 
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QMimeData, QTimer, QUrl, Qt, pyqtSignal
 from PyQt6.QtGui import QDrag, QTextDocumentFragment
 from PyQt6.QtWidgets import (
@@ -44,6 +46,26 @@ class PasteEditor(QPlainTextEdit):
     draft_inserted = pyqtSignal()
     draft_rejected = pyqtSignal()
 
+    def _prepare_layout(self, size):
+        # Qt can spend minutes wrapping a long single-line paste. Switch before
+        # inserting large text, and restore normal wrapping for short drafts.
+        mode = (QPlainTextEdit.LineWrapMode.NoWrap if size > 64 * 1024
+                else QPlainTextEdit.LineWrapMode.WidgetWidth)
+        if self.lineWrapMode() != mode:
+            self.setLineWrapMode(mode)
+
+    def setPlainText(self, text):
+        size = len(text.encode("utf-8"))
+        if size > 64 * 1024:
+            self._prepare_layout(size)
+        super().setPlainText(text)
+        if size <= 64 * 1024:
+            self._prepare_layout(size)
+
+    def clear(self):
+        super().clear()
+        self._prepare_layout(0)
+
     def canInsertFromMimeData(self, source):
         return _plain_drop_text(source) is not None
 
@@ -59,7 +81,12 @@ class PasteEditor(QPlainTextEdit):
         if size + len(text.encode("utf-8")) > MAX_BYTES:
             self.draft_rejected.emit()
             return False
+        final_size = size + len(text.encode("utf-8"))
+        if final_size > 64 * 1024:
+            self._prepare_layout(final_size)
         self.insertPlainText(text)
+        if final_size <= 64 * 1024:
+            self._prepare_layout(final_size)
         self.draft_inserted.emit()
         return True
 
@@ -771,8 +798,20 @@ class DropVault(PhoenixPanelInterface):
         generation = self._local_generation
         job = FileJob(mode, path, data)
         self._job = job
-        job.completed.connect(lambda result: self._local_done(generation, mode, result, copy_file))
-        job.failed.connect(lambda message: self._local_error(generation, message))
+        panel_ref = weakref.ref(self)
+
+        def completed(result):
+            panel = panel_ref()
+            if panel is not None and not sip.isdeleted(panel):
+                panel._local_done(generation, mode, result, copy_file)
+
+        def failed(message):
+            panel = panel_ref()
+            if panel is not None and not sip.isdeleted(panel):
+                panel._local_error(generation, message)
+
+        job.completed.connect(completed)
+        job.failed.connect(failed)
         job.launch()
         self._buttons()
 

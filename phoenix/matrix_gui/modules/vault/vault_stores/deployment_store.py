@@ -108,7 +108,7 @@ class DeploymentStore(VaultStore):
             • Validate
             • Commit
         """
-        data = self.get_data()
+        data = deepcopy(self.get_data())
 
         # Create deployment entry if missing
         dep = data.setdefault(dep_id, {})
@@ -122,15 +122,15 @@ class DeploymentStore(VaultStore):
                 dep[k] = deepcopy(v)
 
         # Commit via VaultStore (→ vault_core.patch())
-        return self.commit()
+        return self.commit_candidate(data)
 
     def delete_dep(self, dep_id):
         """
         Controlled deletion through store API.
         """
-        data = self.get_data()
+        data = deepcopy(self.get_data())
         if dep_id in data:
             data.pop(dep_id)
-            return self.commit()
+            return self.commit_candidate(data)
         return False
 

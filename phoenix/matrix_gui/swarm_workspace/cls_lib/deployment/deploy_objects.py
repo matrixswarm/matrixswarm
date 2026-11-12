@@ -1,7 +1,8 @@
 import json, uuid, hashlib, time
 from copy import deepcopy
 from datetime import datetime
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QMessageBox
+from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QMessageBox, QProgressDialog, QWidget
+from PyQt6.QtCore import Qt
 from matrix_gui.util.exception_diagnostics import log_exception_locations
 from .exceptions.manual_constraint_failure import ManualConstraintFailure
 from matrix_gui.swarm_workspace.cls_lib.constraint.constraint_validator import ConstraintValidator
@@ -58,6 +59,7 @@ class DeploymentSession:
 
         # private crypto bundles (signing, certs, AES, etc.)
         self.crypto_store = {}
+        self._progress = None
 
     # =========================================================
     # ENTRYPOINT
@@ -73,12 +75,27 @@ class DeploymentSession:
             root_gid = self.root_uid
             if not root_gid:
                 print("[DEPLOY][FATAL] No root agent found")
+                QMessageBox.critical(self.workspace, "Deployment Blocked", "The workspace has no root agent to deploy.")
                 return False
 
             # Resolve all constraints directly on the live nodes
             try:
                 compilation_tree = deepcopy(self.tree)
-                resolved_constraints = self._resolve_constraints_parallel(compilation_tree)
+                if isinstance(self.workspace, QWidget):
+                    self._progress = QProgressDialog("Preparing deployment…", "", 0, len(compilation_tree), self.workspace)
+                    self._progress.setWindowTitle("Preparing Deployment")
+                    self._progress.setWindowModality(Qt.WindowModality.WindowModal)
+                    self._progress.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+                    self._progress.setCancelButton(None)
+                    self._progress.setMinimumDuration(0)
+                    self._progress.show()
+                    QApplication.processEvents()
+                try:
+                    resolved_constraints = self._resolve_constraints_parallel(compilation_tree)
+                finally:
+                    if self._progress is not None:
+                        self._progress.close()
+                        self._progress = None
                 # Profile credentials belong only to the directive staging copy.
                 # Never attach them to the live/editable workspace tree.
                 registry = self.resolver.vcs.get_store("registry")
@@ -99,6 +116,7 @@ class DeploymentSession:
             except RsyncBoyProfileError as e:
                 self.dual = DualBuilder()
                 print(f"[DEPLOY BLOCKED] {e}")
+                QMessageBox.critical(self.workspace, "Deployment Blocked", str(e))
                 return None
 
             # Build IR map
@@ -219,7 +237,11 @@ class DeploymentSession:
         validator = ConstraintValidator()
         resolved = {}
 
-        for gid, agent in raw_nodes.items():
+        for index, (gid, agent) in enumerate(raw_nodes.items()):
+            if self._progress is not None:
+                self._progress.setLabelText(f"Preparing {agent.get('name', 'agent')} ({index + 1} of {len(raw_nodes)})…")
+                self._progress.setValue(index)
+                QApplication.processEvents()
             entries = {}
             valid_agent = True
             constraints = agent.get("constraints", [])

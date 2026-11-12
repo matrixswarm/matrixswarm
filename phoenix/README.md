@@ -35,6 +35,59 @@ It decrypts your vault, orchestrates universes, and issues signed commands to li
 Phoenix Cockpit is the GUI control plane for MatrixOS — a secure multi-agent runtime for orchestrating autonomous services.
 (from the MatrixSwarm ecosystem )
 
+### Upgrade notes
+
+The WebSocket connection requires the updated Phoenix and `matrix_websocket`
+agent to be upgraded together. Older clients and agents cannot connect to the
+new challenge-based handshake. Check the system clocks on both machines before
+connecting.
+
+Hotswap uses a signed, chunked transfer and changes one agent for the current
+universe boot only. The Hotswap dialog can instead save an embedded Python
+source in the encrypted deployment directive for the next deploy; this does
+not change the running swarm or rotate its swarm key. Server-wide Replace
+Source uses the deployment's recorded, pinned administrator SSH profile and
+the MatrixOS source publisher. It changes the installed source for future
+starts, but does not restart running agents, update pinned source hashes, or
+change embedded clown-car copies. Install the updated MatrixOS publisher before
+using it.
+
+WordPress Plugin Guard requires the swarm service account to have the access it
+needs to its configured plugin, quarantine, and snapshot directories. Provision
+that access before deployment; Railgun no longer changes WordPress ACLs
+automatically. If an earlier deployment left an ACL manifest at
+`/etc/matrixswarm/capabilities/<swarm-user>.wordpress-acl`, review and reconcile
+those permissions and the manifest before deploying again.
+
+When reusing a universe, agent IDs must contain only letters, digits, `_`, or
+`-`, so MatrixOS can reliably identify and stop the previous agents. Obsolete
+runtime communication folders and cleared channel files are moved into
+`retired-agent-comm` and `retired-agent-signals` inside the runtime boot
+directory for recovery. Static agent data is retained. These archives may need
+operator review and cleanup over time.
+
+New agent boot records include a process creation time so shutdown can avoid
+signaling a different process that inherited an old PID. Older or unreadable
+records may make targeted shutdown report an unresolved agent instead of
+forcing termination; investigate the live process before retrying.
+
+Stop every agent in an older universe using its existing MatrixOS installation
+before upgrading to lifecycle fencing. Railgun provisions a persistent lock for
+each universe; the lock must not be removed or replaced. Boot, shutdown and
+agent spawning coordinate through it, and will refuse to proceed if process
+visibility or lifecycle state is uncertain. If a boot is interrupted and no
+agents remain, an administrator can explicitly recover the state with
+`sudo /matrix/.venv/bin/python3 /matrix/scripts/matrixd lifecycle-recover --universe NAME --confirm-stopped`.
+
+The hardened MatrixOS runtime requires Linux with `openat2` available (kernel
+5.6 or later, or an equivalent backport), an administrator-owned installation and source tree, and a
+procfs view that does not hide processes. Symlinked installation ancestors and
+nested mounts inside protected runtime or static trees are rejected. The
+lifecycle lock coordinates cooperating MatrixOS processes; it is not a
+privilege boundary against a compromised agent running as the swarm account.
+Targeted restart and delete operations require a verifiable signed Matrix and
+Reaper identity; unauthenticated plaintext commands are refused.
+
 ---
 
 ## 💙 Support Development

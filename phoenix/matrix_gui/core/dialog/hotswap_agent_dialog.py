@@ -16,8 +16,14 @@ class HotswapAgentDialog(QDialog):
             self.bus = bus
             self.file_path = None
             self.meta = {}
+            self.action = "hotswap"
 
             layout = QVBoxLayout(self)
+            scope = QLabel("Hotswap changes the running universe for this boot only. "
+                           "Saving the embedded source changes the next deployment only; "
+                           "the target must validate and run it when deployed.")
+            scope.setWordWrap(True)
+            layout.addWidget(scope)
             layout.addWidget(QLabel("Select Running Agent"))
             self.agent_dropdown = QComboBox()
             self.agent_dropdown.addItems(tree_data)  # universal_ids
@@ -29,9 +35,15 @@ class HotswapAgentDialog(QDialog):
             layout.addWidget(self.file_label)
             layout.addWidget(btn_pick)
 
-            btn_ok = QPushButton("Hotswap")
+            btn_ok = QPushButton("Hotswap this boot")
             btn_ok.clicked.connect(self.deploy)
             layout.addWidget(btn_ok)
+            btn_save = QPushButton("Save embedded source for next deploy")
+            btn_save.clicked.connect(self.save_for_next_deploy)
+            layout.addWidget(btn_save)
+            btn_cancel = QPushButton("Cancel")
+            btn_cancel.clicked.connect(self.reject)
+            layout.addWidget(btn_cancel)
         except Exception as e:
             emit_gui_exception_log("HotswapAgentDialog.__init__", e)
 
@@ -65,3 +77,7 @@ class HotswapAgentDialog(QDialog):
             QMessageBox.warning(self, "Error", "Missing file or agent target.")
             return
         self.accept()
+
+    def save_for_next_deploy(self):
+        self.action = "save_embedded"
+        self.deploy()

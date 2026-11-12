@@ -66,17 +66,20 @@ class WorkspaceStore(VaultStore):
         return [(uid, cfg.get("label", "(unnamed)")) for uid, cfg in data.items()]
 
     def _commit_workspaces(self, candidate):
-        previous = deepcopy(self.get_data())
-        live = self.get_data()
-        live.clear()
-        live.update(deepcopy(candidate))
-        accepted = False
-        try:
-            accepted = self.commit()
-            return accepted
-        finally:
-            if not accepted:
-                live = self.get_data()
-                live.clear()
-                live.update(previous)
-            self._buffer = self.get_data()
+        with self._edit_lock():
+            if self._write_busy():
+                return False
+            previous = deepcopy(self.get_data())
+            live = self.get_data()
+            live.clear()
+            live.update(deepcopy(candidate))
+            accepted = False
+            try:
+                accepted = self.commit()
+                return accepted
+            finally:
+                if not accepted:
+                    live = self.get_data()
+                    live.clear()
+                    live.update(previous)
+                self._buffer = self.get_data()

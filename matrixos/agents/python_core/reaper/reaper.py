@@ -1,651 +1,368 @@
-# Authored by Daniel F MacDonald and ChatGPT aka The Generals
-# ╔═══════════════════════════════════════════════╗
-# ║              ☠ REAPER AGENT ☠                ║
-# ║  Tactical Cleanup · Restart · Wipe Authority ║
-# ║                v3.0 Rebuild                  ║
-# ╚═══════════════════════════════════════════════╝
-import sys, os, time, json, shutil, psutil
+"""Fenced, identity-checked shutdown of agents in the active universe."""
+import json
+import hashlib
+import os
 from pathlib import Path
+import re
+import secrets
+import signal
+import sys
+import threading
+import time
+from contextlib import contextmanager
+
+import psutil
+
 sys.path.insert(0, os.getenv("SITE_ROOT"))
 sys.path.insert(0, os.getenv("AGENT_PATH"))
 
 from core.python_core.boot_agent import BootAgent
 from core.python_core.class_lib.packet_delivery.utility.encryption.utility.identity import IdentityObject
+from core.python_core.class_lib.processes.b2_bomber import PinnedProcess
+from core.python_core.class_lib.processes.reaper import Reaper, _matches_job
+from core.python_core.reuse_cleanup import _remove_contents, _tree_preflight, validate_agent_ids
+from core.python_core.safe_paths import child_directory, write_file_at
+from core.python_core.reap_revision import read_reap_authorization
+
 
 class Agent(BootAgent):
-    """
-    Command-driven **Reaper** agent.
-
-    Listens for takedown / restart orders from Matrix, executes the
-    necessary OS-level actions (drop a “die” cookie, SIGTERM / SIGKILL,
-    pod-folder cleanup, etc.), and then reports progress back through
-    `cmd_reap_status`.
-    """
-
     def __init__(self):
-        """
-        Boot strap.
-
-        * Calls parent `BootAgent.__init__` to wire logging, path
-          resolution, and CLI parsing.
-        * Spins up a thread-poke beacon so Matrix can confirm Reaper is
-          responsive (`self._emit_beacon` holds the stop-event handle).
-        """
         super().__init__()
+        self._authorization_lock = threading.Lock()
+        self._authorization_pending = {}
+        self._authorization_inflight = set()
         self._emit_beacon = self.check_for_thread_poke("reaper", timeout=30, emit_to_file_interval=10)
 
-    # ---------------------------------------------------------
-    # CORE ENTRY
-    # ---------------------------------------------------------
-    def cmd_reap_agents(self, content, packet, identity:IdentityObject=None):
-        """
-        Matrix entry-point: execute a batch of Reaper targets.
-
-        Args:
-            content: Dict with a `targets` list; each target follows::
-
-                    {
-                        "universal_id": "<uid>",
-                        "op_stage": "delete_start" | "restart_wait" | …
-                        ...optional hints like "pid", "pod_path"...
-                    }
-
-            packet: Transport envelope (unused beyond logging).
-            identity: Caller’s identity; must be signed by Matrix.
-
-        Flow:
-            * Verifies identity belongs to the Matrix core.
-            * De-duplicates repeated `(uid, op_stage)` pairs in the same
-              batch.
-            * Routes each target to the matching `_handle_*` stage
-              helper.
-            * Any exception in an individual helper is caught and
-              reported to Matrix via `_report_to_matrix`.
-
-        Side-Effects:
-            May kill PIDs, drop files, or wipe directories on disk.
-
-        Returns:
-            None – orchestration only.
-        """
-        try:
-
-            if not self.verify_identity(
-                identity, [self.get_matrix_universal_id()]
-            ):
-                return
-
-            targets = content.get("targets", [])
-            seen = set()
-            for t in targets:
-                uid = t.get("universal_id")
-                if not uid:
-                    self.log("[REAPER] Skipping target with no universal_id")
-                    continue  # prevents 'Missing or unknown universal_id.'
-                stage = t.get("op_stage")
-
-                # optional: de-dup same uid in same batch
-                key = (uid, stage)
-                if key in seen:
-                    continue
-                seen.add(key)
-
-                try:
-                    if stage == "shutdown_probe":
-                        self._handle_shutdown_probe(content)
-                    elif stage == "delete_start":
-                        self._handle_delete_start(t)
-                    elif stage == "delete_escalate":
-                        self._handle_delete_escalate(t)
-                    elif stage == "delete_cleanup":
-                        self._handle_delete_cleanup(t)
-                    elif stage == "restart_start":
-                        self._handle_restart_start(t)
-                    elif stage == "restart_wait":
-                        self._handle_restart_wait(t)
-                    elif stage == "restart_escalate":
-                        self._handle_restart_escalate(t)
-                    elif stage == "restart_cleanup":
-                        self._handle_restart_cleanup(t)
-                    else:
-                        self._report_to_matrix(uid, stage, success=False, error=f"Unknown stage '{stage}'")
-                except Exception as e:
-                    self._report_to_matrix(uid, stage, success=False, error=str(e))
-        except Exception as e:
-            self.log(error=e, block="main_try")
-
-    def _handle_shutdown_probe(self, content):
-        """
-        Stage: **shutdown_probe**
-
-        Ping each target and report whether its PID is alive, dead, or
-        the pod folder is already missing.
-
-        Args:
-            content: Same structure passed from `cmd_reap_agents`.
-
-        Returns:
-            None – emits one `_report_to_matrix` call per target.
-        """
-        try:
-            for t in content.get("targets", []):
-                uid = t.get("universal_id")
-                pid, pod_path = self._resolve_runtime_info(uid)
-
-                # Case 1: pod or pid found → safe
-                if pod_path or pid:
-                    try:
-                        state = "alive" if pid and self.is_pid_alive(pid) else "dead"
-                    except psutil.AccessDenied:
-                        state = "alive"  # can't inspect but it's real
-                    self._report_to_matrix(
-                        uid,
-                        stage="shutdown_probe",
-                        success=True,
-                        error=None,
-                        extra={"pid": pid, "pod_path": pod_path, "state": state}
-                    )
-                    continue
-
-                # Case 2: nothing verifiable — assume safe if prior restart wiped the pod
-                if not pid and not pod_path:
-                    state = "already_dead"
-                    self._report_to_matrix(
-                        uid,
-                        stage="shutdown_probe",
-                        success=True,
-                        error=None,
-                        extra={"pid": None, "pod_path": None, "state": state}
-                    )
-                    self.log(f"[REAPER] {uid} pod missing, assuming already dead (safe delete).")
-                    return
-
-
-            self.log(f"[PROBE] shutdown_probe complete: {len(content['targets'])} targets dispatched.")
-
-        except Exception as e:
-            self.log(error=e, block="main_try")
-
-    # ---------------------------------------------------------
-    # SUPPORT
-    # ---------------------------------------------------------
-    def is_pid_alive(self, pid: int) -> bool:
-        """
-        Safer PID-liveness check wrapped around `psutil`.
-
-        * Logs status for audit.
-        * Treats `AccessDenied` and unexpected errors as “alive” so
-          escalation logic errs on the side of caution.
-
-        Args:
-            pid: OS process ID.
-
-        Returns:
-            True if the process is running and not zombie/dead.
-        """
-        try:
-            proc = psutil.Process(pid)
-            status = proc.status()
-            alive = proc.is_running() and status not in (
-                psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE
-            )
-            self.log(f"[REAPER][PID] {pid} status={status} alive={alive}")
-            return alive
-        except psutil.NoSuchProcess:
-            self.log(f"[REAPER][PID] {pid} not found (NoSuchProcess)")
-            return False
-        except psutil.ZombieProcess:
-            self.log(f"[REAPER][PID] {pid} zombie — treat as dead")
-            return False
-        except psutil.AccessDenied:
-            # If we can't inspect it, assume it's still alive so escalation triggers
-            self.log(f"[REAPER][PID] {pid} access denied — treating as alive for safety")
-            return True
-        except Exception as e:
-            self.log(f"[REAPER][PID] {pid} unexpected error: {e} — treating as alive")
-            return True
-
-    def _handle_restart_start(self, target):
-        """
-        Stage 1 of restart: verify the process is down and clear pod.
-
-        Drops a die-file if the process is still running, otherwise
-        cleans residual pod files so Matrix can spawn a fresh instance.
-
-        Args:
-            target: Target dict from `cmd_reap_agents`.
-        """
-        uid = target["universal_id"]
-        pid = target.get("pid")
-        pod_path = target.get("pod_path")
-
-        if not pid or not pod_path:
-            pid, pod_path = self._resolve_runtime_info(uid)
-            if pid:
-                target["pid"] = pid
-            if pod_path:
-                target["pod_path"] = pod_path
-
-        try:
-            if not pid:
-                self._cleanup_paths(uid, target, full=False)
-                self._report_to_matrix(
-                    uid,
-                    stage="restart_start",
-                    success=True,
-                    extra={"state": "pod_cleared", "pid": pid, "pod_path": pod_path}
-                )
-                self.log(f"[REAPER] {uid} no PID found, assuming already shut down.")
-                return
-
-            if not pid or pid <= 0:
-                raise RuntimeError("Missing or invalid PID")
-
-            alive = None
-            try:
-                alive = self.is_pid_alive(pid)
-            except Exception as e:
-                raise RuntimeError(f"PID verification failed: {e}")
-
-            if alive:
-                self._drop_die(uid)
-                self._report_to_matrix(uid, "restart_start",
-                                       success=True,
-                                       extra={"state": "alive", "pid": pid, "pod_path": pod_path})
-                return
-
-            self._cleanup_paths(uid, target, full=False)
-            die = os.path.join(self.path_resolution["comm_path"], uid, "incoming", "die")
-            if os.path.exists(die):
-                os.remove(die)
-            self._report_to_matrix(uid, "restart_start",
-                                   success=True,
-                                   extra={"state": "pod_cleared", "pid": pid, "pod_path": pod_path})
-        except Exception as e:
-            self._report_to_matrix(uid, "restart_start",
-                                   success=False, error=str(e))
-
-    def _handle_restart_wait(self, target):
-        """
-        Stage 2 of restart: wait-loop check.
-
-        Re-checks PID; reports “alive” or “pod_cleared” so Matrix knows
-        whether to escalate or proceed to cleanup.
-        """
-        uid = target["universal_id"]
-        pid = target.get("pid")
-        if not pid:
-            pid, _ = self._resolve_runtime_info(uid)
-
-        try:
-            if not pid or not self.is_pid_alive(pid):
-                self._report_to_matrix(uid, "restart_wait",
-                                       success=True,
-                                       extra={"state": "pod_cleared", "pid": pid})
-            else:
-                self._report_to_matrix(uid, "restart_wait",
-                                       success=True,
-                                       extra={"state": "alive", "pid": pid})
-        except Exception as e:
-            self._report_to_matrix(uid, "restart_wait", success=False, error=str(e))
-
-    def _handle_restart_escalate(self, target):
-        """
-        Stage 3 of restart: forced kill.
-
-        Sends SIGTERM → short sleep → SIGKILL if the process won’t die.
-        """
-        uid = target["universal_id"]
-        pid = target.get("pid")
-        if not pid:
-            pid, _ = self._resolve_runtime_info(uid)
-
-        try:
-            if pid and self.is_pid_alive(pid):
-                os.kill(pid, 15)
-                time.sleep(2)
-                if self.is_pid_alive(pid):
-                    os.kill(pid, 9)
-                    time.sleep(1)
-
-            if not self.is_pid_alive(pid):
-                self._report_to_matrix(uid, "restart_escalate",
-                                       success=True,
-                                       extra={"state": "terminated"})
-            else:
-                raise RuntimeError("Process still alive after escalation kill.")
-        except Exception as e:
-            self._report_to_matrix(uid, "restart_escalate", success=False, error=str(e))
-
-    def _handle_restart_cleanup(self, target):
-        """
-        Final stage of restart: clear pod + die cookie and confirm clean.
-        """
-        uid = target["universal_id"]
-        pid, pod_path = self._resolve_runtime_info(uid)
-        try:
-            self._cleanup_paths(uid, {"pod_path": pod_path, "comm_path": self.path_resolution["comm_path"]}, full=False)
-            # remove lingering die cookie
-            die = os.path.join(self.path_resolution["comm_path"], uid, "incoming", "die")
-            if os.path.exists(die):
-                os.remove(die)
-            self._report_to_matrix(uid, "restart_cleanup", success=True, extra={"state": "cleaned"})
-        except Exception as e:
-            self._report_to_matrix(uid, "restart_cleanup", success=False, error=str(e))
-
-    def _report_to_matrix(self, uid, stage, success, error=None, extra=None):
-        """
-        Wrap → sign → ship a `cmd_reap_status` packet back to Matrix.
-
-        Args:
-            uid: Agent UID the report applies to.
-            stage: Lifecycle stage we just handled.
-            success: Boolean flag.
-            error: Optional error string.
-            extra: Arbitrary dict merged into `result`.
-
-        Silent-fails if packet creation or dispatch bombs.
-        """
-        if not uid:
-            self.log(f"[REAPER][REPORT] Missing universal_id for stage '{stage}' — skipping report")
+    def cmd_reap_agents(self, content, packet, identity: IdentityObject = None):
+        if not self._verified_matrix(identity):
             return
-
-        try:
-            payload = {
-                "handler": "cmd_reap_status",
-                "content": {
-                    "universal_id": uid,
-                    "stage": stage,
-                    "result": {
-                        "success": success,
-                        "error": error,
-                        **(extra or {})
-                    },
-                },
-                "timestamp": time.time(),
-                "origin": self.command_line_args.get("universal_id", "reaper"),
-            }
-
-            self.log(
-                f"[REAPER][REPORT] ➤ Reporting to Matrix: uid={uid}, stage={stage}, success={success}, error={error}")
-            self.log(f"[REAPER][REPORT] ➤ Payload: {json.dumps(payload, indent=2)}")
-
-            pk = self.get_delivery_packet("standard.command.packet")
-            if not pk:
-                raise RuntimeError("Failed to create delivery packet.")
-
-            pk.set_data(payload)
-            self.pass_packet(pk, self.get_matrix_universal_id())
-
-        except Exception as e:
-            self.log(f"[REAPER][ERROR] Failed to report to Matrix (stage: {stage}, uid: {uid}): {e}",
-                     block="_report_to_matrix")
-
-    # ---------------------------------------------------------
-    # STAGE HANDLERS
-    # ---------------------------------------------------------
-    def _handle_delete_start(self, target):
-        """
-        Stage 1 of delete: attempt graceful shutdown via die-file or
-        proceed directly if already dead.
-        """
-        uid = target["universal_id"]
-        pid = target.get("pid")
-        if not pid:
-            pid, recovered_pod = self._resolve_runtime_info(uid)
-            if recovered_pod:
-                target["pod_path"] = recovered_pod
-        try:
-            # Step 1: verify PID legitimacy
-            if not pid or pid <= 0:
-                raise RuntimeError("Missing or invalid PID")
-
-            alive = None
+        if not isinstance(content, dict) or not isinstance(content.get("targets"), list):
+            self.log("[REAPER] Invalid target list.", level="ERROR")
+            return
+        seen = set()
+        for target in content["targets"]:
+            if not isinstance(target, dict):
+                continue
+            uid, stage, transaction_id = target.get("universal_id"), target.get("op_stage"), target.get("transaction_id")
+            if (not isinstance(uid, str) or not isinstance(stage, str)
+                    or not isinstance(transaction_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", transaction_id)
+                    or (uid, stage, transaction_id) in seen):
+                continue
+            seen.add((uid, stage, transaction_id))
             try:
-                alive = self.is_pid_alive(pid)
-            except Exception as e:
-                raise RuntimeError(f"PID verification failed: {e}")
+                validate_agent_ids((uid,))
+                if uid in (self.command_line_args.get("universal_id"), self.get_matrix_universal_id()):
+                    raise ValueError("Refusing to reap Matrix or Reaper")
+                self._request_authorization(uid, stage, transaction_id)
+            except Exception as exc:
+                self.log("[REAPER] Target operation failed.", error=exc, level="ERROR")
+                self._report_to_matrix(uid, stage, False, transaction_id=transaction_id, error=str(exc))
 
-            if alive:
-                # alive → drop die cookie, report back and exit
-                self._drop_die(uid)
-                self._report_to_matrix(uid, "delete_start",
-                                       success=True,
-                                       extra={"state": "alive"})
-            else:
-                self._report_to_matrix(uid, "delete_start",
-                                       success=True,
-                                       extra={"state": "dead"})
-        except Exception as e:
-            self._report_to_matrix(uid, "delete_start",
-                                   success=False, error=str(e))
+    def _verified_matrix(self, identity):
+        return (isinstance(identity, IdentityObject) and identity.has_verified_identity()
+                and identity.get_sender_uid() == self.get_matrix_universal_id())
 
-    def _handle_delete_escalate(self, target):
-        """
-        Stage 2 of delete: forced termination after timeout.
-        """
-        uid = target["universal_id"]
-
-        # always refresh runtime info; don't trust incoming fields
-        fresh_pid, fresh_pod = self._resolve_runtime_info(uid)
-        if fresh_pod:
-            target["pod_path"] = fresh_pod
-        if fresh_pid:
-            target["pid"] = fresh_pid
-
-        pid = target.get("pid")
-
+    def _request_authorization(self, uid, stage, transaction_id):
+        nonce = secrets.token_hex(32)
+        key = (uid, stage, transaction_id)
+        with self._authorization_lock:
+            if key in self._authorization_inflight or any(value["key"] == key for value in self._authorization_pending.values()):
+                return
+            if len(self._authorization_pending) >= 256:
+                raise RuntimeError("Too many pending Reaper authorization requests")
+            timer = threading.Timer(30, self._authorization_timeout, args=(nonce,))
+            timer.daemon = True
+            self._authorization_pending[nonce] = {"key": key, "deadline": time.monotonic() + 30, "timer": timer}
+            timer.start()
         try:
-            if pid and self.is_pid_alive(pid):
-                self.log(f"[REAPER] ⚠️ Escalating kill for {uid} (pid={pid})")
-                os.kill(pid, 15)
-                time.sleep(2)
-                if self.is_pid_alive(pid):
-                    os.kill(pid, 9)
-                    self.log(f"[REAPER] 💀 Sent SIGKILL to {uid} (pid={pid})")
-                    time.sleep(1)
+            packet = self.get_delivery_packet("standard.command.packet")
+            packet.set_data({"handler": "cmd_reap_authorize", "content": {"universal_id": uid,
+                             "stage": stage, "transaction_id": transaction_id, "nonce": nonce}})
+            if not self.pass_packet(packet, self.get_matrix_universal_id()):
+                raise RuntimeError("Could not send Reaper authorization challenge")
+        except Exception:
+            with self._authorization_lock:
+                pending = self._authorization_pending.pop(nonce, None)
+            if pending:
+                pending["timer"].cancel()
+            raise
 
-            # post-kill confirmation (re-resolve again in case a supervisor respawned)
-            confirm_pid, _ = self._resolve_runtime_info(uid)
-            if not confirm_pid or not self.is_pid_alive(confirm_pid):
-                self._report_to_matrix(uid, "delete_escalate",
-                                       success=True, extra={"state": "terminated"})
-            else:
-                raise RuntimeError(f"{uid} still alive after escalation kill (pid={confirm_pid}).")
+    def _authorization_timeout(self, nonce):
+        with self._authorization_lock:
+            pending = self._authorization_pending.pop(nonce, None)
+        if pending:
+            uid, stage, transaction_id = pending["key"]
+            self._report_to_matrix(uid, stage, False, transaction_id=transaction_id,
+                                   error="Matrix did not authorize this operation in time")
 
-        except Exception as e:
-            self._report_to_matrix(uid, "delete_escalate", success=False, error=str(e))
-
-
-    # ---------------------------------------------------------
-    # UTILITIES
-    # ---------------------------------------------------------
-    def _drop_die(self, uid):
-        """
-        Touch an `incoming/die` file in the agent’s comm folder – the
-        agent’s watchdog should pick this up and shut down gracefully.
-        """
+    def cmd_reap_authorization(self, content, packet, identity: IdentityObject = None):
+        """Consume a single fresh, Matrix-signed response before acting."""
+        if not self._verified_matrix(identity) or not isinstance(content, dict):
+            return
+        nonce = content.get("nonce")
+        if not isinstance(nonce, str) or not re.fullmatch(r"[0-9a-f]{64}", nonce):
+            return
+        with self._authorization_lock:
+            pending = self._authorization_pending.get(nonce)
+            if not pending or pending["key"] != (content.get("universal_id"), content.get("stage"), content.get("transaction_id")):
+                return
+            pending = self._authorization_pending.pop(nonce)
+            self._authorization_inflight.add(pending["key"])
+        pending["timer"].cancel()
+        uid, stage, transaction_id = pending["key"]
+        if time.monotonic() >= pending["deadline"] or content.get("authorized") is not True:
+            with self._authorization_lock:
+                self._authorization_inflight.discard(pending["key"])
+            self._report_to_matrix(uid, stage, False, transaction_id=transaction_id,
+                                   error="Matrix authorization was stale or refused")
+            return
         try:
-            incoming = os.path.join(
-                self.path_resolution["comm_path"], uid, "incoming"
-            )
-            os.makedirs(incoming, exist_ok=True)
-            with open(os.path.join(incoming, "die"), "w", encoding="utf-8") as f:
-                f.write("true")
-                f.close()
-            self.log(f"[REAPER] Dropped die cookie for {uid}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to drop die cookie for {uid}: {e}")
+            snapshot = self._validate_target_snapshot(stage, content.get("target_snapshot"))
+            revision = content.get("revision")
+            if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{64}", revision):
+                raise ValueError("Invalid Matrix authorization revision")
+            worker = threading.Thread(target=self._execute_authorized,
+                                      args=(uid, stage, transaction_id, snapshot, revision), daemon=True)
+            worker.start()
+        except Exception as exc:
+            with self._authorization_lock:
+                self._authorization_inflight.discard(pending["key"])
+            self._report_to_matrix(uid, stage, False, transaction_id=transaction_id, error=str(exc))
 
-    def _handle_delete_cleanup(self, target):
-        """
-        Final delete stage: nuke pod directory *and* comm folder.
+    def _execute_authorized(self, uid, stage, transaction_id, target_snapshot, revision):
+        try:
+            with self._fenced_reaper() as reaper:
+                self._verify_committed_authorization(reaper, uid, stage, transaction_id, target_snapshot, revision)
+                state, extra = self._run_stage(reaper, uid, stage, target_snapshot)
+            self._report_to_matrix(uid, stage, True, transaction_id=transaction_id, extra={"state": state, **extra})
+        except Exception as exc:
+            self.log("[REAPER] Target operation failed.", error=exc, level="ERROR")
+            self._report_to_matrix(uid, stage, False, transaction_id=transaction_id, error=str(exc))
+        finally:
+            with self._authorization_lock:
+                self._authorization_inflight.discard((uid, stage, transaction_id))
 
-        Ensures idempotency—will try to kill lingering PIDs one last
-        time, but carries on even if they’re already gone.
-        """
-        uid = target["universal_id"]
+    def _verify_committed_authorization(self, reaper, uid, stage, transaction_id, snapshot, revision):
+        """Recheck the signed committed revision while the fence is held."""
+        with child_directory(reaper._comm_fd, self.get_matrix_universal_id()) as matrix_fd:
+            state, _ = read_reap_authorization(matrix_fd, public_key=self.matrix_pub,
+                universe=self.command_line_args["universe"], boot_id=self.path_resolution["reboot_uuid"],
+                generation=os.environ.get("MATRIX_LIFECYCLE_GENERATION"))
+        target = state["targets"].get(uid)
+        operation = target.get("op") if isinstance(target, dict) else None
+        valid_op = (operation in ("shutdown_restart", "shutdown_delete") if stage == "shutdown_probe"
+                    else operation == ("shutdown_restart" if stage.startswith("restart_") else "shutdown_delete"))
+        if (state["revision"] != revision or not isinstance(target, dict) or target.get("locked") is not True
+                or not valid_op or target.get("transaction_id") != transaction_id or target.get("stage") != stage
+                or (stage != "shutdown_probe" and target.get("target_snapshot") != snapshot)):
+            raise ValueError("Matrix transaction changed after authorization")
 
-        # Always re-derive; packet fields are hints only
-        _, live_pod = self._resolve_runtime_info(uid)
-        pod_path = live_pod or target.get("pod_path")  # prefer live
+    @contextmanager
+    def _fenced_reaper(self):
+        reaper = Reaper(self.path_resolution["pod_path"], self.path_resolution["comm_path"],
+                        lifecycle_base=self.path_resolution["install_path"],
+                        lifecycle_universe=self.command_line_args["universe"],
+                        lifecycle_generation=os.environ.get("MATRIX_LIFECYCLE_GENERATION"))
+        with reaper.lifecycle_guard():
+            yield reaper
 
-        comm_path = self.path_resolution.get("comm_path")
+    @staticmethod
+    def _validate_target_snapshot(stage, snapshot):
+        if stage == "shutdown_probe":
+            if snapshot is not None:
+                raise ValueError("Unexpected probe target snapshot")
+            return None
+        if not isinstance(snapshot, list) or len(snapshot) > 1024:
+            raise ValueError("Reaper transaction has no valid probed target identity")
+        names = set()
+        for item in snapshot:
+            if (not isinstance(item, dict) or set(item) != {"pod", "pid", "process_started_at", "record_sha256"}
+                    or type(item["pid"]) is not int or item["pid"] <= 0
+                    or type(item["process_started_at"]) not in (int, float)
+                    or not isinstance(item["record_sha256"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", item["record_sha256"])):
+                raise ValueError("Invalid probed target identity")
+            validate_agent_ids((item["pod"],))
+            if item["pod"] in names:
+                raise ValueError("Duplicate probed target pod")
+            names.add(item["pod"])
+        return snapshot
 
-        # Idempotent: best-effort kill just in case the process lingered
-        pid = target.get("pid")
-        if pid and self.is_pid_alive(pid):
-            self.log(f"[REAPER] ⚠️ {uid} still alive in cleanup (pid={pid}) — forcing final kill.")
+    def _visible_target_jobs(self, uid):
+        """Do not infer absence when procfs hides a possible universe job."""
+        try:
+            lines = Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()
+            proc_mount = next(line.split() for line in lines if len(line.split()) > 9 and line.split()[4] == "/proc" and "-" in line.split() and line.split()[line.split().index("-") + 1] == "proc")
+            separator = proc_mount.index("-")
+            options = (proc_mount[5] + "," + proc_mount[separator + 3]).split(",")
+            if any(value.startswith("hidepid=") and value != "hidepid=0" for value in options):
+                raise RuntimeError("Restricted procfs hides processes")
+        except (OSError, StopIteration, IndexError) as exc:
+            raise RuntimeError("Cannot verify procfs visibility") from exc
+        label = f"{self.command_line_args['universe']}:{uid}"
+        result = set()
+        for proc in psutil.process_iter(["pid", "cmdline", "status", "ppid"]):
             try:
-                os.kill(pid, 15)
-                time.sleep(1.5)
-                if self.is_pid_alive(pid):
-                    os.kill(pid, 9)
-                    self.log(f"[REAPER] 💀 Forced SIGKILL on {uid} (pid={pid})")
-            except Exception as e:
-                self.log(f"[REAPER][WARN] Final kill attempt failed for {uid}: {e}")
-
-        try:
-            # Delete pod if present
-            self._cleanup_agent_footprint(uid, pod_path=pod_path, comm_path=comm_path, nuke_comm=True)
-            self._report_to_matrix(uid, "delete_cleanup", success=True, extra={"state": "cleaned"})
-        except Exception as e:
-            self._report_to_matrix(uid, "delete_cleanup", success=False, error=str(e))
-
-    def _cleanup_paths(self, uid, target, full=True):
-        """
-        Thin wrapper that passes pod/comm paths into the generic
-        `_cleanup_agent_footprint`.
-
-        Args:
-            uid: Agent UID.
-            target: Dict possibly holding `pod_path`, `comm_path`.
-            full: If True, also purge the entire comm folder.
-        """
-        pod_path = target.get("pod_path")
-        comm_path = target.get("comm_path")
-        self._cleanup_agent_footprint(uid, pod_path=pod_path, comm_path=comm_path, nuke_comm=full)
-
-    def _cleanup_agent_footprint(self, uid, pod_path=None, comm_path=None, *, nuke_comm=False):
-        """
-        Recursively delete pod and/or comm directories within the
-        approved roots, guarding against path-traversal.
-
-        Args:
-            uid: Agent UID (for logging only).
-            pod_path: Absolute path to the pod directory.
-            comm_path: Root comm directory (`.../<uid>` is appended).
-            nuke_comm: If True, remove `comm_path/uid` as well.
-        """
-        try:
-            base_pod_root = Path(self.path_resolution.get("pod_path", "")).resolve()
-            base_comm_root = Path(self.path_resolution.get("comm_path", "")).resolve()
-            self.log(
-                f"[REAPER][DEBUG] base_pod_root={base_pod_root} base_comm_root={base_comm_root} pod_path_arg={pod_path}")
-
-            # Pod
-            if pod_path:
-                podp = Path(pod_path)
-                try:
-                    podp.relative_to(base_pod_root)
-                    if podp.is_dir():
-                        shutil.rmtree(podp, ignore_errors=True)
-                        self.log(f"[REAPER] 🧹 Cleared pod {podp}")
-                    else:
-                        self.log(f"[REAPER] (pod already gone) {podp}")
-                except ValueError:
-                    self.log(f"[REAPER][WARN] pod outside pod_root; refusing: {podp}")
-
-            # Comm
-            if nuke_comm and comm_path:
-                comp = Path(comm_path).resolve() / uid
-                try:
-                    comp.relative_to(base_comm_root)
-                    if comp.is_dir():
-                        shutil.rmtree(comp, ignore_errors=True)
-                        self.log(f"[REAPER] 🧹 Cleared comm {comp}")
-                    else:
-                        self.log(f"[REAPER] (comm already gone) {comp}")
-                except ValueError:
-                    self.log(f"[REAPER][WARN] comm outside comm_root; refusing: {comp}")
-
-        except Exception as e:
-            self.log(error=e, block="_cleanup_agent_footprint", level="ERROR")
-
-    def _resolve_runtime_info(self, uid):
-        """
-        Best-effort lookup of an agent’s live PID and pod folder.
-
-        Search order:
-            1. Active process list (`--job <universe>:<uid>` in cmdline)
-            2. `boot.json` files under the pod root
-            3. Newest spawn record in `comm/<uid>/spawn/`
-
-        Returns:
-            (pid, pod_path) – either may be `None` if not found.
-        """
-        universe = self.command_line_args.get("universe")
-        pod_root = Path(self.path_resolution.get("pod_path", ""))
-        comm_root = Path(self.path_resolution.get("comm_path", ""))
-
-        # --- Live process table ---
-        try:
-            for proc in psutil.process_iter(attrs=["pid", "cmdline"]):
-                cmd = proc.info.get("cmdline")
+                info = proc.info
+                if info.get("status") == psutil.STATUS_ZOMBIE:
+                    continue
+                cmd = info.get("cmdline")
+                if cmd is None:
+                    raise RuntimeError("Cannot inspect all processes")
                 if not cmd:
-                    continue
-                joined = " ".join(cmd)
-                if f"--job {universe}:{uid}" not in joined:
-                    continue
+                    if info.get("pid") == 2 or info.get("ppid") == 2:
+                        continue
+                    raise RuntimeError("Cannot establish process identity")
+                if _matches_job(cmd, label):
+                    result.add(info["pid"])
+            except psutil.NoSuchProcess:
+                continue
+            except psutil.AccessDenied as exc:
+                raise RuntimeError("Cannot inspect all processes") from exc
+        return result
 
-                for arg in cmd:
-                    if "/pod/" in arg:
-                        pod_uuid = arg.split("/pod/")[-1].split("/")[0]
-                        pod_path = pod_root / pod_uuid
-                        if pod_path.exists():
-                            self.log(f"[REAPER] Live pod detected for {uid}: {pod_path}")
-                            return proc.info["pid"], str(pod_path)
-                # fallback to last arg heuristic
-                run_path = Path(cmd[-1]) if len(cmd) else None
-                if run_path and run_path.parent.exists():
-                    return proc.info["pid"], str(run_path.parent)
-        except Exception as e:
-            self.log(f"[REAPER] Live scan failed: {e}")
-
-        # --- boot.json fallback ---
+    @contextmanager
+    def _target_snapshot(self, reaper, uid):
+        """Pin every recorded target and reject unrecorded live processes."""
+        records, refs = [], []
         try:
-            for boot_file in pod_root.glob("*/boot.json"):
+            for pod_name in os.listdir(reaper._pod_fd):
+                record = reaper._read_boot_record(pod_name)
+                record_uid = record.get("universal_id")
+                validate_agent_ids((record_uid,))
+                if record_uid != uid:
+                    continue
+                pid = record.get("pid")
+                cmd = record.get("cmd")
+                if not _matches_job(cmd, f"{self.command_line_args['universe']}:{uid}"):
+                    raise ValueError("Target boot record has an invalid job identity")
+                digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                records.append({"pod": pod_name, "pid": pid,
+                                "process_started_at": record.get("process_started_at"), "record_sha256": digest})
                 try:
-                    with open(boot_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    if data.get("universal_id") == uid:
-                        pid = data.get("pid")
-                        return pid, str(boot_file.parent)
-                except Exception:
+                    ref = PinnedProcess(pid, record.get("process_started_at"), expected_cmd=cmd)
+                except (psutil.NoSuchProcess, ProcessLookupError):
                     continue
-        except Exception as e:
-            self.log(f"[REAPER] Boot.json scan failed: {e}")
+                refs.append(ref)
+            visible = self._visible_target_jobs(uid)
+            live = [ref for ref in refs if ref.is_alive()]
+            if visible != {ref.pid for ref in live}:
+                raise RuntimeError("Unrecorded or uninspectable target process")
+            yield records, live
+        finally:
+            for ref in refs:
+                ref.close()
 
-        # --- spawn file fallback ---
+    def _drop_die(self, reaper, uid):
+        with child_directory(reaper._comm_fd, uid, create=True) as agent_fd:
+            with child_directory(agent_fd, "incoming", create=True) as incoming_fd:
+                write_file_at(incoming_fd, "die", json.dumps("terminate").encode())
+
+    @staticmethod
+    def _terminate(refs):
+        for ref in refs:
+            ref.send_signal(signal.SIGTERM)
+        if refs:
+            time.sleep(2)
+        for ref in refs:
+            if ref.is_alive():
+                ref.kill()
+        if refs:
+            time.sleep(1)
+        if any(ref.is_alive() for ref in refs):
+            raise RuntimeError("Target process remains alive after escalation")
+
+    def _clean_target(self, reaper, uid, records, *, remove_comm):
+        """Preflight all target paths, then delete only anchored directories."""
+        for entry in records:
+            pod_name = entry["pod"]
+            with child_directory(reaper._pod_fd, pod_name) as pod_fd:
+                _tree_preflight(pod_fd)
         try:
-            spawn_dir = comm_root / uid / "spawn"
-            if spawn_dir.is_dir():
-                spawn_files = sorted(
-                    [f for f in spawn_dir.glob("*.spawn")],
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True
-                )
-                if spawn_files:
-                    latest = spawn_files[0].name
-                    pod_uuid = latest.split("_", 1)[-1].replace(".spawn", "")
-                    pod_path = pod_root / pod_uuid
-                    if pod_path.exists():
-                        self.log(f"[REAPER] 🗂 Using spawn record for {uid}: {pod_path}")
-                        return None, str(pod_path)
-        except Exception as e:
-            self.log(f"[REAPER] Spawn record scan failed: {e}")
+            with child_directory(reaper._comm_fd, uid) as comm_fd:
+                if remove_comm:
+                    _tree_preflight(comm_fd)
+                else:
+                    try:
+                        with child_directory(comm_fd, "incoming") as incoming_fd:
+                            self._regular_marker_exists(incoming_fd, "die")
+                    except FileNotFoundError:
+                        pass
+        except FileNotFoundError:
+            pass
+        # Recheck process visibility immediately before the destructive step;
+        # the exclusive lifecycle guard prevents cooperating spawns meanwhile.
+        with self._target_snapshot(reaper, uid) as (current, live):
+            if live:
+                raise RuntimeError("Target is still running; cleanup refused")
+            if {item["pod"]: item for item in current} != {item["pod"]: item for item in records}:
+                raise RuntimeError("Target pod records changed before cleanup")
+        for entry in records:
+            pod_name = entry["pod"]
+            with child_directory(reaper._pod_fd, pod_name) as pod_fd:
+                _remove_contents(pod_fd)
+            os.rmdir(pod_name, dir_fd=reaper._pod_fd)
+        try:
+            comm_context = child_directory(reaper._comm_fd, uid)
+            comm_fd = comm_context.__enter__()
+        except FileNotFoundError:
+            return
+        try:
+            if remove_comm:
+                _remove_contents(comm_fd)
+            else:
+                try:
+                    with child_directory(comm_fd, "incoming") as incoming_fd:
+                        if self._regular_marker_exists(incoming_fd, "die"):
+                            identity = self._regular_entry_identity(incoming_fd, "die")
+                            if not self._unlink_received_entry(incoming_fd, "die", identity):
+                                raise RuntimeError("Die marker changed during cleanup")
+                except FileNotFoundError:
+                    pass
+        finally:
+            comm_context.__exit__(None, None, None)
+        if remove_comm:
+            os.rmdir(uid, dir_fd=reaper._comm_fd)
 
-        return None, None
+    def _run_stage(self, reaper, uid, stage, expected_snapshot):
+        with self._target_snapshot(reaper, uid) as (records, live):
+            if stage == "shutdown_probe":
+                return ("alive" if live else "dead" if records else "already_dead"), {"target_snapshot": records}
+            expected = {entry["pod"]: entry for entry in expected_snapshot}
+            if any(entry["pod"] not in expected or entry != expected[entry["pod"]] for entry in records):
+                raise RuntimeError("Target pod or process changed since shutdown probe")
+            if stage in ("restart_start", "delete_start"):
+                if live:
+                    self._drop_die(reaper, uid)
+                    return "alive", {}
+                return "dead", {}
+            if stage in ("restart_wait", "restart_escalate", "delete_escalate"):
+                self._terminate(live)
+                with self._target_snapshot(reaper, uid) as (_, remaining):
+                    if remaining:
+                        raise RuntimeError("Target restarted during escalation")
+                if stage == "restart_wait":
+                    self._clean_target(reaper, uid, records, remove_comm=False)
+                    return "pod_cleared", {}
+                return "terminated", {}
+            if stage in ("restart_cleanup", "delete_cleanup"):
+                if live:
+                    raise RuntimeError("Target is still running; cleanup refused")
+                self._clean_target(reaper, uid, records, remove_comm=(stage == "delete_cleanup"))
+                return "cleaned", {}
+            raise ValueError(f"Unknown Reaper stage: {stage}")
+
+    def _report_to_matrix(self, uid, stage, success, error=None, extra=None, *, transaction_id):
+        try:
+            payload = {"handler": "cmd_reap_status", "content": {"universal_id": uid, "stage": stage, "transaction_id": transaction_id,
+                       "result": {"success": success, "error": error, **(extra or {})}},
+                       "timestamp": time.time(), "origin": self.command_line_args.get("universal_id", "reaper")}
+            packet = self.get_delivery_packet("standard.command.packet")
+            packet.set_data(payload)
+            if not self.pass_packet(packet, self.get_matrix_universal_id()):
+                self.log(f"[REAPER][ERROR] Could not report {stage} for {uid}.")
+        except Exception as exc:
+            self.log("[REAPER][ERROR] Failed to report status.", error=exc)
 
 
 if __name__ == "__main__":

@@ -386,7 +386,7 @@ class VaultSSHKeyInstallDialog(QDialog):
         return candidate
 
     def _commit_profile(self, serial, updated):
-        namespace = self.registry_store.get_namespace("ssh")
+        namespace = deepcopy(self.registry_store.get_namespace("ssh"))
         original = deepcopy(namespace.get(serial))
         if original is None:
             raise RuntimeError("The selected SSH profile no longer exists")
@@ -399,8 +399,7 @@ class VaultSSHKeyInstallDialog(QDialog):
             datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         )
         namespace[serial] = updated
-        if not self.registry_store.commit():
-            namespace[serial] = original
+        if not self.registry_store.set_namespace("ssh", namespace):
             raise RuntimeError("Vault rejected the SSH profile update")
 
         self.updated_serial = serial

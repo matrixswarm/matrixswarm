@@ -145,7 +145,7 @@ class RailgunWorker(QThread):
             grants = describe_runtime_capabilities(runtime_capabilities)
             grants.append(describe_universe_teardown_grant(universe))
             self.sig_stdout.emit(
-                f"[RAILGUN] Railgun-managed active grants: {len(grants)}\n"
+                f"[RAILGUN] Grants and access requirements: {len(grants)}\n"
             )
             for grant in grants:
                 self.sig_stdout.emit(f"[RAILGUN]   {grant}\n")

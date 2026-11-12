@@ -845,7 +845,9 @@ class TreeParser(LogMixin):
                 return
             uid = node.get("universal_id") or node.get(self.UNIVERSAL_ID_KEY)
             if uid:
-                node.update(mark)
+                # Each target needs its own lifecycle state: stage results,
+                # process snapshots, and callbacks are updated independently.
+                node.update(copy.deepcopy(mark))
                 affected.append(uid)
             if recurse_children:
                 for child in node.get(self.CHILDREN_KEY, []):
