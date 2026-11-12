@@ -1,6 +1,7 @@
 import sys
 import base64
 import json
+import os
 import time
 import unittest
 from copy import deepcopy
@@ -183,6 +184,7 @@ class PacketCryptoReplayTests(unittest.TestCase):
                 self.assertEqual({"command": "status"}, current.unpack_secure_packet(fresh))
                 self.assertEqual({"command": "status"}, current.unpack_secure_packet(fresh))
 
+    @unittest.skipUnless(os.name == "posix", "MatrixOS agent runtime requires POSIX")
     def test_boot_reload_reads_same_fresh_encrypted_directive_with_children(self):
         from core.python_core.boot_agent import BootAgent
         from core.python_core.class_lib.packet_delivery.utility.encryption.config import ENCRYPTION_CONFIG

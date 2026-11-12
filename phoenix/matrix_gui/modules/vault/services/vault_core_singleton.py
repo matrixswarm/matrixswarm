@@ -57,6 +57,7 @@ class VaultCoreSingleton:
         self.data = deepcopy(vault_data)
         self.last_good = deepcopy(self.data)
         self._closed = False
+        self._write_state_untrusted = False
         self._listeners = set()
         self._workspace_queue = deque()
         self._workspace_active = None
@@ -196,6 +197,7 @@ class VaultCoreSingleton:
                     # Disk was already replaced. Never report a failed save or
                     # allow another write from potentially inconsistent RAM.
                     self._closed = True
+                    self._write_state_untrusted = True
                     try:
                         self._access_control.close()
                     except Exception:
@@ -275,7 +277,7 @@ class VaultCoreSingleton:
         self._start_workspace_write()
 
     def _start_workspace_write(self):
-        if self._closed:
+        if self._write_state_untrusted:
             while self._workspace_queue:
                 _, callback = self._workspace_queue.popleft()
                 try:

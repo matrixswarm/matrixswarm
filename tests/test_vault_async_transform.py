@@ -151,6 +151,37 @@ class VaultAsyncTransformTests(unittest.TestCase):
         self.assertEqual(writes[1]["deployments"]["dep"]["value"], "new")
         self.assertEqual(writes[1]["workspaces"]["workspace"]["name"], "saved")
 
+    def test_publication_failure_rejects_queued_workspace_without_second_write(self):
+        class FailingDict(dict):
+            def clear(self):
+                raise MemoryError("cannot publish")
+        self.core.data["deployments"] = FailingDict(self.core.data["deployments"])
+        gate = threading.Event()
+        entered = threading.Event()
+        done = []
+        loop = QEventLoop()
+
+        def transform(section):
+            entered.set()
+            if not gate.wait(3):
+                raise TimeoutError("worker stalled")
+            section["dep"]["value"] = "new"
+            return section, "digest"
+
+        with patch("matrix_gui.modules.vault.services.vault_service_loader.save_vault_singlefile") as save:
+            self.core.transform_section_async("deployments", transform,
+                lambda result, error: done.append(error))
+            self.assertTrue(entered.wait(2))
+            self.core.save_workspace_async({"uuid": "queued"},
+                lambda ok: (done.append(ok), loop.quit()))
+            QTimer.singleShot(30, gate.set)
+            QTimer.singleShot(3000, loop.quit)
+            loop.exec()
+        self.assertEqual(save.call_count, 1)
+        self.assertIsInstance(done[0], VaultSavedReopenRequired)
+        self.assertIs(done[1], False)
+        self.assertNotIn("queued", self.core.data["workspaces"])
+
     def test_registry_edit_during_transform_is_refused_without_live_mutation(self):
         registry = self.core.get_store("registry")
         deployments = self.core.get_store("deployments")
